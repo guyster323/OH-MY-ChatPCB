@@ -22,6 +22,7 @@ test('Phase 1 public development documents are present and actionable', async ()
 
   assert.match(readme, /User Test Guide/);
   assert.match(readme, /Codex CLI verification/);
+  assert.match(readme, /npm install/);
   assert.match(readme, /npm run verify:sample/);
   assert.match(readme, /npm run verify:panel/);
   assert.match(readme, /npm run verify:ui/);

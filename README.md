@@ -34,6 +34,7 @@ Not implemented yet:
 ## Quick Start
 
 ```powershell
+npm install
 npm test
 npm run verify:sample
 npm run verify:panel
@@ -53,9 +54,10 @@ Use this flow when you want to try the current scaffold from a user perspective.
 cd C:\Users\windo\chatpcb2
 ```
 
-2. Run the full local verification:
+2. Install dependencies and run the full local verification:
 
 ```powershell
+npm install
 npm test
 npm run verify:sample
 npm run verify:panel

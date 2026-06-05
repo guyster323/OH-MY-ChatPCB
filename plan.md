@@ -267,6 +267,7 @@ Acceptance criteria:
 Run from `C:\Users\windo\chatpcb2`:
 
 ```powershell
+npm install
 npm test
 npm run verify:sample
 npm run verify:panel
