@@ -1,0 +1,13 @@
+node_modules/
+npm-debug.log*
+
+workspaces/
+data/kicad-exports/
+test-results/
+coverage/
+.nyc_output/
+
+*.tmp
+*.log
+.DS_Store
+Thumbs.db

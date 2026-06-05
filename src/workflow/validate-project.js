@@ -1,0 +1,52 @@
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+
+import { runKicadCli } from '../kicad/kicad-cli.js';
+
+export async function validateProject({ projectDir, kicadCliPath, runKicadCliImpl = runKicadCli } = {}) {
+  if (!projectDir) {
+    throw new Error('projectDir is required.');
+  }
+
+  const resolvedProjectDir = path.resolve(projectDir);
+  const schematic = await findFirst(resolvedProjectDir, '.kicad_sch');
+  if (!schematic) {
+    return skipped('NO_SCHEMATIC', `No .kicad_sch file found in ${resolvedProjectDir}.`);
+  }
+
+  const output = path.join(resolvedProjectDir, 'chatpcb-erc.json');
+
+  try {
+    const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], {
+      explicitPath: kicadCliPath,
+      cwd: resolvedProjectDir
+    });
+
+    return {
+      ok: result.exitCode === 0,
+      skipped: false,
+      tool: result.command,
+      source: result.source,
+      report: output,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr
+    };
+  } catch (error) {
+    return skipped('KICAD_CLI_UNAVAILABLE', error.message);
+  }
+}
+
+async function findFirst(projectDir, extension) {
+  const entries = await readdir(projectDir, { withFileTypes: true });
+  const match = entries.find((entry) => entry.isFile() && entry.name.endsWith(extension));
+  return match ? path.join(projectDir, match.name) : null;
+}
+
+function skipped(code, message) {
+  return {
+    ok: true,
+    skipped: true,
+    reason: { code, message }
+  };
+}

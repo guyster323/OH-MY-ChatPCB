@@ -1,0 +1,28 @@
+{
+  "name": "oh-my-chatpcb",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Agent-native KiCad fork companion runtime for ChatPCB.",
+  "bin": {
+    "chatpcb": "./bin/chatpcb-cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "generate:sample": "node ./bin/chatpcb-cli.js generate --project ./workspaces/sample-mcu --prompt \"STM32 board with 3.3V regulator, reset button, I2C sensor connector, UART header, status LED\"",
+    "validate:sample": "node ./bin/chatpcb-cli.js validate --project ./workspaces/sample-mcu",
+    "simulate:sample": "node ./bin/chatpcb-cli.js simulate --project ./workspaces/sample-mcu",
+    "daemon": "node ./bin/chatpcb-cli.js daemon"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "kicad",
+    "pcb",
+    "eda",
+    "agent",
+    "chatpcb"
+  ],
+  "license": "GPL-3.0-or-later"
+}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChatPCB</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>ChatPCB</h1>
+          <p id="connection-status">Connecting</p>
+        </div>
+        <select id="provider">
+          <option value="codex">Codex CLI</option>
+          <option value="claude">Claude Code</option>
+          <option value="copilot">Copilot CLI</option>
+        </select>
+      </header>
+
+      <section class="context-strip">
+        <label>
+          <span>Project</span>
+          <input id="project-dir" value="./workspaces/panel-project" />
+        </label>
+        <button id="generate-button" type="button">Generate</button>
+      </section>
+
+      <section id="chat-log" class="chat-log" aria-live="polite"></section>
+
+      <form id="composer" class="composer">
+        <textarea
+          id="prompt"
+          rows="4"
+          spellcheck="true"
+        >STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.</textarea>
+        <button type="submit">Send</button>
+      </form>
+
+      <section class="results">
+        <h2>Artifacts</h2>
+        <ul id="artifact-list"></ul>
+      </section>
+    </main>
+    <script type="module" src="./panel.js"></script>
+  </body>
+</html>
