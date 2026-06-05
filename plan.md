@@ -25,6 +25,8 @@
 - [x] Replaced placeholder license pointer with the full GPL-3.0 license text.
 - [x] Added `npm run verify:sample` for one-command sample generation, ERC validation, and SPICE hook verification.
 - [x] Added README user-test guide and Codex CLI verification instructions.
+- [x] Added `npm run verify:panel` for panel default prompt to daemon websocket verification.
+- [x] Attempted Computer Use UI verification and documented the local bridge blocker.
 - [x] Added automated tests covering runtime envelopes, daemon dispatch, CLI generation, provider bridge, KiCad CLI resolution, validation paths, simulation paths, and panel assets.
 
 ## Current Baseline
@@ -107,6 +109,7 @@ Remaining work:
 
 - [x] Push the new `plan.md` after review if it should become the public development source of truth.
 - [x] Add `npm run verify:sample` that runs sample generation, ERC validation, and SPICE hook in one command.
+- [x] Add `npm run verify:panel` that validates the panel default prompt through the daemon websocket `schematic.generate` flow.
 - [x] Add a short `CONTRIBUTING.md` explaining test-first development, local-only credential policy, and KiCad fork workflow.
 - [x] Replace the placeholder SPDX license file with the full GPL-3.0-or-later license text.
 
@@ -263,6 +266,8 @@ Run from `C:\Users\windo\chatpcb2`:
 
 ```powershell
 npm test
+npm run verify:sample
+npm run verify:panel
 node ./bin/chatpcb-cli.js generate --project ./workspaces/sample-mcu --prompt "STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED."
 node ./bin/chatpcb-cli.js validate --project ./workspaces/sample-mcu
 node ./bin/chatpcb-cli.js simulate --project ./workspaces/sample-mcu

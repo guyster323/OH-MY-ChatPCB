@@ -13,6 +13,7 @@
     "validate:sample": "node ./bin/chatpcb-cli.js validate --project ./workspaces/sample-mcu",
     "simulate:sample": "node ./bin/chatpcb-cli.js simulate --project ./workspaces/sample-mcu",
     "verify:sample": "npm run generate:sample && npm run validate:sample && npm run simulate:sample",
+    "verify:panel": "node ./scripts/verify-panel-flow.js",
     "daemon": "node ./bin/chatpcb-cli.js daemon"
   },
   "engines": {

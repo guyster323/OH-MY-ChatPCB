@@ -36,6 +36,7 @@ Not implemented yet:
 ```powershell
 npm test
 npm run verify:sample
+npm run verify:panel
 npm run daemon
 ```
 
@@ -56,6 +57,7 @@ cd C:\Users\windo\chatpcb2
 ```powershell
 npm test
 npm run verify:sample
+npm run verify:panel
 ```
 
 Expected result:
@@ -64,6 +66,7 @@ Expected result:
 - sample generation writes files under `workspaces/sample-mcu`
 - KiCad validation passes when `kicad-cli` is available
 - simulation returns success or the typed `NGSPICE_UNAVAILABLE` skip when `ngspice` is not installed
+- panel verification starts `chatpcb-agentd`, sends the panel default prompt as a websocket `schematic.generate` tool call, and confirms generated artifact paths
 
 3. Start the local daemon:
 
@@ -103,6 +106,18 @@ codex exec -C C:\Users\windo\chatpcb2 --dangerously-bypass-approvals-and-sandbox
 ```
 
 The expected Codex CLI result is a concise report that confirms `npm run verify:sample` ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
+
+## Computer Use verification status
+
+Computer Use was attempted for direct UI verification, but the local automation bridge is not currently available in this session:
+
+```text
+Computer Use native pipe path is unavailable
+```
+
+Fallback browser automation was also checked. The in-app Browser backend returned `Browser is not available: iab`, and the Chrome automation backend returned `Browser is not available: extension`. Chrome itself is installed and running, and the Codex Chrome extension plus native host manifest checks passed locally.
+
+Until the Computer Use or Chrome automation bridge is available, `npm run verify:panel` is the repeatable user-flow proxy. It verifies the same panel-to-daemon websocket contract that the right-side KiCad WebView uses.
 
 ## CLI
 

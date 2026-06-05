@@ -23,11 +23,14 @@ test('Phase 1 public development documents are present and actionable', async ()
   assert.match(readme, /User Test Guide/);
   assert.match(readme, /Codex CLI verification/);
   assert.match(readme, /npm run verify:sample/);
+  assert.match(readme, /npm run verify:panel/);
+  assert.match(readme, /Computer Use verification status/);
   assert.match(readme, /codex exec -C C:\\Users\\windo\\chatpcb2 --dangerously-bypass-approvals-and-sandbox/);
   assert.doesNotMatch(readme, /--ask-for-approval/);
   assert.match(readme, /Keep this terminal running/);
 
   assert.match(plan, /- \[x\] Add `npm run verify:sample`/);
+  assert.match(plan, /- \[x\] Add `npm run verify:panel`/);
   assert.match(plan, /- \[x\] Add a short `CONTRIBUTING\.md`/);
   assert.match(plan, /- \[x\] Replace the placeholder SPDX license file/);
 });
