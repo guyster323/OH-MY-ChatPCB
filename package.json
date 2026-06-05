@@ -12,6 +12,7 @@
     "generate:sample": "node ./bin/chatpcb-cli.js generate --project ./workspaces/sample-mcu --prompt \"STM32 board with 3.3V regulator, reset button, I2C sensor connector, UART header, status LED\"",
     "validate:sample": "node ./bin/chatpcb-cli.js validate --project ./workspaces/sample-mcu",
     "simulate:sample": "node ./bin/chatpcb-cli.js simulate --project ./workspaces/sample-mcu",
+    "verify:sample": "npm run generate:sample && npm run validate:sample && npm run simulate:sample",
     "daemon": "node ./bin/chatpcb-cli.js daemon"
   },
   "engines": {

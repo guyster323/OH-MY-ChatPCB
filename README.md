@@ -35,13 +35,74 @@ Not implemented yet:
 
 ```powershell
 npm test
-npm run generate:sample
-npm run validate:sample
-npm run simulate:sample
+npm run verify:sample
 npm run daemon
 ```
 
 Open `apps/panel/index.html` in a WebView or browser while `npm run daemon` is running.
+
+## User Test Guide
+
+Use this flow when you want to try the current scaffold from a user perspective.
+
+1. Start in the repository root:
+
+```powershell
+cd C:\Users\windo\chatpcb2
+```
+
+2. Run the full local verification:
+
+```powershell
+npm test
+npm run verify:sample
+```
+
+Expected result:
+
+- all Node tests pass
+- sample generation writes files under `workspaces/sample-mcu`
+- KiCad validation passes when `kicad-cli` is available
+- simulation returns success or the typed `NGSPICE_UNAVAILABLE` skip when `ngspice` is not installed
+
+3. Start the local daemon:
+
+```powershell
+npm run daemon
+```
+
+Keep this terminal running. The daemon owns the local websocket endpoint used by the panel.
+
+4. In another browser window, open:
+
+```text
+C:\Users\windo\chatpcb2\apps\panel\index.html
+```
+
+You can also open `apps/panel/index.html` from a KiCad WebView host.
+
+5. Use the default prompt or enter a prompt like:
+
+```text
+STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.
+```
+
+Expected result:
+
+- the panel connects to `chatpcb-agentd`
+- pressing `Generate` sends a `schematic.generate` tool call
+- generated artifact paths appear in the panel
+- the generated `.kicad_sch` can be validated with `npm run validate:sample`
+
+## Codex CLI verification
+
+Codex CLI is used as a local validation surface, not as a stored credential source. The command below bypasses approvals and sandboxing, so use it only in this local checkout after reviewing the prompt.
+
+```powershell
+codex exec -C C:\Users\windo\chatpcb2 --dangerously-bypass-approvals-and-sandbox "Run exactly this command: npm run verify:sample. Then read README.md and answer whether the documented User Test Guide is enough for a user to test the current scaffold. Do not edit files."
+```
+
+The expected Codex CLI result is a concise report that confirms `npm run verify:sample` ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
 
 ## CLI
 

@@ -21,6 +21,10 @@
 - [x] Added WebView-ready right panel bundle in `apps/panel`.
 - [x] Added KiCad `wxWebView` panel C++ skeleton in `kicad-fork/chatpcb_panel`.
 - [x] Added project docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/KICAD_FORK_BOOTSTRAP.md`, `docs/ROADMAP.md`, `docs/handoff-next-session.md`.
+- [x] Added `CONTRIBUTING.md` with TDD, credential, and KiCad fork workflow rules.
+- [x] Replaced placeholder license pointer with the full GPL-3.0 license text.
+- [x] Added `npm run verify:sample` for one-command sample generation, ERC validation, and SPICE hook verification.
+- [x] Added README user-test guide and Codex CLI verification instructions.
 - [x] Added automated tests covering runtime envelopes, daemon dispatch, CLI generation, provider bridge, KiCad CLI resolution, validation paths, simulation paths, and panel assets.
 
 ## Current Baseline
@@ -29,7 +33,7 @@
 
 **GitHub repo:** `https://github.com/guyster323/OH-MY-ChatPCB`
 
-**Current root commit:** `04b5ee4 feat: initialize ChatPCB scaffold`
+**Current root commit:** run `git log --oneline -1` in `C:\Users\windo\chatpcb2`.
 
 **KiCad fork checkout:** `C:\Users\windo\kicad-source-mirror-chatpcb`
 
@@ -97,14 +101,14 @@ Future tool names should stay action-oriented and explicit:
 
 ## Phase 1: Scaffold and Validation Baseline
 
-Status: mostly complete.
+Status: complete for the scaffold and validation baseline.
 
 Remaining work:
 
-- [ ] Push the new `plan.md` after review if it should become the public development source of truth.
-- [ ] Add `npm run verify:sample` that runs sample generation, ERC validation, and SPICE hook in one command.
-- [ ] Add a short `CONTRIBUTING.md` explaining test-first development, local-only credential policy, and KiCad fork workflow.
-- [ ] Replace the placeholder SPDX license file with the full GPL-3.0-or-later license text.
+- [x] Push the new `plan.md` after review if it should become the public development source of truth.
+- [x] Add `npm run verify:sample` that runs sample generation, ERC validation, and SPICE hook in one command.
+- [x] Add a short `CONTRIBUTING.md` explaining test-first development, local-only credential policy, and KiCad fork workflow.
+- [x] Replace the placeholder SPDX license file with the full GPL-3.0-or-later license text.
 
 Acceptance criteria:
 
@@ -277,8 +281,8 @@ git log --oneline -1
 
 Implement Phase 1 remaining items, then start Phase 2 with a tiny real-symbol schematic fixture:
 
-1. Add `npm run verify:sample`.
-2. Add `CONTRIBUTING.md`.
-3. Replace `LICENSE` with the full GPL text.
-4. Add the first fixture-based real schematic authoring test.
-5. Implement the smallest real KiCad symbol output that passes that test and live KiCad ERC.
+1. Push the Phase 1 completion commit to GitHub.
+2. Add the first fixture-based real schematic authoring test.
+3. Implement the smallest real KiCad symbol output that passes that test and live KiCad ERC.
+4. Add diff-preview tests for the first generated schematic patch.
+5. Begin Codex/Claude/Copilot fake provider adapter tests.
