@@ -37,6 +37,7 @@ Not implemented yet:
 npm test
 npm run verify:sample
 npm run verify:panel
+npm run verify:ui
 npm run daemon
 ```
 
@@ -58,6 +59,7 @@ cd C:\Users\windo\chatpcb2
 npm test
 npm run verify:sample
 npm run verify:panel
+npm run verify:ui
 ```
 
 Expected result:
@@ -67,6 +69,7 @@ Expected result:
 - KiCad validation passes when `kicad-cli` is available
 - simulation returns success or the typed `NGSPICE_UNAVAILABLE` skip when `ngspice` is not installed
 - panel verification starts `chatpcb-agentd`, sends the panel default prompt as a websocket `schematic.generate` tool call, and confirms generated artifact paths
+- browser UI verification opens the panel, types a prompt, clicks `Generate`, and confirms artifact rows are rendered
 
 3. Start the local daemon:
 
@@ -102,10 +105,20 @@ Expected result:
 Codex CLI is used as a local validation surface, not as a stored credential source. The command below bypasses approvals and sandboxing, so use it only in this local checkout after reviewing the prompt.
 
 ```powershell
-codex exec -C C:\Users\windo\chatpcb2 --dangerously-bypass-approvals-and-sandbox "Run exactly this command: npm run verify:sample. Then read README.md and answer whether the documented User Test Guide is enough for a user to test the current scaffold. Do not edit files."
+codex exec -C C:\Users\windo\chatpcb2 --dangerously-bypass-approvals-and-sandbox "Run exactly these commands: npm run verify:sample and npm run verify:ui. Then read README.md and answer whether the documented User Test Guide is enough for a user to test the current scaffold. Do not edit files."
 ```
 
-The expected Codex CLI result is a concise report that confirms `npm run verify:sample` ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
+The expected Codex CLI result is a concise report that confirms the sample and browser UI verifications ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
+
+## Browser UI verification
+
+Run this command for the closest repeatable check to a user operating the current panel:
+
+```powershell
+npm run verify:ui
+```
+
+It starts `chatpcb-agentd` on `127.0.0.1:41317`, serves `apps/panel/index.html`, opens the panel in a local Chromium-compatible browser, fills the project and prompt fields, clicks `Generate`, and verifies that generated artifacts appear in the UI.
 
 ## Computer Use verification status
 
@@ -117,7 +130,7 @@ Computer Use native pipe path is unavailable
 
 Fallback browser automation was also checked. The in-app Browser backend returned `Browser is not available: iab`, and the Chrome automation backend returned `Browser is not available: extension`. Chrome itself is installed and running, and the Codex Chrome extension plus native host manifest checks passed locally.
 
-Until the Computer Use or Chrome automation bridge is available, `npm run verify:panel` is the repeatable user-flow proxy. It verifies the same panel-to-daemon websocket contract that the right-side KiCad WebView uses.
+Until the Computer Use or Chrome automation bridge is available, `npm run verify:ui` is the strongest repeatable user-flow proxy. It verifies real browser input, click behavior, websocket generation, and artifact rendering for the same panel contract that the right-side KiCad WebView uses.
 
 ## CLI
 
