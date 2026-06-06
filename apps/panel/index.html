@@ -13,11 +13,14 @@
           <h1>ChatPCB</h1>
           <p id="connection-status">Connecting</p>
         </div>
-        <select id="provider">
-          <option value="codex">Codex CLI</option>
-          <option value="claude">Claude Code</option>
-          <option value="copilot">Copilot CLI</option>
-        </select>
+        <div class="provider-control">
+          <select id="provider">
+            <option value="codex">Codex CLI</option>
+            <option value="claude">Claude Code</option>
+            <option value="copilot">Copilot CLI</option>
+          </select>
+          <p id="provider-status">Provider pending</p>
+        </div>
       </header>
 
       <section class="context-strip">
@@ -25,10 +28,24 @@
           <span>Project</span>
           <input id="project-dir" value="./workspaces/panel-project" />
         </label>
-        <button id="generate-button" type="button">Generate</button>
+        <div class="context-actions">
+          <button id="generate-button" type="button">Generate</button>
+          <button id="preview-patch-button" type="button">Preview</button>
+        </div>
       </section>
 
       <section id="chat-log" class="chat-log" aria-live="polite"></section>
+
+      <section id="patch-review" class="patch-review" hidden>
+        <div class="patch-review-head">
+          <h2>Patch</h2>
+          <div class="patch-actions">
+            <button id="approve-patch-button" type="button">Apply</button>
+            <button id="cancel-patch-button" type="button" class="secondary-button">Cancel</button>
+          </div>
+        </div>
+        <pre id="patch-diff" tabindex="0"></pre>
+      </section>
 
       <form id="composer" class="composer">
         <textarea
@@ -36,7 +53,10 @@
           rows="4"
           spellcheck="true"
         >STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.</textarea>
-        <button type="submit">Send</button>
+        <div class="composer-actions">
+          <button id="cancel-provider-button" type="button" class="secondary-button" disabled>Stop</button>
+          <button type="submit">Send</button>
+        </div>
       </form>
 
       <section class="results">
@@ -44,6 +64,6 @@
         <ul id="artifact-list"></ul>
       </section>
     </main>
-    <script type="module" src="./panel.js"></script>
+    <script src="./panel.js"></script>
   </body>
 </html>

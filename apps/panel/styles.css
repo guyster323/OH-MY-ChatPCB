@@ -24,7 +24,7 @@ textarea {
 
 .shell {
   display: grid;
-  grid-template-rows: auto auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto auto auto;
   gap: 10px;
   min-height: 100vh;
   padding: 12px;
@@ -32,6 +32,7 @@ textarea {
 
 .topbar,
 .context-strip,
+.patch-review,
 .composer,
 .results {
   border: 1px solid #d9dee7;
@@ -69,11 +70,31 @@ h2 {
   font-size: 12px;
 }
 
+.provider-control {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  min-width: 150px;
+}
+
+#provider-status {
+  color: #607086;
+  font-size: 12px;
+}
+
 .context-strip {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
   padding: 10px;
+}
+
+.context-actions,
+.patch-actions,
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: end;
 }
 
 label {
@@ -116,6 +137,12 @@ button {
   font-weight: 650;
 }
 
+.secondary-button {
+  border-color: #9ba8b6;
+  background: #ffffff;
+  color: #253342;
+}
+
 .chat-log {
   overflow: auto;
   display: grid;
@@ -154,7 +181,7 @@ button {
   padding: 10px;
 }
 
-.composer button {
+.composer-actions {
   justify-self: end;
 }
 
@@ -162,6 +189,38 @@ button {
   display: grid;
   gap: 8px;
   padding: 10px;
+}
+
+.patch-review {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.patch-review[hidden] {
+  display: none;
+}
+
+.patch-review-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+#patch-diff {
+  overflow: auto;
+  max-height: 220px;
+  margin: 0;
+  border: 1px solid #c8d0dc;
+  border-radius: 6px;
+  background: #f9fbfd;
+  padding: 9px;
+  color: #1c242c;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
 }
 
 #artifact-list {
@@ -181,6 +240,7 @@ button {
 
   .topbar,
   .context-strip,
+  .patch-review,
   .composer,
   .results,
   .message {
@@ -201,6 +261,10 @@ button {
     color: #e8edf3;
   }
 
+  #provider-status {
+    color: #9baabd;
+  }
+
   .message.user {
     border-color: #3c6674;
     background: #13242b;
@@ -209,5 +273,17 @@ button {
   .message.system {
     border-color: #746b3d;
     background: #2b2616;
+  }
+
+  .secondary-button {
+    border-color: #465563;
+    background: #11161b;
+    color: #e8edf3;
+  }
+
+  #patch-diff {
+    border-color: #465563;
+    background: #11161b;
+    color: #e8edf3;
   }
 }

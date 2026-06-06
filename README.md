@@ -17,18 +17,28 @@ This is not a full KiCad fork yet. It is the implementation scaffold that lets t
 Implemented now:
 
 - Natural-language MCU peripheral prompt normalization
-- Reviewable KiCad project draft generation
-- KiCad-compatible metadata using schematic `text`, not custom `chatpcb_*` nodes
+- Reviewable KiCad project draft generation with embedded ChatPCB fixture symbols, wire stubs, net labels, and footprint mappings
+- Project-local `ChatPCB` symbol library generation through `chatpcb.kicad_sym` and `sym-lib-table`
+- KiCad-compatible metadata using normal schematic objects and `.chatpcb.json`, not custom top-level `chatpcb_*` nodes
+- ERC report parsing that fails validation on KiCad `error` severity while surfacing warning-only reports
+- Daemon startup now reports the actual bound port and rejects port collisions, so UI verification can reuse an already-running `chatpcb-agentd`
+- Approval-gated `schematic.patch` preview/apply workflow with diff output, cancel handling, validation, and rollback
+- Provider registry and status checks for Codex CLI, Claude Code, and GitHub Copilot CLI
+- Strict local provider transcript parsing that accepts provider `tool.call` JSON only, redacts stderr secrets, and can write redacted trace files
+- Panel provider selector connected to daemon `provider.status`
+- Provider chat invocation from the panel, verified with an injected fake provider in `npm run verify:ui`
+- Process-level provider cancellation through `AbortSignal`, daemon-level `provider.cancel`, and the panel Stop button
+- Real Codex CLI provider smoke from panel chat without test injection
+- Source-level KiCad fork schematic editor integration for `CHATPCB_PANEL`
 - SPICE fixture generation for simple analog support circuits
 - Local daemon and WebView websocket surface
 - Windows KiCad CLI discovery including `C:/Program Files/KiCad/10.0` and `9.0`
 
 Not implemented yet:
 
-- Direct symbol placement for production schematics
+- Production-grade schematic symbols beyond the constrained MCU peripheral fixture set
 - PCB layout generation
-- KiCad source-tree integration build files
-- Real Codex/Claude/Copilot prompt templates and tool-call enforcement
+- Built KiCad fork binary with visible ChatPCB side panel
 - Full SPICE model selection for MCU vendor parts
 
 ## Quick Start
@@ -68,10 +78,11 @@ Expected result:
 
 - all Node tests pass
 - sample generation writes files under `workspaces/sample-mcu`
-- KiCad validation passes when `kicad-cli` is available
+- KiCad validation passes cleanly when `kicad-cli` is available; the generated project includes its own `ChatPCB` symbol library, so the sample ERC has `0` errors and `0` warnings
+- KiCad SVG export can render the generated sample schematic for visual review
 - simulation returns success or the typed `NGSPICE_UNAVAILABLE` skip when `ngspice` is not installed
 - panel verification starts `chatpcb-agentd`, sends the panel default prompt as a websocket `schematic.generate` tool call, and confirms generated artifact paths
-- browser UI verification opens the panel, types a prompt, clicks `Generate`, and confirms artifact rows are rendered
+- browser UI verification opens the panel, types prompts, clicks `Generate`, previews/cancels/applies a patch, exercises provider Stop cancellation with a fake provider, and confirms artifact rows are rendered
 
 3. Start the local daemon:
 
@@ -120,25 +131,13 @@ Run this command for the closest repeatable check to a user operating the curren
 npm run verify:ui
 ```
 
-It starts `chatpcb-agentd` on `127.0.0.1:41317`, serves `apps/panel/index.html`, opens the panel in a local Chromium-compatible browser, fills the project and prompt fields, clicks `Generate`, and verifies that generated artifacts appear in the UI.
+It starts `chatpcb-agentd` on `127.0.0.1:41317`, serves `apps/panel/index.html`, opens the panel in a local Chromium-compatible browser, fills the project and prompt fields, clicks `Generate`, previews/cancels/applies a patch, exercises provider Stop cancellation, and verifies that generated artifacts appear in the UI.
 
 ## Computer Use verification status
 
-Computer Use was attempted for direct UI verification, but the local automation bridge is not currently available in this session:
+Computer Use is available in the current Codex desktop session and can list, activate, inspect, and operate Windows apps. It was used to launch the local KiCad fork build at `C:\Users\windo\kicad-source-mirror-chatpcb\build\chatpcb-vcpkg\eeschema\eeschema.exe`, verify the visible right-side ChatPCB panel, confirm the panel auto-starts `chatpcb-agentd`, and click `Generate` from inside KiCad. The generated `chatpcb_mcu_peripheral.kicad_sch` also opens in the forked schematic editor.
 
-```text
-Computer Use native pipe path is unavailable
-```
-
-After granting Computer Use permission and updating Codex, the retry reached a different setup failure before Windows apps could be listed:
-
-```text
-windows sandbox failed: spawn setup refresh
-```
-
-Fallback browser automation was also checked. The in-app Browser backend returned `Browser is not available: iab`, and the Chrome automation backend returned `Browser is not available: extension`. Chrome itself is installed and running, and the Codex Chrome extension plus native host manifest checks passed locally.
-
-Until the Computer Use or Chrome automation bridge is available, `npm run verify:ui` is the strongest repeatable user-flow proxy. It verifies real browser input, click behavior, websocket generation, and artifact rendering for the same panel contract that the right-side KiCad WebView uses.
+`npm run verify:ui` remains the strongest repeatable non-interactive user-flow check. It starts or reuses `chatpcb-agentd`, serves `apps/panel/index.html`, performs real browser input and click behavior, and verifies websocket generation plus artifact rendering for the same panel contract that the right-side KiCad WebView uses.
 
 ## CLI
 
@@ -149,7 +148,7 @@ node ./bin/chatpcb-cli.js simulate --project ./workspaces/demo
 node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 ```
 
-`validate` returns `skipped: true` when KiCad CLI is unavailable. `simulate` returns `skipped: true` when `ngspice` is unavailable.
+`validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; the current generated MCU fixture is expected to validate with `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
 
 ## Architecture
 
@@ -165,12 +164,17 @@ The current tool-call names are:
 
 - `schematic.generate`
 - `project.create`
+- `schematic.patch`
 - `validate.erc`
 - `simulate.spice`
+- `provider.status`
+- `provider.list`
+- `provider.invoke`
+- `provider.cancel`
 
 ## KiCad Fork Integration
 
-Use `kicad-fork/chatpcb_panel` as the first source drop-in. The actual KiCad frame integration should instantiate `CHATPCB_PANEL` in the schematic and PCB editor side area, then package `apps/panel/*` into the KiCad install tree at `share/chatpcb/`.
+Use `kicad-fork/chatpcb_panel` as the first source drop-in. The KiCad fork branch now instantiates `CHATPCB_PANEL` in the schematic editor side area, packages `share/chatpcb_panel/`, prepares development runtime assets, and can launch the panel-backed schematic editor locally with the ChatPCB daemon connected.
 
 ## License
 

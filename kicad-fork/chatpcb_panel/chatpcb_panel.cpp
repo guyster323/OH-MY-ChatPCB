@@ -4,10 +4,42 @@
 #include <wx/log.h>
 #include <wx/sizer.h>
 #include <wx/stdpaths.h>
+#include <wx/utils.h>
 
 namespace
 {
 constexpr int CHATPCB_AGENT_PORT = 41317;
+
+wxString ResolveAgentCommand()
+{
+    wxString explicitCommand;
+
+    if( wxGetEnv( wxT( "CHATPCB_CLI_COMMAND" ), &explicitCommand ) && !explicitCommand.IsEmpty() )
+        return explicitCommand;
+
+#ifdef __WXMSW__
+    wxString appData;
+
+    if( wxGetEnv( wxT( "APPDATA" ), &appData ) && !appData.IsEmpty() )
+    {
+        wxFileName npmShim( appData, wxEmptyString );
+        npmShim.AppendDir( wxT( "npm" ) );
+        npmShim.SetFullName( wxT( "chatpcb.cmd" ) );
+
+        if( npmShim.FileExists() )
+        {
+            wxString command;
+            command.Printf( wxT( "cmd.exe /C \"\"%s\" daemon --host 127.0.0.1 --port %d\"" ),
+                            npmShim.GetFullPath(), CHATPCB_AGENT_PORT );
+            return command;
+        }
+    }
+#endif
+
+    wxString command;
+    command.Printf( wxT( "chatpcb daemon --host 127.0.0.1 --port %d" ), CHATPCB_AGENT_PORT );
+    return command;
+}
 }
 
 CHATPCB_PANEL::CHATPCB_PANEL( wxWindow* parent ) :
@@ -42,11 +74,8 @@ void CHATPCB_PANEL::EnsureAgentRunning()
     if( m_agentProcess )
         return;
 
-    wxString command;
-    command.Printf( "chatpcb daemon --host 127.0.0.1 --port %d", CHATPCB_AGENT_PORT );
-
     m_agentProcess = new wxProcess( this );
-    long pid = wxExecute( command, wxEXEC_ASYNC, m_agentProcess );
+    long pid = wxExecute( ResolveAgentCommand(), wxEXEC_ASYNC, m_agentProcess );
 
     if( pid == 0 )
     {
@@ -64,7 +93,7 @@ wxString CHATPCB_PANEL::ResolvePanelUrl() const
     wxFileName panelPath( wxStandardPaths::Get().GetExecutablePath() );
     panelPath.RemoveLastDir();
     panelPath.AppendDir( "share" );
-    panelPath.AppendDir( "chatpcb" );
+    panelPath.AppendDir( "chatpcb_panel" );
     panelPath.SetFullName( "index.html" );
     return panelPath.GetFullPath();
 #endif

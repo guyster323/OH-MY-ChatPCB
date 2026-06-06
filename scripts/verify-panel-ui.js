@@ -9,12 +9,16 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 import { startDaemon } from '../src/runtime/agent-daemon.js';
+import { createEnvelope } from '../src/runtime/envelope.js';
 
 const panelIndexPath = 'apps/panel/index.html';
 const panelRoot = path.resolve(path.dirname(panelIndexPath));
 const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
 const prompt =
   'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.';
+const patchPrompt = 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.';
+const providerPrompt = 'Use the selected provider to generate an STM32 board with USB-C power and status LED.';
+const slowProviderPrompt = 'Start a slow provider request so the panel Stop button can cancel it.';
 
 const staticServer = await startStaticServer(panelRoot);
 const daemon = await startUiDaemon();
@@ -33,7 +37,7 @@ try {
   await page.locator('#prompt').fill(prompt);
   await page.locator('#generate-button').click();
 
-  await page.waitForFunction(() => document.querySelectorAll('#artifact-list li').length >= 4, null, {
+  await page.waitForFunction(() => document.querySelectorAll('#artifact-list li').length >= 6, null, {
     timeout: 10000
   });
 
@@ -47,17 +51,91 @@ try {
   assert.ok(result.messages.some((message) => message?.includes('STM32 board with USB-C power')));
   assert.ok(result.messages.some((message) => message?.includes('STM32 draft generated.')));
   assert.ok(result.artifacts.some((artifact) => artifact?.includes('.kicad_sch')));
+  assert.ok(result.artifacts.some((artifact) => artifact?.includes('.kicad_sym')));
+  assert.ok(result.artifacts.some((artifact) => artifact?.includes('sym-lib-table')));
+
+  await page.locator('#prompt').fill(patchPrompt);
+  await page.locator('#preview-patch-button').click();
+  await page.locator('#patch-review').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelector('#patch-diff')?.textContent?.includes('--- chatpcb_mcu_peripheral.chatpcb.json'));
+  await page.locator('#cancel-patch-button').click();
+  await page.locator('#patch-review').waitFor({ state: 'hidden' });
+
+  await page.locator('#preview-patch-button').click();
+  await page.locator('#patch-review').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelector('#patch-diff')?.textContent?.includes('+++ chatpcb_mcu_peripheral.chatpcb.json'));
+  await page.locator('#approve-patch-button').click();
+  await page.waitForFunction(() => [...document.querySelectorAll('#chat-log .message')].some((node) => node.textContent?.includes('Patch applied. ERC passed.')), null, {
+    timeout: 20000
+  });
+  await page.waitForFunction(() => document.querySelectorAll('#artifact-list li').length >= 6, null, {
+    timeout: 10000
+  });
+
+  const patchResult = await page.evaluate(() => ({
+    patchHidden: document.querySelector('#patch-review')?.hasAttribute('hidden'),
+    messages: [...document.querySelectorAll('#chat-log .message')].map((node) => node.textContent),
+    artifacts: [...document.querySelectorAll('#artifact-list li')].map((node) => node.textContent)
+  }));
+
+  assert.equal(patchResult.patchHidden, true);
+  assert.ok(patchResult.messages.some((message) => message?.includes('Patch canceled.')));
+  assert.ok(patchResult.messages.some((message) => message?.includes('Patch applied. ERC passed.')));
+  assert.ok(patchResult.artifacts.some((artifact) => artifact?.includes('.kicad_sym')));
+
+  await page.locator('#prompt').fill(slowProviderPrompt);
+  await page.locator('#composer button[type="submit"]').click();
+  await page.waitForFunction(() => document.querySelector('#cancel-provider-button')?.disabled === false, null, {
+    timeout: 10000
+  });
+  await page.locator('#cancel-provider-button').click();
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('#chat-log .message')].some((node) => node.textContent?.includes('Provider request cancelled.')),
+    null,
+    {
+      timeout: 10000
+    }
+  );
+  await page.waitForFunction(() => document.querySelector('#cancel-provider-button')?.disabled === true, null, {
+    timeout: 10000
+  });
+
+  const cancelResult = await page.evaluate(() => ({
+    cancelDisabled: document.querySelector('#cancel-provider-button')?.disabled,
+    messages: [...document.querySelectorAll('#chat-log .message')].map((node) => node.textContent)
+  }));
+
+  assert.equal(cancelResult.cancelDisabled, true);
+  assert.ok(cancelResult.messages.some((message) => message?.includes('Provider request cancelled.')));
+
+  await page.locator('#prompt').fill(providerPrompt);
+  await page.locator('#composer button[type="submit"]').click();
+  await page.waitForFunction(() => [...document.querySelectorAll('#chat-log .message')].some((node) => node.textContent?.includes('Drafting from fake provider.')), null, {
+    timeout: 10000
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('#chat-log .message')].filter((node) => node.textContent?.includes('STM32 draft generated.')).length >= 2, null, {
+    timeout: 10000
+  });
+
+  const providerResult = await page.evaluate(() => ({
+    messages: [...document.querySelectorAll('#chat-log .message')].map((node) => node.textContent),
+    artifacts: [...document.querySelectorAll('#artifact-list li')].map((node) => node.textContent)
+  }));
+
+  assert.ok(providerResult.messages.some((message) => message?.includes('Drafting from fake provider.')));
+  assert.ok(providerResult.messages.some((message) => message?.includes(providerPrompt)));
+  assert.ok(providerResult.artifacts.some((artifact) => artifact?.includes('.kicad_sym')));
   assert.deepEqual(pageErrors, []);
 
   console.log(
     JSON.stringify(
       {
         ok: true,
-        verified: 'browser panel input click artifact flow',
+        verified: 'browser panel generate preview cancel approve provider stop artifact flow',
         service: 'chatpcb-agentd',
         browser: browser.browserType().name(),
         projectDir,
-        artifacts: result.artifacts
+        artifacts: providerResult.artifacts
       },
       null,
       2
@@ -71,29 +149,42 @@ try {
 }
 
 async function startUiDaemon() {
-  try {
-    return await startDaemon({ host: '127.0.0.1', port: 41317 });
-  } catch (error) {
-    if (error?.code !== 'EADDRINUSE' || !(await isDaemonReady())) {
-      throw error;
+  return startDaemon({
+    host: '127.0.0.1',
+    port: 41317,
+    dispatchOptions: {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({
+        provider,
+        command: 'fake-provider',
+        available: true,
+        status: 'available'
+      }),
+      runProviderProcessImpl: fakeProviderTranscript
     }
-
-    return {
-      url: 'http://127.0.0.1:41317',
-      close: async () => {}
-    };
-  }
+  });
 }
 
-async function isDaemonReady() {
-  try {
-    const response = await fetch('http://127.0.0.1:41317/health');
-    if (!response.ok) return false;
-    const body = await response.json();
-    return body.service === 'chatpcb-agentd';
-  } catch {
-    return false;
+async function fakeProviderTranscript({ input, signal }) {
+  if (input.includes(slowProviderPrompt)) {
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('Provider process cancelled.')));
+    });
   }
+
+  return {
+    exitCode: 0,
+    stderr: '',
+    events: [
+      createEnvelope('agent.delta', { text: 'Drafting from fake provider.' }),
+      createEnvelope('tool.call', {
+        id: 'call_fake_provider_generate',
+        name: 'schematic.generate',
+        args: {
+          prompt
+        }
+      })
+    ]
+  };
 }
 
 async function launchBrowser() {

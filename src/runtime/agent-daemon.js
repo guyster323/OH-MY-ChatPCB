@@ -2,11 +2,23 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
+import { runProviderProcess } from './provider-process.js';
+import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
 import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.js';
+import { applySchematicPatch } from '../workflow/schematic-patch.js';
 import { simulateProject } from '../workflow/simulate-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 
-export async function dispatchToolCall(call) {
+const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'simulate.spice'];
+
+export async function dispatchToolCall(
+  call,
+  {
+    checkProviderAvailabilityImpl = checkProviderAvailability,
+    runProviderProcessImpl = runProviderProcess,
+    providerControllers = new Map()
+  } = {}
+) {
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
   }
@@ -25,6 +37,35 @@ export async function dispatchToolCall(call) {
     case 'validate.erc':
       return ok(await validateProject({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
 
+    case 'schematic.patch':
+      return ok(
+        await applySchematicPatch({
+          projectDir: call.args?.projectDir,
+          prompt: call.args?.prompt,
+          projectName: call.args?.projectName,
+          approved: call.args?.approved === true,
+          cancel: call.args?.cancel === true
+        })
+      );
+
+    case 'provider.status':
+      return ok(await checkProviderAvailabilityImpl({ provider: call.args?.provider ?? 'codex' }));
+
+    case 'provider.list':
+      return ok({ providers: listProviderDefinitions() });
+
+    case 'provider.invoke':
+      return ok(
+        await invokeProvider(call, {
+          runProviderProcessImpl,
+          checkProviderAvailabilityImpl,
+          providerControllers
+        })
+      );
+
+    case 'provider.cancel':
+      return ok(cancelProvider(call.args, providerControllers));
+
     case 'simulate.spice':
       return ok(await simulateProject({ projectDir: call.args?.projectDir, ngspicePath: call.args?.ngspicePath }));
 
@@ -33,8 +74,117 @@ export async function dispatchToolCall(call) {
   }
 }
 
-export async function startDaemon({ host = '127.0.0.1', port = 41317 } = {}) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, providerControllers }) {
+  const args = call.args ?? {};
+  const invocationId = args.invocationId ?? call.id;
+  const provider = args.provider ?? 'codex';
+  const projectDir = args.projectDir;
+  const prompt = args.prompt;
+
+  if (!prompt) {
+    throw new Error('provider.invoke requires a prompt.');
+  }
+
+  if (!invocationId) {
+    throw new Error('provider.invoke requires an invocation id.');
+  }
+
+  const definition = getProviderDefinition(provider);
+  const availability = await checkProviderAvailabilityImpl({ provider });
+  if (!availability.available) {
+    throw new Error(`${definition.label} is not available on this machine.`);
+  }
+
+  const input = buildProviderPrompt({
+    provider,
+    userMessage: prompt,
+    projectDir,
+    allowedTools: PROVIDER_ALLOWED_TOOLS
+  });
+  const controller = new AbortController();
+  providerControllers.set(invocationId, controller);
+  let transcript;
+
+  try {
+    transcript = await runProviderProcessImpl({
+      command: definition.command,
+      args: definition.args,
+      input,
+      allowedToolNames: PROVIDER_ALLOWED_TOOLS,
+      signal: controller.signal
+    });
+  } finally {
+    providerControllers.delete(invocationId);
+  }
+
+  const toolResults = [];
+  for (const event of transcript.events) {
+    if (event.type !== 'tool.call') continue;
+
+    const toolCall = withProjectContext(event.payload, projectDir);
+    toolResults.push({
+      id: event.payload.id,
+      ...(await dispatchToolCall(toolCall, { checkProviderAvailabilityImpl, runProviderProcessImpl, providerControllers }))
+    });
+  }
+
+  return {
+    providerInvocation: true,
+    invocationId,
+    provider,
+    events: transcript.events,
+    toolResults,
+    stderr: transcript.stderr,
+    tracePath: transcript.tracePath
+  };
+}
+
+function cancelProvider(args = {}, providerControllers) {
+  const invocationId = args.id ?? args.invocationId;
+  if (!invocationId) {
+    throw new Error('provider.cancel requires an id.');
+  }
+
+  const controller = providerControllers.get(invocationId);
+  if (!controller) {
+    return {
+      cancelled: false,
+      id: invocationId,
+      reason: 'not_found'
+    };
+  }
+
+  controller.abort();
+  providerControllers.delete(invocationId);
+  return {
+    cancelled: true,
+    id: invocationId
+  };
+}
+
+function withProjectContext(payload, projectDir) {
+  const args = {
+    ...(payload.args ?? {})
+  };
+
+  if (projectDir && !args.projectDir) {
+    args.projectDir = projectDir;
+  }
+
+  return {
+    id: payload.id,
+    name: payload.name,
+    args
+  };
+}
+
+export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOptions = {} } = {}) {
   const clients = new Set();
+  const providerControllers = dispatchOptions.providerControllers ?? new Map();
+  const resolvedDispatchOptions = {
+    ...dispatchOptions,
+    providerControllers
+  };
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -49,7 +199,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317 } = {}) {
 
       if (request.method === 'POST' && request.url === '/tool') {
         const body = await readJson(request);
-        sendJson(response, 200, await dispatchToolCall(body));
+        sendJson(response, 200, await dispatchToolCall(body, resolvedDispatchOptions));
         return;
       }
 
@@ -80,7 +230,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317 } = {}) {
             socket,
             createEnvelope('tool.result', {
               id: envelope.payload.id,
-              ...(await dispatchToolCall(envelope.payload))
+              ...(await dispatchToolCall(envelope.payload, resolvedDispatchOptions))
             })
           );
         } else if (envelope.type === 'chat.message') {
@@ -100,12 +250,20 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317 } = {}) {
     socket.on('error', () => clients.delete(socket));
   });
 
-  await new Promise((resolve) => server.listen(port, host, resolve));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
 
   return {
     host,
-    port,
-    url: `http://${host}:${server.address().port}`,
+    port: address.port,
+    url: `http://${host}:${address.port}`,
     server,
     close: () =>
       new Promise((resolve, reject) => {
@@ -170,7 +328,19 @@ function createWebSocketAccept(key) {
 function sendWebSocketJson(socket, payload) {
   const text = JSON.stringify(payload);
   const data = Buffer.from(text);
-  const header = data.length < 126 ? Buffer.from([0x81, data.length]) : Buffer.from([0x81, 126, data.length >> 8, data.length & 0xff]);
+  let header;
+
+  if (data.length < 126) {
+    header = Buffer.from([0x81, data.length]);
+  } else if (data.length <= 0xffff) {
+    header = Buffer.from([0x81, 126, data.length >> 8, data.length & 0xff]);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(data.length), 2);
+  }
+
   socket.write(Buffer.concat([header, data]));
 }
 

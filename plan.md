@@ -6,6 +6,7 @@
 - [x] Initialized local git repository and pushed `main` to `https://github.com/guyster323/OH-MY-ChatPCB`.
 - [x] Forked KiCad source mirror to `https://github.com/guyster323/kicad-source-mirror`.
 - [x] Added KiCad fork branch `chatpcb-panel-scaffold` with ChatPCB panel scaffold.
+- [x] Added source-level KiCad fork integration that instantiates `CHATPCB_PANEL` in the schematic editor AUI pane and packages `share/chatpcb_panel`.
 - [x] Added local `chatpcb` CLI entrypoint: `bin/chatpcb-cli.js`.
 - [x] Added `generate`, `validate`, `simulate`, and `daemon` CLI commands.
 - [x] Added `chatpcb-agentd` local daemon with `/health`, `/tool`, and `/ws`.
@@ -16,7 +17,7 @@
 - [x] Added KiCad-compatible schematic metadata using normal schematic `text`, not custom `chatpcb_*` nodes.
 - [x] Added SPICE fixture generation for simple analog support circuits.
 - [x] Added KiCad CLI lookup order: explicit path, `KICAD_CLI_PATH`, Windows KiCad install paths, then `kicad-cli` from `PATH`.
-- [x] Verified generated sample with local KiCad 9.0.7 ERC: `0` violations.
+- [x] Verified generated sample with local KiCad 9.0.7 ERC: `0` errors and `0` warnings.
 - [x] Added typed skip behavior for unavailable `ngspice`.
 - [x] Added WebView-ready right panel bundle in `apps/panel`.
 - [x] Added KiCad `wxWebView` panel C++ skeleton in `kicad-fork/chatpcb_panel`.
@@ -27,8 +28,23 @@
 - [x] Added README user-test guide and Codex CLI verification instructions.
 - [x] Added `npm run verify:panel` for panel default prompt to daemon websocket verification.
 - [x] Added `npm run verify:ui` for browser-based prompt input, Generate click, and artifact rendering verification.
-- [x] Attempted Computer Use UI verification and documented the local bridge blocker.
-- [x] Retried Computer Use after Codex update; current blocker is `windows sandbox failed: spawn setup refresh`.
+- [x] Attempted Computer Use UI verification and documented the bridge/policy blockers encountered in this environment.
+- [x] Rechecked direct Computer Use after the bridge recovered; Windows UI automation can list and launch apps, but Chrome panel verification was stopped by browser URL policy before the `Generate` flow completed.
+- [x] Added the first Phase 2 real-symbol schematic fixture with embedded ChatPCB symbols, wire stubs, net labels, footprint mappings, and `.chatpcb.json` explanations.
+- [x] Added project-local `ChatPCB` symbol library packaging through `chatpcb.kicad_sym` and `sym-lib-table`.
+- [x] Added ERC report parsing so validation fails on KiCad `error` severity and surfaces warning-only reports.
+- [x] Fixed daemon port-collision handling so `verify:ui` can reuse an already-running `chatpcb-agentd` instead of hanging.
+- [x] Verified KiCad CLI SVG export renders the generated sample schematic with symbols, notes, wires, and net labels.
+- [x] Added approval-gated `schematic.patch` preview/apply workflow with diff output, cancel handling, validation, and rollback.
+- [x] Added panel UI for patch diff preview, approve, cancel, validation-result display, and rollback messaging.
+- [x] Fixed large WebSocket tool-result framing so approval results with large diffs reach the panel.
+- [x] Added Phase 4 provider registry entries for Codex, Claude, and Copilot with local status probing.
+- [x] Added strict provider transcript parsing, fake CLI provider tests, stderr redaction, and redacted local trace files.
+- [x] Connected the panel provider selector to daemon `provider.status`.
+- [x] Added provider invocation from panel chat through a selected local provider, with fake-provider browser verification.
+- [x] Added process-level provider cancellation through `AbortSignal`.
+- [x] Added panel Stop UI and daemon-level cancellation for in-flight provider calls.
+- [x] Smoke-tested an installed Codex provider from panel chat without test injection.
 - [x] Added automated tests covering runtime envelopes, daemon dispatch, CLI generation, provider bridge, KiCad CLI resolution, validation paths, simulation paths, and panel assets.
 
 ## Current Baseline
@@ -43,7 +59,7 @@
 
 **KiCad fork branch:** `chatpcb-panel-scaffold`
 
-**KiCad fork commit:** `80bde26 feat: add ChatPCB panel scaffold`
+**KiCad fork commit:** `80bde26 feat: add ChatPCB panel scaffold` plus uncommitted source-level panel integration in `C:\Users\windo\kicad-source-mirror-chatpcb`.
 
 **Known local tools:**
 
@@ -51,6 +67,8 @@
 - KiCad 9.0.7 CLI is available at `C:/Program Files/KiCad/9.0/bin/kicad-cli.exe`.
 - KiCad 10 CLI was not found locally.
 - `ngspice` was not found on `PATH`.
+- `cmake` was not found on `PATH`, but Visual Studio CMake is available at `C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`.
+- The KiCad fork Ninja configure/build path works after loading `vcvars64.bat` and using the local vcpkg toolchain; `eeschema/eeschema.exe` launches with the ChatPCB panel connected.
 
 ## Product Goal
 
@@ -89,8 +107,13 @@ Current supported tool names:
 
 - `schematic.generate`
 - `project.create`
+- `schematic.patch`
 - `validate.erc`
 - `simulate.spice`
+- `provider.status`
+- `provider.list`
+- `provider.invoke`
+- `provider.cancel`
 
 Future tool names should stay action-oriented and explicit:
 
@@ -129,21 +152,22 @@ Goal: move from review-note schematics to actual KiCad symbols, wires, labels, a
 
 Work items:
 
-- [ ] Add a tiny fixture symbol library for generated tests.
-- [ ] Define a minimal internal schematic AST for MCU peripheral circuits.
-- [ ] Implement symbol placement for power input, regulator, MCU placeholder, reset button, boot button, status LED, I2C connector, UART header, and sensor connector.
-- [ ] Implement net labels for `VBUS`, `+3V3`, `GND`, `SCL`, `SDA`, `TX`, `RX`, `RESET`, and `BOOT`.
-- [ ] Implement footprint mapping for generated symbols.
-- [ ] Keep `.chatpcb.json` as the authoritative ChatPCB metadata store.
-- [ ] Keep generated `.kicad_sch` free of custom top-level `chatpcb_*` nodes.
-- [ ] Add golden tests for generated schematic structure.
-- [ ] Add live KiCad ERC smoke tests for every generated fixture.
+- [x] Add a tiny fixture symbol library for generated tests.
+- [x] Define a minimal internal schematic AST for MCU peripheral circuits.
+- [x] Implement symbol placement for power input, regulator, MCU placeholder, reset button, boot button, status LED, I2C connector, UART header, and sensor connector.
+- [x] Implement net labels for `VBUS`, `+3V3`, `GND`, `SCL`, `SDA`, `TX`, `RX`, `RESET`, and `BOOT`.
+- [x] Implement footprint mapping for generated symbols.
+- [x] Keep `.chatpcb.json` as the authoritative ChatPCB metadata store.
+- [x] Keep generated `.kicad_sch` free of custom top-level `chatpcb_*` nodes.
+- [x] Add golden tests for generated schematic structure.
+- [x] Add live KiCad ERC smoke tests for every generated fixture.
 
 Acceptance criteria:
 
 - Generated `.kicad_sch` contains real symbols and nets, not only text notes.
 - KiCad CLI can load every fixture.
-- ERC result is either clean or contains only documented, intentional warnings.
+- KiCad CLI SVG export can render the generated sample for visual review.
+- ERC result is clean for the generated MCU fixture. Validation still fails on any KiCad `error` severity and surfaces warning-only reports for future fixtures.
 - The generator can explain every generated symbol and net in `.chatpcb.json`.
 
 ## Phase 3: Diff Preview and Safe Apply
@@ -152,13 +176,14 @@ Goal: make all agent-generated file changes reviewable before they modify a user
 
 Work items:
 
-- [ ] Add `schematic.patch` tool-call support.
-- [ ] Add a file snapshot model for before/after comparison.
-- [ ] Add unified diff generation for `.kicad_sch`, `.kicad_pcb`, `.kicad_pro`, and `.chatpcb.json`.
-- [ ] Add panel UI for diff preview, approve, cancel, and rerun validation.
-- [ ] Add daemon-side apply lock to prevent concurrent writes to the same project.
-- [ ] Add rollback behavior using pre-apply snapshots.
-- [ ] Add tests for approve, cancel, failed validation, and rollback paths.
+- [x] Add `schematic.patch` tool-call support.
+- [x] Add a file snapshot model for before/after comparison.
+- [x] Add unified diff generation for currently generated project files: `.kicad_sch`, `.kicad_pro`, `.chatpcb.json`, `sym-lib-table`, `chatpcb.kicad_sym`, and SPICE fixture.
+- [ ] Extend patch diff handling to `.kicad_pcb` once PCB drafts exist.
+- [x] Add panel UI for diff preview, approve, cancel, and rerun validation.
+- [x] Add daemon-side apply lock to prevent concurrent writes to the same project.
+- [x] Add rollback behavior using pre-apply snapshots.
+- [x] Add tests for approve, cancel, failed validation, and rollback paths.
 
 Acceptance criteria:
 
@@ -173,21 +198,25 @@ Goal: connect user-owned local CLI agent sessions to ChatPCB without storing pro
 
 Work items:
 
-- [ ] Add provider registry for `codex`, `claude`, and `copilot`.
-- [ ] Add provider availability checks using `Get-Command` on Windows and equivalent checks on Unix.
-- [ ] Add strict tool-call prompting for each provider.
-- [ ] Add transcript parser that accepts only `tool.call` JSON plus normal assistant deltas.
-- [ ] Add timeout, cancellation, and stderr redaction.
-- [ ] Add local trace files with secrets redacted.
-- [ ] Add panel provider selector state connected to daemon configuration.
-- [ ] Add tests using fake CLI providers.
+- [x] Add provider registry for `codex`, `claude`, and `copilot`.
+- [x] Add provider availability checks using `Get-Command` on Windows and equivalent checks on Unix.
+- [x] Add strict tool-call prompting for each provider.
+- [x] Add transcript parser that accepts only `tool.call` JSON plus normal assistant deltas.
+- [x] Add timeout and stderr redaction.
+- [x] Add provider process cancellation.
+- [x] Add panel Stop UI and daemon-level cancellation for in-flight provider calls.
+- [x] Add local trace files with secrets redacted.
+- [x] Add panel provider selector state connected to daemon configuration.
+- [x] Add tests using fake CLI providers.
 
 Acceptance criteria:
 
-- A fake provider can stream text and emit `schematic.generate`.
-- Unknown or malformed tool calls are rejected before execution.
-- Provider credentials are never written to repo files or daemon logs.
-- User can select provider in the panel and receive a typed status result.
+- [x] A fake provider can stream text and emit `schematic.generate`.
+- [x] Unknown or malformed tool calls are rejected before execution.
+- [x] Provider credentials are redacted from stderr transcripts and optional local trace files.
+- [x] User can select provider in the panel and receive a typed status result.
+- [x] A selected provider can be invoked from panel chat to produce a tool call, proven with a fake provider in `npm run verify:ui`.
+- [x] A real installed provider can be smoke-tested from panel chat without test injection. Verified with Codex CLI returning `PANEL_REAL_PROVIDER_ASSISTANT_OK` through the panel.
 
 ## Phase 5: KiCad Fork Integration
 
@@ -195,22 +224,22 @@ Goal: wire the ChatPCB panel into the real KiCad source tree instead of keeping 
 
 Work items:
 
-- [ ] Open `C:\Users\windo\kicad-source-mirror-chatpcb` on branch `chatpcb-panel-scaffold`.
-- [ ] Identify the schematic editor frame and side/dock panel integration point.
-- [ ] Add `plugins/chatpcb_panel` or the final chosen source directory to KiCad CMake.
-- [ ] Instantiate `CHATPCB_PANEL` in the schematic editor first.
-- [ ] Package `share/chatpcb_panel` assets into the KiCad install tree.
-- [ ] Ensure the panel resolves the correct local asset URL in installed builds.
-- [ ] Ensure the panel can start `chatpcb daemon` or connect to an already running daemon.
-- [ ] Add a Windows smoke build note with exact CMake command once the local KiCad build environment is prepared.
+- [x] Open `C:\Users\windo\kicad-source-mirror-chatpcb` on branch `chatpcb-panel-scaffold`.
+- [x] Identify the schematic editor frame and side/dock panel integration point.
+- [x] Add `plugins/chatpcb_panel` or the final chosen source directory to KiCad CMake.
+- [x] Instantiate `CHATPCB_PANEL` in the schematic editor first.
+- [x] Package `share/chatpcb_panel` assets into the KiCad install tree.
+- [x] Ensure the panel resolves the correct local asset URL in installed builds.
+- [x] Ensure the panel can start `chatpcb daemon` or connect to an already running daemon.
+- [x] Add a Windows smoke build note with exact CMake command once the local KiCad build environment is prepared.
 
 Acceptance criteria:
 
-- KiCad fork launches with a visible ChatPCB side panel.
-- The panel connects to `chatpcb-agentd`.
-- A prompt from inside KiCad generates a project draft.
-- Generated schematic opens in KiCad.
-- Local branch `chatpcb-panel-scaffold` remains rebaseable against KiCad upstream mirror.
+- [x] KiCad fork launches with a visible ChatPCB side panel.
+- [x] The panel connects to `chatpcb-agentd`.
+- [x] A prompt from inside KiCad generates a project draft.
+- [x] Generated schematic opens in KiCad.
+- [x] Local branch `chatpcb-panel-scaffold` remains rebaseable against KiCad upstream mirror.
 
 ## Phase 6: Simulation Support
 
@@ -289,10 +318,8 @@ git log --oneline -1
 
 ## Next Immediate Task
 
-Start Phase 2 with a tiny real-symbol schematic fixture:
+Continue Phase 4 and Phase 5 while hardening direct GUI verification:
 
-1. Add the first fixture-based real schematic authoring test.
-2. Implement the smallest real KiCad symbol output that passes that test and live KiCad ERC.
-3. Add diff-preview tests for the first generated schematic patch.
-4. Begin Codex/Claude/Copilot fake provider adapter tests.
-5. Re-run Computer Use verification when the native pipe is available in the session.
+1. Wire the panel into the real KiCad fork source tree and installed asset path.
+2. Keep direct Computer Use verification in the release checklist, using a fresh unlocked sample project so KiCad GUI does not show duplicate-open or stale-loading GUI states.
+3. Continue toward PCB/layout, DRC, and manufacturing workflows once KiCad fork integration is visible in the real application.

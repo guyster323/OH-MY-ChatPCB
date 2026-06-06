@@ -8,7 +8,7 @@ ChatPCB is split into three local-only layers:
 - Agent daemon: websocket and HTTP tool-call bridge on `127.0.0.1`
 - KiCad automation: project generation, `kicad-cli` validation, and `ngspice` simulation hooks
 
-The daemon does not store provider API keys. Provider-specific adapters should call already-authenticated local CLI tools through the process bridge.
+The daemon does not store provider API keys. Provider-specific adapters call already-authenticated local CLI tools through the process bridge, accept provider-emitted `tool.call` JSON only, redact secrets from stderr transcripts and optional local trace files, and support process-level cancellation with `AbortSignal`.
 
 ## Message Envelope
 
@@ -39,10 +39,12 @@ The v1 generator produces review drafts for MCU peripheral circuits. It writes:
 
 - `.kicad_pro`
 - `.kicad_sch`
+- `chatpcb.kicad_sym`
+- `sym-lib-table`
 - `.chatpcb.json`
 - `_simulation.cir`
 
-The schematic intentionally uses KiCad-visible `text` notes in this scaffold. Direct symbol placement belongs in the next implementation phase, after fixture-based ERC tests are in place.
+The schematic uses project-local ChatPCB fixture symbols, wire stubs, net labels, no-connect markers for intentionally unused optional pins, and review notes. ChatPCB metadata stays in `.chatpcb.json`; custom top-level `chatpcb_*` schematic nodes are not allowed.
 
 ## Validation Contract
 

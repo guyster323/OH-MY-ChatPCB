@@ -35,3 +35,80 @@ test('validateProject passes absolute schematic and report paths to kicad-cli', 
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('validateProject fails when KiCad ERC report contains errors', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-errors-'));
+  await writeFile(path.join(root, 'demo.kicad_sch'), '(kicad_sch)\n', 'utf8');
+
+  try {
+    const result = await validateProject({
+      projectDir: root,
+      runKicadCliImpl: async (args) => {
+        const reportPath = args[args.indexOf('--output') + 1];
+        await writeFile(
+          reportPath,
+          JSON.stringify({
+            sheets: [
+              {
+                violations: [
+                  { severity: 'warning', type: 'lib_symbol_issues' },
+                  { severity: 'error', type: 'pin_not_connected' }
+                ]
+              }
+            ]
+          }),
+          'utf8'
+        );
+        return { exitCode: 0, stdout: '', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+      }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.erc.errorCount, 1);
+    assert.equal(result.erc.warningCount, 1);
+    assert.deepEqual(result.erc.byType, {
+      lib_symbol_issues: 1,
+      pin_not_connected: 1
+    });
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateProject keeps warning-only KiCad ERC reports successful but visible', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-warnings-'));
+  await writeFile(path.join(root, 'demo.kicad_sch'), '(kicad_sch)\n', 'utf8');
+
+  try {
+    const result = await validateProject({
+      projectDir: root,
+      runKicadCliImpl: async (args) => {
+        const reportPath = args[args.indexOf('--output') + 1];
+        await writeFile(
+          reportPath,
+          JSON.stringify({
+            sheets: [
+              {
+                violations: [
+                  { severity: 'warning', type: 'lib_symbol_issues' },
+                  { severity: 'warning', type: 'lib_symbol_issues' }
+                ]
+              }
+            ]
+          }),
+          'utf8'
+        );
+        return { exitCode: 0, stdout: '', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.erc.errorCount, 0);
+    assert.equal(result.erc.warningCount, 2);
+    assert.deepEqual(result.erc.byType, {
+      lib_symbol_issues: 2
+    });
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

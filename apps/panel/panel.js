@@ -5,19 +5,34 @@ const logEl = document.querySelector('#chat-log');
 const formEl = document.querySelector('#composer');
 const promptEl = document.querySelector('#prompt');
 const projectEl = document.querySelector('#project-dir');
+const providerEl = document.querySelector('#provider');
+const providerStatusEl = document.querySelector('#provider-status');
 const artifactListEl = document.querySelector('#artifact-list');
 const generateButtonEl = document.querySelector('#generate-button');
+const previewPatchButtonEl = document.querySelector('#preview-patch-button');
+const patchReviewEl = document.querySelector('#patch-review');
+const patchDiffEl = document.querySelector('#patch-diff');
+const approvePatchButtonEl = document.querySelector('#approve-patch-button');
+const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
+const cancelProviderButtonEl = document.querySelector('#cancel-provider-button');
 
 let socket;
+let pendingPatch = null;
+let activeProviderInvocationId = null;
 
 connect();
 
 formEl.addEventListener('submit', (event) => {
   event.preventDefault();
-  sendGenerate();
+  sendProviderChat();
 });
 
 generateButtonEl.addEventListener('click', () => sendGenerate());
+previewPatchButtonEl.addEventListener('click', () => sendPatchPreview());
+approvePatchButtonEl.addEventListener('click', () => sendPatchApproval());
+cancelPatchButtonEl.addEventListener('click', () => sendPatchCancel());
+cancelProviderButtonEl.addEventListener('click', () => sendProviderCancel());
+providerEl.addEventListener('change', () => refreshProviderStatus());
 
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
@@ -25,6 +40,7 @@ function connect() {
   socket.addEventListener('open', () => {
     statusEl.textContent = 'Connected';
     appendMessage('system', 'chatpcb-agentd connected.');
+    refreshProviderStatus();
   });
 
   socket.addEventListener('message', (event) => {
@@ -47,6 +63,7 @@ function sendGenerate() {
   const projectDir = projectEl.value.trim();
   if (!prompt || !projectDir) return;
 
+  hidePatchReview();
   appendMessage('user', prompt);
   sendEnvelope('tool.call', {
     id: `call_${Date.now()}`,
@@ -54,6 +71,94 @@ function sendGenerate() {
     args: {
       projectDir,
       prompt
+    }
+  });
+}
+
+function sendProviderChat() {
+  const prompt = promptEl.value.trim();
+  const projectDir = projectEl.value.trim();
+  if (!prompt || !projectDir) return;
+
+  hidePatchReview();
+  appendMessage('user', prompt);
+  const invocationId = `call_${Date.now()}`;
+  activeProviderInvocationId = invocationId;
+  setProviderBusy(true);
+  sendEnvelope('tool.call', {
+    id: invocationId,
+    name: 'provider.invoke',
+    args: {
+      invocationId,
+      provider: providerEl.value,
+      projectDir,
+      prompt
+    }
+  });
+}
+
+function sendProviderCancel() {
+  if (!activeProviderInvocationId) return;
+
+  sendEnvelope('tool.call', {
+    id: `call_cancel_${Date.now()}`,
+    name: 'provider.cancel',
+    args: {
+      id: activeProviderInvocationId
+    }
+  });
+}
+
+function sendPatchPreview() {
+  const prompt = promptEl.value.trim();
+  const projectDir = projectEl.value.trim();
+  if (!prompt || !projectDir) return;
+
+  pendingPatch = { projectDir, prompt };
+  appendMessage('user', prompt);
+  sendEnvelope('tool.call', {
+    id: `call_${Date.now()}`,
+    name: 'schematic.patch',
+    args: {
+      projectDir,
+      prompt,
+      approved: false
+    }
+  });
+}
+
+function sendPatchApproval() {
+  if (!pendingPatch) return;
+
+  sendEnvelope('tool.call', {
+    id: `call_${Date.now()}`,
+    name: 'schematic.patch',
+    args: {
+      ...pendingPatch,
+      approved: true
+    }
+  });
+}
+
+function sendPatchCancel() {
+  const projectDir = pendingPatch?.projectDir ?? projectEl.value.trim();
+  pendingPatch = null;
+  sendEnvelope('tool.call', {
+    id: `call_${Date.now()}`,
+    name: 'schematic.patch',
+    args: {
+      projectDir,
+      cancel: true
+    }
+  });
+}
+
+function refreshProviderStatus() {
+  sendEnvelope('tool.call', {
+    id: `call_${Date.now()}`,
+    name: 'provider.status',
+    args: {
+      provider: providerEl.value
     }
   });
 }
@@ -88,13 +193,100 @@ function handleEnvelope(envelope) {
   if (envelope.type === 'tool.result') {
     if (!envelope.payload.ok) {
       appendMessage('system', envelope.payload.error?.message ?? 'Tool call failed.');
+      if (envelope.payload.id === activeProviderInvocationId) {
+        clearActiveProvider();
+      }
       return;
     }
 
-    const result = envelope.payload.result;
-    appendMessage('assistant', `${result.spec.mcu.family} draft generated.`);
-    renderArtifacts(result.files);
+    handleToolResult(envelope.payload.result);
   }
+}
+
+function handleToolResult(result) {
+  if (result.providerInvocation) {
+    if (result.invocationId === activeProviderInvocationId) {
+      clearActiveProvider();
+    }
+
+    for (const event of result.events ?? []) {
+      if (event.type === 'agent.delta') {
+        appendMessage('assistant', event.payload?.text ?? '');
+      }
+    }
+
+    for (const toolResult of result.toolResults ?? []) {
+      if (!toolResult.ok) {
+        appendMessage('system', toolResult.error?.message ?? 'Provider tool call failed.');
+      } else {
+        handleToolResult(toolResult.result);
+      }
+    }
+    return;
+  }
+
+  if (result.cancelled) {
+    clearActiveProvider();
+    appendMessage('assistant', 'Provider request cancelled.');
+    return;
+  }
+
+  if (result.provider && typeof result.available === 'boolean') {
+    providerStatusEl.textContent = `${result.provider}: ${result.status}`;
+    providerStatusEl.dataset.status = result.status;
+    return;
+  }
+
+  if (result.requiresApproval) {
+    patchDiffEl.textContent = result.diff || 'No file changes.';
+    patchReviewEl.hidden = false;
+    approvePatchButtonEl.disabled = result.changedFiles?.length === 0;
+    appendMessage('assistant', `Patch preview ready for ${result.changedFiles?.length ?? 0} files.`);
+    return;
+  }
+
+  if (result.canceled) {
+    hidePatchReview();
+    appendMessage('assistant', 'Patch canceled.');
+    return;
+  }
+
+  if (result.rolledBack) {
+    hidePatchReview();
+    renderArtifacts(result.files);
+    appendMessage(
+      'system',
+      `Patch validation failed (${result.validation?.erc?.errorCount ?? 0} ERC errors). Changes were rolled back.`
+    );
+    return;
+  }
+
+  if (result.applied) {
+    hidePatchReview();
+    renderArtifacts(result.files);
+    appendMessage('assistant', `Patch applied. ERC ${result.validation?.ok ? 'passed' : 'did not pass'}.`);
+    return;
+  }
+
+  appendMessage('assistant', `${result.spec.mcu.family} draft generated.`);
+  renderArtifacts(result.files);
+}
+
+function hidePatchReview() {
+  pendingPatch = null;
+  patchDiffEl.textContent = '';
+  patchReviewEl.hidden = true;
+  approvePatchButtonEl.disabled = false;
+}
+
+function clearActiveProvider() {
+  activeProviderInvocationId = null;
+  setProviderBusy(false);
+}
+
+function setProviderBusy(isBusy) {
+  cancelProviderButtonEl.disabled = !isBusy;
+  providerEl.disabled = isBusy;
 }
 
 function renderArtifacts(files) {
