@@ -28,6 +28,7 @@ test('Phase 1 public development documents are present and actionable', async ()
   assert.match(readme, /npm run verify:ui/);
   assert.match(readme, /Browser UI verification/);
   assert.match(readme, /Computer Use verification status/);
+  assert.match(readme, /windows sandbox failed: spawn setup refresh/);
   assert.match(readme, /codex exec -C C:\\Users\\windo\\chatpcb2 --dangerously-bypass-approvals-and-sandbox/);
   assert.doesNotMatch(readme, /--ask-for-approval/);
   assert.match(readme, /Keep this terminal running/);

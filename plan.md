@@ -28,6 +28,7 @@
 - [x] Added `npm run verify:panel` for panel default prompt to daemon websocket verification.
 - [x] Added `npm run verify:ui` for browser-based prompt input, Generate click, and artifact rendering verification.
 - [x] Attempted Computer Use UI verification and documented the local bridge blocker.
+- [x] Retried Computer Use after Codex update; current blocker is `windows sandbox failed: spawn setup refresh`.
 - [x] Added automated tests covering runtime envelopes, daemon dispatch, CLI generation, provider bridge, KiCad CLI resolution, validation paths, simulation paths, and panel assets.
 
 ## Current Baseline

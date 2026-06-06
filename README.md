@@ -130,6 +130,12 @@ Computer Use was attempted for direct UI verification, but the local automation 
 Computer Use native pipe path is unavailable
 ```
 
+After granting Computer Use permission and updating Codex, the retry reached a different setup failure before Windows apps could be listed:
+
+```text
+windows sandbox failed: spawn setup refresh
+```
+
 Fallback browser automation was also checked. The in-app Browser backend returned `Browser is not available: iab`, and the Chrome automation backend returned `Browser is not available: extension`. Chrome itself is installed and running, and the Codex Chrome extension plus native host manifest checks passed locally.
 
 Until the Computer Use or Chrome automation bridge is available, `npm run verify:ui` is the strongest repeatable user-flow proxy. It verifies real browser input, click behavior, websocket generation, and artifact rendering for the same panel contract that the right-side KiCad WebView uses.
