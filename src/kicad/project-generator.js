@@ -39,11 +39,13 @@ export function buildMcuSchematicAst(spec) {
       connectedPins: ['VBUS', 'GND'],
       pinNets: profileMode ? { 1: 'VBUS', 2: 'GND' } : undefined
     }),
-    component('U1', profileMode ? 'Regulator_Linear:TC1262-33' : 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
-      value: profileMode ? 'TC1262-33' : undefined,
-      pins: ['VBUS', 'GND', '+3V3'],
-      connectedPins: ['GND', 'VBUS', '+3V3'],
-      pinNets: profileMode ? { 1: 'VBUS', 2: 'GND', 3: '+3V3' } : undefined
+    component('U1', profileMode ? 'Regulator_Switching:TPS62177DQC' : 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', profileMode ? 'Package_SON:WSON-10-1EP_2x3mm_P0.5mm_EP0.84x2.4mm_ThermalVias' : 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
+      value: profileMode ? 'TPS62177DQC' : undefined,
+      pins: profileMode ? ['GND', 'VBUS', 'VBUS', 'NC', '+3V3', 'GND', 'PG', 'VBUS', 'SW_3V3', '+3V3', 'GND'] : ['VBUS', 'GND', '+3V3'],
+      connectedPins: profileMode ? ['GND', 'VBUS', '+3V3', 'SW_3V3'] : ['GND', 'VBUS', '+3V3'],
+      pinNets: profileMode
+        ? { 1: 'GND', 2: 'VBUS', 3: 'VBUS', 5: '+3V3', 6: 'GND', 8: 'VBUS', 9: 'SW_3V3', 10: '+3V3', 11: 'GND' }
+        : undefined
     }),
     component('U2', mcuLibId, `${spec.mcu.package} controller/module with named MCU nets for review.`, mcuFootprintFor(spec), {
       value: spec.mcu.package === 'unspecified' ? 'MCU_PLACEHOLDER' : spec.mcu.package,
@@ -157,7 +159,13 @@ export function buildMcuSchematicAst(spec) {
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'decoupling-network')) {
     components.push(
       component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
-      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Bulk 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined })
+      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Buck output 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
+      ...(profileMode
+        ? [
+            component('C3', 'Device:C', 'Buck input 10uF capacitor on VBUS.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['VBUS', 'GND'], connectedPins: ['VBUS', 'GND'], pinNets: { 1: 'VBUS', 2: 'GND' } }),
+            component('L1', 'Device:L', 'Buck inductor between switch node and +3V3 output.', 'Inductor_SMD:L_0805_2012Metric', { value: '2.2uH', pins: ['SW_3V3', '+3V3'], connectedPins: ['SW_3V3', '+3V3'], pinNets: { 1: 'SW_3V3', 2: '+3V3' } })
+          ]
+        : [])
     );
   }
 
@@ -215,7 +223,7 @@ export function buildMcuSchematicAst(spec) {
 
   return {
     components,
-    nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']).map((name) => ({
+    nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT', ...components.flatMap((item) => item.connectedPins ?? [])]).map((name) => ({
       name,
       explanation: explainNet(name)
     }))
@@ -589,6 +597,20 @@ function officialPinDefinitionsFor(libId) {
       ];
     case 'Regulator_Linear:TC1262-33':
       return [pinDef('1', -7.62, 0, 0), pinDef('2', 0, -7.62, 90), pinDef('3', 7.62, 0, 180)];
+    case 'Regulator_Switching:TPS62177DQC':
+      return [
+        pinDef('1', 0, -12.7, 90),
+        pinDef('2', -10.16, 7.62, 0),
+        pinDef('3', -10.16, 5.08, 0),
+        pinDef('4', -5.08, -12.7, 90),
+        pinDef('5', 10.16, 2.54, 180),
+        pinDef('6', 2.54, -12.7, 90),
+        pinDef('7', -10.16, -5.08, 0),
+        pinDef('8', -10.16, 0, 0),
+        pinDef('9', 10.16, 7.62, 180),
+        pinDef('10', 10.16, 5.08, 180),
+        pinDef('11', -2.54, -12.7, 90)
+      ];
     case 'power:PWR_FLAG':
       return [pinDef('1', 0, 0, 90)];
     case 'Switch:SW_Push':
@@ -628,6 +650,7 @@ function officialPinDefinitionsFor(libId) {
         pinDef('10', 7.62, -5.08, 180)
       ];
     case 'Device:C':
+    case 'Device:L':
     case 'Device:R':
       return [pinDef('1', 0, 3.81, 270), pinDef('2', 0, -3.81, 90)];
     case 'Connector:USB_C_Receptacle_USB2.0_16P':
@@ -673,6 +696,7 @@ function symbolPinsFor(libId) {
       return ['VBUS', 'GND'];
     case 'ChatPCB:REGULATOR_3V3':
     case 'Regulator_Linear:TC1262-33':
+    case 'Regulator_Switching:TPS62177DQC':
       return ['VBUS', 'GND', '+3V3'];
     case 'power:PWR_FLAG':
       return ['VBUS'];
@@ -709,6 +733,8 @@ function symbolPinsFor(libId) {
     case 'ChatPCB:DECOUPLING_CAP':
     case 'Device:C':
       return ['+3V3', 'GND'];
+    case 'Device:L':
+      return ['SW_3V3', '+3V3'];
     case 'ChatPCB:CC_RESISTOR':
       return ['CC1', 'GND', 'CC2'];
     case 'ChatPCB:LED_RESISTOR':

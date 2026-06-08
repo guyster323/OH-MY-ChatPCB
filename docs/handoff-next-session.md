@@ -365,13 +365,61 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32s3-usbc-sensor-ki
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32s3-usbc-sensor-kicad10-final\chatpcb_mcu_peripheral.pdf .\workspaces\esp32s3-usbc-sensor-kicad10-final\chatpcb_mcu_peripheral.kicad_sch
 ```
 
+## 2026-06-08 Cross-Profile Buck Regulator Increment
+
+- Added a TDD increment after `a8f46d4 feat: add profile calculation evidence` to turn the previous 500mA LDO thermal blocker into a real schematic topology change.
+- Root repo baseline before this increment: `a8f46d4 feat: add profile calculation evidence`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - Supported ESP32-S3 and STM32 profiles now use official KiCad symbol `Regulator_Switching:TPS62177DQC` instead of `Regulator_Linear:TC1262-33`.
+  - The generated schematic now includes the buck support structure: `U1 TPS62177DQC`, `L1 2.2uH`, `C2 10uF` output capacitor, and `C3 10uF` input capacitor.
+  - The buck IC pins are mapped as `VIN/EN/~SLEEP=VBUS`, `PGND/AGND/PAD=GND`, `SW=SW_3V3`, and `FB/VOS=+3V3`; `L1` connects `SW_3V3` to `+3V3`.
+  - `boardProfile.productionParts` now records the buck regulator, inductor, input capacitor, and output capacitor for both profiles.
+  - `regulator-topology-selection`: pass, because the previous equivalent LDO loss would be `0.85W`.
+  - `buck-loss-estimate`: warning, `183mW` estimated converter loss at a provisional 90% efficiency assumption.
+  - `regulator-thermal-budget`: pass, because the `0.85W` LDO loss is avoided by the buck topology.
+- Current generated metadata evidence:
+  - ESP32 profile and STM32 profile both include `U1 TPS62177DQC`, `L1 2.2uH`, `C2 10uF`, and `C3 10uF`.
+  - MCU/profile changes do not drop the power-topology calculation checks.
+- Verification run in this increment:
+  - `node --test tests\board-profiles.test.js`: initially failed because the previous `TC1262-33` LDO was still generated; passed after implementation.
+  - `npm test`: 62/62 pass.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both generated profile projects.
+- Final user-facing decision after this increment:
+  - `integration works`: still yes.
+  - `flexibility improved`: yes. The buck regulator topology and calculation evidence follow both ESP32-S3 and STM32 supported profiles.
+  - `release-quality circuit`: still no. The previous LDO thermal blocker is improved, but release-quality still requires sourced/orderable exact parts, datasheet review for TPS62177DQC and support passives, regulator efficiency/thermal/layout evidence, PCB layout, DRC, Gerbers, drill files, and manufacturing constraints.
+
+Additional verification commands run for this increment:
+
+```powershell
+node --test tests\board-profiles.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+```
+
 ## Next Work
 
-1. Resolve the `regulator-thermal-budget` release blocker with a sourced regulator/package/layout/ambient assumption that can support the 3.3V 500mA rail, or lower the current budget and expose that tradeoff to the user.
-2. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB/LCSC live sourcing evidence.
-3. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
-4. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator thermal margin after the sourced regulator choice is locked.
-5. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
-6. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
-7. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
-8. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+2. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+3. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+4. Add PCB layout, DRC, Gerber/drill/manufacturing export gates before any profile can return `ready-for-release`.
+5. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
+6. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
+7. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
+8. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
+9. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.

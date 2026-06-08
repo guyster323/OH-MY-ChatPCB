@@ -350,8 +350,8 @@ Direct regulator and zero-warning ERC update on 2026-06-08:
 - `TC1262-33` is mapped as `1=VBUS`, `2=GND`, `3=+3V3` and is described by KiCad as a 500mA fixed 3.3V regulator.
 - Supported profiles now add `power:PWR_FLAG` markers for both `VBUS` and `GND`.
 - The schematic renderer now handles 90/270-degree official pin stubs outward and uses a wider 5-column placement grid to avoid official USB-C/passive label collisions.
-- Current official KiCad 10.0.3 ERC result for both ESP32-S3 and STM32 profile samples is `0` errors and `0` warnings.
-- This satisfies the production-symbol/zero-warning schematic integration gate for the supported profiles, but the status remains `ready-for-prototype-review`, not `ready-for-release`, until sourcing, datasheet review, simulation/calculation evidence, PCB layout, DRC, and manufacturing outputs are complete.
+- At that increment, the official KiCad 10.0.3 ERC result for both ESP32-S3 and STM32 profile samples was `0` errors and `0` warnings.
+- That satisfied the production-symbol/zero-warning schematic integration gate for the supported profiles, but the status remained `ready-for-prototype-review`, not `ready-for-release`, until sourcing, datasheet review, simulation/calculation evidence, PCB layout, DRC, and manufacturing outputs were complete.
 
 Cross-profile release evidence update on 2026-06-08:
 
@@ -367,7 +367,16 @@ Cross-profile calculation evidence update on 2026-06-08:
 - Supported ESP32-S3 and STM32 profiles now publish reusable `boardProfile.releaseEvidence.calculations`.
 - Current shared calculation evidence includes `status-led-current` pass at `1.3mA`, `usb-c-cc-pulldown-current` pass at `0.98mA`, `i2c-pullup-rise-time` warning at `398ns`, and `regulator-thermal-budget` blocker at `0.85W`.
 - Review output now surfaces calculation warnings and blockers as user-readable residual risks, so changing the MCU/profile does not drop the same electrical checks.
-- The explicit thermal blocker is the current reason the supported profiles cannot be called release-quality even though KiCad schematic ERC is `0` errors and `0` warnings.
+- At that increment, the explicit thermal blocker was the current reason the supported profiles could not be called release-quality even though KiCad schematic ERC was `0` errors and `0` warnings.
+
+Cross-profile buck regulator update on 2026-06-08:
+
+- Supported ESP32-S3 and STM32 profiles now use `Regulator_Switching:TPS62177DQC` instead of `Regulator_Linear:TC1262-33` for the 3.3V 500mA rail.
+- The generated supported-profile schematic now includes a real buck power structure: `U1 TPS62177DQC`, `L1 2.2uH`, `C2 10uF` output capacitor, `C3 10uF` input capacitor, and `SW_3V3` switch node.
+- Current official KiCad 10.0.3 ERC result for both regenerated profile samples remains `0` errors and `0` warnings, with SVG/PDF export passing.
+- `regulator-topology-selection` now passes because the former equivalent LDO loss was `0.85W`.
+- `buck-loss-estimate` is a warning at `183mW` using a provisional 90% efficiency assumption; release still needs sourced part evidence, datasheet efficiency curves, layout review, and DRC.
+- `regulator-thermal-budget` now passes at the schematic topology level because the `0.85W` LDO loss is avoided, but this does not make the board release-quality by itself.
 
 Acceptance criteria:
 
@@ -380,6 +389,7 @@ Acceptance criteria:
 - Supported profiles must not report `ready-for-release` while KiCad ERC reports `lib_symbol_mismatch` or any other warning; current supported-profile schematic ERC is `0` errors and `0` warnings, but downstream release gates still block release.
 - Supported profiles must carry production part evidence so changing the MCU/profile does not drop sourcing, datasheet, simulation, or layout/DRC release requirements.
 - Supported profiles must carry calculation evidence for shared electrical assumptions, and any warning or blocker calculation must appear in review residual risks before release.
+- Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -422,10 +432,10 @@ git log --oneline -1
 
 Continue Phase 8 before widening PCB/layout scope:
 
-1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-2. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TC1262-33, USB-C connector, debug connector, passives, switches, and LED.
-3. Resolve the `regulator-thermal-budget` blocker by selecting a sourced regulator/package/layout assumption that can support the 3.3V 500mA rail, or by reducing the rail budget and showing that tradeoff to the user.
-4. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator thermal margin after the sourced regulator choice is locked.
+1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+2. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+3. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+4. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
 5. Add PCB layout, DRC, Gerber/drill/manufacturing export gates before any profile can return `ready-for-release`.
 6. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
 7. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.

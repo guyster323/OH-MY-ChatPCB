@@ -49,8 +49,8 @@ const PROFILE_INTERFACES = [
 
 const COMMON_PRODUCTION_PARTS = [
   part('J1', 'power-input-header', 'Connector_Generic:Conn_01x02', 'POWER_INPUT', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical'),
-  part('U1', '3v3-regulator', 'Regulator_Linear:TC1262-33', 'TC1262-33', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
-    requirements: ['Fixed 3.3V output', '500mA rail budget', 'Thermal margin review before release'],
+  part('U1', '3v3-buck-regulator', 'Regulator_Switching:TPS62177DQC', 'TPS62177DQC', 'Package_SON:WSON-10-1EP_2x3mm_P0.5mm_EP0.84x2.4mm_ThermalVias', {
+    requirements: ['Fixed 3.3V output', '500mA rail budget', 'Buck topology selected to avoid linear regulator thermal loss'],
     simulation: true
   }),
   part('SW1', 'reset-button', 'Switch:SW_Push', 'RESET_BUTTON', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
@@ -65,6 +65,8 @@ const COMMON_PRODUCTION_PARTS = [
   part('J6', 'gpio-header', 'Connector_Generic:Conn_01x05', 'GPIO_HEADER', 'Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical'),
   part('C1', 'local-decoupling-capacitor', 'Device:C', '100nF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
   part('C2', 'bulk-rail-capacitor', 'Device:C', '10uF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+  part('C3', 'buck-input-capacitor', 'Device:C', '10uF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+  part('L1', 'buck-inductor', 'Device:L', '2.2uH', 'Inductor_SMD:L_0805_2012Metric', { simulation: true }),
   part('R1', 'usb-c-cc1-pulldown', 'Device:R', '5.1k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
   part('R2', 'usb-c-cc2-pulldown', 'Device:R', '5.1k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
   part('R3', 'status-led-resistor', 'Device:R', '1k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
@@ -119,7 +121,7 @@ export function applyBoardProfile(spec) {
       releaseTarget: 'prototype-review',
       assumptions: [
         'USB-C is wired as a 5V sink with USB 2.0 data where supported.',
-        '3.3V rail budget is 500mA before final regulator thermal and sourcing review.',
+        '3.3V rail budget is 500mA and uses a fixed 3.3V buck regulator profile before final sourcing review.',
         'JLCPCB orderability requires a live sourcing check before release.'
       ],
       releaseGates: RELEASE_GATES.map((gate) => ({ ...gate })),
@@ -233,13 +235,31 @@ function calculationEvidence() {
       releaseImpact: 'Prototype review can proceed; release needs actual bus capacitance and target I2C speed.'
     },
     {
+      id: 'regulator-topology-selection',
+      status: 'pass',
+      subjectRefs: ['U1', 'L1', 'C2', 'C3'],
+      assumptions: ['5V USB-C input', '3.3V output', '500mA rail budget', 'linear regulator would dissipate 0.85W'],
+      equation: 'Pldo = (5.0V - 3.3V) * 0.5A',
+      result: 'Buck topology selected because the equivalent 0.85W LDO thermal load is too high for an unreleased compact sensor board.',
+      releaseImpact: 'Improves the default circuit topology; release still needs sourced buck BOM, datasheet layout review, and PCB DRC.'
+    },
+    {
+      id: 'buck-loss-estimate',
+      status: 'warning',
+      subjectRefs: ['U1', 'L1', 'C2', 'C3'],
+      assumptions: ['3.3V output', '500mA rail budget', '90% provisional buck efficiency'],
+      equation: '(3.3V * 0.5A) * (1 / 0.90 - 1)',
+      result: '183mW estimated converter loss at the provisional 500mA rail budget.',
+      releaseImpact: 'Thermal risk is reduced versus an LDO, but release still needs datasheet efficiency curves, layout, and sourced inductor/capacitor checks.'
+    },
+    {
       id: 'regulator-thermal-budget',
-      status: 'blocker',
-      subjectRefs: ['U1'],
-      assumptions: ['5V USB-C input', '3.3V output', '500mA rail budget'],
+      status: 'pass',
+      subjectRefs: ['U1', 'L1'],
+      assumptions: ['5V USB-C input', '3.3V output', '500mA rail budget', 'TPS62177DQC fixed 3.3V buck regulator profile'],
       equation: '(5.0V - 3.3V) * 0.5A',
-      result: '0.85W regulator dissipation at full rail budget.',
-      releaseImpact: 'Release is blocked until package thermal resistance, copper area, ambient temperature, and sourced regulator variant are reviewed.'
+      result: '0.85W LDO loss avoided by the buck regulator topology.',
+      releaseImpact: 'No longer a schematic-level thermal blocker; release remains gated by sourced BOM, datasheet, layout, and DRC evidence.'
     }
   ];
 }
