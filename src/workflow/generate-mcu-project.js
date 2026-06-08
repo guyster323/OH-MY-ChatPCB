@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { normalizeCircuitSpec } from '../runtime/circuit-spec.js';
+import { applyBoardProfile } from '../runtime/board-profiles.js';
 import {
   buildMcuSchematicAst,
   renderKiCadProject,
@@ -17,7 +18,7 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
     throw new Error('projectDir is required.');
   }
 
-  const spec = normalizeCircuitSpec(prompt);
+  const spec = applyBoardProfile(normalizeCircuitSpec(prompt));
   const schematic = buildMcuSchematicAst(spec);
   const projectMetadata = { ...spec, schematic };
   await mkdir(projectDir, { recursive: true });

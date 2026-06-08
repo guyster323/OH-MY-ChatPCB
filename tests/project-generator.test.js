@@ -99,11 +99,11 @@ test('writes real schematic symbols, net labels, and metadata explanations for M
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
     assert.deepEqual(
       metadata.schematic.components.map((component) => component.ref),
-      ['J1', 'U1', 'U2', 'SW1', 'SW2', 'D1', 'J2', 'J3']
+      ['J1', 'U1', 'U2', 'SW1', 'SW2', 'D1', 'J2', 'J3', 'J4']
     );
     assert.deepEqual(
       metadata.schematic.nets.map((net) => net.name),
-      ['VBUS', '+3V3', 'GND', 'SCL', 'SDA', 'TX', 'RX', 'RESET', 'BOOT']
+      ['VBUS', '+3V3', 'GND', 'SCL', 'SDA', 'TX', 'RX', 'USB_DP', 'USB_DN', 'CC1', 'CC2', 'RESET', 'BOOT']
     );
     assert.ok(
       metadata.schematic.components.every((component) => component.explanation),
@@ -138,7 +138,7 @@ test('omits optional MCU interface labels when that interface is not requested',
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
     assert.deepEqual(
       metadata.schematic.nets.map((net) => net.name),
-      ['VBUS', '+3V3', 'GND', 'SCL', 'SDA', 'RESET', 'BOOT']
+      ['VBUS', '+3V3', 'GND', 'SCL', 'SDA', 'USB_DP', 'USB_DN', 'CC1', 'CC2', 'RESET', 'BOOT']
     );
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -157,8 +157,10 @@ test('reports release blockers and proposed review-loop fixes for incomplete man
 
     assert.equal(result.review.status, 'blocked');
     assert.ok(result.review.findings.blockers.some((finding) => /exact ESP32-S3 part or module/i.test(finding.message)));
-    assert.ok(result.review.findings.blockers.some((finding) => /SPI/i.test(finding.message)));
-    assert.ok(result.review.findings.blockers.some((finding) => /USB/i.test(finding.message)));
+    assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-spi'));
+    assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-usb'));
+    assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-gpio'));
+    assert.ok(result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
     assert.ok(result.review.findings.warnings.some((finding) => /fixture symbols/i.test(finding.message)));
     assert.ok(result.review.proposedFixes.every((fix) => fix.approvalRequired === true));
     assert.ok(result.nextActions.some((action) => /review findings/i.test(action)));

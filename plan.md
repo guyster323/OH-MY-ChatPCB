@@ -293,7 +293,8 @@ Work items:
 - [x] Record and, where possible, suppress or document first-run update/privacy/setup prompts that would confuse a general user.
 - [x] Define a release-quality gate for the constrained MCU peripheral circuit: exact parts or stated placeholders, values, footprints, power rails, decoupling, reset/boot/debug wiring, connector pinout, ERC status, exports, and residual risk notes.
 - [x] Decide whether the next implementation should make one constrained circuit release-ready or add a user review-and-improve loop when requirements are incomplete.
-- [ ] If pursuing circuit quality, replace fixture-like symbols/values with supported real components and tests for the chosen board target.
+- [x] Add reusable supported-board profiles and tests that can improve a blocked generic prompt into a concrete prototype-review schematic for ESP32-S3 and STM32 targets.
+- [ ] If pursuing final circuit quality, replace remaining fixture-like support symbols/values with exact orderable components and tests for the chosen board target.
 - [x] If pursuing the UX loop, add review findings grouped by severity, user-readable remediation proposals, approval-gated patch application, rerun validation, and final readiness status.
 - [x] Add direct GUI verification through official KiCad latest stable and the built KiCad fork panel where feasible.
 
@@ -305,6 +306,15 @@ Session result on 2026-06-08:
 - The same sample remains blocked for release because exact orderable parts, production symbols, USB/SPI/GPIO/SWD wiring, and JLCPCB sourcing assumptions are not resolved.
 - The selected product path is the review-and-improve UX loop, not pretending the current circuit is release-ready.
 
+Supported profile update on 2026-06-08:
+
+- Added `esp32-s3-usbc-sensor` and `stm32-usbc-sensor` profiles for repeatable cross-design/cross-verification instead of one-off prompt patches.
+- ESP32-S3 profile uses `ESP32-S3-WROOM-1-N8R2`, maps requested SWD to ESP32-S3 USB-JTAG/JTAG with an explicit user-facing note, and uses the KiCad 10 footprint `RF_Module:ESP32-S3-WROOM-1`.
+- STM32 profile uses `STM32G0B1CBT6`, keeps direct SWD wiring, and uses `Package_QFP:LQFP-48_7x7mm_P0.5mm`.
+- Both profiles add USB-C sink pins, CC pulldowns, SPI/GPIO/debug headers, local and bulk decoupling, exact profile MCU symbols, profile notes, and `ready-for-prototype-review` status.
+- Both profile samples validate in official KiCad 10.0.3 with ERC `0` errors and `0` warnings and export SVG/PDF.
+- Both profile samples still stop short of release because JLCPCB live sourcing, exact regulator/connector/passive orderability, datasheet-level pin review, ESD/protection policy, layout, DRC, Gerbers, and simulation evidence are not complete.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -312,6 +322,7 @@ Acceptance criteria:
 - The system no longer describes the generated schematic as release-ready unless the release-quality gate is satisfied.
 - Missing electrical requirements become explicit blockers or review findings, not silent assumptions.
 - A user can either release a constrained supported circuit with evidence or run a clear review-fix-validate loop.
+- Supported profiles may report `ready-for-prototype-review`; they must not report `ready-for-release` until sourcing, simulation, layout/DRC, and manufacturing export gates pass.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -355,5 +366,5 @@ git log --oneline -1
 Continue Phase 8 before widening PCB/layout scope:
 
 1. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-2. Add a real ESP32-S3 supported circuit only after exact orderable parts, footprints, pinout, and assumptions are known.
+2. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
 3. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

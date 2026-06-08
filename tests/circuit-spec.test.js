@@ -31,3 +31,10 @@ test('preserves ESP32-S3 variant when the prompt names it', () => {
 
   assert.equal(spec.mcu.family, 'ESP32-S3');
 });
+
+test('normalizes USB data nets to KiCad-safe profile names', () => {
+  const spec = normalizeCircuitSpec('USB-C sensor board with USB data.');
+  const usb = spec.interfaces.find((iface) => iface.kind === 'usb');
+
+  assert.deepEqual(usb.pins, ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2']);
+});

@@ -26,11 +26,13 @@ export function renderKiCadProject(baseName) {
 }
 
 export function buildMcuSchematicAst(spec) {
-  const mcuConnectedPins = ['+3V3', 'GND', ...interfaceNetNames(spec), 'RESET', 'BOOT'];
+  const mcuConnectedPins = unique(['+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']);
+  const mcuLibId = mcuSymbolFor(spec);
   const components = [
     component('J1', 'ChatPCB:POWER_INPUT', 'USB-C / external power input.', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical'),
     component('U1', 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2'),
-    component('U2', 'ChatPCB:MCU_PLACEHOLDER', `${spec.mcu.family} controller placeholder with named MCU nets for review.`, 'Package_QFP:LQFP-48_7x7mm_P0.5mm', {
+    component('U2', mcuLibId, `${spec.mcu.package} controller/module with named MCU nets for review.`, mcuFootprintFor(spec), {
+      value: spec.mcu.package === 'unspecified' ? 'MCU_PLACEHOLDER' : spec.mcu.package,
       connectedPins: mcuConnectedPins
     }),
     component('SW1', 'ChatPCB:RESET_BUTTON', 'Momentary reset input for the MCU RESET net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
@@ -50,9 +52,49 @@ export function buildMcuSchematicAst(spec) {
     );
   }
 
+  if (spec.interfaces.some((iface) => iface.kind === 'usb')) {
+    components.push(
+      component('J4', 'ChatPCB:USB_C_CONNECTOR', 'USB-C sink connector with VBUS, USB data, CC pins, and GND.', 'Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12')
+    );
+  }
+
+  if (spec.interfaces.some((iface) => iface.kind === 'spi')) {
+    components.push(
+      component('J5', 'ChatPCB:SPI_HEADER', 'SPI expansion header exposing SCK, MOSI, MISO, CS, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical')
+    );
+  }
+
+  if (spec.interfaces.some((iface) => iface.kind === 'gpio')) {
+    components.push(
+      component('J6', 'ChatPCB:GPIO_HEADER', 'GPIO expansion header exposing GPIO0, GPIO1, GPIO2, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical')
+    );
+  }
+
+  if (spec.debug?.nets?.length > 0) {
+    components.push(
+      component('J7', 'ChatPCB:DEBUG_HEADER', `${spec.debug.implementedProtocol.toUpperCase()} debug header for ${spec.mcu.family}.`, 'Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical', {
+        connectedPins: [...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT']
+      })
+    );
+  }
+
+  if (spec.peripherals.some((peripheral) => peripheral.kind === 'decoupling-network')) {
+    components.push(
+      component('C1', 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF' }),
+      component('C2', 'ChatPCB:DECOUPLING_CAP', 'Bulk 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF' })
+    );
+  }
+
+  if (spec.peripherals.some((peripheral) => peripheral.kind === 'usb-c-cc-pulldowns')) {
+    components.push(
+      component('R1', 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC1.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k' }),
+      component('R2', 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC2.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k' })
+    );
+  }
+
   return {
     components,
-    nets: ['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), 'RESET', 'BOOT'].map((name) => ({
+    nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']).map((name) => ({
       name,
       explanation: explainNet(name)
     }))
@@ -79,7 +121,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
   (title_block
     (title "${escapeSchText(baseName)}")
   )
-${renderLibSymbols()}
+${renderLibSymbols(schematic.components.map((item) => item.libId))}
 ${notes.map((note, index) => renderText(note, 25.4, 25.4 + index * 7.62)).join('\n')}
 ${schematic.components.map((item, index) => renderPlacedComponent(item, 38.1 + (index % 4) * 38.1, 88.9 + Math.floor(index / 4) * 33.02, baseName)).join('\n')}
   (sheet_instances
@@ -135,11 +177,11 @@ export function renderSpiceFixture(spec) {
   ].join('\n');
 }
 
-function component(ref, libId, explanation, footprint, { connectedPins } = {}) {
+function component(ref, libId, explanation, footprint, { connectedPins, value } = {}) {
   return {
     ref,
     libId,
-    value: libId.split(':')[1],
+    value: value ?? libId.split(':')[1],
     footprint,
     explanation,
     connectedPins
@@ -147,17 +189,7 @@ function component(ref, libId, explanation, footprint, { connectedPins } = {}) {
 }
 
 function interfaceNetNames(spec) {
-  const names = [];
-
-  if (spec.interfaces.some((iface) => iface.kind === 'i2c')) {
-    names.push('SCL', 'SDA');
-  }
-
-  if (spec.interfaces.some((iface) => iface.kind === 'uart')) {
-    names.push('TX', 'RX');
-  }
-
-  return names;
+  return unique((spec.interfaces ?? []).flatMap((iface) => (iface.pins ?? []).filter((pin) => !['+3V3', 'GND', 'VBUS'].includes(pin))));
 }
 
 function explainNet(name) {
@@ -176,6 +208,34 @@ function explainNet(name) {
       return 'UART transmit signal for debug header.';
     case 'RX':
       return 'UART receive signal for debug header.';
+    case 'USB_DP':
+    case 'D+':
+      return 'USB 2.0 positive data signal.';
+    case 'USB_DN':
+    case 'D-':
+      return 'USB 2.0 negative data signal.';
+    case 'CC1':
+    case 'CC2':
+      return 'USB-C configuration channel sink pulldown net.';
+    case 'SCK':
+    case 'MOSI':
+    case 'MISO':
+    case 'CS':
+      return 'SPI expansion signal.';
+    case 'GPIO0':
+    case 'GPIO1':
+    case 'GPIO2':
+    case 'GPIO':
+      return 'General-purpose expansion signal.';
+    case 'SWDIO':
+    case 'SWCLK':
+    case 'NRST':
+      return 'ARM SWD debug signal.';
+    case 'MTMS':
+    case 'MTCK':
+    case 'MTDI':
+    case 'MTDO':
+      return 'ESP32 JTAG debug signal.';
     case 'RESET':
       return 'MCU reset input controlled by reset button.';
     case 'BOOT':
@@ -185,9 +245,13 @@ function explainNet(name) {
   }
 }
 
-function renderLibSymbols() {
+function renderLibSymbols(usedLibIds) {
+  const used = new Set(usedLibIds);
   return `  (lib_symbols
-${fixtureSymbols().map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id))).join('\n')}
+${fixtureSymbols()
+  .filter(([id]) => used.has(id))
+  .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id)))
+  .join('\n')}
   )`;
 }
 
@@ -196,16 +260,25 @@ function fixtureSymbols() {
     ['ChatPCB:POWER_INPUT', 'J', 'POWER_INPUT'],
     ['ChatPCB:REGULATOR_3V3', 'U', 'REGULATOR_3V3'],
     ['ChatPCB:MCU_PLACEHOLDER', 'U', 'MCU_PLACEHOLDER'],
+    ['ChatPCB:ESP32_S3_WROOM_1', 'U', 'ESP32_S3_WROOM_1_N8R2'],
+    ['ChatPCB:STM32G0B1CBT6', 'U', 'STM32G0B1CBT6'],
     ['ChatPCB:RESET_BUTTON', 'SW', 'RESET_BUTTON'],
     ['ChatPCB:BOOT_BUTTON', 'SW', 'BOOT_BUTTON'],
     ['ChatPCB:STATUS_LED', 'D', 'STATUS_LED'],
     ['ChatPCB:I2C_CONNECTOR', 'J', 'I2C_CONNECTOR'],
-    ['ChatPCB:UART_HEADER', 'J', 'UART_HEADER']
+    ['ChatPCB:UART_HEADER', 'J', 'UART_HEADER'],
+    ['ChatPCB:USB_C_CONNECTOR', 'J', 'USB_C_CONNECTOR'],
+    ['ChatPCB:SPI_HEADER', 'J', 'SPI_HEADER'],
+    ['ChatPCB:GPIO_HEADER', 'J', 'GPIO_HEADER'],
+    ['ChatPCB:DEBUG_HEADER', 'J', 'DEBUG_HEADER'],
+    ['ChatPCB:DECOUPLING_CAP', 'C', 'DECOUPLING_CAP'],
+    ['ChatPCB:CC_RESISTOR', 'R', 'CC_RESISTOR']
   ];
 }
 
 function renderLibSymbol(id, referencePrefix, value, pins, { projectLibrary = false } = {}) {
-  const symbolName = projectLibrary ? value : id;
+  const symbolName = projectLibrary ? id.split(':').at(-1) : id;
+  const unitBaseName = symbolName.includes(':') ? symbolName.split(':').at(-1) : symbolName;
   const indent = projectLibrary ? '  ' : '    ';
 
   return `${indent}(symbol "${escapeSchText(symbolName)}"
@@ -222,13 +295,13 @@ function renderLibSymbol(id, referencePrefix, value, pins, { projectLibrary = fa
       (property "Footprint" "" (at ${sch(0)} ${sch(-10.16)} 0)
         (effects (font (size ${sch(1.27)} ${sch(1.27)})) hide)
       )
-      (symbol "${escapeSchText(value)}_0_1"
+      (symbol "${escapeSchText(unitBaseName)}_0_1"
         (rectangle (start ${sch(-7.62)} ${sch(6.35)}) (end ${sch(7.62)} ${sch(-6.35)})
           (stroke (width ${sch(0.254)}) (type default))
           (fill (type background))
         )
       )
-      (symbol "${escapeSchText(value)}_1_1"
+      (symbol "${escapeSchText(unitBaseName)}_1_1"
 ${pins.map((pinName, index) => renderLibPin(pinName, index)).join('\n')}
       )
     )`;
@@ -301,7 +374,9 @@ function symbolPinsFor(libId) {
     case 'ChatPCB:REGULATOR_3V3':
       return ['VBUS', 'GND', '+3V3'];
     case 'ChatPCB:MCU_PLACEHOLDER':
-      return ['+3V3', 'GND', 'SCL', 'SDA', 'TX', 'RX', 'RESET', 'BOOT'];
+    case 'ChatPCB:ESP32_S3_WROOM_1':
+    case 'ChatPCB:STM32G0B1CBT6':
+      return ['+3V3', 'GND', 'SCL', 'SDA', 'TX', 'RX', 'USB_DP', 'USB_DN', 'SCK', 'MOSI', 'MISO', 'CS', 'GPIO0', 'GPIO1', 'GPIO2', 'SWDIO', 'SWCLK', 'NRST', 'MTMS', 'MTCK', 'MTDI', 'MTDO', 'RESET', 'BOOT'];
     case 'ChatPCB:RESET_BUTTON':
       return ['RESET', 'GND'];
     case 'ChatPCB:BOOT_BUTTON':
@@ -312,8 +387,46 @@ function symbolPinsFor(libId) {
       return ['SCL', 'SDA', '+3V3', 'GND'];
     case 'ChatPCB:UART_HEADER':
       return ['TX', 'RX', '+3V3', 'GND'];
+    case 'ChatPCB:USB_C_CONNECTOR':
+      return ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2'];
+    case 'ChatPCB:SPI_HEADER':
+      return ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND'];
+    case 'ChatPCB:GPIO_HEADER':
+      return ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'];
+    case 'ChatPCB:DEBUG_HEADER':
+      return ['SWDIO', 'SWCLK', 'NRST', 'MTMS', 'MTCK', 'MTDI', 'MTDO', '+3V3', 'GND', 'RESET', 'BOOT'];
+    case 'ChatPCB:DECOUPLING_CAP':
+      return ['+3V3', 'GND'];
+    case 'ChatPCB:CC_RESISTOR':
+      return ['CC1', 'GND', 'CC2'];
     default:
       return [];
+  }
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function mcuSymbolFor(spec) {
+  switch (spec.boardProfile?.id) {
+    case 'esp32-s3-usbc-sensor':
+      return 'ChatPCB:ESP32_S3_WROOM_1';
+    case 'stm32-usbc-sensor':
+      return 'ChatPCB:STM32G0B1CBT6';
+    default:
+      return 'ChatPCB:MCU_PLACEHOLDER';
+  }
+}
+
+function mcuFootprintFor(spec) {
+  switch (spec.boardProfile?.id) {
+    case 'esp32-s3-usbc-sensor':
+      return 'RF_Module:ESP32-S3-WROOM-1';
+    case 'stm32-usbc-sensor':
+      return 'Package_QFP:LQFP-48_7x7mm_P0.5mm';
+    default:
+      return 'Package_QFP:LQFP-48_7x7mm_P0.5mm';
   }
 }
 

@@ -2,8 +2,16 @@ const SUPPORTED_INTERFACE_NETS = {
   i2c: ['SCL', 'SDA'],
   uart: ['TX', 'RX'],
   spi: ['SCK', 'MOSI', 'MISO', 'CS'],
-  usb: ['D+', 'D-', 'CC1', 'CC2'],
-  gpio: ['GPIO']
+  usb: ['CC1', 'CC2'],
+  gpio: []
+};
+
+const INTERFACE_ALIASES = {
+  usb: [
+    ['D+', 'USB_DP'],
+    ['D-', 'USB_DN']
+  ],
+  gpio: [['GPIO', 'GPIO0']]
 };
 
 export function reviewCircuitReadiness({ spec, validation } = {}) {
@@ -30,6 +38,14 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     addFinding(findings.warnings, 'fixture-symbols', 'The schematic still uses ChatPCB fixture symbols instead of production KiCad library symbols.');
   }
 
+  if (spec.boardProfile?.releaseTarget === 'prototype-review') {
+    addFinding(
+      findings.warnings,
+      'profile-sourcing-review',
+      'The supported board profile has fixed schematic structure, but live JLCPCB sourcing and final layout review are still required before release.'
+    );
+  }
+
   if (/jlcpcb|order|manufactur/i.test(spec.sourcePrompt ?? '')) {
     addFinding(
       findings.blockers,
@@ -41,16 +57,33 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   for (const kind of requestedKinds) {
     const expectedNets = SUPPORTED_INTERFACE_NETS[kind] ?? [];
     const missingNets = expectedNets.filter((net) => !generatedNets.has(net));
-    if (missingNets.length > 0) {
+    const missingAliases = (INTERFACE_ALIASES[kind] ?? [])
+      .filter((aliases) => !aliases.some((net) => generatedNets.has(net)))
+      .map((aliases) => aliases.join('/'));
+    const allMissing = [...missingNets, ...missingAliases];
+    if (allMissing.length > 0) {
       addFinding(
         findings.blockers,
         `missing-${kind}`,
-        `${kind.toUpperCase()} was requested but generated nets are missing: ${missingNets.join(', ')}.`
+        `${kind.toUpperCase()} was requested but generated nets are missing: ${allMissing.join(', ')}.`
       );
     }
   }
 
-  if (/swd/i.test(spec.sourcePrompt ?? '') && !generatedNets.has('SWDIO') && !generatedNets.has('SWCLK')) {
+  if (spec.debug?.note) {
+    addFinding(findings.notes, 'debug-profile', spec.debug.note);
+  }
+
+  if (spec.boardProfile?.id) {
+    addFinding(findings.notes, 'board-profile', `Using supported ${spec.mcu.family} USB-C sensor profile: ${spec.boardProfile.id}.`);
+  }
+
+  if (
+    /swd/i.test(spec.sourcePrompt ?? '') &&
+    spec.debug?.implementedProtocol !== 'esp32-usb-jtag' &&
+    !generatedNets.has('SWDIO') &&
+    !generatedNets.has('SWCLK')
+  ) {
     addFinding(findings.blockers, 'missing-swd', 'SWD was requested but no SWDIO/SWCLK debug connector wiring was generated.');
   }
 

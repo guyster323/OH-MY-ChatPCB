@@ -1,0 +1,100 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+
+test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug nets and full interfaces', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-esp32-profile-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt:
+        'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+    });
+
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    const nets = metadata.schematic.nets.map((net) => net.name);
+    const refs = metadata.schematic.components.map((component) => component.ref);
+    const mcu = metadata.schematic.components.find((component) => component.ref === 'U2');
+    const schematic = await readFile(result.files.schematic, 'utf8');
+    const symbolLibrary = await readFile(result.files.symbolLibrary, 'utf8');
+
+    assert.equal(metadata.boardProfile.id, 'esp32-s3-usbc-sensor');
+    assert.equal(metadata.mcu.package, 'ESP32-S3-WROOM-1-N8R2');
+    assert.equal(mcu.footprint, 'RF_Module:ESP32-S3-WROOM-1');
+    assert.match(schematic, /\(lib_id "ChatPCB:ESP32_S3_WROOM_1"\)/);
+    assert.doesNotMatch(schematic, /MCU_PLACEHOLDER/);
+    assert.match(symbolLibrary, /\(symbol "ESP32_S3_WROOM_1"/);
+    assert.doesNotMatch(symbolLibrary, /\(symbol "ESP32_S3_WROOM_1_N8R2"/);
+    assert.equal(metadata.debug.requestedProtocol, 'swd');
+    assert.equal(metadata.debug.implementedProtocol, 'esp32-usb-jtag');
+    assert.deepEqual(metadata.debug.nets, ['USB_DP', 'USB_DN', 'MTMS', 'MTCK', 'MTDI', 'MTDO']);
+    assert.ok(nets.includes('USB_DP'));
+    assert.ok(nets.includes('USB_DN'));
+    assert.ok(nets.includes('CC1'));
+    assert.ok(nets.includes('CC2'));
+    assert.ok(nets.includes('SCK'));
+    assert.ok(nets.includes('MOSI'));
+    assert.ok(nets.includes('MISO'));
+    assert.ok(nets.includes('CS'));
+    assert.ok(nets.includes('GPIO0'));
+    assert.ok(nets.includes('MTMS'));
+    assert.ok(nets.includes('MTCK'));
+    assert.ok(!nets.includes('SWDIO'));
+    assert.ok(!nets.includes('SWCLK'));
+    assert.ok(refs.includes('C1'));
+    assert.ok(refs.includes('C2'));
+    assert.ok(refs.includes('R1'));
+    assert.ok(refs.includes('R2'));
+    assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'fixture-symbols'));
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-sourcing-review'));
+    assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
+    assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('STM32 supported sensor profile keeps the same board structure but implements SWD directly', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-stm32-profile-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt:
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+    });
+
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    const nets = metadata.schematic.nets.map((net) => net.name);
+    const schematic = await readFile(result.files.schematic, 'utf8');
+
+    assert.equal(metadata.boardProfile.id, 'stm32-usbc-sensor');
+    assert.equal(metadata.mcu.package, 'STM32G0B1CBT6');
+    assert.match(schematic, /\(lib_id "ChatPCB:STM32G0B1CBT6"\)/);
+    assert.doesNotMatch(schematic, /MCU_PLACEHOLDER/);
+    assert.equal(metadata.debug.requestedProtocol, 'swd');
+    assert.equal(metadata.debug.implementedProtocol, 'swd');
+    assert.deepEqual(metadata.debug.nets, ['SWDIO', 'SWCLK', 'NRST']);
+    assert.ok(nets.includes('USB_DP'));
+    assert.ok(nets.includes('USB_DN'));
+    assert.ok(nets.includes('SCK'));
+    assert.ok(nets.includes('MOSI'));
+    assert.ok(nets.includes('MISO'));
+    assert.ok(nets.includes('CS'));
+    assert.ok(nets.includes('GPIO0'));
+    assert.ok(nets.includes('SWDIO'));
+    assert.ok(nets.includes('SWCLK'));
+    assert.ok(!nets.includes('MTMS'));
+    assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'fixture-symbols'));
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-sourcing-review'));
+    assert.ok(result.review.findings.notes.some((finding) => /supported STM32 USB-C sensor profile/i.test(finding.message)));
+    assert.ok(!result.review.findings.blockers.some((finding) => finding.code.startsWith('missing-')));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

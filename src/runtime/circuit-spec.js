@@ -121,7 +121,7 @@ function defaultPinsFor(kind) {
     case 'uart':
       return ['TX', 'RX', '+3V3', 'GND'];
     case 'usb':
-      return ['VBUS', 'D+', 'D-', 'GND', 'CC1', 'CC2'];
+      return ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2'];
     default:
       return ['GPIO', '+3V3', 'GND'];
   }
