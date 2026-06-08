@@ -384,6 +384,13 @@ Evidence-based release status update on 2026-06-08:
 - Clean ERC plus pending sourcing, datasheet, simulation, incomplete release evidence, or warning/blocker calculations now returns `ready-for-prototype-review` with a `release-evidence-incomplete` warning.
 - A profile can return `ready-for-release` only when ERC is `0` errors and `0` warnings, findings have no warnings/blockers, release gates are complete, production evidence checks are complete, and calculations are release-clean.
 
+PCB draft and DRC smoke update on 2026-06-08:
+
+- Supported ESP32-S3 and STM32 profiles now generate a first `.kicad_pcb` artifact with an `Edge.Cuts` outline and placement-only footprint references for schematic components.
+- Supported-profile metadata now records a generated board draft while keeping PCB DRC, Gerber export, and drill export as pending manufacturing gates.
+- Official KiCad 10.0.3 can run PCB DRC on both generated board drafts, but both reports currently show `21` violations, `0` unconnected items, all grouped as `lib_footprint_mismatch`.
+- This improves the path toward a JLCPCB-ready board, but it does not make the board release-quality.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -397,6 +404,7 @@ Acceptance criteria:
 - Supported profiles must carry calculation evidence for shared electrical assumptions, and any warning or blocker calculation must appear in review residual risks before release.
 - Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
 - Supported profiles must not return `ready-for-release` while any release gate, production-part sourcing/datasheet/simulation evidence, release-evidence status, or calculation status is incomplete, warning, or blocker, even when ERC is clean.
+- Supported profiles must not return `ready-for-release` merely because a `.kicad_pcb` file exists; the generated board must have real footprint bodies or an equivalent KiCad-updated board, reviewed placement/routing/zones/constraints, PCB DRC with zero violations, and generated Gerber/drill outputs.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -439,11 +447,13 @@ git log --oneline -1
 
 Continue Phase 8 before widening PCB/layout scope:
 
-1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-2. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
-3. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
-4. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
-5. Add PCB layout, DRC, Gerber/drill/manufacturing export gates before any profile can return `ready-for-release`.
-6. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-7. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
-8. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.
+1. Replace placement-only PCB footprint references with real KiCad footprint bodies or a KiCad board-update flow so `lib_footprint_mismatch` DRC violations disappear.
+2. Add initial routed layout for the constrained ESP32-S3 and STM32 supported profiles, including critical buck loop placement, USB-C routing assumptions, power/ground zones, board constraints, and connector placement.
+3. Generate Gerbers and drill files only after PCB DRC is clean.
+4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+7. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
+8. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
+9. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
+10. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

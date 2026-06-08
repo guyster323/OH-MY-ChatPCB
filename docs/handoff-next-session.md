@@ -458,14 +458,69 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
 ```
 
+## 2026-06-08 PCB Draft and DRC Smoke Increment
+
+- Added a TDD increment after `1f68035 feat: gate release status on evidence` to create the first supported-profile PCB artifact without claiming manufacturing readiness.
+- Root repo baseline before this increment: `1f68035 feat: gate release status on evidence`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - Supported ESP32-S3 and STM32 profiles now write `chatpcb_mcu_peripheral.kicad_pcb` and return `files.board`.
+  - The generated board file contains a KiCad 10 PCB container, an `Edge.Cuts` board outline, and placement-only footprint references for all schematic components that declare footprints.
+  - Supported-profile metadata now records `boardProfile.manufacturing.boardDraft.status = generated`.
+  - The same metadata keeps `drc`, `exports.gerber`, and `exports.drill` as `pending`, with explicit reasons.
+- TDD evidence:
+  - `tests/project-generator.test.js` first failed because supported profiles did not return `files.board`.
+  - After implementation, the test verifies `.kicad_pcb` creation, outline generation, key footprint references (`U1`, `L1`, `J4`), and pending manufacturing metadata.
+- Verification run in this increment:
+  - `node --test tests\project-generator.test.js`: pass, 7/7.
+  - `npm test`: pass, 65/65.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad CLI path: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
+  - Official KiCad CLI version: `10.0.3`.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both generated profile projects.
+  - Official KiCad 10.0.3 ESP32/STM32 PCB DRC smoke: DRC runs and writes JSON reports, but both boards report `21` violations, `0` unconnected items, all grouped as `lib_footprint_mismatch`.
+- Computer Use GUI verification:
+  - Direct Windows Computer Use tooling was not callable in this session after tool discovery; only browser/Node automation tools were exposed.
+  - GUI verification should be rerun in a future session where Computer Use is available.
+- Final user-facing decision after this increment:
+  - `integration works`: still yes.
+  - `flexibility improved`: yes. The same PCB-draft/manufacturing metadata behavior now follows both ESP32-S3 and STM32 supported profiles.
+  - `release-quality circuit`: still no. The board artifact is placement-only, the KiCad DRC reports `21` `lib_footprint_mismatch` violations, and routing, copper zones, constraints, DRC-clean evidence, Gerbers, drill files, sourced BOM, datasheets, and manufacturer checks remain incomplete.
+
+Additional verification commands run for this increment:
+
+```powershell
+node --test tests\project-generator.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" --version
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\stm32-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
+```
+
 ## Next Work
 
-1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-2. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
-3. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
-4. Add PCB layout, DRC, Gerber/drill/manufacturing export gates before any profile can return `ready-for-release`.
-5. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
-6. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
-7. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
-8. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
-9. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+1. Replace placement-only PCB footprint references with real KiCad footprint bodies or use a KiCad board-update flow so DRC no longer reports `lib_footprint_mismatch`.
+2. Add initial routed layout for the constrained ESP32-S3 and STM32 supported profiles, including critical buck loop placement, USB-C routing assumptions, power/ground zones, board constraints, and connector placement.
+3. Generate and validate Gerber and drill outputs only after PCB DRC is clean.
+4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+7. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
+8. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
+9. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
+10. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
+11. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.

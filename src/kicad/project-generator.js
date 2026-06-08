@@ -28,6 +28,54 @@ export function renderKiCadProject(baseName) {
   )}\n`;
 }
 
+export function renderKiCadBoard({ baseName, schematic }) {
+  const components = schematic.components.filter((component) => component.footprint);
+  const footprints = components
+    .map((component, index) => renderBoardFootprint(component, 25 + (index % 5) * 22, 25 + Math.floor(index / 5) * 18))
+    .join('\n');
+
+  return `(kicad_pcb
+  (version 20240108)
+  (generator "pcbnew")
+  (generator_version "10.0")
+  (general
+    (thickness 1.6)
+  )
+  (paper "A4")
+  (title_block
+    (title "${escapeSchText(baseName)}")
+  )
+  (layers
+    (0 "F.Cu" signal)
+    (31 "B.Cu" signal)
+    (32 "B.Adhes" user)
+    (33 "F.Adhes" user)
+    (34 "B.Paste" user)
+    (35 "F.Paste" user)
+    (36 "B.SilkS" user)
+    (37 "F.SilkS" user)
+    (38 "B.Mask" user)
+    (39 "F.Mask" user)
+    (44 "Edge.Cuts" user)
+  )
+  (setup
+    (pad_to_mask_clearance 0)
+  )
+  (gr_rect
+    (start 10 10)
+    (end 110 80)
+    (stroke
+      (width 0.1)
+      (type default)
+    )
+    (fill none)
+    (layer "Edge.Cuts")
+    (uuid "${randomUUID()}")
+  )
+${footprints}
+)`;
+}
+
 export function buildMcuSchematicAst(spec) {
   const profileMode = Boolean(spec.boardProfile?.id);
   const mcuConnectedPins = unique(['+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']);
@@ -391,6 +439,26 @@ function renderLibSymbols(usedLibIds) {
 
   return `  (lib_symbols
 ${[...fixtureBlocks, ...officialBlocks].join('\n')}
+  )`;
+}
+
+function renderBoardFootprint(componentModel, x, y) {
+  const uuid = randomUUID();
+
+  return `  (footprint "${escapeSchText(componentModel.footprint)}"
+    (layer "F.Cu")
+    (uuid "${uuid}")
+    (at ${sch(x)} ${sch(y)} 0)
+    (property "Reference" "${escapeSchText(componentModel.ref)}"
+      (at 0 -2 0)
+      (layer "F.SilkS")
+      (effects (font (size 1 1) (thickness 0.15)))
+    )
+    (property "Value" "${escapeSchText(componentModel.value)}"
+      (at 0 2 0)
+      (layer "F.Fab")
+      (effects (font (size 1 1) (thickness 0.15)))
+    )
   )`;
 }
 

@@ -186,3 +186,37 @@ test('review blocker names the requested MCU family instead of a hard-coded part
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('supported release profiles generate a PCB draft and manufacturing metadata', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-pcb-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt:
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+    });
+
+    assert.equal(result.files.board.endsWith('.kicad_pcb'), true);
+
+    const board = await readFile(result.files.board, 'utf8');
+    assert.match(board, /\(kicad_pcb/);
+    assert.match(board, /\(generator "pcbnew"\)/);
+    assert.match(board, /\(gr_rect[\s\S]*\(layer "Edge\.Cuts"\)/);
+    assert.match(board, /\(footprint "Package_SON:WSON-10-1EP_2x3mm_P0\.5mm_EP0\.84x2\.4mm_ThermalVias"/);
+    assert.match(board, /\(property "Reference" "U1"/);
+    assert.match(board, /\(footprint "Inductor_SMD:L_0805_2012Metric"/);
+    assert.match(board, /\(property "Reference" "L1"/);
+    assert.match(board, /\(footprint "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12"/);
+    assert.match(board, /\(property "Reference" "J4"/);
+
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    assert.equal(metadata.boardProfile.manufacturing.boardDraft.status, 'generated');
+    assert.equal(metadata.boardProfile.manufacturing.boardDraft.file, 'chatpcb_mcu_peripheral.kicad_pcb');
+    assert.equal(metadata.boardProfile.manufacturing.drc.status, 'pending');
+    assert.equal(metadata.boardProfile.manufacturing.exports.gerber.status, 'pending');
+    assert.equal(metadata.boardProfile.manufacturing.exports.drill.status, 'pending');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

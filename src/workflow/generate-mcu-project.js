@@ -5,6 +5,7 @@ import { normalizeCircuitSpec } from '../runtime/circuit-spec.js';
 import { applyBoardProfile } from '../runtime/board-profiles.js';
 import {
   buildMcuSchematicAst,
+  renderKiCadBoard,
   renderKiCadProject,
   renderKiCadSchematic,
   renderProjectSymbolLibrary,
@@ -20,10 +21,20 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
 
   const spec = applyBoardProfile(normalizeCircuitSpec(prompt));
   const schematic = buildMcuSchematicAst(spec);
-  const projectMetadata = { ...spec, schematic };
+  const baseName = sanitizeProjectName(projectName);
+  const boardFileName = `${baseName}.kicad_pcb`;
+  const projectMetadata = {
+    ...spec,
+    boardProfile: spec.boardProfile
+      ? {
+          ...spec.boardProfile,
+          manufacturing: manufacturingMetadataFor(boardFileName)
+        }
+      : spec.boardProfile,
+    schematic
+  };
   await mkdir(projectDir, { recursive: true });
 
-  const baseName = sanitizeProjectName(projectName);
   const files = {
     project: path.join(projectDir, `${baseName}.kicad_pro`),
     schematic: path.join(projectDir, `${baseName}.kicad_sch`),
@@ -33,8 +44,15 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
     spec: path.join(projectDir, `${baseName}.chatpcb.json`)
   };
 
+  if (projectMetadata.boardProfile?.id) {
+    files.board = path.join(projectDir, boardFileName);
+  }
+
   await writeFile(files.project, renderKiCadProject(baseName), 'utf8');
   await writeFile(files.schematic, renderKiCadSchematic({ baseName, spec, schematic }), 'utf8');
+  if (files.board) {
+    await writeFile(files.board, renderKiCadBoard({ baseName, schematic }), 'utf8');
+  }
   await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(schematic.components.map((component) => component.libId)), 'utf8');
   await writeFile(files.symbolTable, renderProjectSymbolTable(), 'utf8');
   await writeFile(files.spice, renderSpiceFixture(spec), 'utf8');
@@ -52,6 +70,30 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
       'Run ERC with kicad-cli when KiCad is installed.',
       'Run SPICE simulation for supported power and simple analog subcircuits.'
     ]
+  };
+}
+
+function manufacturingMetadataFor(boardFileName) {
+  return {
+    boardDraft: {
+      status: 'generated',
+      file: boardFileName,
+      note: 'Initial placement-only PCB draft with board outline; routing, zones, constraints, DRC, Gerbers, and drill files remain pending.'
+    },
+    drc: {
+      status: 'pending',
+      reason: 'PCB DRC has not been run on a routed manufacturing board.'
+    },
+    exports: {
+      gerber: {
+        status: 'pending',
+        reason: 'Gerber export requires reviewed PCB layout and DRC.'
+      },
+      drill: {
+        status: 'pending',
+        reason: 'Drill export requires reviewed PCB layout and DRC.'
+      }
+    }
   };
 }
 
