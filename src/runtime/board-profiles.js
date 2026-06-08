@@ -34,8 +34,9 @@ const PROFILE_INTERFACES = [
 const RELEASE_GATES = [
   {
     id: 'production-symbols',
-    status: 'pending',
-    reason: 'Support components still use project-local ChatPCB fixture symbols until production KiCad symbols are selected.'
+    status: 'complete',
+    reason:
+      'Supported profile support components use production KiCad symbols; profile MCU symbols remain project-local only when an exact official KiCad symbol is unavailable.'
   },
   {
     id: 'sourcing',

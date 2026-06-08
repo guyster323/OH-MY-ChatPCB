@@ -26,53 +26,96 @@ export function renderKiCadProject(baseName) {
 }
 
 export function buildMcuSchematicAst(spec) {
+  const profileMode = Boolean(spec.boardProfile?.id);
   const mcuConnectedPins = unique(['+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']);
   const mcuLibId = mcuSymbolFor(spec);
   const components = [
-    component('J1', 'ChatPCB:POWER_INPUT', 'USB-C / external power input.', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical'),
-    component('U1', 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2'),
+    component('J1', profileMode ? 'Connector_Generic:Conn_01x02' : 'ChatPCB:POWER_INPUT', 'USB-C / external power input.', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
+      value: profileMode ? 'POWER_INPUT' : undefined,
+      pins: ['VBUS', 'GND'],
+      connectedPins: ['VBUS', 'GND']
+    }),
+    component('U1', profileMode ? 'Regulator_Linear:AMS1117-3.3' : 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
+      value: profileMode ? 'AMS1117-3.3' : undefined,
+      pins: ['VBUS', 'GND', '+3V3'],
+      connectedPins: ['GND', 'VBUS', '+3V3']
+    }),
     component('U2', mcuLibId, `${spec.mcu.package} controller/module with named MCU nets for review.`, mcuFootprintFor(spec), {
       value: spec.mcu.package === 'unspecified' ? 'MCU_PLACEHOLDER' : spec.mcu.package,
       connectedPins: mcuConnectedPins
     }),
-    component('SW1', 'ChatPCB:RESET_BUTTON', 'Momentary reset input for the MCU RESET net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
-    component('SW2', 'ChatPCB:BOOT_BUTTON', 'Momentary boot/BOOTSEL input for the MCU BOOT net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
-    component('D1', 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric')
+    component('SW1', profileMode ? 'Switch:SW_Push' : 'ChatPCB:RESET_BUTTON', 'Momentary reset input for the MCU RESET net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA', {
+      value: profileMode ? 'RESET_BUTTON' : undefined,
+      pins: ['RESET', 'GND'],
+      connectedPins: ['RESET', 'GND']
+    }),
+    component('SW2', profileMode ? 'Switch:SW_Push' : 'ChatPCB:BOOT_BUTTON', 'Momentary boot/BOOTSEL input for the MCU BOOT net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA', {
+      value: profileMode ? 'BOOT_BUTTON' : undefined,
+      pins: ['BOOT', 'GND'],
+      connectedPins: ['BOOT', 'GND']
+    }),
+    component('D1', profileMode ? 'Device:LED' : 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric', {
+      value: profileMode ? 'STATUS_LED' : undefined,
+      pins: ['+3V3', 'GND'],
+      connectedPins: ['+3V3', 'GND']
+    })
   ];
 
   if (spec.interfaces.some((iface) => iface.kind === 'i2c')) {
     components.push(
-      component('J2', 'ChatPCB:I2C_CONNECTOR', 'I2C sensor connector exposing SCL, SDA, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical')
+      component('J2', profileMode ? 'Connector_Generic:Conn_01x04' : 'ChatPCB:I2C_CONNECTOR', 'I2C sensor connector exposing SCL, SDA, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', {
+        value: profileMode ? 'I2C_CONNECTOR' : undefined,
+        pins: ['SCL', 'SDA', '+3V3', 'GND'],
+        connectedPins: ['SCL', 'SDA', '+3V3', 'GND']
+      })
     );
   }
 
   if (spec.interfaces.some((iface) => iface.kind === 'uart')) {
     components.push(
-      component('J3', 'ChatPCB:UART_HEADER', 'UART debug header exposing TX, RX, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical')
+      component('J3', profileMode ? 'Connector_Generic:Conn_01x04' : 'ChatPCB:UART_HEADER', 'UART debug header exposing TX, RX, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', {
+        value: profileMode ? 'UART_HEADER' : undefined,
+        pins: ['TX', 'RX', '+3V3', 'GND'],
+        connectedPins: ['TX', 'RX', '+3V3', 'GND']
+      })
     );
   }
 
   if (spec.interfaces.some((iface) => iface.kind === 'usb')) {
     components.push(
-      component('J4', 'ChatPCB:USB_C_CONNECTOR', 'USB-C sink connector with VBUS, USB data, CC pins, and GND.', 'Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12')
+      component('J4', profileMode ? 'Connector:USB_C_Receptacle_USB2.0_16P' : 'ChatPCB:USB_C_CONNECTOR', 'USB-C sink connector with VBUS, USB data, CC pins, and GND.', 'Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12', {
+        value: profileMode ? 'USB_C_CONNECTOR' : undefined,
+        pins: ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2'],
+        connectedPins: ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2']
+      })
     );
   }
 
   if (spec.interfaces.some((iface) => iface.kind === 'spi')) {
     components.push(
-      component('J5', 'ChatPCB:SPI_HEADER', 'SPI expansion header exposing SCK, MOSI, MISO, CS, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical')
+      component('J5', profileMode ? 'Connector_Generic:Conn_01x06' : 'ChatPCB:SPI_HEADER', 'SPI expansion header exposing SCK, MOSI, MISO, CS, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical', {
+        value: profileMode ? 'SPI_HEADER' : undefined,
+        pins: ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND'],
+        connectedPins: ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND']
+      })
     );
   }
 
   if (spec.interfaces.some((iface) => iface.kind === 'gpio')) {
     components.push(
-      component('J6', 'ChatPCB:GPIO_HEADER', 'GPIO expansion header exposing GPIO0, GPIO1, GPIO2, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical')
+      component('J6', profileMode ? 'Connector_Generic:Conn_01x05' : 'ChatPCB:GPIO_HEADER', 'GPIO expansion header exposing GPIO0, GPIO1, GPIO2, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical', {
+        value: profileMode ? 'GPIO_HEADER' : undefined,
+        pins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'],
+        connectedPins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND']
+      })
     );
   }
 
   if (spec.debug?.nets?.length > 0) {
     components.push(
-      component('J7', 'ChatPCB:DEBUG_HEADER', `${spec.debug.implementedProtocol.toUpperCase()} debug header for ${spec.mcu.family}.`, 'Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical', {
+      component('J7', profileMode ? 'Connector_Generic:Conn_02x05_Odd_Even' : 'ChatPCB:DEBUG_HEADER', `${spec.debug.implementedProtocol.toUpperCase()} debug header for ${spec.mcu.family}.`, 'Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical', {
+        value: profileMode ? 'DEBUG_HEADER' : undefined,
+        pins: [...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT'],
         connectedPins: [...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT']
       })
     );
@@ -80,21 +123,23 @@ export function buildMcuSchematicAst(spec) {
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'decoupling-network')) {
     components.push(
-      component('C1', 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF' }),
-      component('C2', 'ChatPCB:DECOUPLING_CAP', 'Bulk 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF' })
+      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'] }),
+      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Bulk 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'] })
     );
   }
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'usb-c-cc-pulldowns')) {
     components.push(
-      component('R1', 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC1.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k' }),
-      component('R2', 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC2.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k' })
+      component('R1', profileMode ? 'Device:R' : 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC1.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k', pins: ['CC1', 'GND'], connectedPins: ['CC1', 'GND'] }),
+      component('R2', profileMode ? 'Device:R' : 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC2.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k', pins: ['CC2', 'GND'], connectedPins: ['CC2', 'GND'] })
     );
   }
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'status-led-resistor')) {
     components.push(
-      component('R3', 'ChatPCB:LED_RESISTOR', 'Status LED series resistor for a bounded indicator current.', 'Resistor_SMD:R_0603_1608Metric', {
+      component('R3', profileMode ? 'Device:R' : 'ChatPCB:LED_RESISTOR', 'Status LED series resistor for a bounded indicator current.', 'Resistor_SMD:R_0603_1608Metric', {
+        pins: ['+3V3', 'GND'],
+        connectedPins: ['+3V3', 'GND'],
         value: '1k'
       })
     );
@@ -102,12 +147,14 @@ export function buildMcuSchematicAst(spec) {
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'i2c-pullups')) {
     components.push(
-      component('R4', 'ChatPCB:I2C_PULLUP', 'I2C SCL pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
+      component('R4', profileMode ? 'Device:R' : 'ChatPCB:I2C_PULLUP', 'I2C SCL pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
         value: '4.7k',
+        pins: ['+3V3', 'SCL'],
         connectedPins: ['+3V3', 'SCL']
       }),
-      component('R5', 'ChatPCB:I2C_PULLUP', 'I2C SDA pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
+      component('R5', profileMode ? 'Device:R' : 'ChatPCB:I2C_PULLUP', 'I2C SDA pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
         value: '4.7k',
+        pins: ['+3V3', 'SDA'],
         connectedPins: ['+3V3', 'SDA']
       })
     );
@@ -166,12 +213,16 @@ export function renderProjectSymbolTable() {
 )\n`;
 }
 
-export function renderProjectSymbolLibrary() {
+export function renderProjectSymbolLibrary(usedLibIds = fixtureSymbols().map(([id]) => id)) {
+  const used = new Set(usedLibIds);
   return `(kicad_symbol_lib
   (version 20241209)
   (generator "chatpcb")
   (generator_version "0.1")
-${fixtureSymbols().map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id), { projectLibrary: true })).join('\n')}
+${fixtureSymbols()
+  .filter(([id]) => used.has(id))
+  .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id), { projectLibrary: true }))
+  .join('\n')}
 )\n`;
 }
 
@@ -198,13 +249,14 @@ export function renderSpiceFixture(spec) {
   ].join('\n');
 }
 
-function component(ref, libId, explanation, footprint, { connectedPins, value } = {}) {
+function component(ref, libId, explanation, footprint, { connectedPins, pins, value } = {}) {
   return {
     ref,
     libId,
     value: value ?? libId.split(':')[1],
     footprint,
     explanation,
+    pins,
     connectedPins
   };
 }
@@ -269,11 +321,15 @@ function explainNet(name) {
 function renderLibSymbols(usedLibIds) {
   const used = new Set(usedLibIds);
   return `  (lib_symbols
-${fixtureSymbols()
+${schematicSymbolDefinitions()
   .filter(([id]) => used.has(id))
   .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id)))
   .join('\n')}
   )`;
+}
+
+function schematicSymbolDefinitions() {
+  return [...fixtureSymbols(), ...productionSupportSymbols()];
 }
 
 function fixtureSymbols() {
@@ -296,6 +352,22 @@ function fixtureSymbols() {
     ['ChatPCB:CC_RESISTOR', 'R', 'CC_RESISTOR'],
     ['ChatPCB:LED_RESISTOR', 'R', 'LED_RESISTOR'],
     ['ChatPCB:I2C_PULLUP', 'R', 'I2C_PULLUP']
+  ];
+}
+
+function productionSupportSymbols() {
+  return [
+    ['Connector_Generic:Conn_01x02', 'J', 'POWER_INPUT'],
+    ['Regulator_Linear:AMS1117-3.3', 'U', 'AMS1117-3.3'],
+    ['Switch:SW_Push', 'SW', 'SW_Push'],
+    ['Device:LED', 'D', 'LED'],
+    ['Connector_Generic:Conn_01x04', 'J', 'Conn_01x04'],
+    ['Connector:USB_C_Receptacle_USB2.0_16P', 'J', 'USB_C_Receptacle_USB2.0_16P'],
+    ['Connector_Generic:Conn_01x06', 'J', 'Conn_01x06'],
+    ['Connector_Generic:Conn_01x05', 'J', 'Conn_01x05'],
+    ['Connector_Generic:Conn_02x05_Odd_Even', 'J', 'Conn_02x05_Odd_Even'],
+    ['Device:C', 'C', 'C'],
+    ['Device:R', 'R', 'R']
   ];
 }
 
@@ -343,13 +415,17 @@ function renderLibPin(pinName, index) {
 }
 
 function renderPlacedComponent(componentModel, x, y, baseName) {
-  const connectedPins = new Set(componentModel.connectedPins ?? symbolPinsFor(componentModel.libId));
+  const symbolPins = symbolPinsFor(componentModel.libId);
+  const pins = componentModel.pins ?? symbolPins;
+  const pinSlots = symbolPins.length > pins.length ? symbolPins : pins;
+  const connectedPins = new Set(componentModel.connectedPins ?? pins);
 
   return [
     renderSymbolInstance(componentModel, x, y, baseName),
-    ...symbolPinsFor(componentModel.libId).flatMap((pinName, index) => {
-      if (connectedPins.has(pinName)) {
-        return renderPinNetStub(pinName, x, y, index);
+    ...pinSlots.flatMap((pinName, index) => {
+      const netName = pins[index];
+      if (netName && connectedPins.has(netName)) {
+        return renderPinNetStub(netName, x, y, index);
       }
 
       const point = pinConnectionPoint(x, y, index);
@@ -393,36 +469,48 @@ function renderSymbolInstance(componentModel, x, y, baseName) {
 function symbolPinsFor(libId) {
   switch (libId) {
     case 'ChatPCB:POWER_INPUT':
+    case 'Connector_Generic:Conn_01x02':
       return ['VBUS', 'GND'];
     case 'ChatPCB:REGULATOR_3V3':
+    case 'Regulator_Linear:AMS1117-3.3':
       return ['VBUS', 'GND', '+3V3'];
     case 'ChatPCB:MCU_PLACEHOLDER':
     case 'ChatPCB:ESP32_S3_WROOM_1':
     case 'ChatPCB:STM32G0B1CBT6':
       return ['+3V3', 'GND', 'SCL', 'SDA', 'TX', 'RX', 'USB_DP', 'USB_DN', 'SCK', 'MOSI', 'MISO', 'CS', 'GPIO0', 'GPIO1', 'GPIO2', 'SWDIO', 'SWCLK', 'NRST', 'MTMS', 'MTCK', 'MTDI', 'MTDO', 'RESET', 'BOOT'];
     case 'ChatPCB:RESET_BUTTON':
+    case 'Switch:SW_Push':
       return ['RESET', 'GND'];
     case 'ChatPCB:BOOT_BUTTON':
       return ['BOOT', 'GND'];
     case 'ChatPCB:STATUS_LED':
+    case 'Device:LED':
       return ['+3V3', 'GND'];
     case 'ChatPCB:I2C_CONNECTOR':
+    case 'Connector_Generic:Conn_01x04':
       return ['SCL', 'SDA', '+3V3', 'GND'];
     case 'ChatPCB:UART_HEADER':
       return ['TX', 'RX', '+3V3', 'GND'];
     case 'ChatPCB:USB_C_CONNECTOR':
+    case 'Connector:USB_C_Receptacle_USB2.0_16P':
       return ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2'];
     case 'ChatPCB:SPI_HEADER':
+    case 'Connector_Generic:Conn_01x06':
       return ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND'];
     case 'ChatPCB:GPIO_HEADER':
+    case 'Connector_Generic:Conn_01x05':
       return ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'];
     case 'ChatPCB:DEBUG_HEADER':
       return ['SWDIO', 'SWCLK', 'NRST', 'MTMS', 'MTCK', 'MTDI', 'MTDO', '+3V3', 'GND', 'RESET', 'BOOT'];
+    case 'Connector_Generic:Conn_02x05_Odd_Even':
+      return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
     case 'ChatPCB:DECOUPLING_CAP':
+    case 'Device:C':
       return ['+3V3', 'GND'];
     case 'ChatPCB:CC_RESISTOR':
       return ['CC1', 'GND', 'CC2'];
     case 'ChatPCB:LED_RESISTOR':
+    case 'Device:R':
       return ['+3V3', 'GND'];
     case 'ChatPCB:I2C_PULLUP':
       return ['+3V3', 'SCL', 'SDA'];

@@ -35,7 +35,7 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
 
   await writeFile(files.project, renderKiCadProject(baseName), 'utf8');
   await writeFile(files.schematic, renderKiCadSchematic({ baseName, spec, schematic }), 'utf8');
-  await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(), 'utf8');
+  await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(schematic.components.map((component) => component.libId)), 'utf8');
   await writeFile(files.symbolTable, renderProjectSymbolTable(), 'utf8');
   await writeFile(files.spice, renderSpiceFixture(spec), 'utf8');
   await writeFile(files.spec, `${JSON.stringify(projectMetadata, null, 2)}\n`, 'utf8');

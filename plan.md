@@ -296,7 +296,9 @@ Work items:
 - [x] Add reusable supported-board profiles and tests that can improve a blocked generic prompt into a concrete prototype-review schematic for ESP32-S3 and STM32 targets.
 - [x] Add cross-profile release gates that keep ESP32-S3 and STM32 profile outputs out of `ready-for-release` until production symbols, sourcing, datasheet review, simulation, and layout/DRC evidence are complete.
 - [x] Expand both supported profiles with actual support-circuit passives for status LED current limiting and I2C pull-ups.
-- [ ] If pursuing final circuit quality, replace remaining fixture-like support symbols/values with exact orderable components and tests for the chosen board target.
+- [x] Replace supported-profile support component placements with production-facing KiCad library IDs and keep ChatPCB local symbols only for profile MCUs where exact official symbols are unavailable.
+- [ ] If pursuing final circuit quality, replace generated cached support-symbol geometry with actual official KiCad symbol geometry or official-pin-location wiring, then remove all `lib_symbol_mismatch` ERC warnings.
+- [ ] Add exact orderable components and tests for the chosen board target.
 - [x] If pursuing the UX loop, add review findings grouped by severity, user-readable remediation proposals, approval-gated patch application, rerun validation, and final readiness status.
 - [x] Add direct GUI verification through official KiCad latest stable and the built KiCad fork panel where feasible.
 
@@ -314,7 +316,7 @@ Supported profile update on 2026-06-08:
 - ESP32-S3 profile uses `ESP32-S3-WROOM-1-N8R2`, maps requested SWD to ESP32-S3 USB-JTAG/JTAG with an explicit user-facing note, and uses the KiCad 10 footprint `RF_Module:ESP32-S3-WROOM-1`.
 - STM32 profile uses `STM32G0B1CBT6`, keeps direct SWD wiring, and uses `Package_QFP:LQFP-48_7x7mm_P0.5mm`.
 - Both profiles add USB-C sink pins, CC pulldowns, SPI/GPIO/debug headers, local and bulk decoupling, exact profile MCU symbols, profile notes, and `ready-for-prototype-review` status.
-- Both profile samples validate in official KiCad 10.0.3 with ERC `0` errors and `0` warnings and export SVG/PDF.
+- Both profile samples validate in official KiCad 10.0.3 with ERC `0` errors and `18` warnings of type `lib_symbol_mismatch`, then export SVG/PDF.
 - Both profile samples still stop short of release because JLCPCB live sourcing, exact regulator/connector/passive orderability, datasheet-level pin review, ESD/protection policy, layout, DRC, Gerbers, and simulation evidence are not complete.
 
 Release gate update on 2026-06-08:
@@ -324,6 +326,14 @@ Release gate update on 2026-06-08:
 - Review output now warns with `profile-support-symbols` when support components still use project-local fixture symbols, and lists every pending release gate in residual risks.
 - Official KiCad 10.0.3 validation and SVG/PDF export still pass for both regenerated profile samples after the added passives and release-gate metadata.
 
+Production symbol update on 2026-06-08:
+
+- Supported-profile support components now use production-facing KiCad library IDs for the regulator, passives, LED, switches, USB-C connector, and headers.
+- `chatpcb.kicad_sym` is filtered so supported profiles no longer carry unused support fixture symbols in the project-local library.
+- KiCad 10.0.3 initially reported dangling/isolated labels when only the `lib_id`s were changed, because generated label stubs were positioned for ChatPCB's simple rectangular symbols rather than official KiCad symbol geometry.
+- The current implementation adds schematic-level cached support-symbol definitions to preserve connectivity. This gets both ESP32-S3 and STM32 profile samples to ERC `0` errors, but KiCad reports `18` `lib_symbol_mismatch` warnings because the cached definitions are not the official library drawings.
+- Therefore the profile status remains `ready-for-prototype-review`, not `ready-for-release`.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -332,6 +342,7 @@ Acceptance criteria:
 - Missing electrical requirements become explicit blockers or review findings, not silent assumptions.
 - A user can either release a constrained supported circuit with evidence or run a clear review-fix-validate loop.
 - Supported profiles may report `ready-for-prototype-review`; they must not report `ready-for-release` until production-symbol, sourcing, datasheet-review, simulation, layout/DRC, and manufacturing export gates pass.
+- Supported profiles must not report `ready-for-release` while KiCad ERC reports `lib_symbol_mismatch` or any other warning.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -375,6 +386,7 @@ git log --oneline -1
 Continue Phase 8 before widening PCB/layout scope:
 
 1. Replace support fixture symbols with production KiCad symbols and pin-compatible footprints where possible.
-2. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-3. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
-4. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.
+2. Replace generated cached support-symbol geometry with official KiCad symbol geometry or compute label stubs from official pin locations so ERC reaches `0` errors and `0` warnings.
+3. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
+4. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
+5. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

@@ -103,6 +103,63 @@ New next-session entrypoint:
 - Built fork `eeschema.exe` process smoke: STM32 profile schematic launched and stayed alive for 5 seconds, then was stopped.
 - Direct Computer Use remained unavailable as a callable tool in this run, so native GUI click-through was not repeated.
 
+## 2026-06-08 Production Support Symbol Increment
+
+- Answered the user's follow-up directly: yes, there is an improvement path for `ESP32-S3 USB-C sensor board is not release-quality yet`, but the safe path is staged. The current session advanced the supported-profile schematic toward release quality without changing the final state to release-ready.
+- Current root baseline before this increment was `ce8a7f5 feat: expose release gates for board profiles`; KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Official KiCad latest stable was rechecked from official KiCad sources:
+  - KiCad Windows downloads page reported Current Version `10.0.3`.
+  - KiCad 10.0.3 release post dated 2026-05-15 described `10.0.3` as the stable bug-fix release.
+  - Installed CLI path `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe` returned version `10.0.3`.
+- Implemented with TDD:
+  - Supported ESP32-S3 and STM32 profiles no longer place support components as `ChatPCB:*` fixture symbols.
+  - Support components now use production-facing KiCad library IDs where possible: `Regulator_Linear:AMS1117-3.3`, `Device:R`, `Device:C`, `Device:LED`, `Switch:SW_Push`, `Connector:USB_C_Receptacle_USB2.0_16P`, `Connector_Generic:Conn_01x02`, `Connector_Generic:Conn_01x04`, `Connector_Generic:Conn_01x05`, `Connector_Generic:Conn_01x06`, and `Connector_Generic:Conn_02x05_Odd_Even`.
+  - The project-local `chatpcb.kicad_sym` is now filtered to only the used ChatPCB symbols, so supported profiles keep the profile MCU local symbol but drop support fixture symbols from the project-local library.
+  - The schematic-level symbol cache includes generated definitions for support symbols so KiCad 10 can preserve label connectivity instead of producing dangling/isolated-label ERC errors.
+  - `production-symbols` release gate moved from pending to complete for the supported profile support components. It still explicitly notes that profile MCU symbols remain project-local when an exact official KiCad symbol is unavailable.
+- Root-cause note: changing only the placed `lib_id` to official KiCad symbols caused KiCad 10.0.3 ERC failures (`label_dangling`, `isolated_pin_label`, `unconnected_wire_endpoint`) because the generated label stubs were positioned for ChatPCB's rectangular symbol geometry, not the official library geometry. Adding schematic symbol cache definitions fixed the connectivity errors, but KiCad now reports `lib_symbol_mismatch` warnings because those cached definitions intentionally do not match the official library drawings.
+- Fresh generated samples:
+  - `workspaces/esp32-s3-usbc-sensor-profile`
+  - `workspaces/stm32-usbc-sensor-profile`
+- Official KiCad 10.0.3 validation result for both samples:
+  - Format upgrade ok.
+  - ERC errors: `0`.
+  - ERC warnings: `18`, all `lib_symbol_mismatch`.
+  - Integration status: KiCad 10 can parse, upgrade, ERC-check, and export the generated projects.
+  - Release-quality status: not release-quality because the release bar requires zero ERC warnings and real production symbol geometry.
+- Official KiCad 10.0.3 export result:
+  - ESP32 PDF `workspaces/esp32-s3-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.pdf`, 96542 bytes.
+  - ESP32 SVG `workspaces/esp32-s3-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.svg`, 959495 bytes.
+  - STM32 PDF `workspaces/stm32-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.pdf`, 94074 bytes.
+  - STM32 SVG `workspaces/stm32-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.svg`, 945449 bytes.
+- GUI/process smoke:
+  - Official `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\eeschema.exe` opened the ESP32 profile schematic and stayed alive for 5 seconds.
+  - Fork `C:\Users\windo\kicad-source-mirror-chatpcb\build\chatpcb-vcpkg\eeschema\eeschema.exe` opened the ESP32 profile schematic and stayed alive for 5 seconds.
+  - Direct Computer Use remained unavailable as a callable desktop tool; the native KiCad panel click-through was not repeated in this increment.
+- Final user-facing decision after this increment:
+  - `integration works`: yes, for KiCad latest stable 10.0.3, including generate, validate, export, panel verification, and process launch smoke.
+  - `release-quality circuit`: no. The generated ESP32-S3 and STM32 supported profiles are `ready-for-prototype-review`, not `ready-for-release`.
+  - Remaining blockers: replace generated cached support definitions with real official KiCad symbol geometry or connect to official pin locations, remove `lib_symbol_mismatch` warnings, complete datasheet pin review, live JLCPCB/LCSC sourcing, exact orderable regulator/connector/passive decisions, ESD/protection policy, PCB layout/DRC/Gerbers/drill/manufacturing outputs, and simulation/calculation evidence.
+
+Verification commands run for this increment:
+
+```powershell
+node --test tests\board-profiles.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+$env:KICAD_CLI_PATH='C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe'
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+```
+
 Additional verification commands run for this increment:
 
 ```powershell
@@ -154,7 +211,7 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32s3-usbc-sensor-ki
 
 ## Next Work
 
-1. Replace support fixture symbols with production KiCad symbols for regulator, USB-C connector, headers, passives, reset/boot, and LED where possible.
+1. Replace generated support-symbol cache geometry with actual official KiCad symbol geometry, or compute label stubs from official pin locations, so supported profiles reach ERC `0` errors and `0` warnings.
 2. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB live sourcing evidence.
 3. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
 4. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
