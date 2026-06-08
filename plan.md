@@ -378,6 +378,12 @@ Cross-profile buck regulator update on 2026-06-08:
 - `buck-loss-estimate` is a warning at `183mW` using a provisional 90% efficiency assumption; release still needs sourced part evidence, datasheet efficiency curves, layout review, and DRC.
 - `regulator-thermal-budget` now passes at the schematic topology level because the `0.85W` LDO loss is avoided, but this does not make the board release-quality by itself.
 
+Evidence-based release status update on 2026-06-08:
+
+- `reviewCircuitReadiness` now blocks accidental `ready-for-release` promotion when ERC is clean but production evidence remains incomplete.
+- Clean ERC plus pending sourcing, datasheet, simulation, incomplete release evidence, or warning/blocker calculations now returns `ready-for-prototype-review` with a `release-evidence-incomplete` warning.
+- A profile can return `ready-for-release` only when ERC is `0` errors and `0` warnings, findings have no warnings/blockers, release gates are complete, production evidence checks are complete, and calculations are release-clean.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -390,6 +396,7 @@ Acceptance criteria:
 - Supported profiles must carry production part evidence so changing the MCU/profile does not drop sourcing, datasheet, simulation, or layout/DRC release requirements.
 - Supported profiles must carry calculation evidence for shared electrical assumptions, and any warning or blocker calculation must appear in review residual risks before release.
 - Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
+- Supported profiles must not return `ready-for-release` while any release gate, production-part sourcing/datasheet/simulation evidence, release-evidence status, or calculation status is incomplete, warning, or blocker, even when ERC is clean.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 

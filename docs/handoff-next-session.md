@@ -412,6 +412,52 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
 ```
 
+## 2026-06-08 Evidence-Based Release Status Increment
+
+- Added a TDD increment after `e253d4b feat: use buck regulator for profile power` so clean ERC alone cannot promote a profile to `ready-for-release`.
+- Root repo baseline before this increment: `e253d4b feat: use buck regulator for profile power`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - `reviewCircuitReadiness` now adds `release-evidence-incomplete` when profile production-part evidence, datasheet checks, simulation checks, release-evidence status, or calculation status is not release-clean.
+  - A clean ERC result with pending production evidence now returns `ready-for-prototype-review`, not `ready-for-release`.
+  - A profile can return `ready-for-release` only when ERC is `0` errors and `0` warnings, findings have no warnings/blockers, release gates are complete, production evidence checks are complete, and calculations are release-clean.
+- TDD evidence:
+  - New `tests/review-project.test.js` first reproduced the failure: a clean ERC plus pending sourcing evidence incorrectly returned `ready-for-release`.
+  - After implementation, the same test verifies the result is `ready-for-prototype-review` with a `release-evidence-incomplete` warning.
+  - A positive test verifies `ready-for-release` remains possible when all release evidence and ERC are complete.
+- Verification run in this increment:
+  - `node --test tests\review-project.test.js`: initially failed as expected, then passed.
+  - `node --test tests\board-profiles.test.js tests\review-project.test.js`: pass.
+  - `npm test`: 64/64 pass.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both generated profile projects.
+- Final user-facing decision after this increment:
+  - `integration works`: still yes.
+  - `flexibility improved`: yes. Release readiness is now evidence-driven and cannot be accidentally granted when changing MCU/profile or support ICs.
+  - `release-quality circuit`: still no. This increment improves the decision gate; the remaining concrete work is sourced/orderable parts, datasheet review, buck efficiency/thermal/layout evidence, PCB layout, DRC, Gerbers, drill files, and manufacturing constraints.
+
+Additional verification commands run for this increment:
+
+```powershell
+node --test tests\review-project.test.js
+node --test tests\board-profiles.test.js tests\review-project.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+```
+
 ## Next Work
 
 1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.

@@ -147,6 +147,22 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   const missingSimulation = productionParts.filter((part) => part.releaseChecks?.simulation?.status === 'pending');
   const blockingCalculations = calculations.filter((calculation) => calculation.status === 'blocker');
   const warningCalculations = calculations.filter((calculation) => calculation.status === 'warning');
+  const releaseEvidenceIncomplete =
+    Boolean(spec.boardProfile?.id) &&
+    (spec.boardProfile?.releaseEvidence?.status !== 'complete' ||
+      missingSourcing.length > 0 ||
+      missingDatasheet.length > 0 ||
+      missingSimulation.length > 0 ||
+      blockingCalculations.length > 0 ||
+      warningCalculations.length > 0);
+
+  if (releaseEvidenceIncomplete) {
+    addFinding(
+      findings.warnings,
+      'release-evidence-incomplete',
+      'Release evidence is incomplete; clean ERC is not enough for release-quality.'
+    );
+  }
 
   if (missingSourcing.length > 0) {
     residualRisks.push(`sourcing: Missing JLCPCB/LCSC evidence for ${missingSourcing.length} production part(s), including ${summarizeParts(missingSourcing)}.`);
