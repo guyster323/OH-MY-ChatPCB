@@ -421,6 +421,16 @@ ESP32 RF footprint normalization update on 2026-06-08:
   - STM32: `0` violations, `46` unconnected items.
 - This removes the last PCB DRC violation across both supported profiles, but release quality remains blocked by unconnected board items and missing routing, zones, manufacturing exports, sourcing, datasheet, and production review evidence.
 
+Bounded cross-footprint trace update on 2026-06-08:
+
+- Supported ESP32-S3 and STM32 PCB drafts now add bounded cross-footprint same-net traces after the local same-footprint trace scaffold.
+- The accepted routing rule caps cross-footprint segments at `30mm`, skips candidate segments that pass within `1.0mm` of a different-net pad center, and deduplicates segment coordinates before output.
+- A more aggressive 30mm/0.8mm keepout prototype was rejected because it introduced ESP32-S3 DRC violations despite reducing unconnected items further.
+- Official KiCad 10.0.3 PCB DRC now reports:
+  - ESP32-S3: `0` violations, `40` unconnected items.
+  - STM32: `0` violations, `37` unconnected items.
+- This is another cross-profile PCB-quality improvement, but it still is not release quality because both profiles need complete routing/zone/layout work, manufacturing exports, sourcing, datasheet, and production review evidence.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -435,7 +445,7 @@ Acceptance criteria:
 - Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
 - Supported profiles must not return `ready-for-release` while any release gate, production-part sourcing/datasheet/simulation evidence, release-evidence status, or calculation status is incomplete, warning, or blocker, even when ERC is clean.
 - Supported profiles must not return `ready-for-release` merely because a `.kicad_pcb` file exists; the generated board must have real footprint bodies or an equivalent KiCad-updated board, reviewed placement/routing/zones/constraints, PCB DRC with zero violations, and generated Gerber/drill outputs.
-- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; both supported profiles currently have zero PCB DRC violations, but STM32 still has `46` unconnected items and ESP32-S3 still has `48` unconnected items.
+- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; both supported profiles currently have zero PCB DRC violations, but STM32 still has `37` unconnected items and ESP32-S3 still has `40` unconnected items.
 - PCB trace scaffolding must not reduce unconnected items by introducing new KiCad DRC violations; unsafe global or high-density centerline traces should remain review-loop findings instead of generated board copper.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
@@ -479,7 +489,7 @@ git log --oneline -1
 
 Continue Phase 8 before widening PCB/layout scope:
 
-1. Route both supported PCB drafts so unconnected items drop from ESP32-S3 `48` and STM32 `46` to zero without adding new DRC violations.
+1. Route both supported PCB drafts so unconnected items drop from ESP32-S3 `40` and STM32 `37` to zero without adding new DRC violations.
 2. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
 3. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.
 4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.

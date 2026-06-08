@@ -4,6 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
 const BOARD_TRACE_PAD_KEEP_OUT_MM = 0.8;
+const BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM = 30;
+const BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM = 1.0;
 const SCHEMATIC_GRID_COLUMNS = 5;
 const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
 
@@ -597,6 +599,7 @@ function recordBoardPadCenter(padCentersByNet, netName, padBlock, footprintPosit
 
 function renderBoardSegments(padCentersByNet, netIds) {
   const segments = [];
+  const segmentKeys = new Set();
   const allCenters = [...padCentersByNet.entries()].flatMap(([netName, centers]) => centers.map((center) => ({ ...center, netName })));
 
   for (const [netName, centers] of padCentersByNet.entries()) {
@@ -619,12 +622,56 @@ function renderBoardSegments(padCentersByNet, netIds) {
           continue;
         }
 
-        segments.push(renderBoardSegment(start, end, netId));
+        addBoardSegment(segments, segmentKeys, start, end, netId);
+      }
+    }
+
+    addCrossFootprintBoardSegments(segments, segmentKeys, uniqueCenters, netName, netId, allCenters);
+  }
+
+  return segments.join('\n');
+}
+
+function addCrossFootprintBoardSegments(segments, segmentKeys, centers, netName, netId, allCenters) {
+  const connected = [centers[0]];
+  const remaining = centers.slice(1);
+
+  while (remaining.length > 0) {
+    const best = nearestSafeBoardSegment(connected, remaining, netName, allCenters);
+    if (!best) {
+      return;
+    }
+
+    const start = connected[best.connectedIndex];
+    const end = remaining.splice(best.remainingIndex, 1)[0];
+    connected.push(end);
+    addBoardSegment(segments, segmentKeys, start, end, netId);
+  }
+}
+
+function nearestSafeBoardSegment(connected, remaining, netName, allCenters) {
+  let best = null;
+
+  for (let connectedIndex = 0; connectedIndex < connected.length; connectedIndex += 1) {
+    for (let remainingIndex = 0; remainingIndex < remaining.length; remainingIndex += 1) {
+      const start = connected[connectedIndex];
+      const end = remaining[remainingIndex];
+      const distance = boardPointDistance(start, end);
+      if (
+        sameBoardPoint(start, end) ||
+        distance > BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM ||
+        segmentRunsNearOtherNetPad(start, end, netName, allCenters, BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM)
+      ) {
+        continue;
+      }
+
+      if (!best || distance < best.distance) {
+        best = { connectedIndex, remainingIndex, distance };
       }
     }
   }
 
-  return segments.join('\n');
+  return best;
 }
 
 function uniqueBoardPadCenters(centers) {
@@ -660,13 +707,13 @@ function boardPointDistance(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function segmentRunsNearOtherNetPad(start, end, netName, allCenters) {
+function segmentRunsNearOtherNetPad(start, end, netName, allCenters, keepOutMm = BOARD_TRACE_PAD_KEEP_OUT_MM) {
   return allCenters.some((center) => {
     if (center.netName === netName) {
       return false;
     }
 
-    return distanceFromPointToSegment(center, start, end) < BOARD_TRACE_PAD_KEEP_OUT_MM;
+    return distanceFromPointToSegment(center, start, end) < keepOutMm;
   });
 }
 
@@ -684,6 +731,21 @@ function distanceFromPointToSegment(point, start, end) {
     y: start.y + t * dy
   };
   return boardPointDistance(point, projection);
+}
+
+function addBoardSegment(segments, segmentKeys, start, end, netId) {
+  const key = boardSegmentKey(start, end, netId);
+  if (segmentKeys.has(key)) {
+    return;
+  }
+
+  segmentKeys.add(key);
+  segments.push(renderBoardSegment(start, end, netId));
+}
+
+function boardSegmentKey(start, end, netId) {
+  const points = [`${sch(start.x)}:${sch(start.y)}`, `${sch(end.x)}:${sch(end.y)}`].sort();
+  return `${netId}:${points[0]}:${points[1]}`;
 }
 
 function renderBoardSegment(start, end, netId) {

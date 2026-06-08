@@ -626,7 +626,7 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 
 ## Next Work
 
-1. Continue routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `48` and STM32 `46` to zero before manufacturing export, without adding new DRC violations.
+1. Continue routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `40` and STM32 `37` to zero before manufacturing export, without adding new DRC violations.
 2. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
 3. Generate and validate Gerber and drill outputs only after PCB DRC has zero violations and zero unconnected items.
 4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
@@ -669,4 +669,40 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 - User-facing decision:
   - `integration works`: still yes.
   - `cross-profile PCB DRC violations`: now `0` for both ESP32-S3 and STM32 generated PCB drafts.
+  - `release-quality circuit`: still no. Both profiles still have unconnected PCB items, no completed routing/zones, no Gerber/drill outputs, no sourced BOM evidence, and no datasheet/manufacturing signoff.
+
+## 2026-06-08 Bounded Cross-Footprint Trace Increment
+
+- Added a TDD increment after `aa65578 fix: normalize RF module footprint bodies` to reduce remaining PCB unconnected items without reintroducing DRC violations.
+- Root repo baseline before this increment: `aa65578 fix: normalize RF module footprint bodies`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Root-cause/prototype evidence:
+  - Existing unconnected items were dominated by shared power nets (`GND`, `VBUS`, `+3V3`) across connectors, regulator pads, passives, and headers.
+  - A temporary same-net nearest-tree routing prototype with maximum span `30mm` and different-net pad keepout `1.0mm` reduced ESP32-S3 unconnected items from `48` to `40` with `0` violations.
+  - The same prototype reduced STM32 unconnected items from `46` to `37` with `0` violations.
+  - A more aggressive 30mm/0.8mm prototype reduced ESP32-S3 further to `34` unconnected but introduced `4` DRC violations, so it was rejected.
+- Implemented behavior:
+  - The PCB generator now keeps the earlier local same-footprint trace scaffold and adds bounded cross-footprint same-net segments using a nearest safe segment search.
+  - Cross-footprint segments are capped at `30mm`.
+  - Candidate segments are skipped if they pass within `1.0mm` of any different-net pad center.
+  - Duplicate segment coordinates are deduplicated before output.
+- TDD evidence:
+  - `tests/project-generator.test.js` first failed because all generated trace spans were still local (`<= 8mm`) and no safe cross-footprint span existed.
+  - After implementation, the test verifies all trace spans remain bounded (`<= 30mm`) and at least one cross-footprint span (`> 8mm`) is generated.
+- Verification run in this increment:
+  - `node --test tests\project-generator.test.js`: pass, 8/8.
+  - `npm test`: pass, 66/66.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad CLI path: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
+  - Official KiCad CLI version: `10.0.3`.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both schematic ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both regenerated profile projects.
+  - Official KiCad 10.0.3 PCB DRC on regenerated supported profile projects:
+    - ESP32-S3: `0` violations, `40` unconnected items.
+    - STM32: `0` violations, `37` unconnected items.
+- User-facing decision:
+  - `integration works`: still yes.
+  - `cross-profile PCB DRC violations`: still `0` for both generated PCB drafts.
   - `release-quality circuit`: still no. Both profiles still have unconnected PCB items, no completed routing/zones, no Gerber/drill outputs, no sourced BOM evidence, and no datasheet/manufacturing signoff.

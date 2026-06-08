@@ -300,9 +300,14 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
       const segmentSpans = boardSegmentSpans(board);
       assert.ok(segmentSpans.length > 0);
       assert.equal(
-        segmentSpans.every((span) => span <= 8),
+        segmentSpans.every((span) => span <= 30),
         true,
-        'draft PCB trace scaffold should only emit conservative local segments'
+        'draft PCB trace scaffold should only emit bounded conservative segments'
+      );
+      assert.equal(
+        segmentSpans.some((span) => span > 8),
+        true,
+        'draft PCB trace scaffold should connect safe cross-footprint spans'
       );
       assert.doesNotMatch(board, /\(property "Reference" "REF\*\*"/);
     }
