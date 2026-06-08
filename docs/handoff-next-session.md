@@ -160,6 +160,58 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
 ```
 
+## 2026-06-08 Official Symbol Cache and Pin-Location Increment
+
+- Added a second TDD increment after `e303555` to move from generated support-symbol cache geometry toward official KiCad symbol geometry.
+- Current root baseline before this increment: `e303555 feat: use KiCad support symbols for profiles`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Official KiCad latest stable was rechecked from official KiCad sources during this increment:
+  - `https://www.kicad.org/download/windows/` reported Stable Release Current Version `10.0.3`.
+  - `https://www.kicad.org/blog/2026/05/KiCad-10.0.3-Release/` identifies KiCad 10.0.3 as the 2026-05-15 stable bug-fix release.
+  - Installed CLI path `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe` remains the validation path.
+- Implemented behavior:
+  - Production-facing support symbols now cache the official KiCad 10 `.kicad_sym` symbol bodies from the local KiCad install instead of ChatPCB-generated rectangle symbols.
+  - The generator adds official cache dependencies for inherited symbols such as `Regulator_Linear:AP1117-15` used by `Regulator_Linear:AMS1117-3.3`.
+  - Supported profile components now carry pin-number-to-net maps so repeated official symbols such as `Device:R`, `Device:C`, `Switch:SW_Push`, connectors, and USB-C pins can be wired by real pin number rather than by a generic generated pin order.
+  - The renderer now has explicit official pin-location tables for the supported KiCad symbols used by the ESP32-S3 and STM32 profile boards.
+- Result versus previous increment:
+  - Previous profile ERC: `0` errors, `18` warnings, all `lib_symbol_mismatch`.
+  - Current ESP32-S3 profile ERC: `0` errors, `5` warnings: `multiple_net_names: 1`, `unconnected_wire_endpoint: 3`, `lib_symbol_mismatch: 1`.
+  - Current STM32 profile ERC: `0` errors, `5` warnings: `multiple_net_names: 1`, `unconnected_wire_endpoint: 3`, `lib_symbol_mismatch: 1`.
+  - The remaining warning cluster is still centered on the inherited `Regulator_Linear:AMS1117-3.3`/`AP1117-15` symbol and regulator net stubs.
+- Fresh generated samples:
+  - `workspaces/esp32-s3-usbc-sensor-profile`
+  - `workspaces/stm32-usbc-sensor-profile`
+- Official KiCad 10.0.3 export result after this increment:
+  - ESP32 PDF `workspaces/esp32-s3-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.pdf`, 105448 bytes.
+  - ESP32 SVG `workspaces/esp32-s3-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.svg`, 932016 bytes.
+  - STM32 PDF `workspaces/stm32-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.pdf`, 102951 bytes.
+  - STM32 SVG `workspaces/stm32-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.svg`, 917970 bytes.
+- Verification commands run:
+
+```powershell
+node --test tests\board-profiles.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+$env:KICAD_CLI_PATH='C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe'
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+```
+
+- `npm run verify:ui` initially failed with `EADDRINUSE` on `127.0.0.1:41317` because a global installed `oh-my-chatpcb` daemon was already running. The stale ChatPCB daemon process was stopped, and `npm run verify:ui` then passed.
+- Final readiness decision after this increment:
+  - `integration works`: yes, KiCad 10.0.3 can generate, validate, and export both supported profiles.
+  - `release-quality circuit`: still no. Release-quality requires ERC `0` errors and `0` warnings, exact orderable parts, datasheet pin review, sourcing, simulation/calculation evidence, and layout/manufacturing outputs.
+  - Next concrete engineering target: remove the remaining AMS1117/AP1117 inherited-symbol mismatch and regulator net-stub warnings, then rerun ESP32/STM32 cross-profile ERC until both are `0` errors and `0` warnings.
+
 Additional verification commands run for this increment:
 
 ```powershell
@@ -211,7 +263,7 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32s3-usbc-sensor-ki
 
 ## Next Work
 
-1. Replace generated support-symbol cache geometry with actual official KiCad symbol geometry, or compute label stubs from official pin locations, so supported profiles reach ERC `0` errors and `0` warnings.
+1. Remove the remaining `Regulator_Linear:AMS1117-3.3`/`AP1117-15` inherited-symbol mismatch and regulator net-stub warnings so both supported profiles reach ERC `0` errors and `0` warnings in official KiCad 10.0.3.
 2. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB live sourcing evidence.
 3. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
 4. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.

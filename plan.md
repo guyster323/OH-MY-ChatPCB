@@ -297,7 +297,9 @@ Work items:
 - [x] Add cross-profile release gates that keep ESP32-S3 and STM32 profile outputs out of `ready-for-release` until production symbols, sourcing, datasheet review, simulation, and layout/DRC evidence are complete.
 - [x] Expand both supported profiles with actual support-circuit passives for status LED current limiting and I2C pull-ups.
 - [x] Replace supported-profile support component placements with production-facing KiCad library IDs and keep ChatPCB local symbols only for profile MCUs where exact official symbols are unavailable.
-- [ ] If pursuing final circuit quality, replace generated cached support-symbol geometry with actual official KiCad symbol geometry or official-pin-location wiring, then remove all `lib_symbol_mismatch` ERC warnings.
+- [x] Replace generated cached support-symbol geometry for supported profile support components with official KiCad 10 symbol-cache bodies where available.
+- [x] Add pin-number-to-net mapping and official pin-location wiring tables for supported profile support symbols.
+- [ ] If pursuing final circuit quality, remove the remaining inherited-regulator `lib_symbol_mismatch`, `multiple_net_names`, and `unconnected_wire_endpoint` ERC warnings.
 - [ ] Add exact orderable components and tests for the chosen board target.
 - [x] If pursuing the UX loop, add review findings grouped by severity, user-readable remediation proposals, approval-gated patch application, rerun validation, and final readiness status.
 - [x] Add direct GUI verification through official KiCad latest stable and the built KiCad fork panel where feasible.
@@ -333,6 +335,14 @@ Production symbol update on 2026-06-08:
 - KiCad 10.0.3 initially reported dangling/isolated labels when only the `lib_id`s were changed, because generated label stubs were positioned for ChatPCB's simple rectangular symbols rather than official KiCad symbol geometry.
 - The current implementation adds schematic-level cached support-symbol definitions to preserve connectivity. This gets both ESP32-S3 and STM32 profile samples to ERC `0` errors, but KiCad reports `18` `lib_symbol_mismatch` warnings because the cached definitions are not the official library drawings.
 - Therefore the profile status remains `ready-for-prototype-review`, not `ready-for-release`.
+
+Official symbol-cache update on 2026-06-08:
+
+- Supported-profile production support symbols now cache official KiCad 10 `.kicad_sym` bodies from the installed KiCad symbol library instead of ChatPCB-generated rectangle symbols.
+- Repeated official symbols are wired by pin-number-to-net maps, with explicit official pin-location tables for resistors, capacitors, LED, push switches, headers, USB-C, and AMS1117/AP1117 regulator symbols.
+- ERC warnings for both ESP32-S3 and STM32 supported profiles dropped from `18` to `5`.
+- Current official KiCad 10.0.3 ERC result for both profile samples is `0` errors and `5` warnings: `lib_symbol_mismatch: 1`, `multiple_net_names: 1`, `unconnected_wire_endpoint: 3`.
+- The remaining warning cluster is centered on the inherited `Regulator_Linear:AMS1117-3.3`/`AP1117-15` symbol and regulator net stubs.
 
 Acceptance criteria:
 
@@ -386,7 +396,7 @@ git log --oneline -1
 Continue Phase 8 before widening PCB/layout scope:
 
 1. Replace support fixture symbols with production KiCad symbols and pin-compatible footprints where possible.
-2. Replace generated cached support-symbol geometry with official KiCad symbol geometry or compute label stubs from official pin locations so ERC reaches `0` errors and `0` warnings.
+2. Remove the remaining inherited-regulator warnings so ESP32-S3 and STM32 profile ERC reaches `0` errors and `0` warnings.
 3. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
 4. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
 5. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

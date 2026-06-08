@@ -44,9 +44,13 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.match(schematic, /\(lib_id "Connector_Generic:Conn_01x06"\)/);
     assert.match(schematic, /\(lib_id "Connector_Generic:Conn_02x05_Odd_Even"\)/);
     assert.match(schematic, /\(symbol "Device:R"/);
+    assert.match(schematic, /\(property "Description" "Resistor"/);
     assert.match(schematic, /\(symbol "Device:C"/);
+    assert.match(schematic, /\(property "Description" "Unpolarized capacitor"/);
     assert.match(schematic, /\(symbol "Regulator_Linear:AMS1117-3\.3"/);
+    assert.match(schematic, /\(extends "AP1117-15"\)/);
     assert.match(schematic, /\(symbol "Connector:USB_C_Receptacle_USB2\.0_16P"/);
+    assert.doesNotMatch(schematic, /\(symbol "Device:R"[\s\S]*?\(rectangle\s+\(start -7\.62 6\.35\)/);
     assert.match(symbolLibrary, /\(symbol "ESP32_S3_WROOM_1"/);
     assert.doesNotMatch(symbolLibrary, /\(symbol "REGULATOR_3V3"/);
     assert.doesNotMatch(symbolLibrary, /\(symbol "CC_RESISTOR"/);
@@ -123,9 +127,13 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.match(schematic, /\(lib_id "Connector_Generic:Conn_01x06"\)/);
     assert.match(schematic, /\(lib_id "Connector_Generic:Conn_02x05_Odd_Even"\)/);
     assert.match(schematic, /\(symbol "Device:R"/);
+    assert.match(schematic, /\(property "Description" "Resistor"/);
     assert.match(schematic, /\(symbol "Device:C"/);
+    assert.match(schematic, /\(property "Description" "Unpolarized capacitor"/);
     assert.match(schematic, /\(symbol "Regulator_Linear:AMS1117-3\.3"/);
+    assert.match(schematic, /\(extends "AP1117-15"\)/);
     assert.match(schematic, /\(symbol "Connector:USB_C_Receptacle_USB2\.0_16P"/);
+    assert.doesNotMatch(schematic, /\(symbol "Device:R"[\s\S]*?\(rectangle\s+\(start -7\.62 6\.35\)/);
     assert.equal(metadata.debug.requestedProtocol, 'swd');
     assert.equal(metadata.debug.implementedProtocol, 'swd');
     assert.deepEqual(metadata.debug.nets, ['SWDIO', 'SWCLK', 'NRST']);

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 
 const KICAD_COORDINATE_SCALE = 1;
 
@@ -33,12 +34,14 @@ export function buildMcuSchematicAst(spec) {
     component('J1', profileMode ? 'Connector_Generic:Conn_01x02' : 'ChatPCB:POWER_INPUT', 'USB-C / external power input.', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
       value: profileMode ? 'POWER_INPUT' : undefined,
       pins: ['VBUS', 'GND'],
-      connectedPins: ['VBUS', 'GND']
+      connectedPins: ['VBUS', 'GND'],
+      pinNets: profileMode ? { 1: 'VBUS', 2: 'GND' } : undefined
     }),
     component('U1', profileMode ? 'Regulator_Linear:AMS1117-3.3' : 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
       value: profileMode ? 'AMS1117-3.3' : undefined,
       pins: ['VBUS', 'GND', '+3V3'],
-      connectedPins: ['GND', 'VBUS', '+3V3']
+      connectedPins: ['GND', 'VBUS', '+3V3'],
+      pinNets: profileMode ? { 1: 'GND', 2: '+3V3', 3: 'VBUS' } : undefined
     }),
     component('U2', mcuLibId, `${spec.mcu.package} controller/module with named MCU nets for review.`, mcuFootprintFor(spec), {
       value: spec.mcu.package === 'unspecified' ? 'MCU_PLACEHOLDER' : spec.mcu.package,
@@ -47,17 +50,20 @@ export function buildMcuSchematicAst(spec) {
     component('SW1', profileMode ? 'Switch:SW_Push' : 'ChatPCB:RESET_BUTTON', 'Momentary reset input for the MCU RESET net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA', {
       value: profileMode ? 'RESET_BUTTON' : undefined,
       pins: ['RESET', 'GND'],
-      connectedPins: ['RESET', 'GND']
+      connectedPins: ['RESET', 'GND'],
+      pinNets: profileMode ? { 1: 'RESET', 2: 'GND' } : undefined
     }),
     component('SW2', profileMode ? 'Switch:SW_Push' : 'ChatPCB:BOOT_BUTTON', 'Momentary boot/BOOTSEL input for the MCU BOOT net.', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA', {
       value: profileMode ? 'BOOT_BUTTON' : undefined,
       pins: ['BOOT', 'GND'],
-      connectedPins: ['BOOT', 'GND']
+      connectedPins: ['BOOT', 'GND'],
+      pinNets: profileMode ? { 1: 'BOOT', 2: 'GND' } : undefined
     }),
     component('D1', profileMode ? 'Device:LED' : 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric', {
       value: profileMode ? 'STATUS_LED' : undefined,
       pins: ['+3V3', 'GND'],
-      connectedPins: ['+3V3', 'GND']
+      connectedPins: ['+3V3', 'GND'],
+      pinNets: profileMode ? { 1: 'GND', 2: '+3V3' } : undefined
     })
   ];
 
@@ -66,7 +72,8 @@ export function buildMcuSchematicAst(spec) {
       component('J2', profileMode ? 'Connector_Generic:Conn_01x04' : 'ChatPCB:I2C_CONNECTOR', 'I2C sensor connector exposing SCL, SDA, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', {
         value: profileMode ? 'I2C_CONNECTOR' : undefined,
         pins: ['SCL', 'SDA', '+3V3', 'GND'],
-        connectedPins: ['SCL', 'SDA', '+3V3', 'GND']
+        connectedPins: ['SCL', 'SDA', '+3V3', 'GND'],
+        pinNets: profileMode ? { 1: 'SCL', 2: 'SDA', 3: '+3V3', 4: 'GND' } : undefined
       })
     );
   }
@@ -76,7 +83,8 @@ export function buildMcuSchematicAst(spec) {
       component('J3', profileMode ? 'Connector_Generic:Conn_01x04' : 'ChatPCB:UART_HEADER', 'UART debug header exposing TX, RX, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', {
         value: profileMode ? 'UART_HEADER' : undefined,
         pins: ['TX', 'RX', '+3V3', 'GND'],
-        connectedPins: ['TX', 'RX', '+3V3', 'GND']
+        connectedPins: ['TX', 'RX', '+3V3', 'GND'],
+        pinNets: profileMode ? { 1: 'TX', 2: 'RX', 3: '+3V3', 4: 'GND' } : undefined
       })
     );
   }
@@ -86,7 +94,25 @@ export function buildMcuSchematicAst(spec) {
       component('J4', profileMode ? 'Connector:USB_C_Receptacle_USB2.0_16P' : 'ChatPCB:USB_C_CONNECTOR', 'USB-C sink connector with VBUS, USB data, CC pins, and GND.', 'Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12', {
         value: profileMode ? 'USB_C_CONNECTOR' : undefined,
         pins: ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2'],
-        connectedPins: ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2']
+        connectedPins: ['VBUS', 'USB_DP', 'USB_DN', 'GND', 'CC1', 'CC2'],
+        pinNets: profileMode
+          ? {
+              A1: 'GND',
+              A4: 'VBUS',
+              A5: 'CC1',
+              A6: 'USB_DP',
+              A7: 'USB_DN',
+              A9: 'VBUS',
+              A12: 'GND',
+              B1: 'GND',
+              B4: 'VBUS',
+              B5: 'CC2',
+              B6: 'USB_DP',
+              B7: 'USB_DN',
+              B9: 'VBUS',
+              B12: 'GND'
+            }
+          : undefined
       })
     );
   }
@@ -96,7 +122,8 @@ export function buildMcuSchematicAst(spec) {
       component('J5', profileMode ? 'Connector_Generic:Conn_01x06' : 'ChatPCB:SPI_HEADER', 'SPI expansion header exposing SCK, MOSI, MISO, CS, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical', {
         value: profileMode ? 'SPI_HEADER' : undefined,
         pins: ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND'],
-        connectedPins: ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND']
+        connectedPins: ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND'],
+        pinNets: profileMode ? { 1: 'SCK', 2: 'MOSI', 3: 'MISO', 4: 'CS', 5: '+3V3', 6: 'GND' } : undefined
       })
     );
   }
@@ -106,7 +133,8 @@ export function buildMcuSchematicAst(spec) {
       component('J6', profileMode ? 'Connector_Generic:Conn_01x05' : 'ChatPCB:GPIO_HEADER', 'GPIO expansion header exposing GPIO0, GPIO1, GPIO2, +3V3, and GND.', 'Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical', {
         value: profileMode ? 'GPIO_HEADER' : undefined,
         pins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'],
-        connectedPins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND']
+        connectedPins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'],
+        pinNets: profileMode ? { 1: 'GPIO0', 2: 'GPIO1', 3: 'GPIO2', 4: '+3V3', 5: 'GND' } : undefined
       })
     );
   }
@@ -116,22 +144,25 @@ export function buildMcuSchematicAst(spec) {
       component('J7', profileMode ? 'Connector_Generic:Conn_02x05_Odd_Even' : 'ChatPCB:DEBUG_HEADER', `${spec.debug.implementedProtocol.toUpperCase()} debug header for ${spec.mcu.family}.`, 'Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical', {
         value: profileMode ? 'DEBUG_HEADER' : undefined,
         pins: [...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT'],
-        connectedPins: [...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT']
+        connectedPins: [...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT'],
+        pinNets: profileMode
+          ? Object.fromEntries([...spec.debug.nets, '+3V3', 'GND', 'RESET', 'BOOT'].map((net, index) => [String(index + 1), net]))
+          : undefined
       })
     );
   }
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'decoupling-network')) {
     components.push(
-      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'] }),
-      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Bulk 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'] })
+      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
+      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Bulk 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined })
     );
   }
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'usb-c-cc-pulldowns')) {
     components.push(
-      component('R1', profileMode ? 'Device:R' : 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC1.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k', pins: ['CC1', 'GND'], connectedPins: ['CC1', 'GND'] }),
-      component('R2', profileMode ? 'Device:R' : 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC2.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k', pins: ['CC2', 'GND'], connectedPins: ['CC2', 'GND'] })
+      component('R1', profileMode ? 'Device:R' : 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC1.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k', pins: ['CC1', 'GND'], connectedPins: ['CC1', 'GND'], pinNets: profileMode ? { 1: 'CC1', 2: 'GND' } : undefined }),
+      component('R2', profileMode ? 'Device:R' : 'ChatPCB:CC_RESISTOR', 'USB-C sink pulldown on CC2.', 'Resistor_SMD:R_0603_1608Metric', { value: '5.1k', pins: ['CC2', 'GND'], connectedPins: ['CC2', 'GND'], pinNets: profileMode ? { 1: 'CC2', 2: 'GND' } : undefined })
     );
   }
 
@@ -140,6 +171,7 @@ export function buildMcuSchematicAst(spec) {
       component('R3', profileMode ? 'Device:R' : 'ChatPCB:LED_RESISTOR', 'Status LED series resistor for a bounded indicator current.', 'Resistor_SMD:R_0603_1608Metric', {
         pins: ['+3V3', 'GND'],
         connectedPins: ['+3V3', 'GND'],
+        pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined,
         value: '1k'
       })
     );
@@ -150,12 +182,14 @@ export function buildMcuSchematicAst(spec) {
       component('R4', profileMode ? 'Device:R' : 'ChatPCB:I2C_PULLUP', 'I2C SCL pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
         value: '4.7k',
         pins: ['+3V3', 'SCL'],
-        connectedPins: ['+3V3', 'SCL']
+        connectedPins: ['+3V3', 'SCL'],
+        pinNets: profileMode ? { 1: '+3V3', 2: 'SCL' } : undefined
       }),
       component('R5', profileMode ? 'Device:R' : 'ChatPCB:I2C_PULLUP', 'I2C SDA pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
         value: '4.7k',
         pins: ['+3V3', 'SDA'],
-        connectedPins: ['+3V3', 'SDA']
+        connectedPins: ['+3V3', 'SDA'],
+        pinNets: profileMode ? { 1: '+3V3', 2: 'SDA' } : undefined
       })
     );
   }
@@ -249,7 +283,7 @@ export function renderSpiceFixture(spec) {
   ].join('\n');
 }
 
-function component(ref, libId, explanation, footprint, { connectedPins, pins, value } = {}) {
+function component(ref, libId, explanation, footprint, { connectedPins, pinNets, pins, value } = {}) {
   return {
     ref,
     libId,
@@ -257,6 +291,7 @@ function component(ref, libId, explanation, footprint, { connectedPins, pins, va
     footprint,
     explanation,
     pins,
+    pinNets,
     connectedPins
   };
 }
@@ -320,16 +355,29 @@ function explainNet(name) {
 
 function renderLibSymbols(usedLibIds) {
   const used = new Set(usedLibIds);
+  const fixtureBlocks = fixtureSymbols()
+    .filter(([id]) => used.has(id))
+    .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id)));
+  const officialBlocks = officialCacheDependenciesFor([...used])
+    .map((libId) => renderOfficialCachedSymbol(libId))
+    .filter(Boolean);
+
   return `  (lib_symbols
-${schematicSymbolDefinitions()
-  .filter(([id]) => used.has(id))
-  .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id)))
-  .join('\n')}
+${[...fixtureBlocks, ...officialBlocks].join('\n')}
   )`;
 }
 
-function schematicSymbolDefinitions() {
-  return [...fixtureSymbols(), ...productionSupportSymbols()];
+function officialCacheDependenciesFor(usedLibIds) {
+  const dependencies = [];
+  for (const libId of usedLibIds) {
+    if (libId === 'Regulator_Linear:AMS1117-3.3') {
+      dependencies.push('Regulator_Linear:AP1117-15');
+    }
+    if (officialPinDefinitionsFor(libId).length > 0) {
+      dependencies.push(libId);
+    }
+  }
+  return unique(dependencies);
 }
 
 function fixtureSymbols() {
@@ -355,20 +403,66 @@ function fixtureSymbols() {
   ];
 }
 
-function productionSupportSymbols() {
-  return [
-    ['Connector_Generic:Conn_01x02', 'J', 'POWER_INPUT'],
-    ['Regulator_Linear:AMS1117-3.3', 'U', 'AMS1117-3.3'],
-    ['Switch:SW_Push', 'SW', 'SW_Push'],
-    ['Device:LED', 'D', 'LED'],
-    ['Connector_Generic:Conn_01x04', 'J', 'Conn_01x04'],
-    ['Connector:USB_C_Receptacle_USB2.0_16P', 'J', 'USB_C_Receptacle_USB2.0_16P'],
-    ['Connector_Generic:Conn_01x06', 'J', 'Conn_01x06'],
-    ['Connector_Generic:Conn_01x05', 'J', 'Conn_01x05'],
-    ['Connector_Generic:Conn_02x05_Odd_Even', 'J', 'Conn_02x05_Odd_Even'],
-    ['Device:C', 'C', 'C'],
-    ['Device:R', 'R', 'R']
-  ];
+function renderOfficialCachedSymbol(libId) {
+  const [library, symbolName] = libId.split(':');
+  if (!library || !symbolName) {
+    return null;
+  }
+
+  const libraryPath = officialSymbolLibraryPath(library);
+  if (!libraryPath) {
+    return null;
+  }
+
+  try {
+    const source = readFileSync(libraryPath, 'utf8');
+    const block = extractSymbolBlock(source, symbolName);
+    return indentOfficialSymbolBlock(transformOfficialSymbolBlock(block, library, symbolName));
+  } catch {
+    return null;
+  }
+}
+
+function officialSymbolLibraryPath(library) {
+  const candidates = [
+    process.env.KICAD_SYMBOL_DIR,
+    'C:/Users/windo/AppData/Local/Programs/KiCad/10.0/share/kicad/symbols',
+    'C:/Program Files/KiCad/10.0/share/kicad/symbols'
+  ].filter(Boolean);
+
+  return candidates.map((dir) => `${dir}/${library}.kicad_sym`).find((file) => existsSync(file)) ?? null;
+}
+
+function extractSymbolBlock(source, symbolName) {
+  const start = source.indexOf(`(symbol "${symbolName}"`);
+  if (start < 0) {
+    throw new Error(`Symbol ${symbolName} not found.`);
+  }
+
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === '(') {
+      depth += 1;
+    } else if (source[index] === ')') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+
+  throw new Error(`Symbol ${symbolName} is unterminated.`);
+}
+
+function transformOfficialSymbolBlock(block, library, symbolName) {
+  return block.replace(`(symbol "${symbolName}"`, `(symbol "${library}:${symbolName}"`);
+}
+
+function indentOfficialSymbolBlock(block) {
+  return block
+    .split(/\r?\n/)
+    .map((line) => `    ${line.replace(/\t/g, '  ')}`)
+    .join('\n');
 }
 
 function renderLibSymbol(id, referencePrefix, value, pins, { projectLibrary = false } = {}) {
@@ -415,20 +509,19 @@ function renderLibPin(pinName, index) {
 }
 
 function renderPlacedComponent(componentModel, x, y, baseName) {
-  const symbolPins = symbolPinsFor(componentModel.libId);
-  const pins = componentModel.pins ?? symbolPins;
-  const pinSlots = symbolPins.length > pins.length ? symbolPins : pins;
+  const pins = componentModel.pins ?? symbolPinsFor(componentModel.libId);
+  const pinSlots = pinDefinitionsFor(componentModel.libId, pins);
   const connectedPins = new Set(componentModel.connectedPins ?? pins);
 
   return [
     renderSymbolInstance(componentModel, x, y, baseName),
-    ...pinSlots.flatMap((pinName, index) => {
-      const netName = pins[index];
+    ...pinSlots.flatMap((pinDef, index) => {
+      const netName = componentModel.pinNets?.[pinDef.number] ?? pins[index];
       if (netName && connectedPins.has(netName)) {
-        return renderPinNetStub(netName, x, y, index);
+        return renderPinNetStub(netName, x, y, pinDef);
       }
 
-      const point = pinConnectionPoint(x, y, index);
+      const point = pinConnectionPoint(x, y, pinDef);
       return renderNoConnect(point.x, point.y);
     })
   ].join('\n');
@@ -464,6 +557,95 @@ function renderSymbolInstance(componentModel, x, y, baseName) {
       )
     )
   )`;
+}
+
+function pinDefinitionsFor(libId, fallbackPins) {
+  const official = officialPinDefinitionsFor(libId);
+  return official.length > 0 ? official : generatedPinDefinitions(fallbackPins);
+}
+
+function officialPinDefinitionsFor(libId) {
+  switch (libId) {
+    case 'Connector_Generic:Conn_01x02':
+      return [
+        pinDef('1', -5.08, 0, 0),
+        pinDef('2', -5.08, -2.54, 0)
+      ];
+    case 'Regulator_Linear:AMS1117-3.3':
+      return [pinDef('1', 0, -7.62, 90), pinDef('2', 7.62, 0, 180), pinDef('3', -7.62, 0, 0)];
+    case 'Switch:SW_Push':
+      return [pinDef('1', -5.08, 0, 0), pinDef('2', 5.08, 0, 180)];
+    case 'Device:LED':
+      return [pinDef('1', -3.81, 0, 0), pinDef('2', 3.81, 0, 180)];
+    case 'Connector_Generic:Conn_01x04':
+      return [pinDef('1', -5.08, 2.54, 0), pinDef('2', -5.08, 0, 0), pinDef('3', -5.08, -2.54, 0), pinDef('4', -5.08, -5.08, 0)];
+    case 'Connector_Generic:Conn_01x05':
+      return [
+        pinDef('1', -5.08, 5.08, 0),
+        pinDef('2', -5.08, 2.54, 0),
+        pinDef('3', -5.08, 0, 0),
+        pinDef('4', -5.08, -2.54, 0),
+        pinDef('5', -5.08, -5.08, 0)
+      ];
+    case 'Connector_Generic:Conn_01x06':
+      return [
+        pinDef('1', -5.08, 5.08, 0),
+        pinDef('2', -5.08, 2.54, 0),
+        pinDef('3', -5.08, 0, 0),
+        pinDef('4', -5.08, -2.54, 0),
+        pinDef('5', -5.08, -5.08, 0),
+        pinDef('6', -5.08, -7.62, 0)
+      ];
+    case 'Connector_Generic:Conn_02x05_Odd_Even':
+      return [
+        pinDef('1', -5.08, 5.08, 0),
+        pinDef('2', 7.62, 5.08, 180),
+        pinDef('3', -5.08, 2.54, 0),
+        pinDef('4', 7.62, 2.54, 180),
+        pinDef('5', -5.08, 0, 0),
+        pinDef('6', 7.62, 0, 180),
+        pinDef('7', -5.08, -2.54, 0),
+        pinDef('8', 7.62, -2.54, 180),
+        pinDef('9', -5.08, -5.08, 0),
+        pinDef('10', 7.62, -5.08, 180)
+      ];
+    case 'Device:C':
+    case 'Device:R':
+      return [pinDef('1', 0, 3.81, 270), pinDef('2', 0, -3.81, 90)];
+    case 'Connector:USB_C_Receptacle_USB2.0_16P':
+      return [
+        pinDef('A1', 0, -22.86, 90),
+        pinDef('A4', 15.24, 15.24, 180),
+        pinDef('A5', 15.24, 10.16, 180),
+        pinDef('A6', 15.24, -2.54, 180),
+        pinDef('A7', 15.24, 2.54, 180),
+        pinDef('A8', 15.24, -12.7, 180),
+        pinDef('A9', 15.24, 15.24, 180),
+        pinDef('A12', 0, -22.86, 90),
+        pinDef('B1', 0, -22.86, 90),
+        pinDef('B4', 15.24, 15.24, 180),
+        pinDef('B5', 15.24, 7.62, 180),
+        pinDef('B6', 15.24, -5.08, 180),
+        pinDef('B7', 15.24, 0, 180),
+        pinDef('B8', 15.24, -15.24, 180),
+        pinDef('B9', 15.24, 15.24, 180),
+        pinDef('B12', 0, -22.86, 90),
+        pinDef('SH', -7.62, -22.86, 90)
+      ];
+    default:
+      return [];
+  }
+}
+
+function generatedPinDefinitions(pins) {
+  return pins.map((_, index) => {
+    const leftSide = index % 2 === 0;
+    return pinDef(String(index + 1), leftSide ? -12.7 : 12.7, 5.08 - Math.floor(index / 2) * 2.54, leftSide ? 0 : 180);
+  });
+}
+
+function pinDef(number, x, y, rotation) {
+  return { number, x, y, rotation };
 }
 
 function symbolPinsFor(libId) {
@@ -545,24 +727,35 @@ function mcuFootprintFor(spec) {
   }
 }
 
-function pinConnectionPoint(symbolX, symbolY, pinIndex) {
-  const leftSide = pinIndex % 2 === 0;
+function pinConnectionPoint(symbolX, symbolY, pinDef) {
   return {
-    x: symbolX + (leftSide ? -12.7 : 12.7),
-    y: symbolY - 5.08 + Math.floor(pinIndex / 2) * 2.54,
-    rotation: leftSide ? 0 : 180
+    x: symbolX + pinDef.x,
+    y: symbolY - pinDef.y,
+    rotation: pinDef.rotation
   };
 }
 
-function renderPinNetStub(pinName, symbolX, symbolY, pinIndex) {
-  const start = pinConnectionPoint(symbolX, symbolY, pinIndex);
-  const labelX = start.x + (start.rotation === 0 ? -5.08 : 5.08);
-  const end = { x: labelX, y: start.y };
+function renderPinNetStub(pinName, symbolX, symbolY, pinDef) {
+  const start = pinConnectionPoint(symbolX, symbolY, pinDef);
+  const end = labelPointFromPin(start);
 
   return [
     renderWire(start, end),
     renderLabel(pinName, end.x, end.y, start.rotation)
   ];
+}
+
+function labelPointFromPin(pin) {
+  switch (pin.rotation) {
+    case 90:
+      return { x: pin.x, y: pin.y - 5.08 };
+    case 180:
+      return { x: pin.x + 5.08, y: pin.y };
+    case 270:
+      return { x: pin.x, y: pin.y + 5.08 };
+    default:
+      return { x: pin.x - 5.08, y: pin.y };
+  }
 }
 
 function renderWire(start, end) {
