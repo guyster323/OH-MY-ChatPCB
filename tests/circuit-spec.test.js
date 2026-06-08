@@ -25,3 +25,9 @@ test('uses conservative MCU defaults when prompt does not name a family', () => 
   assert.ok(spec.interfaces.some((iface) => iface.kind === 'spi'));
   assert.ok(spec.peripherals.some((peripheral) => peripheral.kind === 'status-led'));
 });
+
+test('preserves ESP32-S3 variant when the prompt names it', () => {
+  const spec = normalizeCircuitSpec('USB-C powered ESP32-S3 sensor board with SPI, USB, and GPIO header.');
+
+  assert.equal(spec.mcu.family, 'ESP32-S3');
+});

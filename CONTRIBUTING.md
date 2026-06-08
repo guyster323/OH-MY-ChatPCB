@@ -50,3 +50,24 @@ Keep the fork branch rebaseable:
 - do not add custom top-level `chatpcb_*` nodes to KiCad schematic or PCB files
 - keep ChatPCB metadata in `.chatpcb.json`
 - verify generated files with `kicad-cli` before widening the generator
+
+## Circuit quality and user-update workflow
+
+Treat official KiCad latest-stable compatibility as a user-facing requirement.
+A normal user may accept KiCad update prompts, so test generated project files
+in official KiCad separately from the ChatPCB-enabled KiCad fork.
+
+Do not mark a generated circuit release-ready only because ERC passes. For
+release-quality circuit changes, tests and handoff notes must cover:
+
+- exact KiCad version and executable path used for validation
+- schematic readability in the GUI
+- symbol library resolution
+- part values and footprints
+- power rails, power flags, decoupling, reset/boot/debug wiring, and connector pinout
+- ERC errors, warnings, and residual risks
+- generated review/export artifacts where available
+
+If required electrical details are missing, expose them as blockers or review
+findings and prefer an approval-gated review/fix/validate loop over silent
+assumptions.

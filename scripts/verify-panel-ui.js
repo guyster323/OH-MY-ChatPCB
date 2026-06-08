@@ -65,9 +65,16 @@ try {
   await page.locator('#patch-review').waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.querySelector('#patch-diff')?.textContent?.includes('+++ chatpcb_mcu_peripheral.chatpcb.json'));
   await page.locator('#approve-patch-button').click();
-  await page.waitForFunction(() => [...document.querySelectorAll('#chat-log .message')].some((node) => node.textContent?.includes('Patch applied. ERC passed.')), null, {
-    timeout: 20000
-  });
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('#chat-log .message')].some(
+        (node) => node.textContent?.includes('Patch applied.') && node.textContent?.includes('ERC passed.')
+      ),
+    null,
+    {
+      timeout: 20000
+    }
+  );
   await page.waitForFunction(() => document.querySelectorAll('#artifact-list li').length >= 6, null, {
     timeout: 10000
   });
@@ -80,7 +87,7 @@ try {
 
   assert.equal(patchResult.patchHidden, true);
   assert.ok(patchResult.messages.some((message) => message?.includes('Patch canceled.')));
-  assert.ok(patchResult.messages.some((message) => message?.includes('Patch applied. ERC passed.')));
+  assert.ok(patchResult.messages.some((message) => message?.includes('Patch applied.') && message?.includes('ERC passed.')));
   assert.ok(patchResult.artifacts.some((artifact) => artifact?.includes('.kicad_sym')));
 
   await page.locator('#prompt').fill(slowProviderPrompt);

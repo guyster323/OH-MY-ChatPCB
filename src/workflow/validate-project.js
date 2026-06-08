@@ -17,18 +17,30 @@ export async function validateProject({ projectDir, kicadCliPath, runKicadCliImp
   const output = path.join(resolvedProjectDir, 'chatpcb-erc.json');
 
   try {
+    const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], {
+      explicitPath: kicadCliPath,
+      cwd: resolvedProjectDir
+    });
+
     const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], {
       explicitPath: kicadCliPath,
       cwd: resolvedProjectDir
     });
 
     const erc = await readErcSummary(output);
+    const upgradeOk = formatUpgrade.exitCode === 0;
 
     return {
-      ok: result.exitCode === 0 && erc.errorCount === 0,
+      ok: upgradeOk && result.exitCode === 0 && erc.errorCount === 0,
       skipped: false,
       tool: result.command,
       source: result.source,
+      formatUpgrade: {
+        ok: upgradeOk,
+        exitCode: formatUpgrade.exitCode,
+        stdout: formatUpgrade.stdout,
+        stderr: formatUpgrade.stderr
+      },
       report: output,
       erc,
       exitCode: result.exitCode,

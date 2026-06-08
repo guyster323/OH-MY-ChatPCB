@@ -12,6 +12,11 @@ test('WebView panel bundle connects to the local ChatPCB daemon', async () => {
   assert.match(html, /id="provider-status"/);
   assert.match(html, /id="cancel-provider-button"/);
   assert.match(html, /id="patch-diff"/);
+  assert.match(html, /id="review-status"/);
+  assert.match(html, /id="review-blockers"/);
+  assert.match(html, /id="review-warnings"/);
+  assert.match(html, /id="review-notes"/);
+  assert.match(html, /id="review-fixes"/);
   assert.match(html, /id="approve-patch-button"/);
   assert.match(html, /id="cancel-patch-button"/);
   assert.match(html, /panel\.js/);
@@ -28,6 +33,8 @@ test('WebView panel bundle connects to the local ChatPCB daemon', async () => {
   assert.match(script, /refreshProviderStatus/);
   assert.match(script, /rolledBack/);
   assert.match(script, /Patch validation failed/);
+  assert.match(script, /renderReview/);
+  assert.match(script, /ready for prototype review/i);
 });
 
 test('KiCad fork skeleton declares a wxWebView-backed ChatPCB panel', async () => {

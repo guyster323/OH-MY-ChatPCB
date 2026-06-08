@@ -110,3 +110,34 @@ test('approved schematic patch rolls back files when validation fails', async ()
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('approved schematic patch returns readiness review after validation reruns', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-review-'));
+
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
+    });
+
+    const result = await applySchematicPatch({
+      projectDir: root,
+      prompt:
+        'USB-C powered ESP32-S3 sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, reset button, status LED, USB, SPI, GPIO header, JLCPCB order ready.',
+      approved: true,
+      validateProjectImpl: async () => ({
+        ok: true,
+        skipped: false,
+        erc: { errorCount: 0, warningCount: 2, byType: { footprint_link_issues: 2 } }
+      })
+    });
+
+    assert.equal(result.applied, true);
+    assert.equal(result.review.status, 'blocked');
+    assert.ok(result.review.findings.blockers.some((finding) => /footprint/i.test(finding.message)));
+    assert.ok(result.review.findings.blockers.some((finding) => /JLCPCB/i.test(finding.message)));
+    assert.ok(result.review.residualRisks.some((risk) => /not release-ready/i.test(risk)));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

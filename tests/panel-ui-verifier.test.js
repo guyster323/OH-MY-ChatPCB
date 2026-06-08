@@ -34,4 +34,7 @@ test('panel browser UI verifier drives the real panel like a user', async () => 
   assert.match(source, /artifact-list/);
   assert.match(source, /\.kicad_sym/);
   assert.match(source, /sym-lib-table/);
+  assert.match(source, /Patch applied/);
+  assert.match(source, /ERC passed/);
+  assert.doesNotMatch(source, /Patch applied\. ERC passed\./);
 });

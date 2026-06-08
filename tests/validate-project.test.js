@@ -27,10 +27,42 @@ test('validateProject passes absolute schematic and report paths to kicad-cli', 
     });
 
     assert.equal(result.ok, true);
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0].args.slice(0, 3), ['sch', 'upgrade', '--force']);
     assert.equal(path.isAbsolute(calls[0].args.at(-1)), true);
-    assert.equal(path.isAbsolute(calls[0].args[calls[0].args.indexOf('--output') + 1]), true);
+    assert.deepEqual(calls[1].args.slice(0, 2), ['sch', 'erc']);
+    assert.equal(path.isAbsolute(calls[1].args.at(-1)), true);
+    assert.equal(path.isAbsolute(calls[1].args[calls[1].args.indexOf('--output') + 1]), true);
     assert.equal(calls[0].options.cwd, root);
+    assert.equal(calls[1].options.cwd, root);
+    assert.equal(result.formatUpgrade.ok, true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateProject fails validation when schematic format upgrade fails', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-upgrade-fail-'));
+  await writeFile(path.join(root, 'demo.kicad_sch'), '(kicad_sch)\n', 'utf8');
+
+  try {
+    const result = await validateProject({
+      projectDir: root,
+      runKicadCliImpl: async (args) => {
+        const isUpgrade = args[1] === 'upgrade';
+        if (isUpgrade) {
+          return { exitCode: 1, stdout: '', stderr: 'upgrade failed', command: 'fake-kicad-cli', source: 'test' };
+        }
+
+        const reportPath = args[args.indexOf('--output') + 1];
+        await writeFile(reportPath, JSON.stringify({ sheets: [] }), 'utf8');
+        return { exitCode: 0, stdout: '', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+      }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.formatUpgrade.ok, false);
+    assert.equal(result.erc.errorCount, 0);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -44,6 +76,10 @@ test('validateProject fails when KiCad ERC report contains errors', async () => 
     const result = await validateProject({
       projectDir: root,
       runKicadCliImpl: async (args) => {
+        if (args[1] === 'upgrade') {
+          return { exitCode: 0, stdout: 'upgraded', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+        }
+
         const reportPath = args[args.indexOf('--output') + 1];
         await writeFile(
           reportPath,
@@ -83,6 +119,10 @@ test('validateProject keeps warning-only KiCad ERC reports successful but visibl
     const result = await validateProject({
       projectDir: root,
       runKicadCliImpl: async (args) => {
+        if (args[1] === 'upgrade') {
+          return { exitCode: 0, stdout: 'upgraded', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+        }
+
         const reportPath = args[args.indexOf('--output') + 1];
         await writeFile(
           reportPath,

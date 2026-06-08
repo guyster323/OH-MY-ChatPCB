@@ -59,13 +59,13 @@
 
 **KiCad fork branch:** `chatpcb-panel-scaffold`
 
-**KiCad fork commit:** `80bde26 feat: add ChatPCB panel scaffold` plus uncommitted source-level panel integration in `C:\Users\windo\kicad-source-mirror-chatpcb`.
+**KiCad fork commit:** the most recently verified handoff recorded `6818a8e feat: wire ChatPCB panel into schematic editor`. Recheck `git log --oneline -1` in `C:\Users\windo\kicad-source-mirror-chatpcb` before starting new work.
 
 **Known local tools:**
 
 - Node.js is available.
 - KiCad 9.0.7 CLI is available at `C:/Program Files/KiCad/9.0/bin/kicad-cli.exe`.
-- KiCad 10 CLI was not found locally.
+- Official KiCad 10.0.3 is installed at `C:/Users/windo/AppData/Local/Programs/KiCad/10.0/bin/kicad-cli.exe` and is preferred by the resolver before older all-users KiCad installs. As of 2026-06-08, KiCad 10.0.3 was the latest official stable release found from official KiCad sources; verify again before installing or testing because this can change.
 - `ngspice` was not found on `PATH`.
 - `cmake` was not found on `PATH`, but Visual Studio CMake is available at `C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`.
 - The KiCad fork Ninja configure/build path works after loading `vcvars64.bat` and using the local vcpkg toolchain; `eeschema/eeschema.exe` launches with the ChatPCB panel connected.
@@ -281,6 +281,40 @@ Acceptance criteria:
 - Manufacturing exports are generated into an ignored workspace directory.
 - Panel shows artifact paths and validation status.
 
+## Phase 8: KiCad Latest-Stable User Path and Circuit Release Quality
+
+Goal: make the product trustworthy for a normal user who accepts KiCad update prompts, while addressing the gap between an integration-demo schematic and a circuit that can be released or intentionally sent through a review loop.
+
+Work items:
+
+- [x] Verify the latest official KiCad stable release from official KiCad sources before testing.
+- [x] If allowed by the user, install or update official KiCad latest stable and record the exact version/path.
+- [x] Test ChatPCB-generated projects in official latest KiCad separately from the ChatPCB-enabled KiCad fork.
+- [x] Record and, where possible, suppress or document first-run update/privacy/setup prompts that would confuse a general user.
+- [x] Define a release-quality gate for the constrained MCU peripheral circuit: exact parts or stated placeholders, values, footprints, power rails, decoupling, reset/boot/debug wiring, connector pinout, ERC status, exports, and residual risk notes.
+- [x] Decide whether the next implementation should make one constrained circuit release-ready or add a user review-and-improve loop when requirements are incomplete.
+- [ ] If pursuing circuit quality, replace fixture-like symbols/values with supported real components and tests for the chosen board target.
+- [x] If pursuing the UX loop, add review findings grouped by severity, user-readable remediation proposals, approval-gated patch application, rerun validation, and final readiness status.
+- [x] Add direct GUI verification through official KiCad latest stable and the built KiCad fork panel where feasible.
+
+Session result on 2026-06-08:
+
+- Official KiCad latest stable was verified as 10.0.3 and installed to `C:/Users/windo/AppData/Local/Programs/KiCad/10.0`.
+- Validated ChatPCB schematics are upgraded with `kicad-cli sch upgrade --force` before ERC. The resulting KiCad 10 schematic version is `(version 20260306)`.
+- The ESP32-S3 USB-C sensor-board sample opens in official KiCad 10.0.3 without the old-version conversion banner, exports SVG/PDF after validation, and has ERC `0` errors and `0` warnings.
+- The same sample remains blocked for release because exact orderable parts, production symbols, USB/SPI/GPIO/SWD wiring, and JLCPCB sourcing assumptions are not resolved.
+- The selected product path is the review-and-improve UX loop, not pretending the current circuit is release-ready.
+
+Acceptance criteria:
+
+- Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
+- The ChatPCB fork panel path remains separately verified or has a documented build/rebase blocker.
+- The system no longer describes the generated schematic as release-ready unless the release-quality gate is satisfied.
+- Missing electrical requirements become explicit blockers or review findings, not silent assumptions.
+- A user can either release a constrained supported circuit with evidence or run a clear review-fix-validate loop.
+- `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
+- `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
+
 ## Development Rules
 
 - Use tests before implementation for behavior changes.
@@ -318,8 +352,8 @@ git log --oneline -1
 
 ## Next Immediate Task
 
-Continue Phase 4 and Phase 5 while hardening direct GUI verification:
+Continue Phase 8 before widening PCB/layout scope:
 
-1. Wire the panel into the real KiCad fork source tree and installed asset path.
-2. Keep direct Computer Use verification in the release checklist, using a fresh unlocked sample project so KiCad GUI does not show duplicate-open or stale-loading GUI states.
-3. Continue toward PCB/layout, DRC, and manufacturing workflows once KiCad fork integration is visible in the real application.
+1. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
+2. Add a real ESP32-S3 supported circuit only after exact orderable parts, footprints, pinout, and assumptions are known.
+3. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

@@ -47,6 +47,31 @@
         <pre id="patch-diff" tabindex="0"></pre>
       </section>
 
+      <section id="review-panel" class="review-panel" hidden>
+        <div class="review-head">
+          <h2>Review</h2>
+          <p id="review-status">Pending</p>
+        </div>
+        <div class="review-columns">
+          <section>
+            <h3>Blockers</h3>
+            <ul id="review-blockers"></ul>
+          </section>
+          <section>
+            <h3>Warnings</h3>
+            <ul id="review-warnings"></ul>
+          </section>
+          <section>
+            <h3>Notes</h3>
+            <ul id="review-notes"></ul>
+          </section>
+        </div>
+        <section>
+          <h3>Proposed fixes</h3>
+          <ul id="review-fixes"></ul>
+        </section>
+      </section>
+
       <form id="composer" class="composer">
         <textarea
           id="prompt"

@@ -71,9 +71,9 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
   ];
 
   return `(kicad_sch
-  (version 20250114)
+  (version 20260306)
   (generator "eeschema")
-  (generator_version "9.0")
+  (generator_version "10.0")
   (uuid "${uuid}")
   (paper "A4")
   (title_block

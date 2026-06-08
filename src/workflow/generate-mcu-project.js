@@ -10,6 +10,7 @@ import {
   renderProjectSymbolTable,
   renderSpiceFixture
 } from '../kicad/project-generator.js';
+import { reviewCircuitReadiness } from './review-project.js';
 
 export async function generateMcuPeripheralProject({ projectDir, prompt, projectName = 'chatpcb_mcu_peripheral' }) {
   if (!projectDir) {
@@ -38,10 +39,14 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
   await writeFile(files.spice, renderSpiceFixture(spec), 'utf8');
   await writeFile(files.spec, `${JSON.stringify(projectMetadata, null, 2)}\n`, 'utf8');
 
+  const review = reviewCircuitReadiness({ spec: projectMetadata });
+
   return {
     spec: projectMetadata,
     files,
+    review,
     nextActions: [
+      'Review findings and resolve blockers before release.',
       'Review generated schematic text notes before applying to a production board.',
       'Run ERC with kicad-cli when KiCad is installed.',
       'Run SPICE simulation for supported power and simple analog subcircuits.'

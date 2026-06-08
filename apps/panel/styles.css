@@ -24,7 +24,7 @@ textarea {
 
 .shell {
   display: grid;
-  grid-template-rows: auto auto 1fr auto auto auto;
+  grid-template-rows: auto auto 1fr auto auto auto auto;
   gap: 10px;
   min-height: 100vh;
   padding: 12px;
@@ -33,6 +33,7 @@ textarea {
 .topbar,
 .context-strip,
 .patch-review,
+.review-panel,
 .composer,
 .results {
   border: 1px solid #d9dee7;
@@ -201,11 +202,69 @@ button {
   display: none;
 }
 
+.review-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.review-panel[hidden] {
+  display: none;
+}
+
 .patch-review-head {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   align-items: center;
+}
+
+.review-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.review-panel h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+#review-status {
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#review-status[data-status="blocked"] {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+#review-status[data-status="ready-for-release"] {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.review-columns {
+  display: grid;
+  gap: 10px;
+}
+
+.review-panel ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.review-panel li {
+  margin: 4px 0;
+  color: #334155;
+  line-height: 1.35;
+  font-size: 12px;
 }
 
 #patch-diff {
@@ -241,6 +300,7 @@ button {
   .topbar,
   .context-strip,
   .patch-review,
+  .review-panel,
   .composer,
   .results,
   .message {
@@ -285,5 +345,9 @@ button {
     border-color: #465563;
     background: #11161b;
     color: #e8edf3;
+  }
+
+  .review-panel li {
+    color: #cbd6e2;
   }
 }

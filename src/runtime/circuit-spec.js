@@ -1,6 +1,7 @@
 const FAMILY_PATTERNS = [
   ['STM32', /\bstm32\b/i],
   ['RP2040', /\brp2040\b|\braspberry\s*pi\s*pico\b/i],
+  ['ESP32-S3', /\besp32[\s-]?s3\b/i],
   ['ESP32', /\besp32\b/i],
   ['ATmega', /\batmega|arduino\s*nano|arduino\s*uno/i]
 ];

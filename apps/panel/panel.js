@@ -15,6 +15,12 @@ const patchDiffEl = document.querySelector('#patch-diff');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const cancelProviderButtonEl = document.querySelector('#cancel-provider-button');
+const reviewPanelEl = document.querySelector('#review-panel');
+const reviewStatusEl = document.querySelector('#review-status');
+const reviewBlockersEl = document.querySelector('#review-blockers');
+const reviewWarningsEl = document.querySelector('#review-warnings');
+const reviewNotesEl = document.querySelector('#review-notes');
+const reviewFixesEl = document.querySelector('#review-fixes');
 
 let socket;
 let pendingPatch = null;
@@ -238,6 +244,7 @@ function handleToolResult(result) {
   }
 
   if (result.requiresApproval) {
+    renderReview(result.review);
     patchDiffEl.textContent = result.diff || 'No file changes.';
     patchReviewEl.hidden = false;
     approvePatchButtonEl.disabled = result.changedFiles?.length === 0;
@@ -253,6 +260,7 @@ function handleToolResult(result) {
 
   if (result.rolledBack) {
     hidePatchReview();
+    renderReview(result.review);
     renderArtifacts(result.files);
     appendMessage(
       'system',
@@ -263,11 +271,13 @@ function handleToolResult(result) {
 
   if (result.applied) {
     hidePatchReview();
+    renderReview(result.review);
     renderArtifacts(result.files);
-    appendMessage('assistant', `Patch applied. ERC ${result.validation?.ok ? 'passed' : 'did not pass'}.`);
+    appendMessage('assistant', `Patch applied. ${reviewStatusText(result.review)}. ERC ${result.validation?.ok ? 'passed' : 'did not pass'}.`);
     return;
   }
 
+  renderReview(result.review);
   appendMessage('assistant', `${result.spec.mcu.family} draft generated.`);
   renderArtifacts(result.files);
 }
@@ -295,6 +305,64 @@ function renderArtifacts(files) {
     const item = document.createElement('li');
     item.textContent = `${kind}: ${file}`;
     artifactListEl.append(item);
+  }
+}
+
+function renderReview(review) {
+  if (!review) return;
+
+  reviewPanelEl.hidden = false;
+  reviewStatusEl.textContent = reviewStatusText(review);
+  reviewStatusEl.dataset.status = review.status;
+  renderFindingList(reviewBlockersEl, review.findings?.blockers);
+  renderFindingList(reviewWarningsEl, review.findings?.warnings);
+  renderFindingList(reviewNotesEl, review.findings?.notes);
+  renderFixList(reviewFixesEl, review.proposedFixes);
+}
+
+function reviewStatusText(review) {
+  if (!review) return 'Review pending';
+  if (review.statusLabel) return review.statusLabel;
+
+  switch (review.status) {
+    case 'ready-for-release':
+      return 'Ready for release';
+    case 'ready-for-prototype-review':
+      return 'Ready for prototype review';
+    default:
+      return 'Blocked';
+  }
+}
+
+function renderFindingList(listEl, findings = []) {
+  listEl.replaceChildren();
+
+  for (const finding of findings) {
+    const item = document.createElement('li');
+    item.textContent = finding.message ?? String(finding);
+    listEl.append(item);
+  }
+
+  if (findings.length === 0) {
+    const item = document.createElement('li');
+    item.textContent = 'None';
+    listEl.append(item);
+  }
+}
+
+function renderFixList(listEl, fixes = []) {
+  listEl.replaceChildren();
+
+  for (const fix of fixes) {
+    const item = document.createElement('li');
+    item.textContent = `${fix.title}: ${fix.summary}`;
+    listEl.append(item);
+  }
+
+  if (fixes.length === 0) {
+    const item = document.createElement('li');
+    item.textContent = 'No fixes proposed';
+    listEl.append(item);
   }
 }
 

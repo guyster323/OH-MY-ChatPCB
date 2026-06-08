@@ -24,8 +24,9 @@ test('generates a reviewable KiCad project and SPICE fixture for an MCU peripher
 
     const schematic = await readFile(result.files.schematic, 'utf8');
     assert.match(schematic, /\(kicad_sch/);
+    assert.match(schematic, /\(version 20260306\)/);
     assert.match(schematic, /\(generator "eeschema"\)/);
-    assert.match(schematic, /\(generator_version "9\.0"\)/);
+    assert.match(schematic, /\(generator_version "10\.0"\)/);
     assert.match(schematic, /\(title_block/);
     assert.match(schematic, /\(lib_symbols/);
     assert.match(schematic, /\(text "ChatPCB generated MCU peripheral draft/);
@@ -139,6 +140,46 @@ test('omits optional MCU interface labels when that interface is not requested',
       metadata.schematic.nets.map((net) => net.name),
       ['VBUS', '+3V3', 'GND', 'SCL', 'SDA', 'RESET', 'BOOT']
     );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('reports release blockers and proposed review-loop fixes for incomplete manufacturing prompts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-release-review-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt:
+        'USB-C powered ESP32-S3 sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, reset button, status LED, USB, SPI, GPIO header, JLCPCB order ready.'
+    });
+
+    assert.equal(result.review.status, 'blocked');
+    assert.ok(result.review.findings.blockers.some((finding) => /exact ESP32-S3 part or module/i.test(finding.message)));
+    assert.ok(result.review.findings.blockers.some((finding) => /SPI/i.test(finding.message)));
+    assert.ok(result.review.findings.blockers.some((finding) => /USB/i.test(finding.message)));
+    assert.ok(result.review.findings.warnings.some((finding) => /fixture symbols/i.test(finding.message)));
+    assert.ok(result.review.proposedFixes.every((fix) => fix.approvalRequired === true));
+    assert.ok(result.nextActions.some((action) => /review findings/i.test(action)));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('review blocker names the requested MCU family instead of a hard-coded part', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-family-review-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'STM32 sensor board with 3.3V regulator and UART debug header.'
+    });
+
+    assert.ok(result.review.findings.blockers.some((finding) => /exact STM32 part or module/i.test(finding.message)));
+    assert.ok(!result.review.findings.blockers.some((finding) => /ESP32-S3/i.test(finding.message)));
+    assert.ok(result.review.proposedFixes.some((fix) => /exact STM32 module\/chip/i.test(fix.summary)));
+    assert.ok(!result.review.proposedFixes.some((fix) => /ESP32-S3/i.test(fix.summary)));
   } finally {
     await rm(root, { force: true, recursive: true });
   }

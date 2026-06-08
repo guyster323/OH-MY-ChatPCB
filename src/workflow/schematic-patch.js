@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
+import { reviewCircuitReadiness } from './review-project.js';
 import { validateProject } from './validate-project.js';
 
 const applyLocks = new Set();
@@ -42,7 +43,8 @@ export async function applySchematicPatch({
       applied: false,
       files: plan.targetFiles,
       changedFiles: plan.changedFiles,
-      diff: plan.diff
+      diff: plan.diff,
+      review: plan.proposed.review
     };
   }
 
@@ -66,7 +68,8 @@ export async function applySchematicPatch({
         files: plan.targetFiles,
         changedFiles: plan.changedFiles,
         diff: plan.diff,
-        validation
+        validation,
+        review: reviewCircuitReadiness({ spec: plan.proposed.spec, validation })
       };
     }
 
@@ -78,7 +81,8 @@ export async function applySchematicPatch({
       files: plan.targetFiles,
       changedFiles: plan.changedFiles,
       diff: plan.diff,
-      validation
+      validation,
+      review: reviewCircuitReadiness({ spec: plan.proposed.spec, validation })
     };
   } finally {
     applyLocks.delete(resolvedProjectDir);

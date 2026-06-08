@@ -23,6 +23,11 @@ export function resolveKicadCli({
   }
 
   if (platform === 'win32') {
+    const userInstallPath = windowsUserCandidates(env).find((candidate) => exists(candidate));
+    if (userInstallPath) {
+      return { path: userInstallPath, source: 'windows-user-install' };
+    }
+
     const installPath = WINDOWS_CANDIDATES.find((candidate) => exists(candidate));
     if (installPath) {
       return { path: installPath, source: 'windows-install' };
@@ -30,6 +35,20 @@ export function resolveKicadCli({
   }
 
   return { path: 'kicad-cli', source: 'path' };
+}
+
+function windowsUserCandidates(env) {
+  if (!env.LOCALAPPDATA) {
+    return [];
+  }
+
+  const localAppData = env.LOCALAPPDATA.replace(/\\/g, '/').replace(/\/+$/, '');
+  return [
+    `${localAppData}/Programs/KiCad/10.0/bin/kicad-cli.exe`,
+    `${localAppData}/Programs/KiCad/9.0/bin/kicad-cli.exe`,
+    `${localAppData}/Programs/KiCad/8.0/bin/kicad-cli.exe`,
+    `${localAppData}/Programs/KiCad/7.0/bin/kicad-cli.exe`
+  ];
 }
 
 export function runKicadCli(args, options = {}) {
