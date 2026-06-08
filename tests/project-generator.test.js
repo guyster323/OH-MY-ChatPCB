@@ -291,6 +291,15 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
       assert.match(board, /\(pad "2" smd rect/);
       assert.match(board, /\(pad "1" smd rect[\s\S]*\(net \d+ "CC1"\)/);
       assert.match(board, /\(pad "2" smd rect[\s\S]*\(net \d+ "GND"\)/);
+      assert.match(board, /\(segment[\s\S]*\(layer "F\.Cu"\)[\s\S]*\(net \d+\)/);
+      assert.match(board, /\(segment[\s\S]*\(net \d+\)[\s\S]*\(uuid "[^"]+"\)/);
+      const segmentSpans = boardSegmentSpans(board);
+      assert.ok(segmentSpans.length > 0);
+      assert.equal(
+        segmentSpans.every((span) => span <= 8),
+        true,
+        'draft PCB trace scaffold should only emit conservative local segments'
+      );
       assert.doesNotMatch(board, /\(property "Reference" "REF\*\*"/);
     }
   } finally {
@@ -302,3 +311,9 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
     await rm(root, { force: true, recursive: true });
   }
 });
+
+function boardSegmentSpans(board) {
+  return [...board.matchAll(/\(segment\s+\(start\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)\s+\(end\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/g)].map(
+    ([, startX, startY, endX, endY]) => Math.hypot(Number(endX) - Number(startX), Number(endY) - Number(startY))
+  );
+}

@@ -567,9 +567,66 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\stm32-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
 ```
 
+## 2026-06-08 Conservative PCB Trace Scaffold Increment
+
+- Added a TDD increment after `9c491a1 feat: embed profile PCB footprints` to test and implement a safer first PCB routing scaffold.
+- Root repo baseline before this increment: `9c491a1 feat: embed profile PCB footprints`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - The PCB generator now records embedded-footprint pad centers while assigning pad nets.
+  - It emits KiCad `(segment ...)` records only for local same-footprint, same-net pad pairs.
+  - Segment generation is deliberately conservative: maximum local span is `8mm`, and a segment is skipped if it runs within `0.8mm` of a different-net pad center.
+  - This avoids pretending to have a full autorouter while still reducing some KiCad unconnected items when the segment can be emitted without creating obvious DRC conflicts.
+- TDD/debugging evidence:
+  - Initial RED test failed because generated PCB drafts had no segments.
+  - A naive global same-net segment implementation reduced unconnected items to zero but created severe DRC regressions:
+    - ESP32-S3: `169` violations, `0` unconnected; major types included `solder_mask_bridge:114`, `tracks_crossing:32`, `shorting_items:15`.
+    - STM32: `141` violations, `0` unconnected; major types included `solder_mask_bridge:89`, `tracks_crossing:44`, `shorting_items:3`.
+  - Added a second RED check requiring the draft trace scaffold to emit only conservative local segments with span `<= 8mm`.
+  - DRC item inspection showed the naive/local-unfiltered failures came from high-density USB-C and WSON regulator pads where centerline traces crossed or ran too close to other nets.
+  - After adding the different-net pad keepout filter, official KiCad 10.0.3 PCB DRC reports:
+    - ESP32-S3: `1` violation, `48` unconnected items; remaining violation type is `lib_footprint_mismatch:1` for `U2 RF_Module:ESP32-S3-WROOM-1`.
+    - STM32: `0` violations, `46` unconnected items.
+- Verification run in this increment:
+  - `node --test tests\project-generator.test.js`: pass, 8/8.
+  - `npm test`: pass, 66/66.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad CLI path: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
+  - Official KiCad CLI version: `10.0.3`.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both schematic ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both regenerated profile projects.
+  - Official KiCad 10.0.3 PCB DRC smoke on regenerated ESP32-S3 and STM32 profile projects: pass as a smoke command, with the counts above.
+- User-facing decision:
+  - `improvement method exists`: yes. The safe path is incremental DRC-measured PCB construction plus a review/fix loop, not a blanket "release-ready" claim.
+  - `integration works`: still yes.
+  - `release-quality circuit`: still no. ESP32-S3 still has one footprint-library mismatch plus unconnected items; STM32 has no DRC violations but still has unconnected items. Neither profile has complete routing, zones, Gerbers, drill outputs, sourced BOM, datasheet signoff, or JLCPCB-ready manufacturing evidence.
+
+Additional commands run for this increment:
+
+```powershell
+node --test tests\project-generator.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" --version
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\stm32-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
+```
+
 ## Next Work
 
-1. Add routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `53` and STM32 `51` to zero before manufacturing export.
+1. Continue routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `48` and STM32 `46` to zero before manufacturing export, without adding new DRC violations.
 2. Resolve the remaining ESP32 `RF_Module:ESP32-S3-WROOM-1` `lib_footprint_mismatch` warning, likely by using a KiCad board-update flow or recording an explicit supported footprint normalization for RF module keepout/layer behavior.
 3. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
 4. Generate and validate Gerber and drill outputs only after PCB DRC has zero violations and zero unconnected items.

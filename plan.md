@@ -401,6 +401,16 @@ PCB footprint, net assignment, and DRC-rule update on 2026-06-08:
   - STM32: `0` violations, `51` unconnected items.
 - This is a real cross-profile PCB-quality improvement, but it still does not make either profile release-quality because routing, zones, Gerbers, drill outputs, sourced BOM, and datasheet signoff remain incomplete.
 
+Conservative PCB trace scaffold update on 2026-06-08:
+
+- Supported ESP32-S3 and STM32 PCB drafts now emit a small set of KiCad `(segment ...)` traces when the generator can prove a same-footprint, same-net pad connection is local and avoids nearby different-net pad centers.
+- A naive same-net global routing attempt was explicitly rejected after KiCad DRC showed severe regressions: ESP32-S3 `169` violations and STM32 `141` violations despite `0` unconnected items.
+- The accepted conservative scaffold limits segment span to `8mm` and skips candidate traces within `0.8mm` of a different-net pad center.
+- Official KiCad 10.0.3 PCB DRC after the accepted scaffold reports:
+  - ESP32-S3: `1` violation, `48` unconnected items; remaining violation is `lib_footprint_mismatch:1` for `U2 RF_Module:ESP32-S3-WROOM-1`.
+  - STM32: `0` violations, `46` unconnected items.
+- This proves there is a safe improvement path for the "not release-quality" board, but it also proves full release requires real routing/zone/layout work rather than blanket autorouting.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -415,7 +425,8 @@ Acceptance criteria:
 - Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
 - Supported profiles must not return `ready-for-release` while any release gate, production-part sourcing/datasheet/simulation evidence, release-evidence status, or calculation status is incomplete, warning, or blocker, even when ERC is clean.
 - Supported profiles must not return `ready-for-release` merely because a `.kicad_pcb` file exists; the generated board must have real footprint bodies or an equivalent KiCad-updated board, reviewed placement/routing/zones/constraints, PCB DRC with zero violations, and generated Gerber/drill outputs.
-- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; STM32 currently has zero PCB DRC violations but still has unconnected items, and ESP32-S3 still has one footprint-library mismatch plus unconnected items.
+- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; STM32 currently has zero PCB DRC violations but still has `46` unconnected items, and ESP32-S3 still has one footprint-library mismatch plus `48` unconnected items.
+- PCB trace scaffolding must not reduce unconnected items by introducing new KiCad DRC violations; unsafe global or high-density centerline traces should remain review-loop findings instead of generated board copper.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -458,7 +469,7 @@ git log --oneline -1
 
 Continue Phase 8 before widening PCB/layout scope:
 
-1. Route both supported PCB drafts so unconnected items drop from ESP32-S3 `53` and STM32 `51` to zero.
+1. Route both supported PCB drafts so unconnected items drop from ESP32-S3 `48` and STM32 `46` to zero without adding new DRC violations.
 2. Resolve the remaining ESP32 `RF_Module:ESP32-S3-WROOM-1` `lib_footprint_mismatch` warning or record an explicit KiCad board-update/footprint-normalization path that removes it.
 3. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
 4. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.

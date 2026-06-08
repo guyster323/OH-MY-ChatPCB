@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
 const KICAD_COORDINATE_SCALE = 1;
+const BOARD_LOCAL_TRACE_MAX_MM = 8;
+const BOARD_TRACE_PAD_KEEP_OUT_MM = 0.8;
 const SCHEMATIC_GRID_COLUMNS = 5;
 const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
 
@@ -43,10 +45,12 @@ export function renderKiCadProject(baseName) {
 export function renderKiCadBoard({ baseName, schematic }) {
   const components = schematic.components.filter((component) => component.footprint);
   const netIds = boardNetIdsFor(components);
+  const padCentersByNet = new Map();
   const netDeclarations = [...netIds.entries()].map(([name, id]) => `  (net ${id} "${escapeSchText(name)}")`).join('\n');
   const footprints = components
-    .map((component, index) => renderBoardFootprint(component, 25 + (index % 5) * 22, 25 + Math.floor(index / 5) * 18, netIds))
+    .map((component, index) => renderBoardFootprint(component, 25 + (index % 5) * 22, 25 + Math.floor(index / 5) * 18, netIds, padCentersByNet))
     .join('\n');
+  const segments = renderBoardSegments(padCentersByNet, netIds);
 
   return `(kicad_pcb
   (version 20240108)
@@ -88,6 +92,7 @@ ${netDeclarations}
     (uuid "${randomUUID()}")
   )
 ${footprints}
+${segments}
 )`;
 }
 
@@ -457,8 +462,8 @@ ${[...fixtureBlocks, ...officialBlocks].join('\n')}
   )`;
 }
 
-function renderBoardFootprint(componentModel, x, y, netIds) {
-  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, netIds);
+function renderBoardFootprint(componentModel, x, y, netIds, padCentersByNet = null) {
+  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, netIds, padCentersByNet);
   if (embedded) {
     return embedded;
   }
@@ -482,7 +487,7 @@ function renderBoardFootprint(componentModel, x, y, netIds) {
   )`;
 }
 
-function renderEmbeddedBoardFootprint(componentModel, x, y, netIds) {
+function renderEmbeddedBoardFootprint(componentModel, x, y, netIds, padCentersByNet = null) {
   const [library, footprintName] = componentModel.footprint.split(':');
   if (!library || !footprintName) {
     return null;
@@ -495,7 +500,7 @@ function renderEmbeddedBoardFootprint(componentModel, x, y, netIds) {
 
   try {
     const source = readFileSync(footprintPath, 'utf8');
-    return indentBoardFootprintBlock(transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds));
+    return indentBoardFootprintBlock(transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds, padCentersByNet));
   } catch {
     return null;
   }
@@ -516,7 +521,7 @@ function officialFootprintPath(library, footprintName) {
   return candidates.map((dir) => `${dir}/${library}.pretty/${footprintName}.kicad_mod`).find((file) => existsSync(file)) ?? null;
 }
 
-function transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds) {
+function transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds, padCentersByNet = null) {
   const lines = source.trim().split(/\r?\n/);
   const transformed = [];
   let insertedAt = false;
@@ -540,23 +545,148 @@ function transformBoardFootprintBlock(source, componentModel, x, y, library, foo
     transformed.splice(1, 0, `\t(at ${sch(x)} ${sch(y)} 0)`);
   }
 
-  return injectBoardPadNets(transformed.join('\n'), componentModel, netIds);
+  return injectBoardPadNets(transformed.join('\n'), componentModel, netIds, { ref: componentModel.ref, x, y }, padCentersByNet);
 }
 
-function injectBoardPadNets(block, componentModel, netIds) {
+function injectBoardPadNets(block, componentModel, netIds, footprintPosition = { x: 0, y: 0 }, padCentersByNet = null) {
   if (!componentModel.pinNets) {
     return block;
   }
 
-  return block.replace(/(\n\t\(pad "([^"]*)"[\s\S]*?)(\n\t\))/g, (match, prefix, pinNumber, closing) => {
+  return block.replace(/(\n[ \t]*\(pad "([^"]*)"[\s\S]*?)(\n[ \t]*\))/g, (match, prefix, pinNumber, closing) => {
     const netName = componentModel.pinNets[pinNumber];
     const netId = netIds.get(netName);
-    if (!netName || !netId || /\n\t\t\(net \d+ "/.test(prefix)) {
+    if (!netName || !netId) {
+      return match;
+    }
+
+    recordBoardPadCenter(padCentersByNet, netName, prefix, footprintPosition);
+
+    if (/\n[ \t]*\(net \d+ "/.test(prefix)) {
       return match;
     }
 
     return `${prefix}\n\t\t(net ${netId} "${escapeSchText(netName)}")${closing}`;
   });
+}
+
+function recordBoardPadCenter(padCentersByNet, netName, padBlock, footprintPosition) {
+  if (!padCentersByNet || !netName) {
+    return;
+  }
+
+  const localAt = padBlock.match(/\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);
+  const localX = localAt ? Number(localAt[1]) : 0;
+  const localY = localAt ? Number(localAt[2]) : 0;
+  const centers = padCentersByNet.get(netName) ?? [];
+  centers.push({
+    ref: footprintPosition.ref,
+    x: footprintPosition.x + localX,
+    y: footprintPosition.y + localY
+  });
+  padCentersByNet.set(netName, centers);
+}
+
+function renderBoardSegments(padCentersByNet, netIds) {
+  const segments = [];
+  const allCenters = [...padCentersByNet.entries()].flatMap(([netName, centers]) => centers.map((center) => ({ ...center, netName })));
+
+  for (const [netName, centers] of padCentersByNet.entries()) {
+    const netId = netIds.get(netName);
+    const uniqueCenters = uniqueBoardPadCenters(centers);
+    if (!netId || uniqueCenters.length < 2) {
+      continue;
+    }
+
+    for (const localCenters of boardPadCenterGroupsByRef(uniqueCenters)) {
+      const sorted = localCenters.toSorted((a, b) => a.x - b.x || a.y - b.y);
+      for (let index = 1; index < sorted.length; index += 1) {
+        const start = sorted[index - 1];
+        const end = sorted[index];
+        if (
+          sameBoardPoint(start, end) ||
+          boardPointDistance(start, end) > BOARD_LOCAL_TRACE_MAX_MM ||
+          segmentRunsNearOtherNetPad(start, end, netName, allCenters)
+        ) {
+          continue;
+        }
+
+        segments.push(renderBoardSegment(start, end, netId));
+      }
+    }
+  }
+
+  return segments.join('\n');
+}
+
+function uniqueBoardPadCenters(centers) {
+  const seen = new Set();
+  return centers.filter((center) => {
+    const key = `${center.ref ?? ''}:${sch(center.x)}:${sch(center.y)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function boardPadCenterGroupsByRef(centers) {
+  const groups = new Map();
+  for (const center of centers) {
+    const key = center.ref ?? '';
+    const group = groups.get(key) ?? [];
+    group.push(center);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].filter((group) => group.length >= 2);
+}
+
+function sameBoardPoint(a, b) {
+  return sch(a.x) === sch(b.x) && sch(a.y) === sch(b.y);
+}
+
+function boardPointDistance(a, b) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function segmentRunsNearOtherNetPad(start, end, netName, allCenters) {
+  return allCenters.some((center) => {
+    if (center.netName === netName) {
+      return false;
+    }
+
+    return distanceFromPointToSegment(center, start, end) < BOARD_TRACE_PAD_KEEP_OUT_MM;
+  });
+}
+
+function distanceFromPointToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) {
+    return boardPointDistance(point, start);
+  }
+
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  const projection = {
+    x: start.x + t * dx,
+    y: start.y + t * dy
+  };
+  return boardPointDistance(point, projection);
+}
+
+function renderBoardSegment(start, end, netId) {
+  return `  (segment
+    (start ${sch(start.x)} ${sch(start.y)})
+    (end ${sch(end.x)} ${sch(end.y)})
+    (width 0.15)
+    (layer "F.Cu")
+    (net ${netId})
+    (uuid "${randomUUID()}")
+  )`;
 }
 
 function indentBoardFootprintBlock(block) {
