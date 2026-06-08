@@ -30,6 +30,11 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.ok(Array.isArray(metadata.boardProfile.releaseGates));
     assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'sourcing').status, 'pending');
     assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'layout-drc').status, 'pending');
+    assertProductionEvidence(metadata, {
+      mcuRef: 'U2',
+      mcuValue: 'ESP32-S3-WROOM-1-N8R2',
+      debugRole: 'esp32-usb-jtag-header'
+    });
     assert.match(schematic, /\(lib_id "ChatPCB:ESP32_S3_WROOM_1"\)/);
     assert.doesNotMatch(schematic, /MCU_PLACEHOLDER/);
     assert.doesNotMatch(schematic, /\(lib_id "ChatPCB:(REGULATOR_3V3|RESET_BUTTON|BOOT_BUTTON|STATUS_LED|I2C_CONNECTOR|UART_HEADER|USB_C_CONNECTOR|SPI_HEADER|GPIO_HEADER|DEBUG_HEADER|DECOUPLING_CAP|CC_RESISTOR|LED_RESISTOR|I2C_PULLUP)"\)/);
@@ -91,7 +96,9 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.equal(componentValues.get('R5'), '4.7k');
     assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'profile-support-symbols'));
     assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-sourcing-review'));
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'release-gates-incomplete'));
     assert.ok(!result.review.residualRisks.some((risk) => /production KiCad symbols/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /U1 TC1262-33/i.test(risk)));
     assert.ok(result.review.residualRisks.some((risk) => /layout DRC/i.test(risk)));
     assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
@@ -121,6 +128,11 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.ok(Array.isArray(metadata.boardProfile.releaseGates));
     assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'sourcing').status, 'pending');
     assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'layout-drc').status, 'pending');
+    assertProductionEvidence(metadata, {
+      mcuRef: 'U2',
+      mcuValue: 'STM32G0B1CBT6',
+      debugRole: 'swd-header'
+    });
     assert.match(schematic, /\(lib_id "ChatPCB:STM32G0B1CBT6"\)/);
     assert.doesNotMatch(schematic, /MCU_PLACEHOLDER/);
     assert.doesNotMatch(schematic, /\(lib_id "ChatPCB:(REGULATOR_3V3|RESET_BUTTON|BOOT_BUTTON|STATUS_LED|I2C_CONNECTOR|UART_HEADER|USB_C_CONNECTOR|SPI_HEADER|GPIO_HEADER|DEBUG_HEADER|DECOUPLING_CAP|CC_RESISTOR|LED_RESISTOR|I2C_PULLUP)"\)/);
@@ -171,7 +183,9 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.equal(componentValues.get('R5'), '4.7k');
     assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'profile-support-symbols'));
     assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-sourcing-review'));
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'release-gates-incomplete'));
     assert.ok(!result.review.residualRisks.some((risk) => /production KiCad symbols/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /U1 TC1262-33/i.test(risk)));
     assert.ok(result.review.residualRisks.some((risk) => /layout DRC/i.test(risk)));
     assert.ok(result.review.findings.notes.some((finding) => /supported STM32 USB-C sensor profile/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code.startsWith('missing-')));
@@ -179,3 +193,30 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     await rm(root, { force: true, recursive: true });
   }
 });
+
+function assertProductionEvidence(metadata, { mcuRef, mcuValue, debugRole }) {
+  const parts = metadata.boardProfile.productionParts;
+  assert.ok(Array.isArray(parts), 'supported profiles should publish production part evidence');
+
+  const byRef = new Map(parts.map((part) => [part.ref, part]));
+  assert.equal(byRef.get(mcuRef)?.value, mcuValue);
+  assert.equal(byRef.get('U1')?.value, 'TC1262-33');
+  assert.equal(byRef.get('U1')?.role, '3v3-regulator');
+  assert.equal(byRef.get('J4')?.role, 'usb-c-connector');
+  assert.equal(byRef.get('J7')?.role, debugRole);
+  assert.equal(byRef.get('R1')?.value, '5.1k');
+  assert.equal(byRef.get('R2')?.value, '5.1k');
+  assert.equal(byRef.get('R4')?.value, '4.7k');
+  assert.equal(byRef.get('R5')?.value, '4.7k');
+
+  for (const part of parts) {
+    assert.equal(part.releaseChecks.sourcing.status, 'pending', `${part.ref} should require sourcing evidence`);
+    assert.equal(part.releaseChecks.datasheet.status, 'pending', `${part.ref} should require datasheet evidence`);
+  }
+
+  assert.deepEqual(
+    metadata.boardProfile.releaseEvidence.requiredChecks,
+    ['sourcing', 'datasheet', 'simulation', 'layoutDrc']
+  );
+  assert.equal(metadata.boardProfile.releaseEvidence.status, 'incomplete');
+}

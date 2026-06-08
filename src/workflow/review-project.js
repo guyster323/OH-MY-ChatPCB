@@ -59,6 +59,15 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     );
   }
 
+  const incompleteReleaseGates = (spec.boardProfile?.releaseGates ?? []).filter((gate) => gate.status !== 'complete');
+  if (incompleteReleaseGates.length > 0) {
+    addFinding(
+      findings.warnings,
+      'release-gates-incomplete',
+      `Release evidence is incomplete: ${incompleteReleaseGates.map((gate) => gate.id).join(', ')}.`
+    );
+  }
+
   if (/jlcpcb|order|manufactur/i.test(spec.sourcePrompt ?? '')) {
     addFinding(
       findings.blockers,
@@ -131,6 +140,23 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     residualRisks.push('This project is not release-ready until blockers are resolved and validation reruns cleanly.');
   }
 
+  const productionParts = spec.boardProfile?.productionParts ?? [];
+  const missingSourcing = productionParts.filter((part) => part.releaseChecks?.sourcing?.status !== 'complete');
+  const missingDatasheet = productionParts.filter((part) => part.releaseChecks?.datasheet?.status !== 'complete');
+  const missingSimulation = productionParts.filter((part) => part.releaseChecks?.simulation?.status === 'pending');
+
+  if (missingSourcing.length > 0) {
+    residualRisks.push(`sourcing: Missing JLCPCB/LCSC evidence for ${missingSourcing.length} production part(s), including ${summarizeParts(missingSourcing)}.`);
+  }
+
+  if (missingDatasheet.length > 0) {
+    residualRisks.push(`datasheet: Missing pin/rating/footprint review for ${missingDatasheet.length} production part(s), including ${summarizeParts(missingDatasheet)}.`);
+  }
+
+  if (missingSimulation.length > 0) {
+    residualRisks.push(`simulation: Missing calculation or simulation evidence for ${missingSimulation.length} electrical part(s), including ${summarizeParts(missingSimulation)}.`);
+  }
+
   for (const gate of spec.boardProfile?.releaseGates ?? []) {
     if (gate.status !== 'complete') {
       residualRisks.push(`${gate.id}: ${gate.reason}`);
@@ -152,6 +178,13 @@ function addFinding(target, code, message) {
   if (!target.some((finding) => finding.code === code)) {
     target.push({ code, message });
   }
+}
+
+function summarizeParts(parts) {
+  return parts
+    .slice(0, 5)
+    .map((part) => `${part.ref} ${part.value}`)
+    .join(', ');
 }
 
 function statusFor(findings, validation) {

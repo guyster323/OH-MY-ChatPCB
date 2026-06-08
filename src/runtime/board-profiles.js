@@ -3,6 +3,14 @@ const SUPPORTED_PROFILES = [
     id: 'esp32-s3-usbc-sensor',
     family: 'ESP32-S3',
     part: 'ESP32-S3-WROOM-1-N8R2',
+    mcuPart: {
+      ref: 'U2',
+      role: 'mcu-module',
+      libId: 'ChatPCB:ESP32_S3_WROOM_1',
+      value: 'ESP32-S3-WROOM-1-N8R2',
+      footprint: 'RF_Module:ESP32-S3-WROOM-1'
+    },
+    debugPartRole: 'esp32-usb-jtag-header',
     debug: {
       defaultProtocol: 'esp32-usb-jtag',
       nets: ['USB_DP', 'USB_DN', 'MTMS', 'MTCK', 'MTDI', 'MTDO'],
@@ -15,6 +23,14 @@ const SUPPORTED_PROFILES = [
     id: 'stm32-usbc-sensor',
     family: 'STM32',
     part: 'STM32G0B1CBT6',
+    mcuPart: {
+      ref: 'U2',
+      role: 'mcu',
+      libId: 'ChatPCB:STM32G0B1CBT6',
+      value: 'STM32G0B1CBT6',
+      footprint: 'Package_QFP:LQFP-48_7x7mm_P0.5mm'
+    },
+    debugPartRole: 'swd-header',
     debug: {
       defaultProtocol: 'swd',
       nets: ['SWDIO', 'SWCLK', 'NRST']
@@ -29,6 +45,31 @@ const PROFILE_INTERFACES = [
   { kind: 'spi', pins: ['SCK', 'MOSI', 'MISO', 'CS', '+3V3', 'GND'] },
   { kind: 'uart', pins: ['TX', 'RX', '+3V3', 'GND'] },
   { kind: 'gpio', pins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'] }
+];
+
+const COMMON_PRODUCTION_PARTS = [
+  part('J1', 'power-input-header', 'Connector_Generic:Conn_01x02', 'POWER_INPUT', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical'),
+  part('U1', '3v3-regulator', 'Regulator_Linear:TC1262-33', 'TC1262-33', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
+    requirements: ['Fixed 3.3V output', '500mA rail budget', 'Thermal margin review before release'],
+    simulation: true
+  }),
+  part('SW1', 'reset-button', 'Switch:SW_Push', 'RESET_BUTTON', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
+  part('SW2', 'boot-button', 'Switch:SW_Push', 'BOOT_BUTTON', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
+  part('D1', 'status-led', 'Device:LED', 'STATUS_LED', 'LED_SMD:LED_0603_1608Metric'),
+  part('J2', 'i2c-sensor-header', 'Connector_Generic:Conn_01x04', 'I2C_CONNECTOR', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical'),
+  part('J3', 'uart-debug-header', 'Connector_Generic:Conn_01x04', 'UART_HEADER', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical'),
+  part('J4', 'usb-c-connector', 'Connector:USB_C_Receptacle_USB2.0_16P', 'USB_C_CONNECTOR', 'Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12', {
+    requirements: ['USB-C sink connector', 'USB 2.0 data pins', 'CC pulldown compatibility']
+  }),
+  part('J5', 'spi-header', 'Connector_Generic:Conn_01x06', 'SPI_HEADER', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical'),
+  part('J6', 'gpio-header', 'Connector_Generic:Conn_01x05', 'GPIO_HEADER', 'Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical'),
+  part('C1', 'local-decoupling-capacitor', 'Device:C', '100nF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+  part('C2', 'bulk-rail-capacitor', 'Device:C', '10uF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+  part('R1', 'usb-c-cc1-pulldown', 'Device:R', '5.1k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+  part('R2', 'usb-c-cc2-pulldown', 'Device:R', '5.1k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+  part('R3', 'status-led-resistor', 'Device:R', '1k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+  part('R4', 'i2c-scl-pullup', 'Device:R', '4.7k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+  part('R5', 'i2c-sda-pullup', 'Device:R', '4.7k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true })
 ];
 
 const RELEASE_GATES = [
@@ -81,7 +122,12 @@ export function applyBoardProfile(spec) {
         '3.3V rail budget is 500mA before final regulator thermal and sourcing review.',
         'JLCPCB orderability requires a live sourcing check before release.'
       ],
-      releaseGates: RELEASE_GATES
+      releaseGates: RELEASE_GATES.map((gate) => ({ ...gate })),
+      releaseEvidence: {
+        status: 'incomplete',
+        requiredChecks: ['sourcing', 'datasheet', 'simulation', 'layoutDrc']
+      },
+      productionParts: productionPartsFor(profile)
     },
     mcu: {
       ...spec.mcu,
@@ -103,6 +149,56 @@ export function applyBoardProfile(spec) {
       { kind: 'status-led-resistor', value: '1k' },
       { kind: 'i2c-pullups', value: '4.7k' }
     ])
+  };
+}
+
+function productionPartsFor(profile) {
+  return [
+    withReleaseChecks(profile.mcuPart),
+    ...COMMON_PRODUCTION_PARTS.map((item) => withReleaseChecks(item)),
+    withReleaseChecks(
+      part('J7', profile.debugPartRole, 'Connector_Generic:Conn_02x05_Odd_Even', 'DEBUG_HEADER', 'Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical', {
+        requirements: profile.debug.nets.map((net) => `Expose ${net}`)
+      })
+    )
+  ];
+}
+
+function part(ref, role, libId, value, footprint, { requirements = [], simulation = false } = {}) {
+  return {
+    ref,
+    role,
+    libId,
+    value,
+    footprint,
+    requirements,
+    needsSimulationEvidence: simulation
+  };
+}
+
+function withReleaseChecks(item) {
+  const releaseChecks = {
+    sourcing: {
+      status: 'pending',
+      reason: 'Live JLCPCB/LCSC orderability has not been verified.'
+    },
+    datasheet: {
+      status: 'pending',
+      reason: 'Datasheet pin, rating, and footprint compatibility review has not been recorded.'
+    }
+  };
+
+  if (item.needsSimulationEvidence) {
+    releaseChecks.simulation = {
+      status: 'pending',
+      reason: 'Electrical calculation or simulation evidence has not been recorded.'
+    };
+  }
+
+  const { needsSimulationEvidence, ...productionPart } = item;
+  return {
+    ...productionPart,
+    releaseChecks
   };
 }
 

@@ -257,6 +257,33 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
   - `schematic prototype-review quality`: improved materially; both supported profiles now have real support-component KiCad symbols, explicit part/value choices, PWR_FLAG rails, and ERC `0` errors/`0` warnings.
   - `release-quality circuit`: still no. Remaining release blockers are live JLCPCB/LCSC orderability, exact sourced part numbers for regulator/USB-C/passives/connectors, datasheet pin and electrical review, ESD/protection decisions, simulation or calculation evidence, PCB layout, DRC, Gerbers, drill files, and manufacturing constraints.
 
+## 2026-06-08 Cross-Profile Release Evidence Increment
+
+- Added a TDD increment after `68225f4 feat: use direct 500mA regulator symbol` to make the release gates follow the supported board profile instead of living only as generic prose.
+- Root repo baseline before this increment: `68225f4 feat: use direct 500mA regulator symbol`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - Supported ESP32-S3 and STM32 profiles now publish `boardProfile.productionParts` in `.chatpcb.json`.
+  - Each supported profile currently records 19 production parts, including MCU/module, `U1 TC1262-33`, USB-C connector, reset/boot switches, status LED, headers, decoupling capacitors, CC pulldowns, LED resistor, and I2C pull-ups.
+  - Each production part carries reusable `releaseChecks.sourcing` and `releaseChecks.datasheet` status. Electrically significant parts also carry `releaseChecks.simulation`.
+  - Supported profiles now publish `boardProfile.releaseEvidence` with required checks `sourcing`, `datasheet`, `simulation`, and `layoutDrc`.
+  - ESP32-S3 and STM32 differ in MCU part and debug-header role only; the same common evidence structure follows both profiles.
+  - Review output now adds `release-gates-incomplete` when any release gate is pending, and residual risks now name concrete missing evidence such as `U1 TC1262-33`.
+- Current generated metadata evidence:
+  - ESP32 profile: `releaseEvidence.status = incomplete`, required checks `sourcing,datasheet,simulation,layoutDrc`, 19 production parts, MCU `ESP32-S3-WROOM-1-N8R2`.
+  - STM32 profile: `releaseEvidence.status = incomplete`, required checks `sourcing,datasheet,simulation,layoutDrc`, 19 production parts, MCU `STM32G0B1CBT6`.
+- Verification run in this increment:
+  - `node --test tests\board-profiles.test.js`: pass.
+  - `npm test`: 62/62 pass.
+  - `npm run verify:sample`: pass; generic sample remains blocked for missing exact MCU and fixture symbols; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: first hit stale global daemon on `127.0.0.1:41317`; stopped `cmd.exe`/`node.exe` daemon processes, reran, pass.
+  - Official KiCad 10.0.3 ESP32/STM32 generate + validate: both ERC `0` errors and `0` warnings.
+- Final user-facing decision after this increment:
+  - `integration works`: still yes for official KiCad 10.0.3 generate/validate and panel/browser flows.
+  - `flexibility improved`: yes. If the supported MCU changes from ESP32-S3 to STM32, the common release evidence and pending checks still follow the profile.
+  - `release-quality circuit`: still no. The evidence structure now makes the remaining release blockers explicit per part, but sourcing, datasheet review, simulation/calculation evidence, PCB layout, DRC, Gerbers, drill files, and manufacturing constraints are not complete.
+
 Additional verification commands run for this increment:
 
 ```powershell
