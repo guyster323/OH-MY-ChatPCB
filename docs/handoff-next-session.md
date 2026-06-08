@@ -77,6 +77,50 @@ New next-session entrypoint:
 - Direct Computer Use was not callable in this run; GUI evidence is therefore CLI export/process smoke plus automated browser panel verification, not a visual click-through of the native KiCad panel.
 - Final readiness decision for the improved ESP32/STM32 profile samples: `ready-for-prototype-review`, not `ready-for-release`. Remaining release blockers are live JLCPCB sourcing/orderability, exact regulator and connector orderable part decisions, pin-level electrical review against the datasheets, protection/ESD policy, layout/DRC/manufacturing files, and simulation because `ngspice` is unavailable.
 
+## 2026-06-08 Release Gate and Cross-Profile Circuit Expansion
+
+- Added another TDD increment toward the persistent release-quality goal without claiming release readiness.
+- Both supported profiles now add actual support-circuit structure that had been implicit before:
+  - `R3` status LED series resistor, value `1k`.
+  - `R4` I2C SCL pull-up, value `4.7k`.
+  - `R5` I2C SDA pull-up, value `4.7k`.
+- Both supported profiles now carry explicit `boardProfile.releaseGates` in `.chatpcb.json`:
+  - `production-symbols`: pending until support components use production KiCad symbols.
+  - `sourcing`: pending until JLCPCB/LCSC live orderability is checked for every exact component.
+  - `datasheet-pin-review`: pending until MCU/regulator/USB/debug/reset/boot pins are checked against datasheets.
+  - `simulation`: pending until power, LED, reset/boot, and I2C pull-up assumptions have simulation or calculation evidence.
+  - `layout-drc`: pending until PCB layout DRC, Gerbers, drill files, and manufacturer constraints exist.
+- Review output now warns with `profile-support-symbols` when a supported profile still uses project-local ChatPCB fixture symbols for support components.
+- Review output now lists each pending release gate in `residualRisks`, so ERC-clean profile schematics remain visibly not release-ready.
+- Official KiCad latest stable was rechecked again from official KiCad sources during this increment:
+  - KiCad Windows downloads page still reported current stable `10.0.3`.
+  - KiCad 10.0.3 release post dated 2026-05-15 still identified `10.0.3` as the stable bug-fix release.
+  - Installed CLI path `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe` returned version `10.0.3`.
+- Fresh ESP32 and STM32 profile samples were regenerated after the release-gate changes.
+- Official KiCad 10.0.3 validation result for both regenerated profile samples: format upgrade ok, ERC `0` errors and `0` warnings.
+- Official KiCad 10.0.3 SVG/PDF export succeeded for both regenerated profile samples.
+- Official KiCad 10.0.3 `eeschema.exe` process smoke: ESP32 profile schematic launched and stayed alive for 5 seconds, then was stopped.
+- Built fork `eeschema.exe` process smoke: STM32 profile schematic launched and stayed alive for 5 seconds, then was stopped.
+- Direct Computer Use remained unavailable as a callable tool in this run, so native GUI click-through was not repeated.
+
+Additional verification commands run for this increment:
+
+```powershell
+node --test tests\board-profiles.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+```
+
 Additional verification commands run:
 
 ```powershell
@@ -110,9 +154,10 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32s3-usbc-sensor-ki
 
 ## Next Work
 
-1. Turn `ready-for-prototype-review` profiles into true release candidates by adding exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB live sourcing evidence.
-2. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
-3. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
-4. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
-5. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
-6. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+1. Replace support fixture symbols with production KiCad symbols for regulator, USB-C connector, headers, passives, reset/boot, and LED where possible.
+2. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB live sourcing evidence.
+3. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
+4. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
+5. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
+6. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
+7. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.

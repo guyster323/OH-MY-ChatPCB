@@ -20,12 +20,16 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     const nets = metadata.schematic.nets.map((net) => net.name);
     const refs = metadata.schematic.components.map((component) => component.ref);
     const mcu = metadata.schematic.components.find((component) => component.ref === 'U2');
+    const componentValues = new Map(metadata.schematic.components.map((component) => [component.ref, component.value]));
     const schematic = await readFile(result.files.schematic, 'utf8');
     const symbolLibrary = await readFile(result.files.symbolLibrary, 'utf8');
 
     assert.equal(metadata.boardProfile.id, 'esp32-s3-usbc-sensor');
     assert.equal(metadata.mcu.package, 'ESP32-S3-WROOM-1-N8R2');
     assert.equal(mcu.footprint, 'RF_Module:ESP32-S3-WROOM-1');
+    assert.ok(Array.isArray(metadata.boardProfile.releaseGates));
+    assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'sourcing').status, 'pending');
+    assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'layout-drc').status, 'pending');
     assert.match(schematic, /\(lib_id "ChatPCB:ESP32_S3_WROOM_1"\)/);
     assert.doesNotMatch(schematic, /MCU_PLACEHOLDER/);
     assert.match(symbolLibrary, /\(symbol "ESP32_S3_WROOM_1"/);
@@ -50,8 +54,16 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.ok(refs.includes('C2'));
     assert.ok(refs.includes('R1'));
     assert.ok(refs.includes('R2'));
-    assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'fixture-symbols'));
+    assert.ok(refs.includes('R3'));
+    assert.ok(refs.includes('R4'));
+    assert.ok(refs.includes('R5'));
+    assert.equal(componentValues.get('R3'), '1k');
+    assert.equal(componentValues.get('R4'), '4.7k');
+    assert.equal(componentValues.get('R5'), '4.7k');
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-support-symbols'));
     assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-sourcing-review'));
+    assert.ok(result.review.residualRisks.some((risk) => /production KiCad symbols/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /layout DRC/i.test(risk)));
     assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
   } finally {
@@ -71,10 +83,15 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
 
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
     const nets = metadata.schematic.nets.map((net) => net.name);
+    const refs = metadata.schematic.components.map((component) => component.ref);
+    const componentValues = new Map(metadata.schematic.components.map((component) => [component.ref, component.value]));
     const schematic = await readFile(result.files.schematic, 'utf8');
 
     assert.equal(metadata.boardProfile.id, 'stm32-usbc-sensor');
     assert.equal(metadata.mcu.package, 'STM32G0B1CBT6');
+    assert.ok(Array.isArray(metadata.boardProfile.releaseGates));
+    assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'sourcing').status, 'pending');
+    assert.equal(metadata.boardProfile.releaseGates.find((gate) => gate.id === 'layout-drc').status, 'pending');
     assert.match(schematic, /\(lib_id "ChatPCB:STM32G0B1CBT6"\)/);
     assert.doesNotMatch(schematic, /MCU_PLACEHOLDER/);
     assert.equal(metadata.debug.requestedProtocol, 'swd');
@@ -90,8 +107,16 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.ok(nets.includes('SWDIO'));
     assert.ok(nets.includes('SWCLK'));
     assert.ok(!nets.includes('MTMS'));
-    assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'fixture-symbols'));
+    assert.ok(refs.includes('R3'));
+    assert.ok(refs.includes('R4'));
+    assert.ok(refs.includes('R5'));
+    assert.equal(componentValues.get('R3'), '1k');
+    assert.equal(componentValues.get('R4'), '4.7k');
+    assert.equal(componentValues.get('R5'), '4.7k');
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-support-symbols'));
     assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'profile-sourcing-review'));
+    assert.ok(result.review.residualRisks.some((risk) => /production KiCad symbols/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /layout DRC/i.test(risk)));
     assert.ok(result.review.findings.notes.some((finding) => /supported STM32 USB-C sensor profile/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code.startsWith('missing-')));
   } finally {

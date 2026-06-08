@@ -31,6 +31,34 @@ const PROFILE_INTERFACES = [
   { kind: 'gpio', pins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'] }
 ];
 
+const RELEASE_GATES = [
+  {
+    id: 'production-symbols',
+    status: 'pending',
+    reason: 'Support components still use project-local ChatPCB fixture symbols until production KiCad symbols are selected.'
+  },
+  {
+    id: 'sourcing',
+    status: 'pending',
+    reason: 'JLCPCB/LCSC orderability needs a live sourcing check for every exact component.'
+  },
+  {
+    id: 'datasheet-pin-review',
+    status: 'pending',
+    reason: 'MCU, regulator, USB-C, reset, boot, and debug pins need datasheet-level review before release.'
+  },
+  {
+    id: 'simulation',
+    status: 'pending',
+    reason: 'Power, LED current, reset/boot, and I2C pull-up assumptions need simulation or calculation evidence.'
+  },
+  {
+    id: 'layout-drc',
+    status: 'pending',
+    reason: 'PCB layout DRC, Gerbers, drill files, and manufacturer constraints are not generated yet.'
+  }
+];
+
 export function applyBoardProfile(spec) {
   const profile = findSupportedProfile(spec);
   if (!profile) {
@@ -51,7 +79,8 @@ export function applyBoardProfile(spec) {
         'USB-C is wired as a 5V sink with USB 2.0 data where supported.',
         '3.3V rail budget is 500mA before final regulator thermal and sourcing review.',
         'JLCPCB orderability requires a live sourcing check before release.'
-      ]
+      ],
+      releaseGates: RELEASE_GATES
     },
     mcu: {
       ...spec.mcu,
@@ -69,7 +98,9 @@ export function applyBoardProfile(spec) {
       { kind: 'status-led', currentLimit: '1k' },
       { kind: 'sensor-connector', pitch: '2.54mm' },
       { kind: 'decoupling-network', strategy: 'bulk-plus-local-0.1uF' },
-      { kind: 'usb-c-cc-pulldowns', value: '5.1k' }
+      { kind: 'usb-c-cc-pulldowns', value: '5.1k' },
+      { kind: 'status-led-resistor', value: '1k' },
+      { kind: 'i2c-pullups', value: '4.7k' }
     ])
   };
 }

@@ -92,6 +92,27 @@ export function buildMcuSchematicAst(spec) {
     );
   }
 
+  if (spec.peripherals.some((peripheral) => peripheral.kind === 'status-led-resistor')) {
+    components.push(
+      component('R3', 'ChatPCB:LED_RESISTOR', 'Status LED series resistor for a bounded indicator current.', 'Resistor_SMD:R_0603_1608Metric', {
+        value: '1k'
+      })
+    );
+  }
+
+  if (spec.peripherals.some((peripheral) => peripheral.kind === 'i2c-pullups')) {
+    components.push(
+      component('R4', 'ChatPCB:I2C_PULLUP', 'I2C SCL pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
+        value: '4.7k',
+        connectedPins: ['+3V3', 'SCL']
+      }),
+      component('R5', 'ChatPCB:I2C_PULLUP', 'I2C SDA pull-up resistor to +3V3.', 'Resistor_SMD:R_0603_1608Metric', {
+        value: '4.7k',
+        connectedPins: ['+3V3', 'SDA']
+      })
+    );
+  }
+
   return {
     components,
     nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']).map((name) => ({
@@ -272,7 +293,9 @@ function fixtureSymbols() {
     ['ChatPCB:GPIO_HEADER', 'J', 'GPIO_HEADER'],
     ['ChatPCB:DEBUG_HEADER', 'J', 'DEBUG_HEADER'],
     ['ChatPCB:DECOUPLING_CAP', 'C', 'DECOUPLING_CAP'],
-    ['ChatPCB:CC_RESISTOR', 'R', 'CC_RESISTOR']
+    ['ChatPCB:CC_RESISTOR', 'R', 'CC_RESISTOR'],
+    ['ChatPCB:LED_RESISTOR', 'R', 'LED_RESISTOR'],
+    ['ChatPCB:I2C_PULLUP', 'R', 'I2C_PULLUP']
   ];
 }
 
@@ -399,6 +422,10 @@ function symbolPinsFor(libId) {
       return ['+3V3', 'GND'];
     case 'ChatPCB:CC_RESISTOR':
       return ['CC1', 'GND', 'CC2'];
+    case 'ChatPCB:LED_RESISTOR':
+      return ['+3V3', 'GND'];
+    case 'ChatPCB:I2C_PULLUP':
+      return ['+3V3', 'SCL', 'SDA'];
     default:
       return [];
   }

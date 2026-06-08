@@ -294,6 +294,8 @@ Work items:
 - [x] Define a release-quality gate for the constrained MCU peripheral circuit: exact parts or stated placeholders, values, footprints, power rails, decoupling, reset/boot/debug wiring, connector pinout, ERC status, exports, and residual risk notes.
 - [x] Decide whether the next implementation should make one constrained circuit release-ready or add a user review-and-improve loop when requirements are incomplete.
 - [x] Add reusable supported-board profiles and tests that can improve a blocked generic prompt into a concrete prototype-review schematic for ESP32-S3 and STM32 targets.
+- [x] Add cross-profile release gates that keep ESP32-S3 and STM32 profile outputs out of `ready-for-release` until production symbols, sourcing, datasheet review, simulation, and layout/DRC evidence are complete.
+- [x] Expand both supported profiles with actual support-circuit passives for status LED current limiting and I2C pull-ups.
 - [ ] If pursuing final circuit quality, replace remaining fixture-like support symbols/values with exact orderable components and tests for the chosen board target.
 - [x] If pursuing the UX loop, add review findings grouped by severity, user-readable remediation proposals, approval-gated patch application, rerun validation, and final readiness status.
 - [x] Add direct GUI verification through official KiCad latest stable and the built KiCad fork panel where feasible.
@@ -315,6 +317,13 @@ Supported profile update on 2026-06-08:
 - Both profile samples validate in official KiCad 10.0.3 with ERC `0` errors and `0` warnings and export SVG/PDF.
 - Both profile samples still stop short of release because JLCPCB live sourcing, exact regulator/connector/passive orderability, datasheet-level pin review, ESD/protection policy, layout, DRC, Gerbers, and simulation evidence are not complete.
 
+Release gate update on 2026-06-08:
+
+- Both profiles now include R3 `1k` status LED series resistor plus R4/R5 `4.7k` I2C pull-ups.
+- Both profiles now serialize pending `boardProfile.releaseGates` for production symbols, sourcing, datasheet pin review, simulation, and layout DRC/manufacturing outputs.
+- Review output now warns with `profile-support-symbols` when support components still use project-local fixture symbols, and lists every pending release gate in residual risks.
+- Official KiCad 10.0.3 validation and SVG/PDF export still pass for both regenerated profile samples after the added passives and release-gate metadata.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -322,7 +331,7 @@ Acceptance criteria:
 - The system no longer describes the generated schematic as release-ready unless the release-quality gate is satisfied.
 - Missing electrical requirements become explicit blockers or review findings, not silent assumptions.
 - A user can either release a constrained supported circuit with evidence or run a clear review-fix-validate loop.
-- Supported profiles may report `ready-for-prototype-review`; they must not report `ready-for-release` until sourcing, simulation, layout/DRC, and manufacturing export gates pass.
+- Supported profiles may report `ready-for-prototype-review`; they must not report `ready-for-release` until production-symbol, sourcing, datasheet-review, simulation, layout/DRC, and manufacturing export gates pass.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -365,6 +374,7 @@ git log --oneline -1
 
 Continue Phase 8 before widening PCB/layout scope:
 
-1. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-2. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
-3. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.
+1. Replace support fixture symbols with production KiCad symbols and pin-compatible footprints where possible.
+2. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
+3. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
+4. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

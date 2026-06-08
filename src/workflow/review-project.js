@@ -14,6 +14,8 @@ const INTERFACE_ALIASES = {
   gpio: [['GPIO', 'GPIO0']]
 };
 
+const PROFILE_MCU_SYMBOLS = new Set(['ChatPCB:ESP32_S3_WROOM_1', 'ChatPCB:STM32G0B1CBT6']);
+
 export function reviewCircuitReadiness({ spec, validation } = {}) {
   if (!spec) {
     throw new Error('spec is required.');
@@ -36,6 +38,17 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
 
   if (generatedComponents.some((component) => component.libId === 'ChatPCB:MCU_PLACEHOLDER')) {
     addFinding(findings.warnings, 'fixture-symbols', 'The schematic still uses ChatPCB fixture symbols instead of production KiCad library symbols.');
+  }
+
+  if (
+    spec.boardProfile?.id &&
+    generatedComponents.some((component) => component.libId?.startsWith('ChatPCB:') && !PROFILE_MCU_SYMBOLS.has(component.libId))
+  ) {
+    addFinding(
+      findings.warnings,
+      'profile-support-symbols',
+      'Supported profile MCUs are fixed, but support components still use project-local ChatPCB fixture symbols until production KiCad symbols are selected.'
+    );
   }
 
   if (spec.boardProfile?.releaseTarget === 'prototype-review') {
@@ -116,6 +129,12 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
       previewTool: 'schematic.patch'
     });
     residualRisks.push('This project is not release-ready until blockers are resolved and validation reruns cleanly.');
+  }
+
+  for (const gate of spec.boardProfile?.releaseGates ?? []) {
+    if (gate.status !== 'complete') {
+      residualRisks.push(`${gate.id}: ${gate.reason}`);
+    }
   }
 
   const status = statusFor(findings, validation);
