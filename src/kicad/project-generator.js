@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
 const KICAD_COORDINATE_SCALE = 1;
+const SCHEMATIC_GRID_COLUMNS = 5;
+const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
 
 export function renderKiCadProject(baseName) {
   return `${JSON.stringify(
@@ -37,11 +39,11 @@ export function buildMcuSchematicAst(spec) {
       connectedPins: ['VBUS', 'GND'],
       pinNets: profileMode ? { 1: 'VBUS', 2: 'GND' } : undefined
     }),
-    component('U1', profileMode ? 'Regulator_Linear:AMS1117-3.3' : 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
-      value: profileMode ? 'AMS1117-3.3' : undefined,
+    component('U1', profileMode ? 'Regulator_Linear:TC1262-33' : 'ChatPCB:REGULATOR_3V3', 'Regulates VBUS into the +3V3 rail used by MCU and peripherals.', 'Package_TO_SOT_SMD:SOT-223-3_TabPin2', {
+      value: profileMode ? 'TC1262-33' : undefined,
       pins: ['VBUS', 'GND', '+3V3'],
       connectedPins: ['GND', 'VBUS', '+3V3'],
-      pinNets: profileMode ? { 1: 'GND', 2: '+3V3', 3: 'VBUS' } : undefined
+      pinNets: profileMode ? { 1: 'VBUS', 2: 'GND', 3: '+3V3' } : undefined
     }),
     component('U2', mcuLibId, `${spec.mcu.package} controller/module with named MCU nets for review.`, mcuFootprintFor(spec), {
       value: spec.mcu.package === 'unspecified' ? 'MCU_PLACEHOLDER' : spec.mcu.package,
@@ -194,6 +196,23 @@ export function buildMcuSchematicAst(spec) {
     );
   }
 
+  if (profileMode) {
+    components.push(
+      component('#FLG1', 'power:PWR_FLAG', 'ERC power source marker for the externally supplied USB-C VBUS rail.', '', {
+        value: 'PWR_FLAG',
+        pins: ['VBUS'],
+        connectedPins: ['VBUS'],
+        pinNets: { 1: 'VBUS' }
+      }),
+      component('#FLG2', 'power:PWR_FLAG', 'ERC power source marker for the board ground reference.', '', {
+        value: 'PWR_FLAG',
+        pins: ['GND'],
+        connectedPins: ['GND'],
+        pinNets: { 1: 'GND' }
+      })
+    );
+  }
+
   return {
     components,
     nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']).map((name) => ({
@@ -225,7 +244,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
   )
 ${renderLibSymbols(schematic.components.map((item) => item.libId))}
 ${notes.map((note, index) => renderText(note, 25.4, 25.4 + index * 7.62)).join('\n')}
-${schematic.components.map((item, index) => renderPlacedComponent(item, 38.1 + (index % 4) * 38.1, 88.9 + Math.floor(index / 4) * 33.02, baseName)).join('\n')}
+${schematic.components.map((item, index) => renderPlacedComponent(item, 38.1 + (index % SCHEMATIC_GRID_COLUMNS) * 38.1, 88.9 + Math.floor(index / SCHEMATIC_GRID_COLUMNS) * SCHEMATIC_GRID_ROW_SPACING_MM, baseName)).join('\n')}
   (sheet_instances
     (path "/"
       (page "1")
@@ -370,9 +389,6 @@ ${[...fixtureBlocks, ...officialBlocks].join('\n')}
 function officialCacheDependenciesFor(usedLibIds) {
   const dependencies = [];
   for (const libId of usedLibIds) {
-    if (libId === 'Regulator_Linear:AMS1117-3.3') {
-      dependencies.push('Regulator_Linear:AP1117-15');
-    }
     if (officialPinDefinitionsFor(libId).length > 0) {
       dependencies.push(libId);
     }
@@ -571,8 +587,10 @@ function officialPinDefinitionsFor(libId) {
         pinDef('1', -5.08, 0, 0),
         pinDef('2', -5.08, -2.54, 0)
       ];
-    case 'Regulator_Linear:AMS1117-3.3':
-      return [pinDef('1', 0, -7.62, 90), pinDef('2', 7.62, 0, 180), pinDef('3', -7.62, 0, 0)];
+    case 'Regulator_Linear:TC1262-33':
+      return [pinDef('1', -7.62, 0, 0), pinDef('2', 0, -7.62, 90), pinDef('3', 7.62, 0, 180)];
+    case 'power:PWR_FLAG':
+      return [pinDef('1', 0, 0, 90)];
     case 'Switch:SW_Push':
       return [pinDef('1', -5.08, 0, 0), pinDef('2', 5.08, 0, 180)];
     case 'Device:LED':
@@ -654,8 +672,10 @@ function symbolPinsFor(libId) {
     case 'Connector_Generic:Conn_01x02':
       return ['VBUS', 'GND'];
     case 'ChatPCB:REGULATOR_3V3':
-    case 'Regulator_Linear:AMS1117-3.3':
+    case 'Regulator_Linear:TC1262-33':
       return ['VBUS', 'GND', '+3V3'];
+    case 'power:PWR_FLAG':
+      return ['VBUS'];
     case 'ChatPCB:MCU_PLACEHOLDER':
     case 'ChatPCB:ESP32_S3_WROOM_1':
     case 'ChatPCB:STM32G0B1CBT6':
@@ -748,11 +768,11 @@ function renderPinNetStub(pinName, symbolX, symbolY, pinDef) {
 function labelPointFromPin(pin) {
   switch (pin.rotation) {
     case 90:
-      return { x: pin.x, y: pin.y - 5.08 };
+      return { x: pin.x, y: pin.y + 5.08 };
     case 180:
       return { x: pin.x + 5.08, y: pin.y };
     case 270:
-      return { x: pin.x, y: pin.y + 5.08 };
+      return { x: pin.x, y: pin.y - 5.08 };
     default:
       return { x: pin.x - 5.08, y: pin.y };
   }

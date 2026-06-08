@@ -212,6 +212,51 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
   - `release-quality circuit`: still no. Release-quality requires ERC `0` errors and `0` warnings, exact orderable parts, datasheet pin review, sourcing, simulation/calculation evidence, and layout/manufacturing outputs.
   - Next concrete engineering target: remove the remaining AMS1117/AP1117 inherited-symbol mismatch and regulator net-stub warnings, then rerun ESP32/STM32 cross-profile ERC until both are `0` errors and `0` warnings.
 
+## 2026-06-08 Direct 500mA Regulator and Zero-Warning ERC Increment
+
+- Added a TDD increment after `1a11828 feat: cache official KiCad symbols for profiles` to remove the remaining regulator warning cluster without claiming release readiness.
+- Root repo baseline before this increment: `1a11828 feat: cache official KiCad symbols for profiles`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Official KiCad latest stable was rechecked from official KiCad sources during this increment:
+  - `https://www.kicad.org/download/windows/` reported Stable Release Current Version `10.0.3`.
+  - `https://www.kicad.org/blog/2026/05/KiCad-10.0.3-Release/` identifies KiCad 10.0.3 as the 2026-05-15 stable bug-fix release.
+  - Installed CLI path `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe` returned version `10.0.3`.
+- Implemented behavior:
+  - Replaced supported-profile `Regulator_Linear:AMS1117-3.3` with direct official KiCad symbol `Regulator_Linear:TC1262-33`.
+  - `TC1262-33` was selected because the installed KiCad 10 symbol is direct, not inherited, and its description is `500mA Low Dropout CMOS Voltage Regulator, Fixed Output 3.3V, TO-220/SOT-223/TO-263`.
+  - Updated the regulator pin-number map to `1=VBUS`, `2=GND`, `3=+3V3`.
+  - Added `power:PWR_FLAG` markers for both `VBUS` and `GND` in supported profiles so KiCad ERC sees the USB-C input rail and board ground as driven.
+  - Corrected 90/270-degree pin-label stub direction so official bottom/top pins connect outward instead of folding back through the symbol.
+  - Increased schematic placement to 5 columns with larger row spacing to avoid official USB-C symbol pin stubs colliding with passives below it.
+- Result versus previous increment:
+  - Previous ESP32-S3 profile ERC: `0` errors, `5` warnings: `multiple_net_names: 1`, `unconnected_wire_endpoint: 3`, `lib_symbol_mismatch: 1`.
+  - Previous STM32 profile ERC: `0` errors, `5` warnings: `multiple_net_names: 1`, `unconnected_wire_endpoint: 3`, `lib_symbol_mismatch: 1`.
+  - Current ESP32-S3 profile ERC: `0` errors, `0` warnings.
+  - Current STM32 profile ERC: `0` errors, `0` warnings.
+- Fresh generated samples:
+  - `workspaces/esp32-s3-usbc-sensor-profile`
+  - `workspaces/stm32-usbc-sensor-profile`
+- Official KiCad 10.0.3 export result after this increment:
+  - ESP32 PDF `workspaces/esp32-s3-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.pdf`, 106637 bytes.
+  - ESP32 SVG `workspaces/esp32-s3-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.svg`, 784815 bytes.
+  - STM32 PDF `workspaces/stm32-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.pdf`, 104108 bytes.
+  - STM32 SVG `workspaces/stm32-usbc-sensor-profile/exports/chatpcb_mcu_peripheral.svg`, 773116 bytes.
+- Verification run in this increment:
+  - `node --test tests\board-profiles.test.js`: pass.
+  - `npm test`: 62/62 pass.
+  - `npm run verify:sample`: pass; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: first hit stale global daemon on `127.0.0.1:41317`; stopped `cmd.exe`/`node.exe` daemon processes, reran, pass.
+  - Official KiCad 10.0.3 ESP32/STM32 generate + validate: both ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass.
+  - Official `eeschema.exe` process smoke: ESP32 profile schematic launched and stayed alive for 4 seconds, then was stopped.
+  - Fork `eeschema.exe` process smoke: ESP32 profile schematic launched and stayed alive for 4 seconds, then was stopped.
+  - Direct Computer Use remained unavailable as a callable desktop tool; native KiCad panel click-through was not repeated in this increment.
+- Final user-facing decision after this increment:
+  - `integration works`: yes, with official KiCad latest stable 10.0.3 for generate, validate, ERC, export, and process launch smoke.
+  - `schematic prototype-review quality`: improved materially; both supported profiles now have real support-component KiCad symbols, explicit part/value choices, PWR_FLAG rails, and ERC `0` errors/`0` warnings.
+  - `release-quality circuit`: still no. Remaining release blockers are live JLCPCB/LCSC orderability, exact sourced part numbers for regulator/USB-C/passives/connectors, datasheet pin and electrical review, ESD/protection decisions, simulation or calculation evidence, PCB layout, DRC, Gerbers, drill files, and manufacturing constraints.
+
 Additional verification commands run for this increment:
 
 ```powershell
@@ -263,9 +308,9 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32s3-usbc-sensor-ki
 
 ## Next Work
 
-1. Remove the remaining `Regulator_Linear:AMS1117-3.3`/`AP1117-15` inherited-symbol mismatch and regulator net-stub warnings so both supported profiles reach ERC `0` errors and `0` warnings in official KiCad 10.0.3.
-2. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB live sourcing evidence.
-3. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
+1. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB/LCSC live sourcing evidence.
+2. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
+3. Add simulation or documented calculation evidence for the 3.3V regulator, LED current, USB-C sink pulldowns, I2C pull-ups, reset/boot behavior, and thermal margins.
 4. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
 5. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
 6. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.

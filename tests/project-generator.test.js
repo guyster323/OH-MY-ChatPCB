@@ -91,8 +91,8 @@ test('writes real schematic symbols, net labels, and metadata explanations for M
     assert.match(schematic, /\(label "RX"/);
     assert.match(schematic, /\(wire\s+\(pts\s+\(xy 101\.60 86\.36\)\s+\(xy 96\.52 86\.36\)\)/);
     assert.match(schematic, /\(label "SCL"\s+\(at 96\.52 86\.36 0\)/);
-    assert.match(schematic, /\(wire\s+\(pts\s+\(xy 101\.60 116\.84\)\s+\(xy 96\.52 116\.84\)\)/);
-    assert.match(schematic, /\(label "SCL"\s+\(at 96\.52 116\.84 0\)/);
+    assert.match(schematic, /\(wire\s+\(pts\s+\(xy 63\.50 129\.54\)\s+\(xy 58\.42 129\.54\)\)/);
+    assert.match(schematic, /\(label "SCL"\s+\(at 58\.42 129\.54 0\)/);
     assert.match(schematic, /\(effects \(font \(size 1\.27 1\.27\)\)/);
     assert.doesNotMatch(schematic, /\(at 3810\.00 8890\.00 0\)/);
 
