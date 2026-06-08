@@ -511,16 +511,73 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\stm32-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
 ```
 
+## 2026-06-08 PCB Footprint and Net Assignment Increment
+
+- Added a TDD increment after `2507a41 feat: add profile PCB draft metadata` to turn the PCB draft from footprint-name shells into a real KiCad footprint-body placement draft.
+- Root repo baseline before this increment: `2507a41 feat: add profile PCB draft metadata`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - `renderKiCadBoard` now resolves KiCad footprint files from `KICAD_FOOTPRINT_DIR`, the current-user KiCad 10 footprint library, or the all-users KiCad 10 footprint library.
+  - Resolved `.kicad_mod` bodies are embedded into the generated board while preserving the `Lib:Footprint` board name and replacing `Reference`, `Value`, `at`, and UUIDs for each component instance.
+  - The board now emits a top-level net table from component `pinNets`.
+  - Embedded pads now receive `(net <id> "<name>")` assignments when the schematic component has a pin-to-net map, so USB-C A/B duplicate pads are treated as the same electrical nets rather than false shorts.
+  - The supported board outline is now widened to `160mm x 120mm` to keep real embedded footprints away from the board edge in the placement draft.
+  - The generated `.kicad_pro` now records board design rules for the supported footprint set, including `min_through_hole_diameter: 0.2` and `min_hole_clearance: 0.15`.
+- TDD evidence:
+  - `tests/project-generator.test.js` first failed because embedded footprint bodies lacked pads.
+  - A second RED check failed because the board had no net table or pad-level net assignments.
+  - A third RED check failed because the board outline was still `110mm x 80mm`.
+  - A fourth RED check failed because `.kicad_pro` had no `board.design_settings.rules`.
+  - After implementation, the test verifies cross-profile footprint embedding for ESP32-S3 and STM32, pad body preservation, resistor net assignment, the larger board outline, and project DRC rules.
+- Verification run in this increment:
+  - `node --test tests\project-generator.test.js`: pass, 8/8.
+  - `npm test`: pass, 66/66.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad CLI path: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
+  - Official KiCad CLI version previously verified in this session: `10.0.3`.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both schematic ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both generated profile projects.
+  - Official KiCad 10.0.3 PCB DRC after embedding/net/rule/outline changes:
+    - ESP32-S3: `1` violation, `53` unconnected items; remaining violation type is `lib_footprint_mismatch:1` for `U2 RF_Module:ESP32-S3-WROOM-1`.
+    - STM32: `0` violations, `51` unconnected items.
+- Final user-facing decision after this increment:
+  - `integration works`: still yes.
+  - `flexibility improved`: yes. The footprint embedding, net table, pad assignment, outline, and DRC-rule logic apply across ESP32-S3 and STM32 supported profiles.
+  - `release-quality circuit`: still no. STM32 now has zero PCB DRC violations for the placement draft, but both profiles still have many unconnected items because the board is not routed. ESP32 still has one RF module footprint-library mismatch. Neither profile has reviewed routing, copper zones, Gerbers, drill files, sourcing evidence, or datasheet signoff.
+
+Additional verification commands run for this increment:
+
+```powershell
+node --test tests\project-generator.test.js
+npm test
+npm run verify:sample
+npm run verify:panel
+npm run verify:ui
+node ./bin/chatpcb-cli.js generate --project ./workspaces/esp32-s3-usbc-sensor-profile --prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js generate --project ./workspaces/stm32-usbc-sensor-profile --prompt "Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32-s3-usbc-sensor-profile
+node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-profile
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\esp32-s3-usbc-sensor-profile\exports .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\esp32-s3-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export svg --output .\workspaces\stm32-usbc-sensor-profile\exports .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" sch export pdf --output .\workspaces\stm32-usbc-sensor-profile\exports\chatpcb_mcu_peripheral.pdf .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_sch
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\esp32-s3-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
+& "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\stm32-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
+```
+
 ## Next Work
 
-1. Replace placement-only PCB footprint references with real KiCad footprint bodies or use a KiCad board-update flow so DRC no longer reports `lib_footprint_mismatch`.
-2. Add initial routed layout for the constrained ESP32-S3 and STM32 supported profiles, including critical buck loop placement, USB-C routing assumptions, power/ground zones, board constraints, and connector placement.
-3. Generate and validate Gerber and drill outputs only after PCB DRC is clean.
-4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
-6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
-7. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
-8. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
-9. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
-10. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
-11. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+1. Add routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `53` and STM32 `51` to zero before manufacturing export.
+2. Resolve the remaining ESP32 `RF_Module:ESP32-S3-WROOM-1` `lib_footprint_mismatch` warning, likely by using a KiCad board-update flow or recording an explicit supported footprint normalization for RF module keepout/layer behavior.
+3. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
+4. Generate and validate Gerber and drill outputs only after PCB DRC has zero violations and zero unconnected items.
+5. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+6. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+7. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+8. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
+9. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
+10. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
+11. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
+12. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.

@@ -21,6 +21,18 @@ export function renderKiCadProject(baseName) {
       chatpcb: {
         generator: 'OH-MY-ChatPCB',
         status: 'review-draft'
+      },
+      board: {
+        design_settings: {
+          rules: {
+            min_clearance: 0.15,
+            min_hole_clearance: 0.15,
+            min_hole_to_hole: 0.25,
+            min_through_hole_diameter: 0.2,
+            min_track_width: 0.15,
+            min_via_diameter: 0.5
+          }
+        }
       }
     },
     null,
@@ -30,8 +42,10 @@ export function renderKiCadProject(baseName) {
 
 export function renderKiCadBoard({ baseName, schematic }) {
   const components = schematic.components.filter((component) => component.footprint);
+  const netIds = boardNetIdsFor(components);
+  const netDeclarations = [...netIds.entries()].map(([name, id]) => `  (net ${id} "${escapeSchText(name)}")`).join('\n');
   const footprints = components
-    .map((component, index) => renderBoardFootprint(component, 25 + (index % 5) * 22, 25 + Math.floor(index / 5) * 18))
+    .map((component, index) => renderBoardFootprint(component, 25 + (index % 5) * 22, 25 + Math.floor(index / 5) * 18, netIds))
     .join('\n');
 
   return `(kicad_pcb
@@ -61,9 +75,10 @@ export function renderKiCadBoard({ baseName, schematic }) {
   (setup
     (pad_to_mask_clearance 0)
   )
+${netDeclarations}
   (gr_rect
     (start 10 10)
-    (end 110 80)
+    (end 160 120)
     (stroke
       (width 0.1)
       (type default)
@@ -442,7 +457,12 @@ ${[...fixtureBlocks, ...officialBlocks].join('\n')}
   )`;
 }
 
-function renderBoardFootprint(componentModel, x, y) {
+function renderBoardFootprint(componentModel, x, y, netIds) {
+  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, netIds);
+  if (embedded) {
+    return embedded;
+  }
+
   const uuid = randomUUID();
 
   return `  (footprint "${escapeSchText(componentModel.footprint)}"
@@ -460,6 +480,90 @@ function renderBoardFootprint(componentModel, x, y) {
       (effects (font (size 1 1) (thickness 0.15)))
     )
   )`;
+}
+
+function renderEmbeddedBoardFootprint(componentModel, x, y, netIds) {
+  const [library, footprintName] = componentModel.footprint.split(':');
+  if (!library || !footprintName) {
+    return null;
+  }
+
+  const footprintPath = officialFootprintPath(library, footprintName);
+  if (!footprintPath) {
+    return null;
+  }
+
+  try {
+    const source = readFileSync(footprintPath, 'utf8');
+    return indentBoardFootprintBlock(transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds));
+  } catch {
+    return null;
+  }
+}
+
+function boardNetIdsFor(components) {
+  const netNames = unique(components.flatMap((componentModel) => Object.values(componentModel.pinNets ?? {})));
+  return new Map(netNames.map((name, index) => [name, index + 1]));
+}
+
+function officialFootprintPath(library, footprintName) {
+  const candidates = [
+    process.env.KICAD_FOOTPRINT_DIR,
+    'C:/Users/windo/AppData/Local/Programs/KiCad/10.0/share/kicad/footprints',
+    'C:/Program Files/KiCad/10.0/share/kicad/footprints'
+  ].filter(Boolean);
+
+  return candidates.map((dir) => `${dir}/${library}.pretty/${footprintName}.kicad_mod`).find((file) => existsSync(file)) ?? null;
+}
+
+function transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds) {
+  const lines = source.trim().split(/\r?\n/);
+  const transformed = [];
+  let insertedAt = false;
+
+  for (const line of lines) {
+    let nextLine = line
+      .replace(`(footprint "${footprintName}"`, `(footprint "${escapeSchText(`${library}:${footprintName}`)}"`)
+      .replace(/\(property "Reference" "[^"]+"/, `(property "Reference" "${escapeSchText(componentModel.ref)}"`)
+      .replace(/\(property "Value" "[^"]+"/, `(property "Value" "${escapeSchText(componentModel.value)}"`)
+      .replace(/\(uuid "[^"]+"\)/g, () => `(uuid "${randomUUID()}")`);
+
+    transformed.push(nextLine);
+
+    if (!insertedAt && /^\s*\(layer "F\.Cu"\)/.test(nextLine)) {
+      transformed.push(`\t(at ${sch(x)} ${sch(y)} 0)`);
+      insertedAt = true;
+    }
+  }
+
+  if (!insertedAt) {
+    transformed.splice(1, 0, `\t(at ${sch(x)} ${sch(y)} 0)`);
+  }
+
+  return injectBoardPadNets(transformed.join('\n'), componentModel, netIds);
+}
+
+function injectBoardPadNets(block, componentModel, netIds) {
+  if (!componentModel.pinNets) {
+    return block;
+  }
+
+  return block.replace(/(\n\t\(pad "([^"]*)"[\s\S]*?)(\n\t\))/g, (match, prefix, pinNumber, closing) => {
+    const netName = componentModel.pinNets[pinNumber];
+    const netId = netIds.get(netName);
+    if (!netName || !netId || /\n\t\t\(net \d+ "/.test(prefix)) {
+      return match;
+    }
+
+    return `${prefix}\n\t\t(net ${netId} "${escapeSchText(netName)}")${closing}`;
+  });
+}
+
+function indentBoardFootprintBlock(block) {
+  return block
+    .split('\n')
+    .map((line) => `  ${line}`)
+    .join('\n');
 }
 
 function officialCacheDependenciesFor(usedLibIds) {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -203,12 +203,17 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
     assert.match(board, /\(kicad_pcb/);
     assert.match(board, /\(generator "pcbnew"\)/);
     assert.match(board, /\(gr_rect[\s\S]*\(layer "Edge\.Cuts"\)/);
+    assert.match(board, /\(end 160 120\)/);
     assert.match(board, /\(footprint "Package_SON:WSON-10-1EP_2x3mm_P0\.5mm_EP0\.84x2\.4mm_ThermalVias"/);
     assert.match(board, /\(property "Reference" "U1"/);
     assert.match(board, /\(footprint "Inductor_SMD:L_0805_2012Metric"/);
     assert.match(board, /\(property "Reference" "L1"/);
     assert.match(board, /\(footprint "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12"/);
     assert.match(board, /\(property "Reference" "J4"/);
+
+    const project = JSON.parse(await readFile(result.files.project, 'utf8'));
+    assert.equal(project.board.design_settings.rules.min_through_hole_diameter, 0.2);
+    assert.equal(project.board.design_settings.rules.min_hole_clearance, 0.15);
 
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
     assert.equal(metadata.boardProfile.manufacturing.boardDraft.status, 'generated');
@@ -217,6 +222,83 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
     assert.equal(metadata.boardProfile.manufacturing.exports.gerber.status, 'pending');
     assert.equal(metadata.boardProfile.manufacturing.exports.drill.status, 'pending');
   } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('supported release profiles embed resolved KiCad footprint bodies in PCB drafts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-footprints-'));
+  const footprintRoot = path.join(root, 'footprints');
+  const resistorLibrary = path.join(footprintRoot, 'Resistor_SMD.pretty');
+  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+
+  try {
+    await mkdir(resistorLibrary, { recursive: true });
+    await writeFile(
+      path.join(resistorLibrary, 'R_0603_1608Metric.kicad_mod'),
+      `(footprint "R_0603_1608Metric"
+  (version 20260206)
+  (generator "test")
+  (layer "F.Cu")
+  (property "Reference" "REF**"
+    (at 0 -1.43 0)
+    (layer "F.SilkS")
+    (effects (font (size 1 1) (thickness 0.15)))
+  )
+  (property "Value" "R_0603_1608Metric"
+    (at 0 1.43 0)
+    (layer "F.Fab")
+    (effects (font (size 1 1) (thickness 0.15)))
+  )
+  (pad "1" smd rect
+    (at -0.8 0)
+    (size 0.8 0.9)
+    (layers "F.Cu" "F.Paste" "F.Mask")
+  )
+  (pad "2" smd rect
+    (at 0.8 0)
+    (size 0.8 0.9)
+    (layers "F.Cu" "F.Paste" "F.Mask")
+  )
+)
+`,
+      'utf8'
+    );
+    process.env.KICAD_FOOTPRINT_DIR = footprintRoot;
+
+    for (const [profile, prompt] of [
+      [
+        'esp32',
+        'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ],
+      [
+        'stm32',
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ]
+    ]) {
+      const result = await generateMcuPeripheralProject({
+        projectDir: path.join(root, profile),
+        prompt
+      });
+
+      const board = await readFile(result.files.board, 'utf8');
+      assert.match(board, /\(net \d+ "CC1"\)/);
+      assert.match(board, /\(net \d+ "GND"\)/);
+      assert.match(board, /\(footprint "Resistor_SMD:R_0603_1608Metric"/);
+      assert.match(board, /\(property "Reference" "R1"/);
+      assert.match(board, /\(property "Value" "5\.1k"/);
+      assert.match(board, /\(pad "1" smd rect/);
+      assert.match(board, /\(pad "2" smd rect/);
+      assert.match(board, /\(pad "1" smd rect[\s\S]*\(net \d+ "CC1"\)/);
+      assert.match(board, /\(pad "2" smd rect[\s\S]*\(net \d+ "GND"\)/);
+      assert.doesNotMatch(board, /\(property "Reference" "REF\*\*"/);
+    }
+  } finally {
+    if (previousFootprintDir === undefined) {
+      delete process.env.KICAD_FOOTPRINT_DIR;
+    } else {
+      process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
+    }
     await rm(root, { force: true, recursive: true });
   }
 });
