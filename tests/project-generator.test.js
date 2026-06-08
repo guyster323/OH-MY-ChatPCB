@@ -285,6 +285,10 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
       assert.match(board, /\(net \d+ "CC1"\)/);
       assert.match(board, /\(net \d+ "GND"\)/);
       assert.match(board, /\(footprint "Resistor_SMD:R_0603_1608Metric"/);
+      if (profile === 'esp32') {
+        assert.match(board, /\(footprint "ESP32-S3-WROOM-1"/);
+        assert.doesNotMatch(board, /\(footprint "RF_Module:ESP32-S3-WROOM-1"/);
+      }
       assert.match(board, /\(property "Reference" "R1"/);
       assert.match(board, /\(property "Value" "5\.1k"/);
       assert.match(board, /\(pad "1" smd rect/);

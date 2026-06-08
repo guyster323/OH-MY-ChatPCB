@@ -411,6 +411,16 @@ Conservative PCB trace scaffold update on 2026-06-08:
   - STM32: `0` violations, `46` unconnected items.
 - This proves there is a safe improvement path for the "not release-quality" board, but it also proves full release requires real routing/zone/layout work rather than blanket autorouting.
 
+ESP32 RF footprint normalization update on 2026-06-08:
+
+- The ESP32-S3 profile no longer carries the remaining `RF_Module:ESP32-S3-WROOM-1` PCB DRC `lib_footprint_mismatch` warning.
+- Root-cause testing showed that changing U2 `Value` did not affect the warning, but preserving the official RF module footprint body identifier `ESP32-S3-WROOM-1` instead of emitting `RF_Module:ESP32-S3-WROOM-1` removed it under official KiCad 10.0.3 DRC.
+- Schematic metadata and component footprint fields still carry the library-qualified `RF_Module:ESP32-S3-WROOM-1` link used by the generator.
+- Official KiCad 10.0.3 PCB DRC now reports:
+  - ESP32-S3: `0` violations, `48` unconnected items.
+  - STM32: `0` violations, `46` unconnected items.
+- This removes the last PCB DRC violation across both supported profiles, but release quality remains blocked by unconnected board items and missing routing, zones, manufacturing exports, sourcing, datasheet, and production review evidence.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -425,7 +435,7 @@ Acceptance criteria:
 - Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
 - Supported profiles must not return `ready-for-release` while any release gate, production-part sourcing/datasheet/simulation evidence, release-evidence status, or calculation status is incomplete, warning, or blocker, even when ERC is clean.
 - Supported profiles must not return `ready-for-release` merely because a `.kicad_pcb` file exists; the generated board must have real footprint bodies or an equivalent KiCad-updated board, reviewed placement/routing/zones/constraints, PCB DRC with zero violations, and generated Gerber/drill outputs.
-- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; STM32 currently has zero PCB DRC violations but still has `46` unconnected items, and ESP32-S3 still has one footprint-library mismatch plus `48` unconnected items.
+- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; both supported profiles currently have zero PCB DRC violations, but STM32 still has `46` unconnected items and ESP32-S3 still has `48` unconnected items.
 - PCB trace scaffolding must not reduce unconnected items by introducing new KiCad DRC violations; unsafe global or high-density centerline traces should remain review-loop findings instead of generated board copper.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
@@ -470,13 +480,12 @@ git log --oneline -1
 Continue Phase 8 before widening PCB/layout scope:
 
 1. Route both supported PCB drafts so unconnected items drop from ESP32-S3 `48` and STM32 `46` to zero without adding new DRC violations.
-2. Resolve the remaining ESP32 `RF_Module:ESP32-S3-WROOM-1` `lib_footprint_mismatch` warning or record an explicit KiCad board-update/footprint-normalization path that removes it.
-3. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
-4. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.
-5. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-6. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
-7. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
-8. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
-9. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-10. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
-11. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.
+2. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
+3. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.
+4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+7. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
+8. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
+9. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
+10. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

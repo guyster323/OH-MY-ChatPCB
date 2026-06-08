@@ -627,14 +627,46 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 ## Next Work
 
 1. Continue routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `48` and STM32 `46` to zero before manufacturing export, without adding new DRC violations.
-2. Resolve the remaining ESP32 `RF_Module:ESP32-S3-WROOM-1` `lib_footprint_mismatch` warning, likely by using a KiCad board-update flow or recording an explicit supported footprint normalization for RF module keepout/layer behavior.
-3. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
-4. Generate and validate Gerber and drill outputs only after PCB DRC has zero violations and zero unconnected items.
-5. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-6. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
-7. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
-8. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
-9. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
-10. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
-11. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
-12. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+2. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
+3. Generate and validate Gerber and drill outputs only after PCB DRC has zero violations and zero unconnected items.
+4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
+5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
+6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
+7. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
+8. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
+9. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
+10. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
+11. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+
+## 2026-06-08 ESP32 RF Footprint Normalization Increment
+
+- Added a TDD increment after `f0eb3b0 feat: add conservative PCB trace scaffold` to remove the ESP32-only PCB DRC warning.
+- Root repo baseline before this increment: `f0eb3b0 feat: add conservative PCB trace scaffold`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Root-cause evidence:
+  - Official KiCad 10.0.3 DRC reported one ESP32 violation: `lib_footprint_mismatch:1` for `U2 RF_Module:ESP32-S3-WROOM-1`.
+  - Changing only U2 `Value` from `ESP32-S3-WROOM-1-N8R2` to `ESP32-S3-WROOM-1` did not remove the warning.
+  - Changing only the generated U2 PCB footprint identifier from `RF_Module:ESP32-S3-WROOM-1` to the official body name `ESP32-S3-WROOM-1` removed the warning in a temporary DRC experiment.
+- Implemented behavior:
+  - Embedded RF module PCB footprint bodies now preserve the official footprint body identifier while schematic metadata and component footprint fields still carry the library-qualified `RF_Module:ESP32-S3-WROOM-1` link.
+  - This keeps the ESP32 RF module body compatible with KiCad 10.0.3 DRC while retaining the generator's library resolution path.
+- TDD evidence:
+  - `tests/project-generator.test.js` first failed because the generated ESP32 board still emitted `(footprint "RF_Module:ESP32-S3-WROOM-1"`.
+  - After implementation, the test verifies the generated ESP32 board emits `(footprint "ESP32-S3-WROOM-1"` and does not emit the library-qualified RF module body identifier.
+- Verification run in this increment:
+  - `node --test tests\project-generator.test.js`: pass, 8/8.
+  - `npm test`: pass, 66/66.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad CLI path: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
+  - Official KiCad CLI version: `10.0.3`.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both schematic ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both regenerated profile projects.
+  - Official KiCad 10.0.3 PCB DRC on regenerated supported profile projects:
+    - ESP32-S3: `0` violations, `48` unconnected items.
+    - STM32: `0` violations, `46` unconnected items.
+- User-facing decision:
+  - `integration works`: still yes.
+  - `cross-profile PCB DRC violations`: now `0` for both ESP32-S3 and STM32 generated PCB drafts.
+  - `release-quality circuit`: still no. Both profiles still have unconnected PCB items, no completed routing/zones, no Gerber/drill outputs, no sourced BOM evidence, and no datasheet/manufacturing signoff.

@@ -528,7 +528,7 @@ function transformBoardFootprintBlock(source, componentModel, x, y, library, foo
 
   for (const line of lines) {
     let nextLine = line
-      .replace(`(footprint "${footprintName}"`, `(footprint "${escapeSchText(`${library}:${footprintName}`)}"`)
+      .replace(`(footprint "${footprintName}"`, `(footprint "${escapeSchText(boardFootprintIdentifier(library, footprintName))}"`)
       .replace(/\(property "Reference" "[^"]+"/, `(property "Reference" "${escapeSchText(componentModel.ref)}"`)
       .replace(/\(property "Value" "[^"]+"/, `(property "Value" "${escapeSchText(componentModel.value)}"`)
       .replace(/\(uuid "[^"]+"\)/g, () => `(uuid "${randomUUID()}")`);
@@ -546,6 +546,14 @@ function transformBoardFootprintBlock(source, componentModel, x, y, library, foo
   }
 
   return injectBoardPadNets(transformed.join('\n'), componentModel, netIds, { ref: componentModel.ref, x, y }, padCentersByNet);
+}
+
+function boardFootprintIdentifier(library, footprintName) {
+  if (library === 'RF_Module') {
+    return footprintName;
+  }
+
+  return `${library}:${footprintName}`;
 }
 
 function injectBoardPadNets(block, componentModel, netIds, footprintPosition = { x: 0, y: 0 }, padCentersByNet = null) {
