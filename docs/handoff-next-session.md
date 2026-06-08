@@ -284,6 +284,38 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
   - `flexibility improved`: yes. If the supported MCU changes from ESP32-S3 to STM32, the common release evidence and pending checks still follow the profile.
   - `release-quality circuit`: still no. The evidence structure now makes the remaining release blockers explicit per part, but sourcing, datasheet review, simulation/calculation evidence, PCB layout, DRC, Gerbers, drill files, and manufacturing constraints are not complete.
 
+## 2026-06-08 Cross-Profile Calculation Evidence Increment
+
+- Added a TDD increment after `ecd2a50 feat: track release evidence for profiles` to attach reusable electrical calculation evidence to both supported profiles.
+- Root repo baseline before this increment: `ecd2a50 feat: track release evidence for profiles`.
+- KiCad fork baseline remained clean at `6818a8e feat: wire ChatPCB panel into schematic editor`.
+- Implemented behavior:
+  - `boardProfile.releaseEvidence.calculations` now exists for both ESP32-S3 and STM32 supported profiles.
+  - `status-led-current`: pass, `(3.3V - 2.0V) / 1k = 1.3mA` nominal LED current.
+  - `usb-c-cc-pulldown-current`: pass, `5V / 5.1k = 0.98mA` per asserted CC pulldown path.
+  - `i2c-pullup-rise-time`: warning, `0.8473 * 4.7k * 100pF = 398ns`; acceptable for 100kHz standard-mode assumptions but fast-mode requires actual bus capacitance review.
+  - `regulator-thermal-budget`: blocker, `(5.0V - 3.3V) * 0.5A = 0.85W`; release remains blocked until package thermal resistance, copper area, ambient temperature, and sourced regulator variant are reviewed.
+  - Review residual risks now include `calculation-blocker` and `calculation-warning` summaries when calculation evidence is not release-clean.
+  - Tests now assert that the generated user review output exposes the regulator thermal blocker and I2C rise-time warning for both ESP32-S3 and STM32 profiles.
+- Official KiCad stable recheck during final verification:
+  - `https://www.kicad.org/download/windows/` still reported Stable Release Current Version `10.0.3`.
+  - Installed CLI path `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe` returned version `10.0.3`.
+- Current generated metadata evidence:
+  - ESP32 profile and STM32 profile both include the same four calculation evidence records.
+  - MCU/profile changes do not drop LED, USB-C CC, I2C pull-up, or regulator thermal checks.
+- Verification run in this increment:
+  - `node --test tests\board-profiles.test.js`: pass.
+  - `npm test`: 62/62 pass.
+  - `npm run verify:sample`: pass; generic sample remains blocked; sample ERC `0` errors and `0` warnings; simulation skipped with `NGSPICE_UNAVAILABLE`.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+  - Official KiCad 10.0.3 ESP32/STM32 validate: both ERC `0` errors and `0` warnings.
+  - Official KiCad 10.0.3 ESP32/STM32 SVG/PDF export: pass for both generated profile projects.
+- Final user-facing decision after this increment:
+  - `integration works`: still yes.
+  - `flexibility improved`: yes. The same calculation evidence follows ESP32-S3 and STM32 supported profiles.
+  - `release-quality circuit`: still no. The regulator thermal calculation is now an explicit release blocker, and sourcing, datasheet, layout/DRC, manufacturing outputs, and live orderability evidence remain incomplete.
+
 Additional verification commands run for this increment:
 
 ```powershell
@@ -335,10 +367,11 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/esp32s3-usbc-sensor-ki
 
 ## Next Work
 
-1. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB/LCSC live sourcing evidence.
-2. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
-3. Add simulation or documented calculation evidence for the 3.3V regulator, LED current, USB-C sink pulldowns, I2C pull-ups, reset/boot behavior, and thermal margins.
-4. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
-5. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
-6. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
-7. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.
+1. Resolve the `regulator-thermal-budget` release blocker with a sourced regulator/package/layout/ambient assumption that can support the 3.3V 500mA rail, or lower the current budget and expose that tradeoff to the user.
+2. Add exact orderable regulator/connector/passive part choices, datasheet pin mapping, and JLCPCB/LCSC live sourcing evidence.
+3. Add PCB/layout generation and DRC/manufacturing export gates before any `ready-for-release` status.
+4. Extend calculation or simulation evidence for reset/boot behavior, USB protection/ESD decisions, and regulator thermal margin after the sourced regulator choice is locked.
+5. Add user-selectable supported-board profiles in the panel, with diff preview and approval-gated conversion from a blocked generic prompt to a supported profile.
+6. Keep official KiCad latest-stable validation separate from the embedded fork panel path.
+7. Install or document `ngspice` on Windows so simulation checks can run instead of returning `NGSPICE_UNAVAILABLE`.
+8. Re-run direct Computer Use GUI verification when the Computer Use tool is callable again.

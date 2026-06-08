@@ -362,6 +362,13 @@ Cross-profile release evidence update on 2026-06-08:
 - Review output now emits `release-gates-incomplete` and residual risks name concrete missing evidence such as `U1 TC1262-33`.
 - This is a cross-profile foundation for eventual release-quality locking, but it does not complete release quality by itself.
 
+Cross-profile calculation evidence update on 2026-06-08:
+
+- Supported ESP32-S3 and STM32 profiles now publish reusable `boardProfile.releaseEvidence.calculations`.
+- Current shared calculation evidence includes `status-led-current` pass at `1.3mA`, `usb-c-cc-pulldown-current` pass at `0.98mA`, `i2c-pullup-rise-time` warning at `398ns`, and `regulator-thermal-budget` blocker at `0.85W`.
+- Review output now surfaces calculation warnings and blockers as user-readable residual risks, so changing the MCU/profile does not drop the same electrical checks.
+- The explicit thermal blocker is the current reason the supported profiles cannot be called release-quality even though KiCad schematic ERC is `0` errors and `0` warnings.
+
 Acceptance criteria:
 
 - Official latest KiCad can open the generated project or returns a documented actionable incompatibility.
@@ -372,6 +379,7 @@ Acceptance criteria:
 - Supported profiles may report `ready-for-prototype-review`; they must not report `ready-for-release` until production-symbol, sourcing, datasheet-review, simulation, layout/DRC, and manufacturing export gates pass.
 - Supported profiles must not report `ready-for-release` while KiCad ERC reports `lib_symbol_mismatch` or any other warning; current supported-profile schematic ERC is `0` errors and `0` warnings, but downstream release gates still block release.
 - Supported profiles must carry production part evidence so changing the MCU/profile does not drop sourcing, datasheet, simulation, or layout/DRC release requirements.
+- Supported profiles must carry calculation evidence for shared electrical assumptions, and any warning or blocker calculation must appear in review residual risks before release.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
@@ -416,8 +424,9 @@ Continue Phase 8 before widening PCB/layout scope:
 
 1. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
 2. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TC1262-33, USB-C connector, debug connector, passives, switches, and LED.
-3. Add simulation or calculation-backed evidence for the 3.3V rail, LED current, USB-C CC pulldowns, I2C pull-ups, reset/boot behavior, and regulator thermal margin.
-4. Add PCB layout, DRC, Gerber/drill/manufacturing export gates before any profile can return `ready-for-release`.
-5. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-6. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
-7. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.
+3. Resolve the `regulator-thermal-budget` blocker by selecting a sourced regulator/package/layout assumption that can support the 3.3V 500mA rail, or by reducing the rail budget and showing that tradeoff to the user.
+4. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator thermal margin after the sourced regulator choice is locked.
+5. Add PCB layout, DRC, Gerber/drill/manufacturing export gates before any profile can return `ready-for-release`.
+6. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
+7. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
+8. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.

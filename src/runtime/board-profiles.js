@@ -125,7 +125,8 @@ export function applyBoardProfile(spec) {
       releaseGates: RELEASE_GATES.map((gate) => ({ ...gate })),
       releaseEvidence: {
         status: 'incomplete',
-        requiredChecks: ['sourcing', 'datasheet', 'simulation', 'layoutDrc']
+        requiredChecks: ['sourcing', 'datasheet', 'simulation', 'layoutDrc'],
+        calculations: calculationEvidence()
       },
       productionParts: productionPartsFor(profile)
     },
@@ -200,6 +201,47 @@ function withReleaseChecks(item) {
     ...productionPart,
     releaseChecks
   };
+}
+
+function calculationEvidence() {
+  return [
+    {
+      id: 'status-led-current',
+      status: 'pass',
+      subjectRefs: ['D1', 'R3'],
+      assumptions: ['3.3V rail', '2.0V nominal LED forward voltage', '1k series resistor'],
+      equation: '(3.3V - 2.0V) / 1000 ohm',
+      result: '1.3mA nominal status LED current.',
+      releaseImpact: 'Suitable as a low-current indicator assumption before final LED datasheet review.'
+    },
+    {
+      id: 'usb-c-cc-pulldown-current',
+      status: 'pass',
+      subjectRefs: ['R1', 'R2', 'J4'],
+      assumptions: ['5V VBUS', '5.1k pulldown on each USB-C CC pin'],
+      equation: '5V / 5100 ohm',
+      result: '0.98mA nominal current per asserted CC pulldown path.',
+      releaseImpact: 'Confirms the generated CC resistor value is internally consistent with a USB-C sink intent.'
+    },
+    {
+      id: 'i2c-pullup-rise-time',
+      status: 'warning',
+      subjectRefs: ['R4', 'R5', 'J2'],
+      assumptions: ['4.7k pull-up', '100pF estimated bus capacitance', '0.8473 * R * C first-order rise-time estimate'],
+      equation: '0.8473 * 4700 ohm * 100pF',
+      result: '398ns estimated I2C rise time; acceptable for 100kHz standard-mode assumptions, but fast-mode needs bus capacitance review.',
+      releaseImpact: 'Prototype review can proceed; release needs actual bus capacitance and target I2C speed.'
+    },
+    {
+      id: 'regulator-thermal-budget',
+      status: 'blocker',
+      subjectRefs: ['U1'],
+      assumptions: ['5V USB-C input', '3.3V output', '500mA rail budget'],
+      equation: '(5.0V - 3.3V) * 0.5A',
+      result: '0.85W regulator dissipation at full rail budget.',
+      releaseImpact: 'Release is blocked until package thermal resistance, copper area, ambient temperature, and sourced regulator variant are reviewed.'
+    }
+  ];
 }
 
 function findSupportedProfile(spec) {

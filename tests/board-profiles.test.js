@@ -99,6 +99,8 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'release-gates-incomplete'));
     assert.ok(!result.review.residualRisks.some((risk) => /production KiCad symbols/i.test(risk)));
     assert.ok(result.review.residualRisks.some((risk) => /U1 TC1262-33/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /calculation-blocker: regulator-thermal-budget .*0\.85W/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /calculation-warning: i2c-pullup-rise-time .*398ns/i.test(risk)));
     assert.ok(result.review.residualRisks.some((risk) => /layout DRC/i.test(risk)));
     assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
@@ -186,6 +188,8 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'release-gates-incomplete'));
     assert.ok(!result.review.residualRisks.some((risk) => /production KiCad symbols/i.test(risk)));
     assert.ok(result.review.residualRisks.some((risk) => /U1 TC1262-33/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /calculation-blocker: regulator-thermal-budget .*0\.85W/i.test(risk)));
+    assert.ok(result.review.residualRisks.some((risk) => /calculation-warning: i2c-pullup-rise-time .*398ns/i.test(risk)));
     assert.ok(result.review.residualRisks.some((risk) => /layout DRC/i.test(risk)));
     assert.ok(result.review.findings.notes.some((finding) => /supported STM32 USB-C sensor profile/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code.startsWith('missing-')));
@@ -219,4 +223,17 @@ function assertProductionEvidence(metadata, { mcuRef, mcuValue, debugRole }) {
     ['sourcing', 'datasheet', 'simulation', 'layoutDrc']
   );
   assert.equal(metadata.boardProfile.releaseEvidence.status, 'incomplete');
+
+  const calculations = metadata.boardProfile.releaseEvidence.calculations;
+  assert.ok(Array.isArray(calculations), 'supported profiles should publish calculation evidence');
+
+  const byId = new Map(calculations.map((calculation) => [calculation.id, calculation]));
+  assert.equal(byId.get('status-led-current')?.status, 'pass');
+  assert.match(byId.get('status-led-current')?.result ?? '', /1\.3mA/);
+  assert.equal(byId.get('usb-c-cc-pulldown-current')?.status, 'pass');
+  assert.match(byId.get('usb-c-cc-pulldown-current')?.result ?? '', /0\.98mA/);
+  assert.equal(byId.get('i2c-pullup-rise-time')?.status, 'warning');
+  assert.match(byId.get('i2c-pullup-rise-time')?.result ?? '', /398ns/);
+  assert.equal(byId.get('regulator-thermal-budget')?.status, 'blocker');
+  assert.match(byId.get('regulator-thermal-budget')?.result ?? '', /0\.85W/);
 }

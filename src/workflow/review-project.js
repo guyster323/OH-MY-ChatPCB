@@ -141,9 +141,12 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   }
 
   const productionParts = spec.boardProfile?.productionParts ?? [];
+  const calculations = spec.boardProfile?.releaseEvidence?.calculations ?? [];
   const missingSourcing = productionParts.filter((part) => part.releaseChecks?.sourcing?.status !== 'complete');
   const missingDatasheet = productionParts.filter((part) => part.releaseChecks?.datasheet?.status !== 'complete');
   const missingSimulation = productionParts.filter((part) => part.releaseChecks?.simulation?.status === 'pending');
+  const blockingCalculations = calculations.filter((calculation) => calculation.status === 'blocker');
+  const warningCalculations = calculations.filter((calculation) => calculation.status === 'warning');
 
   if (missingSourcing.length > 0) {
     residualRisks.push(`sourcing: Missing JLCPCB/LCSC evidence for ${missingSourcing.length} production part(s), including ${summarizeParts(missingSourcing)}.`);
@@ -155,6 +158,14 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
 
   if (missingSimulation.length > 0) {
     residualRisks.push(`simulation: Missing calculation or simulation evidence for ${missingSimulation.length} electrical part(s), including ${summarizeParts(missingSimulation)}.`);
+  }
+
+  if (blockingCalculations.length > 0) {
+    residualRisks.push(`calculation-blocker: ${summarizeCalculations(blockingCalculations)}`);
+  }
+
+  if (warningCalculations.length > 0) {
+    residualRisks.push(`calculation-warning: ${summarizeCalculations(warningCalculations)}`);
   }
 
   for (const gate of spec.boardProfile?.releaseGates ?? []) {
@@ -185,6 +196,13 @@ function summarizeParts(parts) {
     .slice(0, 5)
     .map((part) => `${part.ref} ${part.value}`)
     .join(', ');
+}
+
+function summarizeCalculations(calculations) {
+  return calculations
+    .slice(0, 3)
+    .map((calculation) => `${calculation.id} ${calculation.result}`)
+    .join('; ');
 }
 
 function statusFor(findings, validation) {
