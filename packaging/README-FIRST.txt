@@ -24,7 +24,9 @@ First chat
 10. Confirm the chat transcript says "Preview workspace saved".
 11. Confirm the large left preview body also shows the saved workspace files.
 12. Click Open evidence to inspect the first-run evidence folder.
-13. The folder path is:
+13. Close and reopen the app, then click Open evidence before sending again.
+14. Confirm it reopens the same previous preview folder.
+15. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

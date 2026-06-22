@@ -233,6 +233,20 @@ fn native_preview_has_open_evidence_button_for_saved_workspace() {
 }
 
 #[test]
+fn open_evidence_recovers_previous_preview_workspace_on_launch() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("open_evidence_recovers_previous_workspace"));
+    assert!(main.contains("recover_last_preview_workspace"));
+    assert!(main.contains("preview_workspace_root().join(\"chatpcb3-esp32s3-preview\")"));
+    assert!(main.contains("last_workspace_dir: recover_last_preview_workspace()"));
+}
+
+#[test]
 fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

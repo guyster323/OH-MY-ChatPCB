@@ -67,6 +67,7 @@ try {
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
         "- Open evidence button for the saved preview workspace",
+        "- Open evidence recovers previous preview workspace after relaunch",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",
         "Current boundary:",

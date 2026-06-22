@@ -364,7 +364,7 @@ mod win32_app {
             open_evidence_button,
             model_choice,
             pipeline_status,
-            last_workspace_dir: None,
+            last_workspace_dir: recover_last_preview_workspace(),
         }
     }
 
@@ -774,6 +774,16 @@ mod win32_app {
             .unwrap_or_else(std::env::temp_dir)
             .join("ChatPCB3")
             .join("Projects")
+    }
+
+    fn recover_last_preview_workspace() -> Option<PathBuf> {
+        let path = preview_workspace_root().join("chatpcb3-esp32s3-preview");
+
+        if path.exists() {
+            Some(path)
+        } else {
+            None
+        }
     }
 
     unsafe fn handle_use_example(hwnd: HWND) {

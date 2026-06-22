@@ -32,7 +32,8 @@ Implemented in this first vertical slice:
 - The left design pane shows a native read-only preview body for each tab, so a
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.
-- `Open evidence` opens the saved preview workspace folder from inside the app.
+- `Open evidence` opens the saved preview workspace folder from inside the app,
+  including after relaunch when a previous preview workspace already exists.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
 - On app launch, the starter prompt is focused and selected so a first-run user
@@ -128,7 +129,9 @@ That folder contains the prompt, artifact manifest, and a prototype-review
 release evidence report. The left project status and preview body also change
 to the saved workspace state. It is still not an order-ready KiCad board. Click
 `Open evidence` in the app to open that folder without finding `%LOCALAPPDATA%`
-by hand. See `docs/user-test-guide.md` for the user-facing check.
+by hand. After closing and reopening the app, `Open evidence` recovers the same
+preview folder if it already exists. See `docs/user-test-guide.md` for the
+user-facing check.
 
 Build a shareable preview package:
 

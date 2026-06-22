@@ -19,6 +19,7 @@ pub struct ChatActionsContract {
     pub app_launch_focuses_prompt_input: bool,
     pub app_launch_selects_available_provider_model: bool,
     pub provider_login_appends_chat_transcript: bool,
+    pub open_evidence_recovers_previous_workspace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +48,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         app_launch_focuses_prompt_input: true,
         app_launch_selects_available_provider_model: true,
         provider_login_appends_chat_transcript: true,
+        open_evidence_recovers_previous_workspace: true,
     }
 }
 
