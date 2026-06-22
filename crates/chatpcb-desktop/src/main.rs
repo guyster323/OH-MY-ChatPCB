@@ -206,6 +206,7 @@ mod win32_app {
 
             ShowWindow(hwnd, SW_SHOW);
             UpdateWindow(hwnd);
+            initialize_provider_model_selection(&*controls_ptr);
             focus_prompt_for_first_chat(&*controls_ptr);
 
             let mut message: MSG = zeroed();
@@ -421,6 +422,28 @@ mod win32_app {
     unsafe fn focus_prompt_for_first_chat(controls: &AppControls) {
         SetFocus(controls.prompt);
         SendMessageW(controls.prompt, EM_SETSEL, 0, -1);
+    }
+
+    unsafe fn initialize_provider_model_selection(controls: &AppControls) {
+        let statuses = super::catalog_with_probe(super::probe_command_version)
+            .into_iter()
+            .map(|provider| chatpcb_desktop::ui_model::ProviderUiStatus {
+                display_name: provider.display_name,
+                available: provider.available,
+                version: provider.version,
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(selected_model) = chatpcb_desktop::ui_model::selected_provider_model(&statuses)
+        {
+            if let Some(model_index) = selected_provider_model_index(selected_model) {
+                SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
+            }
+
+            let pipeline_status =
+                chatpcb_desktop::ui_model::provider_login_pipeline_status(Some(selected_model));
+            set_pipeline_status(controls, &pipeline_status);
+        }
     }
 
     unsafe fn subclass_prompt_input(parent: HWND, prompt: HWND) {

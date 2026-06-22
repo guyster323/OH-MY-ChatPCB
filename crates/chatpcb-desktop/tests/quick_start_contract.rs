@@ -120,6 +120,23 @@ fn app_launch_focuses_and_selects_prompt_for_immediate_chat() {
 }
 
 #[test]
+fn app_launch_selects_available_provider_model_for_first_chat() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("app_launch_selects_available_provider_model"));
+    assert!(main.contains("initialize_provider_model_selection"));
+    assert!(main.contains("catalog_with_probe(super::probe_command_version)"));
+    assert!(main.contains("selected_provider_model"));
+    assert!(main.contains("selected_provider_model_index"));
+    assert!(main.contains("CB_SETCURSEL"));
+    assert!(main.contains("provider_login_pipeline_status"));
+}
+
+#[test]
 fn send_design_creates_a_local_preview_workspace_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

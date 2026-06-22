@@ -56,14 +56,16 @@ Expected result:
    - Provider Login
    - model selector
    - pipeline status
-9. Click `Provider Login`.
-10. Confirm the chat transcript reports local CLI provider status for Codex,
+9. Confirm the model selector has already picked an available local provider if
+   Codex, Claude Code, or Gemini CLI is installed.
+10. Click `Provider Login`.
+11. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI. It should not ask for an API key.
    If a provider is available, the model selector should move to that provider.
-11. Click `Use example` if the prompt input is empty.
-12. Type, edit, or keep a board prompt in the prompt input.
-13. Press Enter in the prompt input, or click `Send design`.
-14. Confirm the chat transcript still includes the earlier Provider Login
+12. Click `Use example` if the prompt input is empty.
+13. Type, edit, or keep a board prompt in the prompt input.
+14. Press Enter in the prompt input, or click `Send design`.
+15. Confirm the chat transcript still includes the earlier Provider Login
     status and also appends your prompt plus a preview pipeline:
    - ESP32-S3 target spec
    - JLCPCB package contract
@@ -72,14 +74,14 @@ Expected result:
    - Freerouting autoroute
    - DRC
    - manufacturing package
-15. Confirm the chat transcript says `Preview workspace saved`.
-16. Confirm the chat transcript is positioned at the latest response after the
+16. Confirm the chat transcript says `Preview workspace saved`.
+17. Confirm the chat transcript is positioned at the latest response after the
     send, so the new design result is visible without manually scrolling down.
-17. Confirm the left project status and large left preview body now show
+18. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-18. Click `Open evidence`.
-19. Confirm Windows opens the preview evidence folder.
-20. Confirm the preview evidence folder exists:
+19. Click `Open evidence`.
+20. Confirm Windows opens the preview evidence folder.
+21. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
