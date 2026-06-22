@@ -7,6 +7,7 @@ pub struct ChatActionsContract {
     pub use_example_fills_prompt: bool,
     pub provider_login_selects_available_model: bool,
     pub pipeline_status_updates_after_actions: bool,
+    pub send_design_writes_preview_workspace: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -24,6 +25,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         use_example_fills_prompt: true,
         provider_login_selects_available_model: true,
         pipeline_status_updates_after_actions: true,
+        send_design_writes_preview_workspace: true,
         provider_login_reports_cli_status: true,
     }
 }
@@ -79,6 +81,23 @@ pub fn send_design_transcript(prompt: &str) -> String {
          - Review the generated plan here first.\r\n\
          - Full KiCad fork integration is still required before order-ready files can be trusted.\r\n\
          Status: preview only, not order-ready yet.\r\n"
+    )
+}
+
+pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file: &str) -> String {
+    format!(
+        "Preview workspace saved\r\n\
+         - Project folder: {project_dir}\r\n\
+         - Release evidence: {release_report_file}\r\n\
+         Status: prototype-review, not order-ready.\r\n"
+    )
+}
+
+pub fn preview_workspace_failed_transcript(error: &str) -> String {
+    format!(
+        "Preview workspace was not saved\r\n\
+         - Reason: {error}\r\n\
+         Status: keep this design at preview only.\r\n"
     )
 }
 

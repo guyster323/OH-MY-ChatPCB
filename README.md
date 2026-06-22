@@ -21,6 +21,9 @@ Implemented in this first vertical slice:
     `order-ready-evidence`
 - `chatpcb-core.exe` stdio JSONL runtime entrypoint for KiCad child-process
   integration.
+- First-run preview workspace creation when `Send design` is clicked. The app
+  writes the prompt, artifact manifest, and prototype-review evidence report
+  under `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
   - right 30 percent chat pane
@@ -32,7 +35,7 @@ Not implemented yet:
 
 - Full KiCad fork rebased on KiCad 10.0.4 source.
 - Real schematic and PCB canvas embedding in the new workspace.
-- Actual KiCad file writing, DSN/SES import/export, Freerouting execution, or
+- Order-ready KiCad file writing, DSN/SES import/export, Freerouting execution, or
   Gerber generation.
 - Signed MSI/NSIS-style installer packaging. The current preview has a
   double-click zip installer.
@@ -93,7 +96,14 @@ selector, prompt input, `Use example`, `Send design` action, and pipeline status
 Login` reports local CLI availability without storing provider credentials, and
 selects the first available local provider in the model selector. `Use example`
 refills the starter prompt after a send. `Send design` reflects the prompt text
-in the chat transcript. See
+in the chat transcript and saves a local preview workspace under:
+
+```text
+%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
+```
+
+That folder contains the prompt, artifact manifest, and a prototype-review
+release evidence report. It is still not an order-ready KiCad board. See
 `docs/user-test-guide.md` for the user-facing check.
 
 Build a shareable preview package:

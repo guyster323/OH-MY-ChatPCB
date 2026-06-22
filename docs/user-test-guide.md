@@ -64,12 +64,25 @@ Expected result:
    - Freerouting autoroute
    - DRC
    - manufacturing package
+12. Confirm the chat transcript says `Preview workspace saved`.
+13. Confirm the preview evidence folder exists:
+
+```text
+%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
+```
+
+Expected files:
+
+- `prompt.txt`
+- `artifact-manifest.json`
+- `release-evidence-preview.md`
 
 ## Current Honest Boundary
 
 This preview proves the native app shell and Rust runtime contract. It does not
 yet prove final KiCad schematic quality, autorouted PCB quality, or JLCPCB
-order readiness.
+order readiness. The preview evidence folder is intentionally
+`prototype-review`, not an order-ready manufacturing package.
 
 The next implementation gate is to register the native workspace inside a real
 KiCad 10.0.4 fork and connect `chatpcb-core.exe` to actual KiCad project files.

@@ -1,6 +1,7 @@
 use chatpcb_core::design::esp32s3_usb_sensor_board_spec;
 use chatpcb_core::layout::freerouting_contract;
 use chatpcb_core::manufacturing::build_jlcpcb_package;
+use chatpcb_core::project::create_preview_workspace;
 use chatpcb_core::provider::catalog_with_probe;
 use chatpcb_desktop::ui_model::chat_actions_contract;
 use serde::Serialize;
@@ -121,6 +122,7 @@ fn run_desktop_app() {
 #[cfg(windows)]
 mod win32_app {
     use std::mem::zeroed;
+    use std::path::PathBuf;
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{GetStockObject, UpdateWindow, WHITE_BRUSH};
@@ -130,11 +132,11 @@ mod win32_app {
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetDlgItemTextW,
         GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
         RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-        ShowWindow, TranslateMessage, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT, ES_AUTOHSCROLL,
-        ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA, HMENU, IDC_ARROW, MSG, SW_SHOW,
-        WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_SIZE, WNDCLASSW,
-        WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
-        WS_VSCROLL,
+        ShowWindow, TranslateMessage, CBS_DROPDOWNLIST, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT,
+        ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA, HMENU, IDC_ARROW,
+        MSG, SW_SHOW, WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_SIZE,
+        WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
+        WS_VISIBLE, WS_VSCROLL,
     };
 
     const APP_TITLE: &str = "ChatPCB KiCad Preview";
@@ -292,7 +294,14 @@ mod win32_app {
             WS_TABSTOP,
             ID_PROVIDER_LOGIN,
         );
-        let model_choice = child(parent, instance, "COMBOBOX", "", WS_TABSTOP, 0);
+        let model_choice = child(
+            parent,
+            instance,
+            "COMBOBOX",
+            "",
+            WS_TABSTOP | CBS_DROPDOWNLIST as u32,
+            0,
+        );
         add_combo_item(model_choice, "codex:auto");
         add_combo_item(model_choice, "claude:auto");
         add_combo_item(model_choice, "gemini:auto");
@@ -514,7 +523,24 @@ mod win32_app {
         }
 
         let prompt = get_control_text(hwnd, ID_PROMPT);
-        let transcript = wide(&chatpcb_desktop::ui_model::send_design_transcript(&prompt));
+        let prompt_for_workspace = if prompt.trim().is_empty() {
+            chatpcb_desktop::ui_model::example_board_prompt()
+        } else {
+            prompt.trim()
+        };
+        let mut transcript = chatpcb_desktop::ui_model::send_design_transcript(&prompt);
+        match super::create_preview_workspace(prompt_for_workspace, preview_workspace_root()) {
+            Ok(workspace) => transcript.push_str(
+                &chatpcb_desktop::ui_model::preview_workspace_saved_transcript(
+                    &workspace.project_dir,
+                    &workspace.release_report_file,
+                ),
+            ),
+            Err(error) => transcript.push_str(
+                &chatpcb_desktop::ui_model::preview_workspace_failed_transcript(&error.to_string()),
+            ),
+        }
+        let transcript = wide(&transcript);
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
         let controls = &*ptr;
         set_pipeline_status(
@@ -523,6 +549,14 @@ mod win32_app {
         );
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
+    }
+
+    fn preview_workspace_root() -> PathBuf {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("ChatPCB3")
+            .join("Projects")
     }
 
     unsafe fn handle_use_example(hwnd: HWND) {

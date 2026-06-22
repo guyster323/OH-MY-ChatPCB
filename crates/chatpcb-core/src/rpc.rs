@@ -1,7 +1,7 @@
 use crate::design::esp32s3_usb_sensor_board_spec;
 use crate::layout::freerouting_contract;
 use crate::manufacturing::build_jlcpcb_package;
-use crate::project::create_esp32s3_project;
+use crate::project::{create_esp32s3_project, create_preview_workspace};
 use crate::provider::catalog_with_probe;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -57,6 +57,35 @@ where
                     "artifactManifest": created.artifact_manifest
                 }
             })
+        }
+        "project.createPreviewWorkspace" => {
+            let prompt = request
+                .params
+                .get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or("ESP32-S3 USB-C sensor board");
+            let root_dir = request
+                .params
+                .get("rootDir")
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::env::temp_dir().join("ChatPCB3").join("Projects"));
+
+            match create_preview_workspace(prompt, root_dir) {
+                Ok(workspace) => json!({
+                    "id": request.id,
+                    "result": {
+                        "previewWorkspace": workspace
+                    }
+                }),
+                Err(error) => json!({
+                    "id": request.id,
+                    "error": {
+                        "code": -32000,
+                        "message": format!("Preview workspace failed: {error}")
+                    }
+                }),
+            }
         }
         "layout.autoroute" => json!({
             "id": request.id,

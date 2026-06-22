@@ -54,3 +54,27 @@ fn first_run_actions_update_the_visible_pipeline_status() {
     assert!(main.contains("set_pipeline_status"));
     assert!(main.contains("controls.pipeline_status"));
 }
+
+#[test]
+fn send_design_creates_a_local_preview_workspace_for_non_experts() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("send_design_writes_preview_workspace"));
+    assert!(ui_model.contains("preview_workspace_saved_transcript"));
+    assert!(main.contains("preview_workspace_root"));
+    assert!(main.contains("create_preview_workspace"));
+    assert!(main.contains("release_report_file"));
+}
+
+#[test]
+fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+
+    assert!(main.contains("CBS_DROPDOWNLIST"));
+    assert!(main.contains("WS_TABSTOP | CBS_DROPDOWNLIST"));
+}

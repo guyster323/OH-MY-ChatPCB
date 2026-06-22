@@ -1,5 +1,7 @@
 use chatpcb_core::rpc::handle_json_rpc_line_with_probe;
 use serde_json::Value;
+use std::fs;
+use std::path::PathBuf;
 
 fn rpc(line: &str) -> Value {
     let response = handle_json_rpc_line_with_probe(line, |command| match command {
@@ -48,6 +50,41 @@ fn json_rpc_creates_fixed_esp32s3_project_manifest() {
         .unwrap()
         .iter()
         .any(|file| file == "chatpcb3-esp32s3.kicad_pcb"));
+}
+
+#[test]
+fn json_rpc_creates_preview_workspace_evidence_folder() {
+    let root = std::env::temp_dir().join(format!(
+        "chatpcb3-rpc-preview-workspace-test-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    let request = serde_json::json!({
+        "id": "project-workspace-1",
+        "method": "project.createPreviewWorkspace",
+        "params": {
+            "prompt": "USB-C ESP32-S3 sensor board",
+            "rootDir": root
+        }
+    });
+    let response = rpc(&request.to_string());
+
+    assert_eq!(response["id"], "project-workspace-1");
+    assert!(PathBuf::from(
+        response["result"]["previewWorkspace"]["release_report_file"]
+            .as_str()
+            .unwrap()
+    )
+    .exists());
+    assert_eq!(
+        response["result"]["previewWorkspace"]["artifact_manifest"]["project_file"],
+        "chatpcb3-esp32s3.kicad_pro"
+    );
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

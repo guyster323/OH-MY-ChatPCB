@@ -17,11 +17,15 @@ First chat
 3. Click Use example if the prompt box is empty.
 4. Type or edit a PCB request in the prompt box.
 5. Click Send design.
+6. Confirm the chat transcript says "Preview workspace saved".
+7. Open this folder to inspect the first-run evidence:
+   %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary
 ----------------
 This preview proves the native app shell and local runtime contract.
-It does not yet generate order-ready KiCad PCB files.
+It saves prototype-review first-run evidence, but it does not yet generate
+order-ready KiCad PCB files.
 
 Evidence files
 --------------

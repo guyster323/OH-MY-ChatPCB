@@ -1,7 +1,7 @@
 use chatpcb_desktop::ui_model::{
     design_pipeline_status, example_loaded_pipeline_status, initial_pipeline_status,
-    initial_transcript, provider_login_pipeline_status, provider_login_transcript,
-    selected_provider_model, send_design_transcript, ProviderUiStatus,
+    initial_transcript, preview_workspace_saved_transcript, provider_login_pipeline_status,
+    provider_login_transcript, selected_provider_model, send_design_transcript, ProviderUiStatus,
 };
 
 #[test]
@@ -106,4 +106,18 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
         design_pipeline_status(),
         "Preview plan queued: schematic -> layout -> DRC -> JLCPCB."
     );
+}
+
+#[test]
+fn preview_workspace_transcript_points_to_saved_local_evidence() {
+    let transcript = preview_workspace_saved_transcript(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
+    );
+
+    assert!(transcript.contains("Preview workspace saved"));
+    assert!(transcript.contains("chatpcb3-esp32s3-preview"));
+    assert!(transcript.contains("release-evidence-preview.md"));
+    assert!(transcript.contains("prototype-review"));
+    assert!(transcript.contains("not order-ready"));
 }

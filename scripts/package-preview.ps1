@@ -56,6 +56,7 @@ try {
         "- Provider Login local CLI status detection",
         "- Prompt input and Send design transcript flow",
         "- Pipeline status transitions for first-run actions",
+        "- Preview workspace evidence folder creation on Send design",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",
         "Current boundary:",
