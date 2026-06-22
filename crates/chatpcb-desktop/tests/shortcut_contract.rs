@@ -94,6 +94,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Working tree"));
     assert!(script.contains("Chat transcript append flow"));
     assert!(script.contains("Chat transcript latest-turn scrolling"));
+    assert!(script.contains("Prompt Enter key sends design"));
     assert!(script.contains("Pipeline status transitions"));
     assert!(script.contains("Preview workspace evidence folder"));
     assert!(script.contains("Left workspace status update"));

@@ -59,7 +59,7 @@ Expected result:
    If a provider is available, the model selector should move to that provider.
 9. Click `Use example` if the prompt input is empty.
 10. Type, edit, or keep a board prompt in the prompt input.
-11. Click `Send design`.
+11. Press Enter in the prompt input, or click `Send design`.
 12. Confirm the chat transcript still includes the earlier Provider Login
     status and also appends your prompt plus a preview pipeline:
    - ESP32-S3 target spec

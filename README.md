@@ -33,6 +33,8 @@ Implemented in this first vertical slice:
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.
 - `Open evidence` opens the saved preview workspace folder from inside the app.
+- Pressing Enter in the prompt input sends the design through the same native
+  path as the `Send design` button.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
   - right 30 percent chat pane
@@ -105,10 +107,11 @@ selector, prompt input, `Use example`, `Send design` action, and pipeline status
 The left tabs also show a native preview body, not an empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 selects the first available local provider in the model selector. `Use example`
-refills the starter prompt after a send. `Send design` appends the prompt and
-assistant response to the existing chat transcript, so Provider Login context
-and earlier messages stay visible. The transcript also moves to the latest
-response after updates. It also saves a local preview workspace under:
+refills the starter prompt after a send. Pressing Enter in the prompt input or
+clicking `Send design` appends the prompt and assistant response to the existing
+chat transcript, so Provider Login context and earlier messages stay visible.
+The transcript also moves to the latest response after updates. It also saves a
+local preview workspace under:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

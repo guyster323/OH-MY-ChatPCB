@@ -15,6 +15,7 @@ pub struct ChatActionsContract {
     pub left_tabs_update_workspace_preview: bool,
     pub send_design_appends_chat_transcript: bool,
     pub chat_transcript_scrolls_to_latest: bool,
+    pub prompt_enter_sends_design: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +40,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         left_tabs_update_workspace_preview: true,
         send_design_appends_chat_transcript: true,
         chat_transcript_scrolls_to_latest: true,
+        prompt_enter_sends_design: true,
     }
 }
 
@@ -80,11 +82,11 @@ pub fn left_tab_body(index: usize) -> &'static str {
 }
 
 pub fn initial_pipeline_status() -> &'static str {
-    "Ready: check provider, edit prompt, then Send design."
+    "Ready: check provider, edit prompt, then press Enter or Send design."
 }
 
 pub fn example_loaded_pipeline_status() -> &'static str {
-    "Example loaded: edit or Send design."
+    "Example loaded: edit, press Enter, or Send design."
 }
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
@@ -104,7 +106,7 @@ pub fn example_board_prompt() -> &'static str {
 
 pub fn initial_transcript() -> String {
     "Welcome to ChatPCB KiCad Preview\r\n\
-     Type a board idea, then click Send design.\r\n\
+     Type a board idea, then press Enter or click Send design.\r\n\
      Click Use example to refill the starter board request.\r\n\
      You can start with: ESP32-S3 USB-C sensor board with OLED display.\r\n\
      Provider Login checks local Codex, Claude Code, and Gemini CLI status without storing credentials.\r\n\
@@ -202,7 +204,7 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
 
     transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");
     transcript.push_str(
-        "Pick an available provider in the model selector, then type a board idea and click Send design.\r\n",
+        "Pick an available provider in the model selector, then type a board idea and press Enter or click Send design.\r\n",
     );
     transcript
 }

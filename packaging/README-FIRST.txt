@@ -16,7 +16,7 @@ First chat
 2. Confirm the model selector moves to an available local provider if one is found.
 3. Click Use example if the prompt box is empty.
 4. Type or edit a PCB request in the prompt box.
-5. Click Send design.
+5. Press Enter in the prompt box, or click Send design.
 6. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
 7. Confirm the transcript is positioned at the latest response.
 8. Confirm the chat transcript says "Preview workspace saved".

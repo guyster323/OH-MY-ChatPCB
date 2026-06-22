@@ -86,6 +86,23 @@ fn chat_transcript_scrolls_to_the_latest_turn_after_updates() {
 }
 
 #[test]
+fn prompt_enter_key_sends_design_like_a_chat_app() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("prompt_enter_sends_design"));
+    assert!(main.contains("subclass_prompt_input"));
+    assert!(main.contains("prompt_window_proc"));
+    assert!(main.contains("VK_RETURN"));
+    assert!(main.contains("WM_KEYDOWN"));
+    assert!(main.contains("PostMessageW"));
+    assert!(main.contains("WM_CHATPCB_SEND_DEFERRED"));
+}
+
+#[test]
 fn send_design_creates_a_local_preview_workspace_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

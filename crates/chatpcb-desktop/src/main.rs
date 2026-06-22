@@ -132,16 +132,17 @@ mod win32_app {
         EM_SCROLLCARET, EM_SETSEL, NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW,
         TCN_SELCHANGE,
     };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetDlgItemTextW,
-        GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
-        RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-        ShowWindow, TranslateMessage, CBS_DROPDOWNLIST, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT,
-        ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA, HMENU, IDC_ARROW,
-        MSG, SW_SHOW, WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_NOTIFY,
-        WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-        WS_VISIBLE, WS_VSCROLL,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
+        GetDlgItemTextW, GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW,
+        PostQuitMessage, RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW,
+        SetWindowTextW, ShowWindow, TranslateMessage, CBS_DROPDOWNLIST, CB_ADDSTRING, CB_SETCURSEL,
+        CW_USEDEFAULT, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA,
+        GWLP_WNDPROC, HMENU, IDC_ARROW, MSG, SW_SHOW, WINDOW_EX_STYLE, WM_APP, WM_COMMAND,
+        WM_DESTROY, WM_KEYDOWN, WM_NCDESTROY, WM_NOTIFY, WM_SIZE, WNDCLASSW, WNDPROC, WS_BORDER,
+        WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
     };
 
     const APP_TITLE: &str = "ChatPCB KiCad Preview";
@@ -153,6 +154,7 @@ mod win32_app {
     const ID_USE_EXAMPLE: usize = 1005;
     const ID_OPEN_EVIDENCE: usize = 1006;
     const WM_CHATPCB_SEND_DEFERRED: u32 = WM_APP + 1;
+    static mut ORIGINAL_PROMPT_PROC: WNDPROC = None;
 
     struct AppControls {
         left_pane: HWND,
@@ -291,6 +293,7 @@ mod win32_app {
             WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
             ID_PROMPT,
         );
+        subclass_prompt_input(parent, prompt);
         let use_example_button = child(
             parent,
             instance,
@@ -412,6 +415,38 @@ mod win32_app {
         SendMessageW(combo, CB_ADDSTRING, 0, text.as_ptr() as isize);
     }
 
+    unsafe fn subclass_prompt_input(parent: HWND, prompt: HWND) {
+        SetWindowLongPtrW(prompt, GWLP_USERDATA, parent as isize);
+        let original = SetWindowLongPtrW(
+            prompt,
+            GWLP_WNDPROC,
+            prompt_window_proc as *const () as isize,
+        );
+        ORIGINAL_PROMPT_PROC = std::mem::transmute::<isize, WNDPROC>(original);
+    }
+
+    unsafe extern "system" fn prompt_window_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_KEYDOWN && wparam == VK_RETURN as WPARAM {
+            let parent = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as HWND;
+            if !parent.is_null() {
+                PostMessageW(parent, WM_CHATPCB_SEND_DEFERRED, 0, 0);
+                return 0;
+            }
+        }
+
+        let original_prompt_proc = ORIGINAL_PROMPT_PROC;
+        if original_prompt_proc.is_some() {
+            CallWindowProcW(original_prompt_proc, hwnd, msg, wparam, lparam)
+        } else {
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+    }
+
     unsafe extern "system" fn window_proc(
         hwnd: HWND,
         msg: u32,
@@ -462,6 +497,7 @@ mod win32_app {
                 let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
                 if !ptr.is_null() {
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                    ORIGINAL_PROMPT_PROC = None;
                     drop(Box::from_raw(ptr));
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)

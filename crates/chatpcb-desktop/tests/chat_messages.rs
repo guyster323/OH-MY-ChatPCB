@@ -115,11 +115,11 @@ fn chat_transcript_append_avoids_empty_history_padding() {
 fn pipeline_status_text_tracks_the_first_run_actions() {
     assert_eq!(
         initial_pipeline_status(),
-        "Ready: check provider, edit prompt, then Send design."
+        "Ready: check provider, edit prompt, then press Enter or Send design."
     );
     assert_eq!(
         example_loaded_pipeline_status(),
-        "Example loaded: edit or Send design."
+        "Example loaded: edit, press Enter, or Send design."
     );
     assert_eq!(
         provider_login_pipeline_status(Some("claude:auto")),
