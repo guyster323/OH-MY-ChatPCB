@@ -244,6 +244,7 @@ fn send_design_runs_erc_drc_reports_after_writing_preview() {
     assert!(main.contains("kicad-validation-summary.txt"));
     assert!(main.contains("summarize_erc_drc_reports"));
     assert!(main.contains("parse_kicad_report"));
+    assert!(main.contains("validation_pipeline_status(&validation.summary)"));
 }
 
 #[test]

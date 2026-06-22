@@ -815,7 +815,8 @@ mod win32_app {
                     );
                 set_design_preview(controls, &preview_body);
                 controls.last_workspace_dir = Some(project_dir);
-                pipeline_after_send = validation.summary;
+                pipeline_after_send =
+                    chatpcb_desktop::ui_model::validation_pipeline_status(&validation.summary);
             }
             Err(error) => {
                 turn_transcript.push_str(

@@ -29,14 +29,15 @@ First chat
 15. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
 16. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
 17. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
-18. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.
-19. Confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-20. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
-21. Close and reopen the app, then click Open evidence before sending again.
-22. Confirm the left project status says "Previous preview workspace found".
-23. Confirm the chat transcript also says "Previous preview workspace found".
-24. Confirm it reopens the same previous preview folder with the report selected.
-25. The folder path is:
+18. Confirm the bottom status says "Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review." when local ERC/DRC reports are clear.
+19. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.
+20. Confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+21. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
+22. Close and reopen the app, then click Open evidence before sending again.
+23. Confirm the left project status says "Previous preview workspace found".
+24. Confirm the chat transcript also says "Previous preview workspace found".
+25. Confirm it reopens the same previous preview folder with the report selected.
+26. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

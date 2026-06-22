@@ -90,21 +90,24 @@ Expected result:
 20. Confirm the chat transcript and large left preview body mention
     `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
     `kicad-validation-summary.txt`.
-21. Click `Open PCB`.
-22. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
+21. Confirm the bottom pipeline status stays short and says
+    `Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review.`
+    when local ERC/DRC reports are clear.
+22. Click `Open PCB`.
+23. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
     contains a 50mm x 50mm `Edge.Cuts` outline.
-23. Click `Open evidence`.
-24. Confirm Windows opens the preview evidence folder with
+24. Click `Open evidence`.
+25. Confirm Windows opens the preview evidence folder with
     `release-evidence-preview.md` selected.
-25. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
+26. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
-26. Confirm the left project status says `Previous preview workspace found`
+27. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
-27. Confirm the chat transcript also says `Previous preview workspace found`
+28. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Open evidence` and `Open PCB`.
-28. Confirm Windows opens the same previous preview evidence folder with the
+29. Confirm Windows opens the same previous preview evidence folder with the
     release evidence report selected.
-29. Confirm the preview evidence folder exists:
+30. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

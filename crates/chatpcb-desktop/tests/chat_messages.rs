@@ -7,7 +7,7 @@ use chatpcb_desktop::ui_model::{
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
     recovered_preview_workspace_body, recovered_preview_workspace_left_status,
     recovered_preview_workspace_transcript, selected_provider_model, send_design_transcript,
-    ProviderUiStatus,
+    validation_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -170,6 +170,25 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
 }
 
 #[test]
+fn validation_pipeline_status_keeps_next_actions_visible_for_non_experts() {
+    let status = validation_pipeline_status(
+        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 0 warnings, 0 unconnected. Gate remains prototype-review until schematic, layout, DRC, Gerber, BOM, and CPL evidence are reviewed.",
+    );
+
+    assert_eq!(
+        status,
+        "Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review."
+    );
+    assert!(status.contains("Open PCB"));
+    assert!(status.contains("Open evidence"));
+    assert!(status.contains("prototype-review"));
+    assert!(
+        status.len() <= 90,
+        "status bar text should stay short enough to remain visible: {status}"
+    );
+}
+
+#[test]
 fn preview_workspace_transcript_points_to_saved_local_evidence() {
     let transcript = preview_workspace_saved_transcript(
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
@@ -318,7 +337,7 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
-        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 1 warning, 0 unconnected. Gate remains prototype-review.",
+        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 0 warnings, 0 unconnected. Gate remains prototype-review.",
     );
 
     assert!(body.contains("KiCad ERC/DRC reports"));
@@ -326,7 +345,7 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
     assert!(body.contains("drc-report.json"));
     assert!(body.contains("kicad-validation-summary.txt"));
     assert!(body.contains("ERC: 0 errors, 0 warnings"));
-    assert!(body.contains("DRC: 0 errors, 1 warning"));
+    assert!(body.contains("DRC: 0 errors, 0 warnings"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
 }
@@ -337,7 +356,7 @@ fn erc_drc_validation_transcript_points_to_saved_reports_without_order_ready_cla
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
-        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 1 warning, 0 unconnected. Gate remains prototype-review.",
+        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 0 warnings, 0 unconnected. Gate remains prototype-review.",
     );
 
     assert!(transcript.contains("KiCad ERC/DRC reports"));

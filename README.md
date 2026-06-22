@@ -43,6 +43,9 @@ Implemented in this first vertical slice:
   DRC in JSON mode when available, then writes `erc-report.json`,
   `drc-report.json`, and `kicad-validation-summary.txt` beside the preview
   files.
+- After local ERC/DRC reports are clear, the bottom pipeline status stays short
+  and points the user to `Open PCB` or `Open evidence` instead of truncating the
+  full report summary.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
 - On app launch, the starter prompt is focused and selected so a first-run user
@@ -146,8 +149,10 @@ project status and preview body also change to the saved workspace state. When
 KiCad 10 is installed locally, `Send design` also runs `kicad-cli.exe pcb
 upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
 folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
-`erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. It is
-still not an order-ready KiCad board. Click
+`erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
+those local reports are clear, the bottom pipeline status says
+`Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review.`
+It is still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad and see the 50mm x
 50mm `Edge.Cuts` preview outline. Click `Open evidence` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the release evidence report

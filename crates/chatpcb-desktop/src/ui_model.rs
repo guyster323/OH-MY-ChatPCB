@@ -127,6 +127,17 @@ pub fn design_pipeline_status() -> &'static str {
     "Preview plan queued: schematic -> layout -> DRC -> JLCPCB."
 }
 
+pub fn validation_pipeline_status(validation_summary: &str) -> String {
+    if validation_summary.contains("ERC: 0 errors, 0 warnings")
+        && validation_summary.contains("DRC: 0 errors, 0 warnings, 0 unconnected")
+    {
+        return "Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review."
+            .to_string();
+    }
+
+    "Review validation: open evidence, inspect ERC/DRC reports. Still prototype-review.".to_string()
+}
+
 pub fn example_board_prompt() -> &'static str {
     "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
 }
