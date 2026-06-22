@@ -7,6 +7,7 @@ pub struct ChatActionsContract {
     pub use_example_fills_prompt: bool,
     pub use_example_focuses_prompt_input: bool,
     pub provider_login_selects_available_model: bool,
+    pub provider_login_keeps_builtin_preview_unblocked: bool,
     pub pipeline_status_updates_after_actions: bool,
     pub send_design_writes_preview_workspace: bool,
     pub kicad_cli_check_runs_after_send_design: bool,
@@ -43,6 +44,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         use_example_fills_prompt: true,
         use_example_focuses_prompt_input: true,
         provider_login_selects_available_model: true,
+        provider_login_keeps_builtin_preview_unblocked: true,
         pipeline_status_updates_after_actions: true,
         send_design_writes_preview_workspace: true,
         kicad_cli_check_runs_after_send_design: true,
@@ -115,7 +117,7 @@ pub fn example_loaded_pipeline_status() -> &'static str {
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     match selected_model {
         Some(model) => format!("Provider ready: {model} selected."),
-        None => "Provider needed: install or login to a local CLI.".to_string(),
+        None => "No local provider found; built-in preview still works.".to_string(),
     }
 }
 
@@ -292,6 +294,12 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
 
     if let Some(model) = selected_provider_model(statuses) {
         transcript.push_str(&format!("Selected model: {model}\r\n"));
+    } else {
+        transcript.push_str("No local provider is ready yet.\r\n");
+        transcript.push_str(
+            "You can still press Send design to create the built-in ESP32-S3 preview.\r\n",
+        );
+        transcript.push_str("Provider-backed design will require CLI login later.\r\n");
     }
 
     transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");

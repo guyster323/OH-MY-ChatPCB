@@ -16,24 +16,25 @@ First chat
 2. Press Enter to send it.
 3. Confirm the model selector has already picked an available local provider if one is found.
 4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
-5. Type immediately after Provider Login; focus returns to the prompt box.
-6. Click Use example if the prompt box is empty.
-7. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
-8. Press Enter in the prompt box, or click Send design.
-9. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-10. Confirm the transcript is positioned at the latest response.
-11. Confirm the chat transcript says "Preview workspace saved".
-12. Confirm the large left preview body also shows the saved KiCad scaffold files.
-13. Confirm the chat transcript and left preview body mention "KiCad CLI check".
-14. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
-15. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.
-16. Confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-17. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
-18. Close and reopen the app, then click Open evidence before sending again.
-19. Confirm the left project status says "Previous preview workspace found".
-20. Confirm the chat transcript also says "Previous preview workspace found".
-21. Confirm it reopens the same previous preview folder with the report selected.
-22. The folder path is:
+5. If no local provider is ready yet, continue anyway; the built-in preview still works.
+6. Type immediately after Provider Login; focus returns to the prompt box.
+7. Click Use example if the prompt box is empty.
+8. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
+9. Press Enter in the prompt box, or click Send design.
+10. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
+11. Confirm the transcript is positioned at the latest response.
+12. Confirm the chat transcript says "Preview workspace saved".
+13. Confirm the large left preview body also shows the saved KiCad scaffold files.
+14. Confirm the chat transcript and left preview body mention "KiCad CLI check".
+15. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
+16. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.
+17. Confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+18. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
+19. Close and reopen the app, then click Open evidence before sending again.
+20. Confirm the left project status says "Previous preview workspace found".
+21. Confirm the chat transcript also says "Previous preview workspace found".
+22. Confirm it reopens the same previous preview folder with the report selected.
+23. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

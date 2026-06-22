@@ -96,6 +96,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("App launch selects available provider model"));
     assert!(script.contains("Chat transcript append flow"));
     assert!(script.contains("Provider Login appends without erasing chat"));
+    assert!(script.contains("Provider Login keeps built-in preview unblocked when no CLI is ready"));
     assert!(script.contains("Provider Login returns focus to prompt"));
     assert!(script.contains("Use example returns focus to prompt"));
     assert!(script.contains("Chat transcript latest-turn scrolling"));

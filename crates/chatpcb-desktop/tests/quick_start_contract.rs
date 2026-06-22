@@ -67,6 +67,21 @@ fn provider_login_returns_focus_to_the_prompt_for_immediate_chat() {
 }
 
 #[test]
+fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("provider_login_keeps_builtin_preview_unblocked"));
+    assert!(ui_model.contains("No local provider found; built-in preview still works."));
+    assert!(ui_model.contains("You can still press Send design"));
+    assert!(main.contains("provider_login_pipeline_status(selected_model)"));
+    assert!(main.contains("handle_provider_login"));
+}
+
+#[test]
 fn first_run_actions_update_the_visible_pipeline_status() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

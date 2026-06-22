@@ -65,6 +65,35 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
 }
 
 #[test]
+fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_ready() {
+    let transcript = provider_login_transcript(&[
+        ProviderUiStatus {
+            display_name: "Codex".to_string(),
+            available: false,
+            version: None,
+        },
+        ProviderUiStatus {
+            display_name: "Claude Code".to_string(),
+            available: false,
+            version: None,
+        },
+        ProviderUiStatus {
+            display_name: "Gemini CLI".to_string(),
+            available: false,
+            version: None,
+        },
+    ]);
+
+    assert!(transcript.contains("No local provider is ready yet"));
+    assert!(transcript.contains("You can still press Send design"));
+    assert!(transcript.contains("CLI login later"));
+    assert!(!transcript.contains("Selected model:"));
+    assert!(!transcript.to_ascii_lowercase().contains("token"));
+    assert!(!transcript.to_ascii_lowercase().contains("api_key"));
+    assert!(!transcript.to_ascii_lowercase().contains("secret"));
+}
+
+#[test]
 fn provider_login_selects_the_first_available_model_for_non_experts() {
     let statuses = [
         ProviderUiStatus {
@@ -131,7 +160,7 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
     );
     assert_eq!(
         provider_login_pipeline_status(None),
-        "Provider needed: install or login to a local CLI."
+        "No local provider found; built-in preview still works."
     );
     assert_eq!(
         design_pipeline_status(),
