@@ -276,6 +276,20 @@ mod win32_app {
             .unwrap_or_else(|| {
                 chatpcb_desktop::ui_model::initial_left_workspace_status().to_string()
             });
+        let initial_chat_transcript = recovered_workspace
+            .as_ref()
+            .map(|path| {
+                let project_dir = path.to_string_lossy();
+                let recovered_turn =
+                    chatpcb_desktop::ui_model::recovered_preview_workspace_transcript(
+                        project_dir.as_ref(),
+                    );
+                chatpcb_desktop::ui_model::append_chat_transcript(
+                    &chatpcb_desktop::ui_model::initial_transcript(),
+                    &recovered_turn,
+                )
+            })
+            .unwrap_or_else(chatpcb_desktop::ui_model::initial_transcript);
 
         let design_preview = child(
             parent,
@@ -301,7 +315,7 @@ mod win32_app {
             parent,
             instance,
             "EDIT",
-            &chatpcb_desktop::ui_model::initial_transcript(),
+            &initial_chat_transcript,
             WS_BORDER
                 | WS_VSCROLL
                 | ES_MULTILINE as u32

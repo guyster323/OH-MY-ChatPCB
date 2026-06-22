@@ -69,6 +69,7 @@ try {
         "- Open evidence button for the saved preview workspace",
         "- Open evidence recovers previous preview workspace after relaunch",
         "- Relaunch shows previous preview workspace status before another send",
+        "- Relaunch mentions previous preview workspace in chat",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",
         "Current boundary:",

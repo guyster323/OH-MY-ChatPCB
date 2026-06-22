@@ -106,4 +106,5 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Open evidence button"));
     assert!(script.contains("Open evidence recovers previous preview workspace"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
+    assert!(script.contains("Relaunch mentions previous preview workspace in chat"));
 }

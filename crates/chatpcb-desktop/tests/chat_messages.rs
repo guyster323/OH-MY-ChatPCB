@@ -4,7 +4,8 @@ use chatpcb_desktop::ui_model::{
     left_tab_status, preview_workspace_body, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
     recovered_preview_workspace_body, recovered_preview_workspace_left_status,
-    selected_provider_model, send_design_transcript, ProviderUiStatus,
+    recovered_preview_workspace_transcript, selected_provider_model, send_design_transcript,
+    ProviderUiStatus,
 };
 
 #[test]
@@ -244,4 +245,20 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(body.contains("Click Open evidence"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("not order-ready"));
+}
+
+#[test]
+fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
+    let project_dir =
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview";
+    let transcript = recovered_preview_workspace_transcript(project_dir);
+
+    assert!(transcript.contains("Previous preview workspace found"));
+    assert!(transcript.contains("Open evidence"));
+    assert!(transcript.contains("chatpcb3-esp32s3-preview"));
+    assert!(transcript.contains("prototype-review"));
+    assert!(transcript.contains("not order-ready"));
+    assert!(!transcript
+        .to_ascii_lowercase()
+        .contains("order-ready evidence"));
 }

@@ -264,6 +264,21 @@ fn app_launch_surfaces_recovered_preview_workspace_to_non_experts() {
 }
 
 #[test]
+fn app_launch_mentions_recovered_preview_workspace_in_chat() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("app_launch_mentions_recovered_workspace_in_chat"));
+    assert!(ui_model.contains("recovered_preview_workspace_transcript"));
+    assert!(main.contains("initial_chat_transcript"));
+    assert!(main.contains("append_chat_transcript"));
+    assert!(main.contains("recovered_preview_workspace_transcript"));
+}
+
+#[test]
 fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

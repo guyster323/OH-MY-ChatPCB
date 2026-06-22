@@ -21,6 +21,7 @@ pub struct ChatActionsContract {
     pub provider_login_appends_chat_transcript: bool,
     pub open_evidence_recovers_previous_workspace: bool,
     pub app_launch_shows_recovered_workspace_status: bool,
+    pub app_launch_mentions_recovered_workspace_in_chat: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +52,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         provider_login_appends_chat_transcript: true,
         open_evidence_recovers_previous_workspace: true,
         app_launch_shows_recovered_workspace_status: true,
+        app_launch_mentions_recovered_workspace_in_chat: true,
     }
 }
 
@@ -203,6 +205,15 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."
+    )
+}
+
+pub fn recovered_preview_workspace_transcript(project_dir: &str) -> String {
+    format!(
+        "Previous preview workspace found\r\n\
+         - Project folder: {project_dir}\r\n\
+         - Click Open evidence to inspect saved files.\r\n\
+         Status: prototype-review, not order-ready.\r\n"
     )
 }
 
