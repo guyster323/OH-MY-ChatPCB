@@ -484,6 +484,8 @@ mod win32_app {
         let prompt = get_control_text(hwnd, ID_PROMPT);
         let transcript = wide(&chatpcb_desktop::ui_model::send_design_transcript(&prompt));
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+        let empty = wide("");
+        SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
     }
 
     unsafe fn handle_provider_login(hwnd: HWND) {

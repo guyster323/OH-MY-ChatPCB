@@ -7,7 +7,8 @@ Install
 -------
 1. Double-click "Install ChatPCB KiCad Preview.cmd".
 2. A desktop shortcut named "ChatPCB KiCad Preview" will be created.
-3. The app starts after installation.
+3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
+4. The app starts after installation.
 
 First chat
 ----------
@@ -24,3 +25,8 @@ Evidence files
 --------------
 - RELEASE-EVIDENCE.txt records the source commit and package contents.
 - SHA256SUMS.txt records hashes for the packaged files.
+
+Uninstall
+---------
+Open the Start Menu folder and click "Uninstall ChatPCB KiCad Preview", or run
+"Uninstall ChatPCB KiCad Preview.cmd" from the installed app folder.

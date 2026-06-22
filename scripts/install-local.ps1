@@ -18,6 +18,8 @@ try {
 
     Copy-Item -Force -Path "$repoRoot\target\release\chatpcb-core.exe" -Destination "$InstallRoot\chatpcb-core.exe"
     Copy-Item -Force -Path "$repoRoot\target\release\chatpcb-desktop.exe" -Destination "$InstallRoot\ChatPCB KiCad Preview.exe"
+    Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$InstallRoot\uninstall-preview.ps1"
+    Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
 
     $shell = New-Object -ComObject WScript.Shell
     $desktopPath = $shell.SpecialFolders.Item('Desktop')
@@ -29,8 +31,25 @@ try {
     $shortcut.Description = "Native ChatPCB KiCad preview app"
     $shortcut.Save()
 
+    $programsPath = $shell.SpecialFolders.Item('Programs')
+    $startMenuPath = Join-Path $programsPath "ChatPCB KiCad Preview"
+    New-Item -ItemType Directory -Force -Path $startMenuPath | Out-Null
+    $startShortcutPath = Join-Path $startMenuPath "ChatPCB KiCad Preview.lnk"
+    $startShortcut = $shell.CreateShortcut($startShortcutPath)
+    $startShortcut.TargetPath = "$InstallRoot\ChatPCB KiCad Preview.exe"
+    $startShortcut.WorkingDirectory = $InstallRoot
+    $startShortcut.Description = "Native ChatPCB KiCad preview app"
+    $startShortcut.Save()
+    $uninstallShortcutPath = Join-Path $startMenuPath "Uninstall ChatPCB KiCad Preview.lnk"
+    $uninstallShortcut = $shell.CreateShortcut($uninstallShortcutPath)
+    $uninstallShortcut.TargetPath = "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
+    $uninstallShortcut.WorkingDirectory = $InstallRoot
+    $uninstallShortcut.Description = "Remove ChatPCB KiCad Preview"
+    $uninstallShortcut.Save()
+
     Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
     Write-Host "Desktop shortcut: $shortcutPath"
+    Write-Host "Start menu shortcut: $startShortcutPath"
 
     if ($Launch) {
         Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot

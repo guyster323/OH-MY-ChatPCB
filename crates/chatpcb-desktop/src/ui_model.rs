@@ -3,6 +3,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChatActionsContract {
     pub send_design_uses_prompt: bool,
+    pub send_design_clears_prompt: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -16,6 +17,7 @@ pub struct ProviderUiStatus {
 pub fn chat_actions_contract() -> ChatActionsContract {
     ChatActionsContract {
         send_design_uses_prompt: true,
+        send_design_clears_prompt: true,
         provider_login_reports_cli_status: true,
     }
 }

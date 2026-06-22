@@ -27,7 +27,9 @@ try {
     Copy-Item -Force -Path "$repoRoot\target\release\chatpcb-core.exe" -Destination "$stagingRoot\chatpcb-core.exe"
     Copy-Item -Force -Path "$repoRoot\target\release\chatpcb-desktop.exe" -Destination "$stagingRoot\ChatPCB KiCad Preview.exe"
     Copy-Item -Force -Path "$repoRoot\packaging\Install ChatPCB KiCad Preview.cmd" -Destination "$stagingRoot\Install ChatPCB KiCad Preview.cmd"
+    Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$stagingRoot\Uninstall ChatPCB KiCad Preview.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\install-from-package.ps1" -Destination "$stagingRoot\install-from-package.ps1"
+    Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$stagingRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$stagingRoot\README-FIRST.txt"
 
     $commit = (git rev-parse --short HEAD).Trim()

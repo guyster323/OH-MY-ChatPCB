@@ -18,6 +18,19 @@ fn shortcut_script_uses_windows_desktop_special_folder() {
 }
 
 #[test]
+fn installers_create_start_menu_shortcut_for_relaunch() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("SpecialFolders.Item('Programs')"));
+        assert!(script.contains("ChatPCB KiCad Preview.lnk"));
+    }
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
@@ -40,12 +53,32 @@ fn packaged_installer_does_not_require_cargo() {
 }
 
 #[test]
+fn package_includes_double_click_uninstaller() {
+    let uninstall =
+        fs::read_to_string(workspace_root().join("packaging/uninstall-preview.ps1")).unwrap();
+    let uninstall_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Uninstall ChatPCB KiCad Preview.cmd"))
+            .unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+
+    assert!(uninstall.contains("$env:LOCALAPPDATA\\ChatPCB3\\ChatPCB KiCad Preview"));
+    assert!(uninstall.contains("SpecialFolders.Item('Desktop')"));
+    assert!(uninstall.contains("SpecialFolders.Item('Programs')"));
+    assert!(uninstall.contains("Remove-Item"));
+    assert!(uninstall_cmd.contains("uninstall-preview.ps1"));
+    assert!(package_script.contains("Uninstall ChatPCB KiCad Preview.cmd"));
+    assert!(package_script.contains("uninstall-preview.ps1"));
+}
+
+#[test]
 fn package_script_creates_zip_with_first_run_files() {
     let script = fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
 
     assert!(script.contains("Compress-Archive"));
     assert!(script.contains("README-FIRST.txt"));
     assert!(script.contains("Install ChatPCB KiCad Preview.cmd"));
+    assert!(script.contains("Uninstall ChatPCB KiCad Preview.cmd"));
     assert!(script.contains("install-from-package.ps1"));
 }
 
