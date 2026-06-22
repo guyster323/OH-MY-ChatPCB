@@ -19,6 +19,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert_eq!(contract["chat_actions"]["send_design_clears_prompt"], true);
     assert_eq!(contract["chat_actions"]["use_example_fills_prompt"], true);
     assert_eq!(
+        contract["chat_actions"]["use_example_focuses_prompt_input"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["provider_login_selects_available_model"],
         true
     );
@@ -69,6 +73,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     );
     assert_eq!(
         contract["chat_actions"]["provider_login_appends_chat_transcript"],
+        true
+    );
+    assert_eq!(
+        contract["chat_actions"]["provider_login_returns_focus_to_prompt"],
         true
     );
     assert_eq!(

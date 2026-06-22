@@ -16,19 +16,20 @@ First chat
 2. Press Enter to send it.
 3. Confirm the model selector has already picked an available local provider if one is found.
 4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
-5. Click Use example if the prompt box is empty.
-6. Type or edit a PCB request in the prompt box.
-7. Press Enter in the prompt box, or click Send design.
-8. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-9. Confirm the transcript is positioned at the latest response.
-10. Confirm the chat transcript says "Preview workspace saved".
-11. Confirm the large left preview body also shows the saved workspace files.
-12. Click Open evidence to inspect the first-run evidence folder.
-13. Close and reopen the app, then click Open evidence before sending again.
-14. Confirm the left project status says "Previous preview workspace found".
-15. Confirm the chat transcript also says "Previous preview workspace found".
-16. Confirm it reopens the same previous preview folder.
-17. The folder path is:
+5. Type immediately after Provider Login; focus returns to the prompt box.
+6. Click Use example if the prompt box is empty.
+7. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
+8. Press Enter in the prompt box, or click Send design.
+9. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
+10. Confirm the transcript is positioned at the latest response.
+11. Confirm the chat transcript says "Preview workspace saved".
+12. Confirm the large left preview body also shows the saved workspace files.
+13. Click Open evidence to inspect the first-run evidence folder.
+14. Close and reopen the app, then click Open evidence before sending again.
+15. Confirm the left project status says "Previous preview workspace found".
+16. Confirm the chat transcript also says "Previous preview workspace found".
+17. Confirm it reopens the same previous preview folder.
+18. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

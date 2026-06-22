@@ -458,6 +458,10 @@ mod win32_app {
         SendMessageW(controls.prompt, EM_SETSEL, 0, -1);
     }
 
+    unsafe fn focus_prompt_after_action(controls: &AppControls) {
+        SetFocus(controls.prompt);
+    }
+
     unsafe fn initialize_provider_model_selection(controls: &AppControls) {
         let statuses = super::catalog_with_probe(super::probe_command_version)
             .into_iter()
@@ -833,6 +837,7 @@ mod win32_app {
             controls,
             chatpcb_desktop::ui_model::example_loaded_pipeline_status(),
         );
+        focus_prompt_after_action(controls);
     }
 
     unsafe fn handle_provider_login(hwnd: HWND) {
@@ -861,6 +866,7 @@ mod win32_app {
         set_pipeline_status(controls, &pipeline_status);
         let provider_login_turn = chatpcb_desktop::ui_model::provider_login_transcript(&statuses);
         append_provider_login_transcript(hwnd, controls, &provider_login_turn);
+        focus_prompt_after_action(controls);
     }
 
     unsafe fn append_provider_login_transcript(

@@ -60,6 +60,8 @@ try {
         "- Prompt Enter key sends design",
         "- Chat transcript append flow across Provider Login and Send design",
         "- Provider Login appends without erasing chat",
+        "- Provider Login returns focus to prompt",
+        "- Use example returns focus to prompt",
         "- Chat transcript latest-turn scrolling after updates",
         "- Pipeline status transitions for first-run actions",
         "- Preview workspace evidence folder creation on Send design",

@@ -63,8 +63,12 @@ Expected result:
    Claude Code, and Gemini CLI without erasing earlier chat turns. It should not
    ask for an API key.
    If a provider is available, the model selector should move to that provider.
+   Without clicking the prompt box again, type a short test request and confirm
+   it appears in the prompt input.
 12. Click `Use example` if the prompt input is empty.
-13. Type, edit, or keep a board prompt in the prompt input.
+13. Type, edit, or keep a board prompt in the prompt input. After clicking
+    `Use example`, pressing Enter should work without clicking back into the
+    prompt box.
 14. Press Enter in the prompt input, or click `Send design`.
 15. Confirm the chat transcript still includes the earlier Provider Login
     status and also appends your prompt plus a preview pipeline:

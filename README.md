@@ -114,10 +114,12 @@ Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. The model selector
 also picks the first available local provider on launch, so a first-run user sees
 a realistic model choice before pressing anything. `Use example` refills the
-starter prompt after a send. On launch, the starter prompt is already selected,
-so typing replaces it immediately. Pressing Enter in the prompt input or clicking
-`Send design` appends the prompt and assistant response to the existing chat
-transcript, so Provider Login context and earlier messages stay visible. The
+starter prompt after a send. Both `Provider Login` and `Use example` return focus
+to the prompt, so the next typed request or Enter key works without another
+click. On launch, the starter prompt is already selected, so typing replaces it
+immediately. Pressing Enter in the prompt input or clicking `Send design` appends
+the prompt and assistant response to the existing chat transcript, so Provider
+Login context and earlier messages stay visible. The
 transcript also moves to the latest response after updates. It also saves a local
 preview workspace under:
 

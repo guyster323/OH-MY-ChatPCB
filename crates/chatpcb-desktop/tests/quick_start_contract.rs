@@ -24,6 +24,20 @@ fn native_preview_has_use_example_button_that_fills_the_prompt() {
 }
 
 #[test]
+fn use_example_returns_focus_to_the_prompt_for_immediate_editing() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("use_example_focuses_prompt_input"));
+    assert!(main.contains("focus_prompt_after_action"));
+    assert!(main.contains("handle_use_example"));
+    assert!(main.contains("focus_prompt_after_action(controls)"));
+}
+
+#[test]
 fn provider_login_updates_model_selector_to_available_cli() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
@@ -36,6 +50,20 @@ fn provider_login_updates_model_selector_to_available_cli() {
     assert!(main.contains("selected_provider_model_index"));
     assert!(main.contains("controls.model_choice"));
     assert!(main.contains("CB_SETCURSEL"));
+}
+
+#[test]
+fn provider_login_returns_focus_to_the_prompt_for_immediate_chat() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("provider_login_returns_focus_to_prompt"));
+    assert!(main.contains("handle_provider_login"));
+    assert!(main.contains("append_provider_login_transcript"));
+    assert!(main.contains("focus_prompt_after_action(controls)"));
 }
 
 #[test]
