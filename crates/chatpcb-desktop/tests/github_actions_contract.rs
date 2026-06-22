@@ -42,3 +42,37 @@ fn github_actions_publishes_tagged_preview_zip_to_releases() {
     assert!(workflow.contains("dist/ChatPCB-KiCad-Preview-windows-x64/RELEASE-EVIDENCE.txt"));
     assert!(workflow.contains("dist/ChatPCB-KiCad-Preview-windows-x64/SHA256SUMS.txt"));
 }
+
+#[test]
+fn github_replacement_readiness_script_is_a_dry_run_gate() {
+    let script =
+        fs::read_to_string(workspace_root().join("scripts/verify-github-replacement-ready.ps1"))
+            .unwrap();
+
+    assert!(script.contains("guyster323/OH-MY-ChatPCB"));
+    assert!(script.contains("git remote get-url origin"));
+    assert!(script.contains("git status --porcelain"));
+    assert!(script.contains("ChatPCB-KiCad-Preview-windows-x64.zip"));
+    assert!(script.contains("RELEASE-EVIDENCE.txt"));
+    assert!(script.contains("SHA256SUMS.txt"));
+    assert!(script.contains("Git commit: $head"));
+    assert!(script.contains("Working tree: clean"));
+    assert!(script.contains("CheckRemoteHead"));
+    assert!(script.contains("git ls-remote origin refs/heads/main"));
+    assert!(script.contains("NO_PUSH_PERFORMED"));
+    assert!(script.contains("explicit user approval"));
+    assert!(!script.contains("git push"));
+}
+
+#[test]
+fn github_replacement_runbook_keeps_the_external_action_explicit() {
+    let runbook =
+        fs::read_to_string(workspace_root().join("docs/github-replacement-runbook.md")).unwrap();
+
+    assert!(runbook.contains("OH-MY-ChatPCB"));
+    assert!(runbook.contains("scripts\\verify-github-replacement-ready.ps1"));
+    assert!(runbook.contains("explicit action-time approval"));
+    assert!(runbook.contains("Do not push"));
+    assert!(runbook.contains("ChatPCB-KiCad-Preview-windows-x64.zip"));
+    assert!(runbook.contains("Preview only; not order-ready"));
+}

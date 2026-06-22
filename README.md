@@ -149,6 +149,10 @@ workflow also uploads the same zip as an Actions artifact named
 `ChatPCB-KiCad-Preview-windows-x64`.
 For a direct public download page, create a tag such as `preview-0.1.0`; the
 `Release ChatPCB KiCad Preview` workflow publishes the zip to GitHub Releases.
+Before replacing the failed `guyster323/OH-MY-ChatPCB` remote history, run
+`scripts\verify-github-replacement-ready.ps1` and follow
+`docs\github-replacement-runbook.md`. The script is a dry run and never pushes;
+the actual GitHub replacement still requires explicit action-time approval.
 
 Run the core manually:
 
