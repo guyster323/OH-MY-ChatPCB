@@ -6,10 +6,21 @@ KiCad fork yet.
 
 ## Install
 
-From the repository root:
+For a packaged first run:
+
+1. Unzip `ChatPCB-KiCad-Preview-windows-x64.zip`.
+2. Double-click `Install ChatPCB KiCad Preview.cmd`.
+
+For a source-tree first run on a machine with Rust installed, double-click:
+
+```text
+Install ChatPCB KiCad Preview.cmd
+```
+
+The equivalent developer command is:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 ```
 
 Expected result:
@@ -17,6 +28,7 @@ Expected result:
 - `chatpcb-core.exe` is copied into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`.
 - `ChatPCB KiCad Preview.exe` is copied into the same folder.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
+- The app starts automatically.
 
 ## First Run
 

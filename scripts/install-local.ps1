@@ -1,5 +1,6 @@
 param(
-    [string]$InstallRoot = "$env:LOCALAPPDATA\ChatPCB3\ChatPCB KiCad Preview"
+    [string]$InstallRoot = "$env:LOCALAPPDATA\ChatPCB3\ChatPCB KiCad Preview",
+    [switch]$Launch
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,6 +8,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        throw "Rust Cargo was not found. Install Rust first, or use the packaged ChatPCB KiCad Preview zip."
+    }
+
     cargo build --release -p chatpcb-core -p chatpcb-desktop
 
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -26,6 +31,10 @@ try {
 
     Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
     Write-Host "Desktop shortcut: $shortcutPath"
+
+    if ($Launch) {
+        Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot
+    }
 }
 finally {
     Pop-Location

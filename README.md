@@ -57,10 +57,27 @@ cargo build
 
 ## Non-Expert Preview Install
 
-For a local first-run preview:
+For a packaged first run, unzip `ChatPCB-KiCad-Preview-windows-x64.zip` and
+double-click:
+
+```text
+Install ChatPCB KiCad Preview.cmd
+```
+
+The packaged installer does not require Rust or Cargo. It copies the native app
+into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
+shortcut, and starts the app.
+
+For a source-tree first run on a machine with Rust installed, double-click:
+
+```text
+Install ChatPCB KiCad Preview.cmd
+```
+
+Or run the same install path manually:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 ```
 
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
@@ -69,6 +86,14 @@ selector, prompt input, `Send design` action, and pipeline status. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 `Send design` reflects the prompt text in the chat transcript. See
 `docs/user-test-guide.md` for the user-facing check.
+
+Build a shareable preview package:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-preview.ps1
+```
+
+The zip is written under `dist\` and intentionally ignored by git.
 
 Run the core manually:
 
