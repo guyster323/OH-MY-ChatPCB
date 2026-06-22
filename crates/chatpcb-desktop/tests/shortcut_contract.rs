@@ -48,3 +48,15 @@ fn package_script_creates_zip_with_first_run_files() {
     assert!(script.contains("Install ChatPCB KiCad Preview.cmd"));
     assert!(script.contains("install-from-package.ps1"));
 }
+
+#[test]
+fn package_script_writes_release_evidence_and_hashes() {
+    let script = fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+
+    assert!(script.contains("RELEASE-EVIDENCE.txt"));
+    assert!(script.contains("SHA256SUMS.txt"));
+    assert!(script.contains("Get-FileHash"));
+    assert!(script.contains("git rev-parse --short HEAD"));
+    assert!(script.contains("git status --porcelain"));
+    assert!(script.contains("Working tree"));
+}

@@ -34,7 +34,8 @@ Not implemented yet:
 - Real schematic and PCB canvas embedding in the new workspace.
 - Actual KiCad file writing, DSN/SES import/export, Freerouting execution, or
   Gerber generation.
-- Windows installer packaging.
+- Signed MSI/NSIS-style installer packaging. The current preview has a
+  double-click zip installer.
 - Live provider invocation. The first slice only detects local CLI availability
   and defines the transport contract.
 
@@ -94,6 +95,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-preview.ps1
 ```
 
 The zip is written under `dist\` and intentionally ignored by git.
+It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, and `SHA256SUMS.txt`
+beside the two executables and installer scripts.
 
 Run the core manually:
 

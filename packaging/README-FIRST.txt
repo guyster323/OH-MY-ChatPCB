@@ -19,3 +19,8 @@ Current boundary
 ----------------
 This preview proves the native app shell and local runtime contract.
 It does not yet generate order-ready KiCad PCB files.
+
+Evidence files
+--------------
+- RELEASE-EVIDENCE.txt records the source commit and package contents.
+- SHA256SUMS.txt records hashes for the packaged files.
