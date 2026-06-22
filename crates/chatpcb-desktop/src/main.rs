@@ -1044,14 +1044,17 @@ mod win32_app {
     unsafe fn open_preview_pcb(project_dir: &PathBuf, controls: &AppControls) {
         let pcb_file = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
         if pcb_file.exists() {
-            open_preview_pcb_file(&pcb_file);
-            set_pipeline_status(controls, "Opened preview PCB in KiCad PCB Editor.");
+            let opened_with_kicad = open_preview_pcb_file(&pcb_file);
+            set_pipeline_status(
+                controls,
+                chatpcb_desktop::ui_model::open_pcb_pipeline_status(opened_with_kicad),
+            );
         } else {
             set_pipeline_status(controls, "PCB file missing: click Send design again.");
         }
     }
 
-    unsafe fn open_preview_pcb_file(pcb_file: &PathBuf) {
+    unsafe fn open_preview_pcb_file(pcb_file: &PathBuf) -> bool {
         if let Some(pcbnew) = preferred_pcbnew_path() {
             let operation = wide("open");
             let executable = wide(&pcbnew.to_string_lossy());
@@ -1064,6 +1067,7 @@ mod win32_app {
                 null(),
                 SW_SHOW,
             );
+            true
         } else {
             let operation = wide("open");
             let board = wide(&pcb_file.to_string_lossy());
@@ -1075,6 +1079,7 @@ mod win32_app {
                 null(),
                 SW_SHOW,
             );
+            false
         }
     }
 

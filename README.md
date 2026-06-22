@@ -36,8 +36,10 @@ Implemented in this first vertical slice:
 - `Open evidence` opens the saved preview workspace folder from inside the app
   with `FIRST-RUN-SUMMARY.txt` selected, including after relaunch when a
   previous preview workspace already exists.
-- `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview in KiCad
-  so a first-run user can inspect the 50mm x 50mm board outline immediately.
+- `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview with KiCad
+  10's PCB Editor when it is installed; otherwise it falls back to the Windows
+  file association and tells the user to install KiCad 10 if PCB Editor did not
+  open.
 - After `Send design`, the app runs a local KiCad CLI compatibility check when
   KiCad 10 is installed and writes `kicad-pcb-check.txt` beside the preview
   files.
@@ -156,8 +158,10 @@ folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 those local reports are clear, the bottom pipeline status says
 `Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review.`
 It is still not an order-ready KiCad board. Click
-`Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad and see the 50mm x
-50mm `Edge.Cuts` preview outline. Click `Open evidence` in the app to open that
+`Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
+see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,
+the app opens the PCB file through Windows and says to install KiCad 10 if PCB
+Editor did not open. Click `Open evidence` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the summary exists,
 Windows opens the folder with `FIRST-RUN-SUMMARY.txt` selected.
 After closing and reopening the app,

@@ -138,6 +138,14 @@ pub fn validation_pipeline_status(validation_summary: &str) -> String {
     "Review validation: open evidence, inspect ERC/DRC reports. Still prototype-review.".to_string()
 }
 
+pub fn open_pcb_pipeline_status(opened_with_kicad: bool) -> &'static str {
+    if opened_with_kicad {
+        "Opened preview PCB in KiCad PCB Editor."
+    } else {
+        "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
+    }
+}
+
 pub fn example_board_prompt() -> &'static str {
     "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
 }
@@ -145,7 +153,7 @@ pub fn example_board_prompt() -> &'static str {
 pub fn initial_transcript() -> String {
     "Welcome to ChatPCB KiCad Preview\r\n\
      Type a board idea, then press Enter or click Send design.\r\n\
-     Click Open PCB after a preview is saved to inspect the board outline in KiCad.\r\n\
+     Click Open PCB after a preview is saved to inspect the board outline with KiCad 10 when installed.\r\n\
      Click Use example to refill the starter board request.\r\n\
      You can start with: ESP32-S3 USB-C sensor board with OLED display.\r\n\
      Provider Login checks local Codex, Claude Code, and Gemini CLI status without storing credentials.\r\n\
@@ -191,7 +199,7 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
          - Project folder: {project_dir}\r\n\
          - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
          - PCB preview: 50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\
-         - Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.\r\n\
+         - Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\
          - Release evidence: {release_report_file}\r\n\
          Status: prototype-review, not order-ready.\r\n"
     )
@@ -218,7 +226,7 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - release-evidence-preview.md\r\n\r\n\
          PCB preview:\r\n\
          50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\r\n\
-         Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.\r\n\r\n\
+         Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."
@@ -305,7 +313,7 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          Project folder:\r\n\
          {project_dir}\r\n\r\n\
          Click Open evidence to inspect the saved files before sending another design.\r\n\
-         Click Open PCB to inspect the saved board outline in KiCad.\r\n\r\n\
+         Click Open PCB to inspect the saved board outline with KiCad 10 when installed.\r\n\r\n\
          Expected files:\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
@@ -326,7 +334,7 @@ pub fn recovered_preview_workspace_transcript(project_dir: &str) -> String {
         "Previous preview workspace found\r\n\
          - Project folder: {project_dir}\r\n\
          - Click Open evidence to inspect saved files.\r\n\
-         - Click Open PCB to inspect the saved board outline in KiCad.\r\n\
+         - Click Open PCB to inspect the saved board outline with KiCad 10 when installed.\r\n\
          Status: prototype-review, not order-ready.\r\n"
     )
 }

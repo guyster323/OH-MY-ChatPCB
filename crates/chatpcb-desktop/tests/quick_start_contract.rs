@@ -344,6 +344,8 @@ fn native_preview_has_open_pcb_button_for_saved_workspace() {
     assert!(main.contains("handle_open_pcb"));
     assert!(main.contains("open_preview_pcb"));
     assert!(main.contains("open_preview_pcb_file"));
+    assert!(main.contains("let opened_with_kicad = open_preview_pcb_file"));
+    assert!(main.contains("open_pcb_pipeline_status(opened_with_kicad)"));
     assert!(main.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(main.contains("pcbnew.exe"));
 }

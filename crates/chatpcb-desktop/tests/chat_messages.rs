@@ -2,7 +2,7 @@ use chatpcb_desktop::ui_model::{
     append_chat_transcript, design_pipeline_status, erc_drc_validation_transcript,
     example_loaded_pipeline_status, initial_left_workspace_status, initial_pipeline_status,
     initial_transcript, kicad_cli_check_transcript, left_tab_body, left_tab_status,
-    preview_workspace_body, preview_workspace_body_with_kicad_check,
+    open_pcb_pipeline_status, preview_workspace_body, preview_workspace_body_with_kicad_check,
     preview_workspace_body_with_validation_reports, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
     recovered_preview_workspace_body, recovered_preview_workspace_left_status,
@@ -20,6 +20,7 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("Send design"));
     assert!(transcript.contains("Open PCB"));
+    assert!(transcript.contains("KiCad 10 when installed"));
     assert!(transcript.contains("preview"));
 }
 
@@ -189,6 +190,18 @@ fn validation_pipeline_status_keeps_next_actions_visible_for_non_experts() {
 }
 
 #[test]
+fn open_pcb_pipeline_status_distinguishes_kicad_from_file_fallback() {
+    let kicad_status = open_pcb_pipeline_status(true);
+    let fallback_status = open_pcb_pipeline_status(false);
+
+    assert_eq!(kicad_status, "Opened preview PCB in KiCad PCB Editor.");
+    assert!(fallback_status.contains("Opened preview PCB file."));
+    assert!(fallback_status.contains("Install KiCad 10"));
+    assert!(fallback_status.contains("PCB Editor did not open"));
+    assert_ne!(kicad_status, fallback_status);
+}
+
+#[test]
 fn preview_workspace_transcript_points_to_saved_local_evidence() {
     let transcript = preview_workspace_saved_transcript(
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
@@ -201,6 +214,7 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("KiCad preview scaffold"));
     assert!(transcript.contains("50mm x 50mm Edge.Cuts"));
     assert!(transcript.contains("Open PCB"));
+    assert!(transcript.contains("KiCad 10 when installed"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
@@ -292,6 +306,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(body.contains("50mm x 50mm Edge.Cuts"));
     assert!(body.contains("Open PCB"));
+    assert!(body.contains("KiCad 10 when installed"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
 }
