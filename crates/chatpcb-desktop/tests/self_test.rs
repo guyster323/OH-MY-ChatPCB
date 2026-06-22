@@ -59,6 +59,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(contract["chat_actions"]["prompt_enter_sends_design"], true);
+    assert_eq!(
+        contract["chat_actions"]["app_launch_focuses_prompt_input"],
+        true
+    );
     assert_eq!(contract["layout"]["left_ratio"], 0.7);
     assert_eq!(contract["layout"]["right_ratio"], 0.3);
     assert_eq!(

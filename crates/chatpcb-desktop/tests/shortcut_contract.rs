@@ -92,6 +92,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("git rev-parse --short HEAD"));
     assert!(script.contains("git status --porcelain"));
     assert!(script.contains("Working tree"));
+    assert!(script.contains("App launch focuses prompt input"));
     assert!(script.contains("Chat transcript append flow"));
     assert!(script.contains("Chat transcript latest-turn scrolling"));
     assert!(script.contains("Prompt Enter key sends design"));

@@ -12,17 +12,19 @@ Install
 
 First chat
 ----------
-1. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status.
-2. Confirm the model selector moves to an available local provider if one is found.
-3. Click Use example if the prompt box is empty.
-4. Type or edit a PCB request in the prompt box.
-5. Press Enter in the prompt box, or click Send design.
-6. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-7. Confirm the transcript is positioned at the latest response.
-8. Confirm the chat transcript says "Preview workspace saved".
-9. Confirm the large left preview body also shows the saved workspace files.
-10. Click Open evidence to inspect the first-run evidence folder.
-11. The folder path is:
+1. Type a PCB request immediately after the app opens. The starter prompt is already selected.
+2. Press Enter to send it.
+3. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status.
+4. Confirm the model selector moves to an available local provider if one is found.
+5. Click Use example if the prompt box is empty.
+6. Type or edit a PCB request in the prompt box.
+7. Press Enter in the prompt box, or click Send design.
+8. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
+9. Confirm the transcript is positioned at the latest response.
+10. Confirm the chat transcript says "Preview workspace saved".
+11. Confirm the large left preview body also shows the saved workspace files.
+12. Click Open evidence to inspect the first-run evidence folder.
+13. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

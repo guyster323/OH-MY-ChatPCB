@@ -16,6 +16,7 @@ pub struct ChatActionsContract {
     pub send_design_appends_chat_transcript: bool,
     pub chat_transcript_scrolls_to_latest: bool,
     pub prompt_enter_sends_design: bool,
+    pub app_launch_focuses_prompt_input: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         send_design_appends_chat_transcript: true,
         chat_transcript_scrolls_to_latest: true,
         prompt_enter_sends_design: true,
+        app_launch_focuses_prompt_input: true,
     }
 }
 

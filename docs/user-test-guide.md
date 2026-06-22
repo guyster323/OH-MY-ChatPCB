@@ -35,16 +35,19 @@ Expected result:
 
 1. Open `ChatPCB KiCad Preview` from the desktop shortcut.
 2. Confirm the window title is `ChatPCB KiCad Preview`.
-3. Confirm the left side is larger than the right side.
-4. Confirm the left side shows these tabs:
+3. Without clicking inside the app, type a short board request and press Enter.
+   Confirm the text becomes a chat turn and the preview workspace is saved.
+4. Reopen the app for the rest of the first-run checks if needed.
+5. Confirm the left side is larger than the right side.
+6. Confirm the left side shows these tabs:
    - Schematic
    - PCB Layout
    - Validation
    - Manufacturing Preview
-5. Click each left tab and confirm the left project status and the large left
+7. Click each left tab and confirm the left project status and the large left
    preview body change for the schematic, PCB layout, validation, and
    manufacturing preview views.
-6. Confirm the right side shows:
+8. Confirm the right side shows:
    - Chat transcript
    - prompt input
    - Use example
@@ -53,14 +56,14 @@ Expected result:
    - Provider Login
    - model selector
    - pipeline status
-7. Click `Provider Login`.
-8. Confirm the chat transcript reports local CLI provider status for Codex,
+9. Click `Provider Login`.
+10. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI. It should not ask for an API key.
    If a provider is available, the model selector should move to that provider.
-9. Click `Use example` if the prompt input is empty.
-10. Type, edit, or keep a board prompt in the prompt input.
-11. Press Enter in the prompt input, or click `Send design`.
-12. Confirm the chat transcript still includes the earlier Provider Login
+11. Click `Use example` if the prompt input is empty.
+12. Type, edit, or keep a board prompt in the prompt input.
+13. Press Enter in the prompt input, or click `Send design`.
+14. Confirm the chat transcript still includes the earlier Provider Login
     status and also appends your prompt plus a preview pipeline:
    - ESP32-S3 target spec
    - JLCPCB package contract
@@ -69,14 +72,14 @@ Expected result:
    - Freerouting autoroute
    - DRC
    - manufacturing package
-13. Confirm the chat transcript says `Preview workspace saved`.
-14. Confirm the chat transcript is positioned at the latest response after the
+15. Confirm the chat transcript says `Preview workspace saved`.
+16. Confirm the chat transcript is positioned at the latest response after the
     send, so the new design result is visible without manually scrolling down.
-15. Confirm the left project status and large left preview body now show
+17. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-16. Click `Open evidence`.
-17. Confirm Windows opens the preview evidence folder.
-18. Confirm the preview evidence folder exists:
+18. Click `Open evidence`.
+19. Confirm Windows opens the preview evidence folder.
+20. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

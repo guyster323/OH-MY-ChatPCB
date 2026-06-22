@@ -54,6 +54,7 @@ try {
         "Verified scope:",
         "- Native Windows preview shell",
         "- Provider Login local CLI status detection",
+        "- App launch focuses prompt input for immediate first chat",
         "- Prompt input and Send design transcript flow",
         "- Prompt Enter key sends design",
         "- Chat transcript append flow across Provider Login and Send design",

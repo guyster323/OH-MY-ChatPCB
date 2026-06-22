@@ -132,7 +132,7 @@ mod win32_app {
         EM_SCROLLCARET, EM_SETSEL, NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW,
         TCN_SELCHANGE,
     };
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VK_RETURN};
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
@@ -141,8 +141,9 @@ mod win32_app {
         SetWindowTextW, ShowWindow, TranslateMessage, CBS_DROPDOWNLIST, CB_ADDSTRING, CB_SETCURSEL,
         CW_USEDEFAULT, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, IDC_ARROW, MSG, SW_SHOW, WINDOW_EX_STYLE, WM_APP, WM_COMMAND,
-        WM_DESTROY, WM_KEYDOWN, WM_NCDESTROY, WM_NOTIFY, WM_SIZE, WNDCLASSW, WNDPROC, WS_BORDER,
-        WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+        WM_DESTROY, WM_KEYDOWN, WM_NCDESTROY, WM_NOTIFY, WM_SETFOCUS, WM_SIZE, WNDCLASSW, WNDPROC,
+        WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        WS_VSCROLL,
     };
 
     const APP_TITLE: &str = "ChatPCB KiCad Preview";
@@ -199,11 +200,13 @@ mod win32_app {
             }
 
             let controls = Box::new(create_controls(hwnd, instance));
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(controls) as isize);
+            let controls_ptr = Box::into_raw(controls);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, controls_ptr as isize);
             layout(hwnd);
 
             ShowWindow(hwnd, SW_SHOW);
             UpdateWindow(hwnd);
+            focus_prompt_for_first_chat(&*controls_ptr);
 
             let mut message: MSG = zeroed();
             while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
@@ -415,6 +418,11 @@ mod win32_app {
         SendMessageW(combo, CB_ADDSTRING, 0, text.as_ptr() as isize);
     }
 
+    unsafe fn focus_prompt_for_first_chat(controls: &AppControls) {
+        SetFocus(controls.prompt);
+        SendMessageW(controls.prompt, EM_SETSEL, 0, -1);
+    }
+
     unsafe fn subclass_prompt_input(parent: HWND, prompt: HWND) {
         SetWindowLongPtrW(prompt, GWLP_USERDATA, parent as isize);
         let original = SetWindowLongPtrW(
@@ -483,6 +491,13 @@ mod win32_app {
             }
             WM_CHATPCB_SEND_DEFERRED => {
                 handle_send_design(hwnd);
+                0
+            }
+            WM_SETFOCUS => {
+                let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
+                if !ptr.is_null() {
+                    focus_prompt_for_first_chat(&*ptr);
+                }
                 0
             }
             WM_SIZE => {

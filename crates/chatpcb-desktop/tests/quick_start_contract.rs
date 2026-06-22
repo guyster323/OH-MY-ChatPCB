@@ -103,6 +103,23 @@ fn prompt_enter_key_sends_design_like_a_chat_app() {
 }
 
 #[test]
+fn app_launch_focuses_and_selects_prompt_for_immediate_chat() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("app_launch_focuses_prompt_input"));
+    assert!(main.contains("focus_prompt_for_first_chat"));
+    assert!(main.contains("SetFocus"));
+    assert!(main.contains("controls.prompt"));
+    assert!(main.contains("EM_SETSEL"));
+    assert!(main.contains("-1"));
+    assert!(main.contains("WM_SETFOCUS"));
+}
+
+#[test]
 fn send_design_creates_a_local_preview_workspace_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
