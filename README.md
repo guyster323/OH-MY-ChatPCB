@@ -29,6 +29,9 @@ Implemented in this first vertical slice:
 - Clicking the left Schematic, PCB Layout, Validation, and Manufacturing
   Preview tabs updates the project status with that view's current preview
   state.
+- The left design pane shows a native read-only preview body for each tab, so a
+  first-run user sees schematic, layout, validation, and manufacturing context
+  instead of a blank canvas.
 - `Open evidence` opens the saved preview workspace folder from inside the app.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
@@ -98,7 +101,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
-selector, prompt input, `Use example`, `Send design` action, and pipeline status. `Provider
+selector, prompt input, `Use example`, `Send design` action, and pipeline status.
+The left tabs also show a native preview body, not an empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 selects the first available local provider in the model selector. `Use example`
 refills the starter prompt after a send. `Send design` reflects the prompt text
@@ -109,11 +113,10 @@ in the chat transcript and saves a local preview workspace under:
 ```
 
 That folder contains the prompt, artifact manifest, and a prototype-review
-release evidence report. The left project status also changes from the initial
-canvas placeholder to the saved preview workspace state. It is still not an
-order-ready KiCad board. Click `Open evidence` in the app to open that folder
-without finding `%LOCALAPPDATA%` by hand. See
-`docs/user-test-guide.md` for the user-facing check.
+release evidence report. The left project status and preview body also change
+to the saved workspace state. It is still not an order-ready KiCad board. Click
+`Open evidence` in the app to open that folder without finding `%LOCALAPPDATA%`
+by hand. See `docs/user-test-guide.md` for the user-facing check.
 
 Build a shareable preview package:
 

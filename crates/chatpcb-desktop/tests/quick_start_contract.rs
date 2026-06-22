@@ -104,6 +104,23 @@ fn left_project_tabs_update_the_workspace_status() {
 }
 
 #[test]
+fn left_project_tabs_show_a_native_preview_body() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("left_tabs_update_workspace_preview"));
+    assert!(ui_model.contains("left_tab_body"));
+    assert!(ui_model.contains("preview_workspace_body"));
+    assert!(main.contains("design_preview"));
+    assert!(main.contains("set_design_preview"));
+    assert!(main.contains("controls.design_preview"));
+    assert!(main.contains("preview_workspace_body"));
+}
+
+#[test]
 fn native_preview_has_open_evidence_button_for_saved_workspace() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

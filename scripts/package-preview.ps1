@@ -59,6 +59,7 @@ try {
         "- Preview workspace evidence folder creation on Send design",
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
+        "- Left design preview body for schematic/layout/validation/manufacturing preview",
         "- Open evidence button for the saved preview workspace",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",

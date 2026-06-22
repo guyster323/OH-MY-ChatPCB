@@ -156,6 +156,7 @@ mod win32_app {
     struct AppControls {
         left_pane: HWND,
         tabs: HWND,
+        design_preview: HWND,
         status: HWND,
         chat_transcript: HWND,
         prompt: HWND,
@@ -249,6 +250,18 @@ mod win32_app {
         add_tab(tabs, 2, "Validation");
         add_tab(tabs, 3, "Manufacturing Preview");
 
+        let design_preview = child(
+            parent,
+            instance,
+            "EDIT",
+            chatpcb_desktop::ui_model::left_tab_body(0),
+            WS_BORDER
+                | WS_VSCROLL
+                | ES_MULTILINE as u32
+                | ES_AUTOVSCROLL as u32
+                | ES_READONLY as u32,
+            0,
+        );
         let status = child(
             parent,
             instance,
@@ -333,6 +346,7 @@ mod win32_app {
         AppControls {
             left_pane,
             tabs,
+            design_preview,
             status,
             chat_transcript,
             prompt,
@@ -473,6 +487,10 @@ mod win32_app {
                 controls,
                 chatpcb_desktop::ui_model::left_tab_status(selected as usize),
             );
+            set_design_preview(
+                controls,
+                chatpcb_desktop::ui_model::left_tab_body(selected as usize),
+            );
         }
     }
 
@@ -503,14 +521,18 @@ mod win32_app {
             height - margin * 2 - 120,
             1,
         );
+        let preview_y = margin + 84;
+        let status_y = height - margin - 68;
+        let preview_height = (status_y - preview_y - gap).max(80);
         MoveWindow(
-            controls.status,
-            margin,
-            height - margin - 68,
-            left_width,
-            68,
+            controls.design_preview,
+            margin + 8,
+            preview_y,
+            left_width - 16,
+            preview_height,
             1,
         );
+        MoveWindow(controls.status, margin, status_y, left_width, 68, 1);
 
         MoveWindow(
             controls.chat_transcript,
@@ -607,6 +629,11 @@ mod win32_app {
                     &workspace.project_dir,
                 );
                 set_left_workspace_status(controls, &left_status);
+                let preview_body = chatpcb_desktop::ui_model::preview_workspace_body(
+                    &workspace.project_dir,
+                    &workspace.release_report_file,
+                );
+                set_design_preview(controls, &preview_body);
                 controls.last_workspace_dir = Some(PathBuf::from(&workspace.project_dir));
             }
             Err(error) => {
@@ -618,6 +645,10 @@ mod win32_app {
                 set_left_workspace_status(
                     controls,
                     "Preview workspace could not be saved. Check chat for the error.",
+                );
+                set_design_preview(
+                    controls,
+                    "Preview workspace was not saved.\r\nCheck the chat transcript for the error.\r\nGate: preview only.",
                 );
             }
         }
@@ -720,6 +751,11 @@ mod win32_app {
     unsafe fn set_left_workspace_status(controls: &AppControls, status: &str) {
         let status = wide(status);
         SetWindowTextW(controls.status, status.as_ptr());
+    }
+
+    unsafe fn set_design_preview(controls: &AppControls, body: &str) {
+        let body = wide(body);
+        SetWindowTextW(controls.design_preview, body.as_ptr());
     }
 
     fn selected_provider_model_index(model: &str) -> Option<usize> {

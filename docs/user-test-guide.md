@@ -41,8 +41,9 @@ Expected result:
    - PCB Layout
    - Validation
    - Manufacturing Preview
-5. Click each left tab and confirm the left project status changes for the
-   schematic, PCB layout, validation, and manufacturing preview views.
+5. Click each left tab and confirm the left project status and the large left
+   preview body change for the schematic, PCB layout, validation, and
+   manufacturing preview views.
 6. Confirm the right side shows:
    - Chat transcript
    - prompt input
@@ -68,8 +69,8 @@ Expected result:
    - DRC
    - manufacturing package
 13. Confirm the chat transcript says `Preview workspace saved`.
-14. Confirm the left project area now shows `Preview workspace saved` instead
-    of only the initial Schematic preview status.
+14. Confirm the left project status and large left preview body now show
+    `Preview workspace saved` instead of only the initial Schematic preview.
 15. Click `Open evidence`.
 16. Confirm Windows opens the preview evidence folder.
 17. Confirm the preview evidence folder exists:

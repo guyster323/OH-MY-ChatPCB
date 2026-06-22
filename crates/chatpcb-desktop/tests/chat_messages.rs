@@ -1,8 +1,9 @@
 use chatpcb_desktop::ui_model::{
     design_pipeline_status, example_loaded_pipeline_status, initial_left_workspace_status,
-    initial_pipeline_status, initial_transcript, left_tab_status, preview_workspace_left_status,
-    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
-    selected_provider_model, send_design_transcript, ProviderUiStatus,
+    initial_pipeline_status, initial_transcript, left_tab_body, left_tab_status,
+    preview_workspace_body, preview_workspace_left_status, preview_workspace_saved_transcript,
+    provider_login_pipeline_status, provider_login_transcript, selected_provider_model,
+    send_design_transcript, ProviderUiStatus,
 };
 
 #[test]
@@ -160,4 +161,45 @@ fn left_tab_status_describes_each_current_project_view() {
     assert!(manufacturing.contains("not generated yet"));
 
     assert_eq!(left_tab_status(99), initial_left_workspace_status());
+}
+
+#[test]
+fn left_tab_body_gives_non_experts_a_visible_design_preview() {
+    let schematic = left_tab_body(0);
+    assert!(schematic.contains("Schematic"));
+    assert!(schematic.contains("ESP32-S3"));
+    assert!(schematic.contains("USB-C"));
+    assert!(schematic.contains("nets"));
+
+    let pcb = left_tab_body(1);
+    assert!(pcb.contains("PCB Layout"));
+    assert!(pcb.contains("placement"));
+    assert!(pcb.contains("Freerouting"));
+
+    let validation = left_tab_body(2);
+    assert!(validation.contains("Validation"));
+    assert!(validation.contains("ERC"));
+    assert!(validation.contains("DRC"));
+
+    let manufacturing = left_tab_body(3);
+    assert!(manufacturing.contains("Manufacturing Preview"));
+    assert!(manufacturing.contains("Gerber"));
+    assert!(manufacturing.contains("BOM"));
+    assert!(manufacturing.contains("CPL"));
+
+    assert_eq!(left_tab_body(99), left_tab_body(0));
+}
+
+#[test]
+fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims() {
+    let body = preview_workspace_body(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
+    );
+
+    assert!(body.contains("Preview workspace saved"));
+    assert!(body.contains("artifact-manifest.json"));
+    assert!(body.contains("release-evidence-preview.md"));
+    assert!(body.contains("prototype-review"));
+    assert!(body.contains("not order-ready"));
 }

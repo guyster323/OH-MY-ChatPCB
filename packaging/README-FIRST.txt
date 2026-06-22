@@ -18,8 +18,9 @@ First chat
 4. Type or edit a PCB request in the prompt box.
 5. Click Send design.
 6. Confirm the chat transcript says "Preview workspace saved".
-7. Click Open evidence to inspect the first-run evidence folder.
-8. The folder path is:
+7. Confirm the large left preview body also shows the saved workspace files.
+8. Click Open evidence to inspect the first-run evidence folder.
+9. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary
