@@ -92,4 +92,5 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("git rev-parse --short HEAD"));
     assert!(script.contains("git status --porcelain"));
     assert!(script.contains("Working tree"));
+    assert!(script.contains("Pipeline status transitions"));
 }

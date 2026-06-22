@@ -23,6 +23,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["pipeline_status_updates_after_actions"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["provider_login_reports_cli_status"],
         true
     );

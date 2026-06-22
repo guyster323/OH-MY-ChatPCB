@@ -55,6 +55,7 @@ try {
         "- Native Windows preview shell",
         "- Provider Login local CLI status detection",
         "- Prompt input and Send design transcript flow",
+        "- Pipeline status transitions for first-run actions",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",
         "Current boundary:",

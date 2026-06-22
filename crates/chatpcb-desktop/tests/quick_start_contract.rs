@@ -37,3 +37,20 @@ fn provider_login_updates_model_selector_to_available_cli() {
     assert!(main.contains("controls.model_choice"));
     assert!(main.contains("CB_SETCURSEL"));
 }
+
+#[test]
+fn first_run_actions_update_the_visible_pipeline_status() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("initial_pipeline_status"));
+    assert!(ui_model.contains("provider_login_pipeline_status"));
+    assert!(ui_model.contains("example_loaded_pipeline_status"));
+    assert!(ui_model.contains("design_pipeline_status"));
+    assert!(ui_model.contains("pipeline_status_updates_after_actions"));
+    assert!(main.contains("set_pipeline_status"));
+    assert!(main.contains("controls.pipeline_status"));
+}

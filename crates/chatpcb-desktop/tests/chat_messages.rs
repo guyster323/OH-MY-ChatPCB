@@ -1,6 +1,7 @@
 use chatpcb_desktop::ui_model::{
-    initial_transcript, provider_login_transcript, selected_provider_model, send_design_transcript,
-    ProviderUiStatus,
+    design_pipeline_status, example_loaded_pipeline_status, initial_pipeline_status,
+    initial_transcript, provider_login_pipeline_status, provider_login_transcript,
+    selected_provider_model, send_design_transcript, ProviderUiStatus,
 };
 
 #[test]
@@ -81,4 +82,28 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
 
     let transcript = provider_login_transcript(&statuses);
     assert!(transcript.contains("Selected model: claude:auto"));
+}
+
+#[test]
+fn pipeline_status_text_tracks_the_first_run_actions() {
+    assert_eq!(
+        initial_pipeline_status(),
+        "Ready: check provider, edit prompt, then Send design."
+    );
+    assert_eq!(
+        example_loaded_pipeline_status(),
+        "Example loaded: edit or Send design."
+    );
+    assert_eq!(
+        provider_login_pipeline_status(Some("claude:auto")),
+        "Provider ready: claude:auto selected."
+    );
+    assert_eq!(
+        provider_login_pipeline_status(None),
+        "Provider needed: install or login to a local CLI."
+    );
+    assert_eq!(
+        design_pipeline_status(),
+        "Preview plan queued: schematic -> layout -> DRC -> JLCPCB."
+    );
 }

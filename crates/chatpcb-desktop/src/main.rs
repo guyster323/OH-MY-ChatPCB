@@ -129,8 +129,8 @@ mod win32_app {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetDlgItemTextW,
         GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
-        RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW, ShowWindow,
-        TranslateMessage, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT, ES_AUTOHSCROLL,
+        RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
+        ShowWindow, TranslateMessage, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT, ES_AUTOHSCROLL,
         ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA, HMENU, IDC_ARROW, MSG, SW_SHOW,
         WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_SIZE, WNDCLASSW,
         WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
@@ -301,7 +301,7 @@ mod win32_app {
             parent,
             instance,
             "STATIC",
-            "Pipeline: requirements -> schematic -> placement -> autoroute -> DRC -> JLCPCB package",
+            chatpcb_desktop::ui_model::initial_pipeline_status(),
             WS_BORDER,
             0,
         );
@@ -516,13 +516,28 @@ mod win32_app {
         let prompt = get_control_text(hwnd, ID_PROMPT);
         let transcript = wide(&chatpcb_desktop::ui_model::send_design_transcript(&prompt));
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+        let controls = &*ptr;
+        set_pipeline_status(
+            controls,
+            chatpcb_desktop::ui_model::design_pipeline_status(),
+        );
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
     }
 
     unsafe fn handle_use_example(hwnd: HWND) {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
+        if ptr.is_null() {
+            return;
+        }
+
         let prompt = wide(chatpcb_desktop::ui_model::example_board_prompt());
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, prompt.as_ptr());
+        let controls = &*ptr;
+        set_pipeline_status(
+            controls,
+            chatpcb_desktop::ui_model::example_loaded_pipeline_status(),
+        );
     }
 
     unsafe fn handle_provider_login(hwnd: HWND) {
@@ -545,10 +560,19 @@ mod win32_app {
         {
             SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
         }
+        let selected_model = chatpcb_desktop::ui_model::selected_provider_model(&statuses);
+        let pipeline_status =
+            chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_model);
+        set_pipeline_status(controls, &pipeline_status);
         let transcript = wide(&chatpcb_desktop::ui_model::provider_login_transcript(
             &statuses,
         ));
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+    }
+
+    unsafe fn set_pipeline_status(controls: &AppControls, status: &str) {
+        let status = wide(status);
+        SetWindowTextW(controls.pipeline_status, status.as_ptr());
     }
 
     fn selected_provider_model_index(model: &str) -> Option<usize> {

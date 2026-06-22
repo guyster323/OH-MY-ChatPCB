@@ -6,6 +6,7 @@ pub struct ChatActionsContract {
     pub send_design_clears_prompt: bool,
     pub use_example_fills_prompt: bool,
     pub provider_login_selects_available_model: bool,
+    pub pipeline_status_updates_after_actions: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -22,8 +23,28 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         send_design_clears_prompt: true,
         use_example_fills_prompt: true,
         provider_login_selects_available_model: true,
+        pipeline_status_updates_after_actions: true,
         provider_login_reports_cli_status: true,
     }
+}
+
+pub fn initial_pipeline_status() -> &'static str {
+    "Ready: check provider, edit prompt, then Send design."
+}
+
+pub fn example_loaded_pipeline_status() -> &'static str {
+    "Example loaded: edit or Send design."
+}
+
+pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
+    match selected_model {
+        Some(model) => format!("Provider ready: {model} selected."),
+        None => "Provider needed: install or login to a local CLI.".to_string(),
+    }
+}
+
+pub fn design_pipeline_status() -> &'static str {
+    "Preview plan queued: schematic -> layout -> DRC -> JLCPCB."
 }
 
 pub fn example_board_prompt() -> &'static str {
