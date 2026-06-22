@@ -1,6 +1,6 @@
 use chatpcb_desktop::ui_model::{
     design_pipeline_status, example_loaded_pipeline_status, initial_left_workspace_status,
-    initial_pipeline_status, initial_transcript, preview_workspace_left_status,
+    initial_pipeline_status, initial_transcript, left_tab_status, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
     selected_provider_model, send_design_transcript, ProviderUiStatus,
 };
@@ -125,9 +125,9 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
 
 #[test]
 fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
-    assert!(
-        initial_left_workspace_status().contains("KiCad native editors attach here in the fork")
-    );
+    assert!(initial_left_workspace_status().contains("Schematic"));
+    assert!(initial_left_workspace_status().contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(initial_left_workspace_status().contains("Native KiCad editor embedding"));
 
     let status = preview_workspace_left_status(
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
@@ -137,4 +137,27 @@ fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
     assert!(status.contains("ChatPCB3\\Projects"));
     assert!(status.contains("prototype-review"));
     assert!(status.contains("not order-ready"));
+}
+
+#[test]
+fn left_tab_status_describes_each_current_project_view() {
+    let schematic = left_tab_status(0);
+    assert!(schematic.contains("Schematic"));
+    assert!(schematic.contains("chatpcb3-esp32s3.kicad_sch"));
+
+    let pcb = left_tab_status(1);
+    assert!(pcb.contains("PCB Layout"));
+    assert!(pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
+
+    let validation = left_tab_status(2);
+    assert!(validation.contains("Validation"));
+    assert!(validation.contains("ERC/DRC"));
+    assert!(validation.contains("not run yet"));
+
+    let manufacturing = left_tab_status(3);
+    assert!(manufacturing.contains("Manufacturing Preview"));
+    assert!(manufacturing.contains("Gerber/BOM/CPL"));
+    assert!(manufacturing.contains("not generated yet"));
+
+    assert_eq!(left_tab_status(99), initial_left_workspace_status());
 }

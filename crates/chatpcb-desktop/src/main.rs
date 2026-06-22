@@ -128,7 +128,9 @@ mod win32_app {
     use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{GetStockObject, UpdateWindow, WHITE_BRUSH};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Controls::{TCIF_TEXT, TCITEMW, TCM_INSERTITEMW};
+    use windows_sys::Win32::UI::Controls::{
+        NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW, TCN_SELCHANGE,
+    };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetDlgItemTextW,
@@ -136,8 +138,8 @@ mod win32_app {
         RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
         ShowWindow, TranslateMessage, CBS_DROPDOWNLIST, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT,
         ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA, HMENU, IDC_ARROW,
-        MSG, SW_SHOW, WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_SIZE,
-        WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
+        MSG, SW_SHOW, WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_NOTIFY,
+        WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
         WS_VISIBLE, WS_VSCROLL,
     };
 
@@ -402,6 +404,10 @@ mod win32_app {
         lparam: LPARAM,
     ) -> LRESULT {
         match msg {
+            WM_NOTIFY => {
+                handle_tab_selection(hwnd, lparam);
+                0
+            }
             WM_COMMAND => {
                 if (wparam & 0xffff) == ID_SEND_DESIGN {
                     PostMessageW(hwnd, WM_CHATPCB_SEND_DEFERRED, 0, 0);
@@ -446,6 +452,27 @@ mod win32_app {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+
+    unsafe fn handle_tab_selection(hwnd: HWND, lparam: LPARAM) {
+        let header = lparam as *const NMHDR;
+        if header.is_null() || (*header).code != TCN_SELCHANGE {
+            return;
+        }
+
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
+        if ptr.is_null() {
+            return;
+        }
+
+        let controls = &*ptr;
+        let selected = SendMessageW(controls.tabs, TCM_GETCURSEL, 0, 0);
+        if selected >= 0 {
+            set_left_workspace_status(
+                controls,
+                chatpcb_desktop::ui_model::left_tab_status(selected as usize),
+            );
         }
     }
 

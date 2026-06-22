@@ -11,6 +11,7 @@ pub struct ChatActionsContract {
     pub send_design_updates_left_workspace_status: bool,
     pub open_evidence_opens_preview_workspace: bool,
     pub provider_login_reports_cli_status: bool,
+    pub left_tabs_update_workspace_status: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,11 +32,22 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         send_design_updates_left_workspace_status: true,
         open_evidence_opens_preview_workspace: true,
         provider_login_reports_cli_status: true,
+        left_tabs_update_workspace_status: true,
     }
 }
 
 pub fn initial_left_workspace_status() -> &'static str {
-    "Schematic/PCB canvas placeholder: KiCad native editors attach here in the fork."
+    "Schematic: preview target file chatpcb3-esp32s3.kicad_sch. Native KiCad editor embedding is next."
+}
+
+pub fn left_tab_status(index: usize) -> &'static str {
+    match index {
+        0 => initial_left_workspace_status(),
+        1 => "PCB Layout: preview target file chatpcb3-esp32s3.kicad_pcb. Placement and routing are not generated yet.",
+        2 => "Validation: ERC/DRC not run yet. Send design creates prototype-review evidence only.",
+        3 => "Manufacturing Preview: Gerber/BOM/CPL not generated yet. JLCPCB upload package is still blocked.",
+        _ => initial_left_workspace_status(),
+    }
 }
 
 pub fn initial_pipeline_status() -> &'static str {

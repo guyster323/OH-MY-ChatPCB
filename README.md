@@ -26,6 +26,9 @@ Implemented in this first vertical slice:
   under `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
 - The left project status updates after `Send design`, so the design side and
   chat side both reflect the saved preview workspace.
+- Clicking the left Schematic, PCB Layout, Validation, and Manufacturing
+  Preview tabs updates the project status with that view's current preview
+  state.
 - `Open evidence` opens the saved preview workspace folder from inside the app.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
