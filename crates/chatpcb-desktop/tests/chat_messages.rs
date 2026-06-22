@@ -148,6 +148,7 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("release-evidence-preview.md"));
     assert!(transcript.contains("KiCad preview scaffold"));
+    assert!(transcript.contains("50mm x 50mm Edge.Cuts"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
@@ -204,6 +205,8 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
 
     let pcb = left_tab_body(1);
     assert!(pcb.contains("PCB Layout"));
+    assert!(pcb.contains("50mm x 50mm"));
+    assert!(pcb.contains("Edge.Cuts"));
     assert!(pcb.contains("placement"));
     assert!(pcb.contains("Freerouting"));
 
@@ -234,6 +237,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(body.contains("50mm x 50mm Edge.Cuts"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
 }

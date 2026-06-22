@@ -87,6 +87,33 @@ fn creates_real_kicad_project_scaffold_files() {
 }
 
 #[test]
+fn generated_pcb_scaffold_has_preview_board_outline_and_silkscreen_label() {
+    let root = unique_test_root().with_extension("pcb-outline");
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    let workspace = create_preview_workspace("ESP32-S3 starter board", &root).unwrap();
+    let project_dir = PathBuf::from(&workspace.project_dir);
+    let pcb = fs::read_to_string(project_dir.join("chatpcb3-esp32s3.kicad_pcb")).unwrap();
+
+    assert!(pcb.contains("(gr_line"));
+    assert!(pcb.contains("(layer \"Edge.Cuts\")"));
+    assert!(pcb.contains("(start 10 10)"));
+    assert!(pcb.contains("(end 60 10)"));
+    assert!(pcb.contains("(end 60 60)"));
+    assert!(pcb.contains("(end 10 60)"));
+    assert!(pcb.contains("(layer \"F.SilkS\")"));
+    assert!(pcb.contains("ChatPCB3 ESP32-S3 USB-C Sensor Board"));
+    assert!(pcb.contains("50mm x 50mm preview outline"));
+
+    let report = fs::read_to_string(&workspace.release_report_file).unwrap();
+    assert!(report.contains("50mm x 50mm preview PCB outline"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn generated_kicad_scaffold_is_parseable_by_local_kicad_cli_when_available() {
     let Some(kicad_cli) = local_kicad_cli() else {
         eprintln!("Skipping KiCad CLI parse check because kicad-cli.exe was not found.");

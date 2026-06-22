@@ -84,7 +84,8 @@ pub fn left_tab_body(index: usize) -> &'static str {
               - Native KiCad schematic embedding is the next fork milestone.\r\n\
               - This preview is safe for first-run orientation, not order-ready evidence.",
         1 => "PCB Layout Preview\r\n\
-              - Board outline, placement, and Freerouting route data are not generated yet.\r\n\
+              - A 50mm x 50mm Edge.Cuts board outline is generated for visual orientation.\r\n\
+              - Component placement and Freerouting route data are not generated yet.\r\n\
               - Planned flow: component placement -> DSN export -> Freerouting -> SES import.\r\n\
               - DRC must pass before manufacturing output can be trusted.",
         2 => "Validation Preview\r\n\
@@ -169,6 +170,7 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
         "Preview workspace saved\r\n\
          - Project folder: {project_dir}\r\n\
          - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
+         - PCB preview: 50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\
          - Release evidence: {release_report_file}\r\n\
          Status: prototype-review, not order-ready.\r\n"
     )
@@ -192,6 +194,8 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
          - release-evidence-preview.md\r\n\r\n\
+         PCB preview:\r\n\
+         50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."

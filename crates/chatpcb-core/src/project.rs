@@ -115,6 +115,7 @@ fn preview_release_report(prompt: &str, manifest: &ArtifactManifest) -> String {
          \r\n\
          Current boundary:\r\n\
          - The KiCad project shell is parseable preview scaffolding, not a completed circuit or PCB layout.\r\n\
+         - 50mm x 50mm preview PCB outline on Edge.Cuts is included for visual orientation.\r\n\
          - KiCad fork integration is still required before these scaffold artifacts can be trusted.\r\n\
          - No Gerber, drill, BOM, CPL, ERC, or DRC result has been generated yet.\r\n\
          - Keep this package at prototype-review until real KiCad validation evidence exists.\r\n",
@@ -234,6 +235,70 @@ fn kicad_pcb_file() -> &'static str {
         (pcbplotparams)\r\n\
       )\r\n\
       (net 0 \"\")\r\n\
+      (gr_line\r\n\
+        (start 10 10)\r\n\
+        (end 60 10)\r\n\
+        (stroke\r\n\
+          (width 0.1)\r\n\
+          (type solid)\r\n\
+        )\r\n\
+        (layer \"Edge.Cuts\")\r\n\
+        (uuid \"33333333-3333-4333-8333-333333333333\")\r\n\
+      )\r\n\
+      (gr_line\r\n\
+        (start 60 10)\r\n\
+        (end 60 60)\r\n\
+        (stroke\r\n\
+          (width 0.1)\r\n\
+          (type solid)\r\n\
+        )\r\n\
+        (layer \"Edge.Cuts\")\r\n\
+        (uuid \"44444444-4444-4444-8444-444444444444\")\r\n\
+      )\r\n\
+      (gr_line\r\n\
+        (start 60 60)\r\n\
+        (end 10 60)\r\n\
+        (stroke\r\n\
+          (width 0.1)\r\n\
+          (type solid)\r\n\
+        )\r\n\
+        (layer \"Edge.Cuts\")\r\n\
+        (uuid \"55555555-5555-4555-8555-555555555555\")\r\n\
+      )\r\n\
+      (gr_line\r\n\
+        (start 10 60)\r\n\
+        (end 10 10)\r\n\
+        (stroke\r\n\
+          (width 0.1)\r\n\
+          (type solid)\r\n\
+        )\r\n\
+        (layer \"Edge.Cuts\")\r\n\
+        (uuid \"66666666-6666-4666-8666-666666666666\")\r\n\
+      )\r\n\
+      (gr_text \"ChatPCB3 ESP32-S3 USB-C Sensor Board\"\r\n\
+        (at 12 16 0)\r\n\
+        (layer \"F.SilkS\")\r\n\
+        (effects\r\n\
+          (font\r\n\
+            (size 1.5 1.5)\r\n\
+            (thickness 0.15)\r\n\
+          )\r\n\
+          (justify left)\r\n\
+        )\r\n\
+        (uuid \"77777777-7777-4777-8777-777777777777\")\r\n\
+      )\r\n\
+      (gr_text \"50mm x 50mm preview outline - not order-ready\"\r\n\
+        (at 12 20 0)\r\n\
+        (layer \"F.SilkS\")\r\n\
+        (effects\r\n\
+          (font\r\n\
+            (size 1.2 1.2)\r\n\
+            (thickness 0.12)\r\n\
+          )\r\n\
+          (justify left)\r\n\
+        )\r\n\
+        (uuid \"88888888-8888-4888-8888-888888888888\")\r\n\
+      )\r\n\
     )\r\n"
 }
 

@@ -66,6 +66,7 @@ try {
         "- Pipeline status transitions for first-run actions",
         "- Preview workspace evidence folder creation on Send design",
         "- KiCad preview scaffold files generated on Send design",
+        "- 50mm PCB preview outline in generated KiCad PCB",
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
