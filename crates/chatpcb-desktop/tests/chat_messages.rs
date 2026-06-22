@@ -1,6 +1,17 @@
 use chatpcb_desktop::ui_model::{
-    provider_login_transcript, send_design_transcript, ProviderUiStatus,
+    initial_transcript, provider_login_transcript, send_design_transcript, ProviderUiStatus,
 };
+
+#[test]
+fn initial_transcript_invites_a_non_expert_first_chat() {
+    let transcript = initial_transcript();
+
+    assert!(transcript.contains("Welcome to ChatPCB KiCad Preview"));
+    assert!(transcript.contains("Type a board idea"));
+    assert!(transcript.contains("Provider Login"));
+    assert!(transcript.contains("Send design"));
+    assert!(transcript.contains("preview"));
+}
 
 #[test]
 fn send_design_transcript_uses_the_user_prompt() {
@@ -14,6 +25,9 @@ fn send_design_transcript_uses_the_user_prompt() {
     assert!(transcript.contains("JLCPCB package contract"));
     assert!(transcript.contains("Freerouting autoroute"));
     assert!(transcript.contains("Full KiCad fork integration"));
+    assert!(transcript.contains("What happened"));
+    assert!(transcript.contains("Next"));
+    assert!(transcript.contains("order-ready"));
 }
 
 #[test]
@@ -34,6 +48,8 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("Codex: available"));
     assert!(transcript.contains("Claude Code: not found"));
+    assert!(transcript.contains("Pick an available provider"));
+    assert!(transcript.contains("not stored"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));

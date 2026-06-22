@@ -20,6 +20,15 @@ pub fn chat_actions_contract() -> ChatActionsContract {
     }
 }
 
+pub fn initial_transcript() -> String {
+    "Welcome to ChatPCB KiCad Preview\r\n\
+     Type a board idea, then click Send design.\r\n\
+     You can start with: ESP32-S3 USB-C sensor board with OLED display.\r\n\
+     Provider Login checks local Codex, Claude Code, and Gemini CLI status without storing credentials.\r\n\
+     This preview shows the native app flow before real order-ready KiCad output is connected.\r\n"
+        .to_string()
+}
+
 pub fn send_design_transcript(prompt: &str) -> String {
     let prompt = prompt.trim();
     let prompt = if prompt.is_empty() {
@@ -30,9 +39,14 @@ pub fn send_design_transcript(prompt: &str) -> String {
 
     format!(
         "User: {prompt}\r\n\
-         Assistant: I created the fixed ESP32-S3 target spec, selected the JLCPCB package contract, \
-         and queued schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package.\r\n\
-         Status: preview only. Full KiCad fork integration is the next implementation gate.\r\n"
+         Assistant: What happened\r\n\
+         - Created the fixed ESP32-S3 target spec.\r\n\
+         - Selected the JLCPCB package contract.\r\n\
+         - Queued schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package.\r\n\
+         Next\r\n\
+         - Review the generated plan here first.\r\n\
+         - Full KiCad fork integration is still required before order-ready files can be trusted.\r\n\
+         Status: preview only, not order-ready yet.\r\n"
     )
 }
 
@@ -52,6 +66,9 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
         }
     }
 
-    transcript.push_str("No provider credentials are stored in ChatPCB3.\r\n");
+    transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");
+    transcript.push_str(
+        "Pick an available provider in the model selector, then type a board idea and click Send design.\r\n",
+    );
     transcript
 }

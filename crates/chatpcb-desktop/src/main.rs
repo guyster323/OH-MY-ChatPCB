@@ -249,7 +249,7 @@ mod win32_app {
             parent,
             instance,
             "EDIT",
-            "Assistant: Describe the PCB you want to build.\r\nSystem: ESP32-S3 USB-C sensor board target is ready.\r\n",
+            &chatpcb_desktop::ui_model::initial_transcript(),
             WS_BORDER
                 | WS_VSCROLL
                 | ES_MULTILINE as u32
