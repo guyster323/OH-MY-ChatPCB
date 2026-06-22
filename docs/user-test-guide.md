@@ -52,6 +52,7 @@ Expected result:
    - prompt input
    - Use example
    - Send design
+   - Open PCB
    - Open evidence
    - Provider Login
    - model selector
@@ -84,18 +85,21 @@ Expected result:
     send, so the new design result is visible without manually scrolling down.
 18. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-19. Click `Open evidence`.
-20. Confirm Windows opens the preview evidence folder with
+19. Click `Open PCB`.
+20. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
+    contains a 50mm x 50mm `Edge.Cuts` outline.
+21. Click `Open evidence`.
+22. Confirm Windows opens the preview evidence folder with
     `release-evidence-preview.md` selected.
-21. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
+23. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
-22. Confirm the left project status says `Previous preview workspace found`
+24. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
-23. Confirm the chat transcript also says `Previous preview workspace found`
-    and points you to `Open evidence`.
-24. Confirm Windows opens the same previous preview evidence folder with the
+25. Confirm the chat transcript also says `Previous preview workspace found`
+    and points you to `Open evidence` and `Open PCB`.
+26. Confirm Windows opens the same previous preview evidence folder with the
     release evidence report selected.
-25. Confirm the preview evidence folder exists:
+27. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

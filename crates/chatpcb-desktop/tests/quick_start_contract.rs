@@ -277,6 +277,24 @@ fn open_evidence_selects_the_release_report_for_non_experts() {
 }
 
 #[test]
+fn native_preview_has_open_pcb_button_for_saved_workspace() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("open_pcb_opens_preview_board"));
+    assert!(main.contains("ID_OPEN_PCB"));
+    assert!(main.contains("Open PCB"));
+    assert!(main.contains("handle_open_pcb"));
+    assert!(main.contains("open_preview_pcb"));
+    assert!(main.contains("open_preview_pcb_file"));
+    assert!(main.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(main.contains("pcbnew.exe"));
+}
+
+#[test]
 fn open_evidence_recovers_previous_preview_workspace_on_launch() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

@@ -79,6 +79,7 @@ fn print_self_test() {
             "Chat input",
             "Use example",
             "Send design",
+            "Open PCB",
             "Open evidence",
             "Pipeline status",
         ],
@@ -154,6 +155,7 @@ mod win32_app {
     const ID_PROMPT: usize = 1004;
     const ID_USE_EXAMPLE: usize = 1005;
     const ID_OPEN_EVIDENCE: usize = 1006;
+    const ID_OPEN_PCB: usize = 1007;
     const WM_CHATPCB_SEND_DEFERRED: u32 = WM_APP + 1;
     static mut ORIGINAL_PROMPT_PROC: WNDPROC = None;
 
@@ -166,6 +168,7 @@ mod win32_app {
         prompt: HWND,
         use_example_button: HWND,
         send_button: HWND,
+        open_pcb_button: HWND,
         provider_button: HWND,
         open_evidence_button: HWND,
         model_choice: HWND,
@@ -348,6 +351,14 @@ mod win32_app {
             WS_TABSTOP,
             ID_SEND_DESIGN,
         );
+        let open_pcb_button = child(
+            parent,
+            instance,
+            "BUTTON",
+            "Open PCB",
+            WS_TABSTOP,
+            ID_OPEN_PCB,
+        );
         let provider_button = child(
             parent,
             instance,
@@ -394,6 +405,7 @@ mod win32_app {
             prompt,
             use_example_button,
             send_button,
+            open_pcb_button,
             provider_button,
             open_evidence_button,
             model_choice,
@@ -548,6 +560,11 @@ mod win32_app {
                     return 0;
                 }
 
+                if (wparam & 0xffff) == ID_OPEN_PCB {
+                    handle_open_pcb(hwnd);
+                    return 0;
+                }
+
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_CHATPCB_SEND_DEFERRED => {
@@ -657,12 +674,17 @@ mod win32_app {
         );
         MoveWindow(controls.prompt, right_x, height - 190, right_width, 58, 1);
         let action_gap = 8;
-        let example_width = if right_width > 300 {
-            124
+        let example_width = if right_width > 340 {
+            112
         } else {
-            right_width / 3
+            right_width / 4
         };
-        let send_width = right_width - example_width - action_gap;
+        let open_pcb_width = if right_width > 340 {
+            96
+        } else {
+            right_width / 4
+        };
+        let send_width = right_width - example_width - open_pcb_width - action_gap * 2;
         MoveWindow(
             controls.use_example_button,
             right_x,
@@ -676,6 +698,14 @@ mod win32_app {
             right_x + example_width + action_gap,
             height - 122,
             send_width,
+            30,
+            1,
+        );
+        MoveWindow(
+            controls.open_pcb_button,
+            right_x + example_width + action_gap + send_width + action_gap,
+            height - 122,
+            open_pcb_width,
             30,
             1,
         );
@@ -791,6 +821,71 @@ mod win32_app {
         } else {
             set_pipeline_status(controls, "No evidence yet: click Send design first.");
         }
+    }
+
+    unsafe fn handle_open_pcb(hwnd: HWND) {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
+        if ptr.is_null() {
+            return;
+        }
+
+        let controls = &*ptr;
+        if let Some(path) = &controls.last_workspace_dir {
+            open_preview_pcb(path, controls);
+        } else {
+            set_pipeline_status(controls, "No PCB yet: click Send design first.");
+        }
+    }
+
+    unsafe fn open_preview_pcb(project_dir: &PathBuf, controls: &AppControls) {
+        let pcb_file = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
+        if pcb_file.exists() {
+            open_preview_pcb_file(&pcb_file);
+            set_pipeline_status(controls, "Opened preview PCB in KiCad PCB Editor.");
+        } else {
+            set_pipeline_status(controls, "PCB file missing: click Send design again.");
+        }
+    }
+
+    unsafe fn open_preview_pcb_file(pcb_file: &PathBuf) {
+        if let Some(pcbnew) = preferred_pcbnew_path() {
+            let operation = wide("open");
+            let executable = wide(&pcbnew.to_string_lossy());
+            let parameters = wide(&format!("\"{}\"", pcb_file.to_string_lossy()));
+            ShellExecuteW(
+                null_mut(),
+                operation.as_ptr(),
+                executable.as_ptr(),
+                parameters.as_ptr(),
+                null(),
+                SW_SHOW,
+            );
+        } else {
+            let operation = wide("open");
+            let board = wide(&pcb_file.to_string_lossy());
+            ShellExecuteW(
+                null_mut(),
+                operation.as_ptr(),
+                board.as_ptr(),
+                null(),
+                null(),
+                SW_SHOW,
+            );
+        }
+    }
+
+    fn preferred_pcbnew_path() -> Option<PathBuf> {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|local_app_data| {
+                local_app_data
+                    .join("Programs")
+                    .join("KiCad")
+                    .join("10.0")
+                    .join("bin")
+                    .join("pcbnew.exe")
+            })
+            .filter(|path| path.exists())
     }
 
     unsafe fn open_evidence_report(project_dir: &PathBuf) {

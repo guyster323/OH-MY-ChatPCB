@@ -17,6 +17,7 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
     assert!(transcript.contains("Use example"));
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("Send design"));
+    assert!(transcript.contains("Open PCB"));
     assert!(transcript.contains("preview"));
 }
 
@@ -149,6 +150,7 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("release-evidence-preview.md"));
     assert!(transcript.contains("KiCad preview scaffold"));
     assert!(transcript.contains("50mm x 50mm Edge.Cuts"));
+    assert!(transcript.contains("Open PCB"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
@@ -238,6 +240,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(body.contains("50mm x 50mm Edge.Cuts"));
+    assert!(body.contains("Open PCB"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
 }
@@ -254,6 +257,7 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(status.contains("prototype-review"));
     assert!(body.contains("Previous preview workspace found"));
     assert!(body.contains("Click Open evidence"));
+    assert!(body.contains("Open PCB"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("not order-ready"));
 }
@@ -266,6 +270,7 @@ fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
 
     assert!(transcript.contains("Previous preview workspace found"));
     assert!(transcript.contains("Open evidence"));
+    assert!(transcript.contains("Open PCB"));
     assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("not order-ready"));

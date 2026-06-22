@@ -34,6 +34,8 @@ Implemented in this first vertical slice:
   instead of a blank canvas.
 - `Open evidence` opens the saved preview workspace folder from inside the app,
   including after relaunch when a previous preview workspace already exists.
+- `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview in KiCad
+  so a first-run user can inspect the 50mm x 50mm board outline immediately.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
 - On app launch, the starter prompt is focused and selected so a first-run user
@@ -108,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
-selector, prompt input, `Use example`, `Send design` action, and pipeline status.
+selector, prompt input, `Use example`, `Send design`, `Open PCB`, and pipeline status.
 The left tabs also show a native preview body, not an empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. The model selector
@@ -133,9 +135,11 @@ release evidence report. It also contains the generated KiCad preview scaffold:
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
 project status and preview body also change to the saved workspace state. It is
 still not an order-ready KiCad board. Click
-`Open evidence` in the app to open that folder without finding `%LOCALAPPDATA%`
-by hand; when the release evidence report exists, Windows opens the folder with
-`release-evidence-preview.md` selected. After closing and reopening the app,
+`Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad and see the 50mm x
+50mm `Edge.Cuts` preview outline. Click `Open evidence` in the app to open that
+folder without finding `%LOCALAPPDATA%` by hand; when the release evidence report
+exists, Windows opens the folder with `release-evidence-preview.md` selected.
+After closing and reopening the app,
 `Open evidence` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The
 chat transcript also
