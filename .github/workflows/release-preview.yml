@@ -1,0 +1,66 @@
+name: Release ChatPCB KiCad Preview
+
+on:
+  push:
+    tags:
+      - "preview-*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag name, for example preview-0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-preview:
+    name: Publish Windows preview release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test -- --test-threads=1
+
+      - name: Build preview package
+        shell: pwsh
+        run: .\scripts\package-preview.ps1
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "tag_name=${{ inputs.tag_name }}" >> $env:GITHUB_OUTPUT
+          } else {
+            "tag_name=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          name: ChatPCB KiCad Preview ${{ steps.release_tag.outputs.tag_name }}
+          draft: false
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            ChatPCB KiCad Preview is a native Windows preview package.
+
+            Download `ChatPCB-KiCad-Preview-windows-x64.zip`, unzip it, then double-click `Install ChatPCB KiCad Preview.cmd`.
+
+            This preview is not order-ready KiCad output yet. See `RELEASE-EVIDENCE.txt` and `SHA256SUMS.txt` in the release assets.
+          files: |
+            dist/ChatPCB-KiCad-Preview-windows-x64.zip
+            dist/ChatPCB-KiCad-Preview-windows-x64/RELEASE-EVIDENCE.txt
+            dist/ChatPCB-KiCad-Preview-windows-x64/SHA256SUMS.txt

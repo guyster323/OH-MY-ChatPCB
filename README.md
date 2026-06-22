@@ -58,8 +58,14 @@ cargo build
 
 ## Non-Expert Preview Install
 
-For a packaged first run, unzip `ChatPCB-KiCad-Preview-windows-x64.zip` and
-double-click:
+For the easiest first run after GitHub is published, open the latest GitHub
+Release and download:
+
+```text
+ChatPCB-KiCad-Preview-windows-x64.zip
+```
+
+Unzip it and double-click:
 
 ```text
 Install ChatPCB KiCad Preview.cmd
@@ -101,6 +107,8 @@ beside the two executables and installer scripts.
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named
 `ChatPCB-KiCad-Preview-windows-x64`.
+For a direct public download page, create a tag such as `preview-0.1.0`; the
+`Release ChatPCB KiCad Preview` workflow publishes the zip to GitHub Releases.
 
 Run the core manually:
 

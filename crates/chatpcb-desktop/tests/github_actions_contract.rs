@@ -24,3 +24,21 @@ fn github_actions_builds_and_uploads_windows_preview_package() {
     assert!(workflow.contains("ChatPCB-KiCad-Preview-windows-x64"));
     assert!(workflow.contains("dist/ChatPCB-KiCad-Preview-windows-x64.zip"));
 }
+
+#[test]
+fn github_actions_publishes_tagged_preview_zip_to_releases() {
+    let workflow =
+        fs::read_to_string(workspace_root().join(".github/workflows/release-preview.yml")).unwrap();
+
+    assert!(workflow.contains("tags:"));
+    assert!(workflow.contains("preview-*"));
+    assert!(workflow.contains("workflow_dispatch"));
+    assert!(workflow.contains("windows-latest"));
+    assert!(workflow.contains("cargo test -- --test-threads=1"));
+    assert!(workflow.contains("scripts\\package-preview.ps1"));
+    assert!(workflow.contains("softprops/action-gh-release"));
+    assert!(workflow.contains("ChatPCB KiCad Preview"));
+    assert!(workflow.contains("dist/ChatPCB-KiCad-Preview-windows-x64.zip"));
+    assert!(workflow.contains("dist/ChatPCB-KiCad-Preview-windows-x64/RELEASE-EVIDENCE.txt"));
+    assert!(workflow.contains("dist/ChatPCB-KiCad-Preview-windows-x64/SHA256SUMS.txt"));
+}
