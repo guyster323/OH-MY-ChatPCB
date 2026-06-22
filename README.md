@@ -24,6 +24,8 @@ Implemented in this first vertical slice:
 - First-run preview workspace creation when `Send design` is clicked. The app
   writes the prompt, artifact manifest, and prototype-review evidence report
   under `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
+- The left project status updates after `Send design`, so the design side and
+  chat side both reflect the saved preview workspace.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
   - right 30 percent chat pane
@@ -103,7 +105,9 @@ in the chat transcript and saves a local preview workspace under:
 ```
 
 That folder contains the prompt, artifact manifest, and a prototype-review
-release evidence report. It is still not an order-ready KiCad board. See
+release evidence report. The left project status also changes from the initial
+canvas placeholder to the saved preview workspace state. It is still not an
+order-ready KiCad board. See
 `docs/user-test-guide.md` for the user-facing check.
 
 Build a shareable preview package:

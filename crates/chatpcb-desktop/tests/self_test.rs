@@ -31,6 +31,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["send_design_updates_left_workspace_status"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["provider_login_reports_cli_status"],
         true
     );

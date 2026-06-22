@@ -71,6 +71,22 @@ fn send_design_creates_a_local_preview_workspace_for_non_experts() {
 }
 
 #[test]
+fn send_design_updates_the_left_workspace_status() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("send_design_updates_left_workspace_status"));
+    assert!(ui_model.contains("initial_left_workspace_status"));
+    assert!(ui_model.contains("preview_workspace_left_status"));
+    assert!(main.contains("set_left_workspace_status"));
+    assert!(main.contains("controls.status"));
+    assert!(main.contains("preview_workspace_left_status"));
+}
+
+#[test]
 fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

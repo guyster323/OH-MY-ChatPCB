@@ -246,7 +246,7 @@ mod win32_app {
             parent,
             instance,
             "STATIC",
-            "Schematic/PCB canvas placeholder: KiCad native editors attach here in the fork.",
+            chatpcb_desktop::ui_model::initial_left_workspace_status(),
             WS_BORDER,
             0,
         );
@@ -530,15 +530,31 @@ mod win32_app {
         };
         let mut transcript = chatpcb_desktop::ui_model::send_design_transcript(&prompt);
         match super::create_preview_workspace(prompt_for_workspace, preview_workspace_root()) {
-            Ok(workspace) => transcript.push_str(
-                &chatpcb_desktop::ui_model::preview_workspace_saved_transcript(
+            Ok(workspace) => {
+                transcript.push_str(
+                    &chatpcb_desktop::ui_model::preview_workspace_saved_transcript(
+                        &workspace.project_dir,
+                        &workspace.release_report_file,
+                    ),
+                );
+                let controls = &*ptr;
+                let left_status = chatpcb_desktop::ui_model::preview_workspace_left_status(
                     &workspace.project_dir,
-                    &workspace.release_report_file,
-                ),
-            ),
-            Err(error) => transcript.push_str(
-                &chatpcb_desktop::ui_model::preview_workspace_failed_transcript(&error.to_string()),
-            ),
+                );
+                set_left_workspace_status(controls, &left_status);
+            }
+            Err(error) => {
+                transcript.push_str(
+                    &chatpcb_desktop::ui_model::preview_workspace_failed_transcript(
+                        &error.to_string(),
+                    ),
+                );
+                let controls = &*ptr;
+                set_left_workspace_status(
+                    controls,
+                    "Preview workspace could not be saved. Check chat for the error.",
+                );
+            }
         }
         let transcript = wide(&transcript);
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
@@ -607,6 +623,11 @@ mod win32_app {
     unsafe fn set_pipeline_status(controls: &AppControls, status: &str) {
         let status = wide(status);
         SetWindowTextW(controls.pipeline_status, status.as_ptr());
+    }
+
+    unsafe fn set_left_workspace_status(controls: &AppControls, status: &str) {
+        let status = wide(status);
+        SetWindowTextW(controls.status, status.as_ptr());
     }
 
     fn selected_provider_model_index(model: &str) -> Option<usize> {

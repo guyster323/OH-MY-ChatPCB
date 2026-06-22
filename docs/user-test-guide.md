@@ -65,7 +65,9 @@ Expected result:
    - DRC
    - manufacturing package
 12. Confirm the chat transcript says `Preview workspace saved`.
-13. Confirm the preview evidence folder exists:
+13. Confirm the left project area now shows `Preview workspace saved` instead
+    of only the initial KiCad canvas placeholder.
+14. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

@@ -1,7 +1,8 @@
 use chatpcb_desktop::ui_model::{
-    design_pipeline_status, example_loaded_pipeline_status, initial_pipeline_status,
-    initial_transcript, preview_workspace_saved_transcript, provider_login_pipeline_status,
-    provider_login_transcript, selected_provider_model, send_design_transcript, ProviderUiStatus,
+    design_pipeline_status, example_loaded_pipeline_status, initial_left_workspace_status,
+    initial_pipeline_status, initial_transcript, preview_workspace_left_status,
+    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
+    selected_provider_model, send_design_transcript, ProviderUiStatus,
 };
 
 #[test]
@@ -120,4 +121,20 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("release-evidence-preview.md"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("not order-ready"));
+}
+
+#[test]
+fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
+    assert!(
+        initial_left_workspace_status().contains("KiCad native editors attach here in the fork")
+    );
+
+    let status = preview_workspace_left_status(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
+    );
+
+    assert!(status.contains("Preview workspace saved"));
+    assert!(status.contains("ChatPCB3\\Projects"));
+    assert!(status.contains("prototype-review"));
+    assert!(status.contains("not order-ready"));
 }

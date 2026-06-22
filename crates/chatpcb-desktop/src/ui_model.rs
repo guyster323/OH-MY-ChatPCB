@@ -8,6 +8,7 @@ pub struct ChatActionsContract {
     pub provider_login_selects_available_model: bool,
     pub pipeline_status_updates_after_actions: bool,
     pub send_design_writes_preview_workspace: bool,
+    pub send_design_updates_left_workspace_status: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -26,8 +27,13 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         provider_login_selects_available_model: true,
         pipeline_status_updates_after_actions: true,
         send_design_writes_preview_workspace: true,
+        send_design_updates_left_workspace_status: true,
         provider_login_reports_cli_status: true,
     }
+}
+
+pub fn initial_left_workspace_status() -> &'static str {
+    "Schematic/PCB canvas placeholder: KiCad native editors attach here in the fork."
 }
 
 pub fn initial_pipeline_status() -> &'static str {
@@ -91,6 +97,10 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
          - Release evidence: {release_report_file}\r\n\
          Status: prototype-review, not order-ready.\r\n"
     )
+}
+
+pub fn preview_workspace_left_status(project_dir: &str) -> String {
+    format!("Preview workspace saved: {project_dir} | prototype-review, not order-ready.")
 }
 
 pub fn preview_workspace_failed_transcript(error: &str) -> String {
