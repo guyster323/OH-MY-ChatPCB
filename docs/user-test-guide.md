@@ -84,9 +84,11 @@ Expected result:
 20. Confirm Windows opens the preview evidence folder.
 21. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
-22. Confirm Windows opens the same preview evidence folder from the previous
+22. Confirm the left project status says `Previous preview workspace found`
+    before you send another prompt.
+23. Confirm Windows opens the same preview evidence folder from the previous
     run.
-23. Confirm the preview evidence folder exists:
+24. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

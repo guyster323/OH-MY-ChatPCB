@@ -20,6 +20,7 @@ pub struct ChatActionsContract {
     pub app_launch_selects_available_provider_model: bool,
     pub provider_login_appends_chat_transcript: bool,
     pub open_evidence_recovers_previous_workspace: bool,
+    pub app_launch_shows_recovered_workspace_status: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +50,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         app_launch_selects_available_provider_model: true,
         provider_login_appends_chat_transcript: true,
         open_evidence_recovers_previous_workspace: true,
+        app_launch_shows_recovered_workspace_status: true,
     }
 }
 
@@ -173,6 +175,28 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          Project folder:\r\n\
          {project_dir}\r\n\r\n\
          Files created:\r\n\
+         - prompt.txt\r\n\
+         - artifact-manifest.json\r\n\
+         - release-evidence-preview.md\r\n\r\n\
+         Release evidence:\r\n\
+         {release_report_file}\r\n\r\n\
+         Gate: prototype-review, not order-ready."
+    )
+}
+
+pub fn recovered_preview_workspace_left_status(project_dir: &str) -> String {
+    format!("Previous preview workspace found: {project_dir} | prototype-review, not order-ready.")
+}
+
+pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
+    let release_report_file = format!("{project_dir}\\release-evidence-preview.md");
+
+    format!(
+        "Previous preview workspace found\r\n\
+         Project folder:\r\n\
+         {project_dir}\r\n\r\n\
+         Click Open evidence to inspect the saved files before sending another design.\r\n\r\n\
+         Expected files:\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
          - release-evidence-preview.md\r\n\r\n\

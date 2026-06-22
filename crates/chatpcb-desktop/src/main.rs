@@ -257,11 +257,31 @@ mod win32_app {
         add_tab(tabs, 2, "Validation");
         add_tab(tabs, 3, "Manufacturing Preview");
 
+        let recovered_workspace = recover_last_preview_workspace();
+        let initial_design_preview = recovered_workspace
+            .as_ref()
+            .map(|path| {
+                let project_dir = path.to_string_lossy();
+                chatpcb_desktop::ui_model::recovered_preview_workspace_body(project_dir.as_ref())
+            })
+            .unwrap_or_else(|| chatpcb_desktop::ui_model::left_tab_body(0).to_string());
+        let initial_left_status = recovered_workspace
+            .as_ref()
+            .map(|path| {
+                let project_dir = path.to_string_lossy();
+                chatpcb_desktop::ui_model::recovered_preview_workspace_left_status(
+                    project_dir.as_ref(),
+                )
+            })
+            .unwrap_or_else(|| {
+                chatpcb_desktop::ui_model::initial_left_workspace_status().to_string()
+            });
+
         let design_preview = child(
             parent,
             instance,
             "EDIT",
-            chatpcb_desktop::ui_model::left_tab_body(0),
+            &initial_design_preview,
             WS_BORDER
                 | WS_VSCROLL
                 | ES_MULTILINE as u32
@@ -273,7 +293,7 @@ mod win32_app {
             parent,
             instance,
             "STATIC",
-            chatpcb_desktop::ui_model::initial_left_workspace_status(),
+            &initial_left_status,
             WS_BORDER,
             0,
         );
@@ -364,7 +384,7 @@ mod win32_app {
             open_evidence_button,
             model_choice,
             pipeline_status,
-            last_workspace_dir: recover_last_preview_workspace(),
+            last_workspace_dir: recovered_workspace,
         }
     }
 

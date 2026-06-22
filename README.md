@@ -130,8 +130,9 @@ release evidence report. The left project status and preview body also change
 to the saved workspace state. It is still not an order-ready KiCad board. Click
 `Open evidence` in the app to open that folder without finding `%LOCALAPPDATA%`
 by hand. After closing and reopening the app, `Open evidence` recovers the same
-preview folder if it already exists. See `docs/user-test-guide.md` for the
-user-facing check.
+preview folder if it already exists, and the left project pane marks that
+previous preview workspace before another send. See `docs/user-test-guide.md`
+for the user-facing check.
 
 Build a shareable preview package:
 

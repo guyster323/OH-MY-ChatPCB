@@ -3,6 +3,7 @@ use chatpcb_desktop::ui_model::{
     initial_left_workspace_status, initial_pipeline_status, initial_transcript, left_tab_body,
     left_tab_status, preview_workspace_body, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
+    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
     selected_provider_model, send_design_transcript, ProviderUiStatus,
 };
 
@@ -226,5 +227,21 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("artifact-manifest.json"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("prototype-review"));
+    assert!(body.contains("not order-ready"));
+}
+
+#[test]
+fn recovered_preview_workspace_text_orients_relaunch_users() {
+    let project_dir =
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview";
+    let status = recovered_preview_workspace_left_status(project_dir);
+    let body = recovered_preview_workspace_body(project_dir);
+
+    assert!(status.contains("Previous preview workspace found"));
+    assert!(status.contains("chatpcb3-esp32s3-preview"));
+    assert!(status.contains("prototype-review"));
+    assert!(body.contains("Previous preview workspace found"));
+    assert!(body.contains("Click Open evidence"));
+    assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("not order-ready"));
 }

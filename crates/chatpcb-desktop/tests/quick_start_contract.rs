@@ -243,7 +243,24 @@ fn open_evidence_recovers_previous_preview_workspace_on_launch() {
     assert!(ui_model.contains("open_evidence_recovers_previous_workspace"));
     assert!(main.contains("recover_last_preview_workspace"));
     assert!(main.contains("preview_workspace_root().join(\"chatpcb3-esp32s3-preview\")"));
-    assert!(main.contains("last_workspace_dir: recover_last_preview_workspace()"));
+    assert!(main.contains("last_workspace_dir: recovered_workspace"));
+}
+
+#[test]
+fn app_launch_surfaces_recovered_preview_workspace_to_non_experts() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("app_launch_shows_recovered_workspace_status"));
+    assert!(ui_model.contains("recovered_preview_workspace_left_status"));
+    assert!(ui_model.contains("recovered_preview_workspace_body"));
+    assert!(main.contains("let recovered_workspace = recover_last_preview_workspace();"));
+    assert!(main.contains("recovered_preview_workspace_left_status"));
+    assert!(main.contains("recovered_preview_workspace_body"));
+    assert!(main.contains("last_workspace_dir: recovered_workspace"));
 }
 
 #[test]

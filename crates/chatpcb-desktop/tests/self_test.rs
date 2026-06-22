@@ -75,6 +75,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         contract["chat_actions"]["open_evidence_recovers_previous_workspace"],
         true
     );
+    assert_eq!(
+        contract["chat_actions"]["app_launch_shows_recovered_workspace_status"],
+        true
+    );
     assert_eq!(contract["layout"]["left_ratio"], 0.7);
     assert_eq!(contract["layout"]["right_ratio"], 0.3);
     assert_eq!(
