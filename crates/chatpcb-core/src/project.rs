@@ -23,6 +23,7 @@ pub struct PreviewWorkspace {
     pub project_dir: String,
     pub manifest_file: String,
     pub release_report_file: String,
+    pub first_run_summary_file: String,
     pub prompt_file: String,
     pub files: Vec<String>,
     pub artifact_manifest: ArtifactManifest,
@@ -56,6 +57,7 @@ pub fn create_preview_workspace(
 
     let manifest_file = project_dir.join("artifact-manifest.json");
     let release_report_file = project_dir.join("release-evidence-preview.md");
+    let first_run_summary_file = project_dir.join("FIRST-RUN-SUMMARY.txt");
     let prompt_file = project_dir.join("prompt.txt");
     let project_file = project_dir.join(&created.artifact_manifest.project_file);
     let schematic_file = project_dir.join(&created.artifact_manifest.schematic_file);
@@ -78,11 +80,13 @@ pub fn create_preview_workspace(
         &release_report_file,
         preview_release_report(prompt, &created.artifact_manifest),
     )?;
+    fs::write(&first_run_summary_file, first_run_summary(prompt))?;
 
     Ok(PreviewWorkspace {
         project_dir: path_to_string(&project_dir),
         manifest_file: path_to_string(&manifest_file),
         release_report_file: path_to_string(&release_report_file),
+        first_run_summary_file: path_to_string(&first_run_summary_file),
         prompt_file: path_to_string(&prompt_file),
         files: vec![
             path_to_string(&project_file),
@@ -92,10 +96,39 @@ pub fn create_preview_workspace(
             path_to_string(&footprint_table_file),
             path_to_string(&manifest_file),
             path_to_string(&release_report_file),
+            path_to_string(&first_run_summary_file),
             path_to_string(&prompt_file),
         ],
         artifact_manifest: created.artifact_manifest,
     })
+}
+
+fn first_run_summary(prompt: &str) -> String {
+    format!(
+        "ChatPCB3 First Run Summary\r\n\
+         ==========================\r\n\
+         \r\n\
+         Start here after your first Send design click.\r\n\
+         \r\n\
+         What was created:\r\n\
+         - A native ChatPCB3 preview workspace for: {prompt}\r\n\
+         - A KiCad project shell with schematic and PCB preview files.\r\n\
+         - A 50mm x 50mm PCB outline for visual inspection.\r\n\
+         \r\n\
+         What to click next in the app:\r\n\
+         - Open PCB: inspect the generated board outline in KiCad.\r\n\
+         - Open evidence: return to this folder and review saved reports.\r\n\
+         \r\n\
+         Current gate:\r\n\
+         - prototype-review\r\n\
+         - not order-ready\r\n\
+         \r\n\
+         Why it is not order-ready yet:\r\n\
+         - Component placement and routing are not generated yet.\r\n\
+         - Gerber, drill, BOM, and CPL files are not generated yet.\r\n\
+         - A human must review real manufacturing evidence before ordering.\r\n",
+        prompt = prompt.trim()
+    )
 }
 
 fn preview_release_report(prompt: &str, manifest: &ArtifactManifest) -> String {

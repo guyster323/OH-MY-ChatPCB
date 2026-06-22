@@ -14,7 +14,7 @@ pub struct ChatActionsContract {
     pub erc_drc_reports_run_after_send_design: bool,
     pub send_design_updates_left_workspace_status: bool,
     pub open_evidence_opens_preview_workspace: bool,
-    pub open_evidence_selects_release_report_file: bool,
+    pub open_evidence_selects_first_run_summary_file: bool,
     pub open_pcb_opens_preview_board: bool,
     pub provider_login_reports_cli_status: bool,
     pub left_tabs_update_workspace_status: bool,
@@ -52,7 +52,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         erc_drc_reports_run_after_send_design: true,
         send_design_updates_left_workspace_status: true,
         open_evidence_opens_preview_workspace: true,
-        open_evidence_selects_release_report_file: true,
+        open_evidence_selects_first_run_summary_file: true,
         open_pcb_opens_preview_board: true,
         provider_login_reports_cli_status: true,
         left_tabs_update_workspace_status: true,
@@ -214,6 +214,7 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - fp-lib-table\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
+         - FIRST-RUN-SUMMARY.txt\r\n\
          - release-evidence-preview.md\r\n\r\n\
          PCB preview:\r\n\
          50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\r\n\
@@ -308,6 +309,7 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          Expected files:\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
+         - FIRST-RUN-SUMMARY.txt\r\n\
          - release-evidence-preview.md\r\n\
          - kicad-pcb-check.txt\r\n\
          - erc-report.json\r\n\

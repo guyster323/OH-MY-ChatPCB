@@ -285,6 +285,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
 
     assert!(body.contains("Preview workspace saved"));
     assert!(body.contains("artifact-manifest.json"));
+    assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
@@ -383,6 +384,7 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(body.contains("Click Open evidence"));
     assert!(body.contains("Open PCB"));
     assert!(body.contains("release-evidence-preview.md"));
+    assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(body.contains("kicad-pcb-check.txt"));
     assert!(body.contains("erc-report.json"));
     assert!(body.contains("drc-report.json"));

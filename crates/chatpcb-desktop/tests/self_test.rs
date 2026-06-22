@@ -51,7 +51,7 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
-        contract["chat_actions"]["open_evidence_selects_release_report_file"],
+        contract["chat_actions"]["open_evidence_selects_first_run_summary_file"],
         true
     );
     assert_eq!(

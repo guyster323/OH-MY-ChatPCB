@@ -98,7 +98,7 @@ Expected result:
     contains a 50mm x 50mm `Edge.Cuts` outline.
 24. Click `Open evidence`.
 25. Confirm Windows opens the preview evidence folder with
-    `release-evidence-preview.md` selected.
+    `FIRST-RUN-SUMMARY.txt` selected.
 26. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
 27. Confirm the left project status says `Previous preview workspace found`
@@ -106,7 +106,7 @@ Expected result:
 28. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Open evidence` and `Open PCB`.
 29. Confirm Windows opens the same previous preview evidence folder with the
-    release evidence report selected.
+    first-run summary selected.
 30. Confirm the preview evidence folder exists:
 
 ```text
@@ -117,6 +117,7 @@ Expected files:
 
 - `prompt.txt`
 - `artifact-manifest.json`
+- `FIRST-RUN-SUMMARY.txt`
 - `release-evidence-preview.md`
 - `kicad-pcb-check.txt`
 - `erc-report.json`

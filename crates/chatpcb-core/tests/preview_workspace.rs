@@ -39,6 +39,14 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     assert!(report.contains("not order-ready"));
     assert!(report.contains("KiCad fork integration is still required"));
 
+    let first_run_summary = fs::read_to_string(&workspace.first_run_summary_file).unwrap();
+    assert!(first_run_summary.contains("Start here"));
+    assert!(first_run_summary.contains("Open PCB"));
+    assert!(first_run_summary.contains("Open evidence"));
+    assert!(first_run_summary.contains("prototype-review"));
+    assert!(first_run_summary.contains("not order-ready"));
+    assert!(workspace.files.contains(&workspace.first_run_summary_file));
+
     let prompt = fs::read_to_string(&workspace.prompt_file).unwrap();
     assert!(prompt.contains("USB-C ESP32-S3"));
 

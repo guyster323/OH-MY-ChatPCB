@@ -22,8 +22,9 @@ Implemented in this first vertical slice:
 - `chatpcb-core.exe` stdio JSONL runtime entrypoint for KiCad child-process
   integration.
 - First-run preview workspace creation when `Send design` is clicked. The app
-  writes the prompt, artifact manifest, and prototype-review evidence report
-  under `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
+  writes the prompt, artifact manifest, first-run summary, and prototype-review
+  evidence report under
+  `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
 - The left project status updates after `Send design`, so the design side and
   chat side both reflect the saved preview workspace.
 - Clicking the left Schematic, PCB Layout, Validation, and Manufacturing
@@ -32,8 +33,9 @@ Implemented in this first vertical slice:
 - The left design pane shows a native read-only preview body for each tab, so a
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.
-- `Open evidence` opens the saved preview workspace folder from inside the app,
-  including after relaunch when a previous preview workspace already exists.
+- `Open evidence` opens the saved preview workspace folder from inside the app
+  with `FIRST-RUN-SUMMARY.txt` selected, including after relaunch when a
+  previous preview workspace already exists.
 - `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview in KiCad
   so a first-run user can inspect the 50mm x 50mm board outline immediately.
 - After `Send design`, the app runs a local KiCad CLI compatibility check when
@@ -141,8 +143,9 @@ preview workspace under:
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 ```
 
-That folder contains the prompt, artifact manifest, and a prototype-review
-release evidence report. It also contains the generated KiCad preview scaffold:
+That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
+and a prototype-review release evidence report. It also contains the generated
+KiCad preview scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
 project status and preview body also change to the saved workspace state. When
@@ -155,8 +158,8 @@ those local reports are clear, the bottom pipeline status says
 It is still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad and see the 50mm x
 50mm `Edge.Cuts` preview outline. Click `Open evidence` in the app to open that
-folder without finding `%LOCALAPPDATA%` by hand; when the release evidence report
-exists, Windows opens the folder with `release-evidence-preview.md` selected.
+folder without finding `%LOCALAPPDATA%` by hand; when the summary exists,
+Windows opens the folder with `FIRST-RUN-SUMMARY.txt` selected.
 After closing and reopening the app,
 `Open evidence` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The

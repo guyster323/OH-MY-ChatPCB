@@ -83,6 +83,18 @@ fn json_rpc_creates_preview_workspace_evidence_folder() {
         response["result"]["previewWorkspace"]["artifact_manifest"]["project_file"],
         "chatpcb3-esp32s3.kicad_pro"
     );
+    assert!(
+        response["result"]["previewWorkspace"]["first_run_summary_file"]
+            .as_str()
+            .unwrap()
+            .ends_with("FIRST-RUN-SUMMARY.txt")
+    );
+    assert!(PathBuf::from(
+        response["result"]["previewWorkspace"]["first_run_summary_file"]
+            .as_str()
+            .unwrap()
+    )
+    .exists());
 
     fs::remove_dir_all(root).unwrap();
 }

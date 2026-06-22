@@ -314,16 +314,17 @@ fn native_preview_has_open_evidence_button_for_saved_workspace() {
 }
 
 #[test]
-fn open_evidence_selects_the_release_report_for_non_experts() {
+fn open_evidence_selects_the_first_run_summary_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
     let ui_model =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
             .unwrap();
 
-    assert!(ui_model.contains("open_evidence_selects_release_report_file"));
+    assert!(ui_model.contains("open_evidence_selects_first_run_summary_file"));
     assert!(main.contains("open_evidence_report"));
     assert!(main.contains("open_evidence_report_file"));
+    assert!(main.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(main.contains("release-evidence-preview.md"));
     assert!(main.contains("explorer.exe"));
     assert!(main.contains("/select,"));

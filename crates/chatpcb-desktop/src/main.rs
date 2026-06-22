@@ -1021,7 +1021,7 @@ mod win32_app {
         let controls = &*ptr;
         if let Some(path) = &controls.last_workspace_dir {
             open_evidence_report(path);
-            set_pipeline_status(controls, "Opened preview evidence report.");
+            set_pipeline_status(controls, "Opened first-run summary in evidence folder.");
         } else {
             set_pipeline_status(controls, "No evidence yet: click Send design first.");
         }
@@ -1107,6 +1107,12 @@ mod win32_app {
     }
 
     unsafe fn open_evidence_report(project_dir: &PathBuf) {
+        let first_run_summary_file = project_dir.join("FIRST-RUN-SUMMARY.txt");
+        if first_run_summary_file.exists() {
+            open_evidence_report_file(&first_run_summary_file);
+            return;
+        }
+
         let release_report_file = project_dir.join("release-evidence-preview.md");
         if release_report_file.exists() {
             open_evidence_report_file(&release_report_file);

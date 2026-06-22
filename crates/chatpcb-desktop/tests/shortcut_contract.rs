@@ -112,7 +112,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Left tab status updates"));
     assert!(script.contains("Left design preview body"));
     assert!(script.contains("Open evidence button"));
-    assert!(script.contains("Open evidence selects release report file"));
+    assert!(script.contains("Open evidence selects FIRST-RUN-SUMMARY.txt"));
     assert!(script.contains("Open PCB button"));
     assert!(script.contains("Open evidence recovers previous preview workspace"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
