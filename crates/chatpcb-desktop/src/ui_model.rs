@@ -9,6 +9,7 @@ pub struct ChatActionsContract {
     pub provider_login_selects_available_model: bool,
     pub pipeline_status_updates_after_actions: bool,
     pub send_design_writes_preview_workspace: bool,
+    pub kicad_cli_check_runs_after_send_design: bool,
     pub send_design_updates_left_workspace_status: bool,
     pub open_evidence_opens_preview_workspace: bool,
     pub open_evidence_selects_release_report_file: bool,
@@ -44,6 +45,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         provider_login_selects_available_model: true,
         pipeline_status_updates_after_actions: true,
         send_design_writes_preview_workspace: true,
+        kicad_cli_check_runs_after_send_design: true,
         send_design_updates_left_workspace_status: true,
         open_evidence_opens_preview_workspace: true,
         open_evidence_selects_release_report_file: true,
@@ -204,6 +206,30 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."
+    )
+}
+
+pub fn preview_workspace_body_with_kicad_check(
+    project_dir: &str,
+    release_report_file: &str,
+    check_report_file: &str,
+    check_summary: &str,
+) -> String {
+    format!(
+        "{}\r\n\r\n\
+         KiCad CLI check:\r\n\
+         {check_summary}\r\n\
+         Report:\r\n\
+         {check_report_file}",
+        preview_workspace_body(project_dir, release_report_file)
+    )
+}
+
+pub fn kicad_cli_check_transcript(check_report_file: &str, check_summary: &str) -> String {
+    format!(
+        "KiCad CLI check\r\n\
+         - {check_summary}\r\n\
+         - Report: {check_report_file}\r\n"
     )
 }
 

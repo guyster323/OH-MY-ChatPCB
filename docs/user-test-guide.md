@@ -85,21 +85,23 @@ Expected result:
     send, so the new design result is visible without manually scrolling down.
 18. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-19. Click `Open PCB`.
-20. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
+19. Confirm the chat transcript and large left preview body mention the
+    `KiCad CLI check` and `kicad-pcb-check.txt`.
+20. Click `Open PCB`.
+21. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
     contains a 50mm x 50mm `Edge.Cuts` outline.
-21. Click `Open evidence`.
-22. Confirm Windows opens the preview evidence folder with
+22. Click `Open evidence`.
+23. Confirm Windows opens the preview evidence folder with
     `release-evidence-preview.md` selected.
-23. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
+24. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
-24. Confirm the left project status says `Previous preview workspace found`
+25. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
-25. Confirm the chat transcript also says `Previous preview workspace found`
+26. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Open evidence` and `Open PCB`.
-26. Confirm Windows opens the same previous preview evidence folder with the
+27. Confirm Windows opens the same previous preview evidence folder with the
     release evidence report selected.
-27. Confirm the preview evidence folder exists:
+28. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
@@ -110,6 +112,7 @@ Expected files:
 - `prompt.txt`
 - `artifact-manifest.json`
 - `release-evidence-preview.md`
+- `kicad-pcb-check.txt`
 - `chatpcb3-esp32s3.kicad_pro`
 - `chatpcb3-esp32s3.kicad_sch`
 - `chatpcb3-esp32s3.kicad_pcb`

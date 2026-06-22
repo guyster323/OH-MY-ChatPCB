@@ -36,6 +36,9 @@ Implemented in this first vertical slice:
   including after relaunch when a previous preview workspace already exists.
 - `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview in KiCad
   so a first-run user can inspect the 50mm x 50mm board outline immediately.
+- After `Send design`, the app runs a local KiCad CLI compatibility check when
+  KiCad 10 is installed and writes `kicad-pcb-check.txt` beside the preview
+  files.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
 - On app launch, the starter prompt is focused and selected so a first-run user
@@ -133,8 +136,10 @@ That folder contains the prompt, artifact manifest, and a prototype-review
 release evidence report. It also contains the generated KiCad preview scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
-project status and preview body also change to the saved workspace state. It is
-still not an order-ready KiCad board. Click
+project status and preview body also change to the saved workspace state. When
+KiCad 10 is installed locally, `Send design` also runs `kicad-cli.exe pcb
+upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
+folder. It is still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad and see the 50mm x
 50mm `Edge.Cuts` preview outline. Click `Open evidence` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the release evidence report

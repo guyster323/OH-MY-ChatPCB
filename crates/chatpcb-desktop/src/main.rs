@@ -123,6 +123,7 @@ fn run_desktop_app() {
 
 #[cfg(windows)]
 mod win32_app {
+    use std::fs;
     use std::mem::zeroed;
     use std::path::PathBuf;
     use std::ptr::{null, null_mut};
@@ -174,6 +175,11 @@ mod win32_app {
         model_choice: HWND,
         pipeline_status: HWND,
         last_workspace_dir: Option<PathBuf>,
+    }
+
+    struct PcbCheckUiResult {
+        summary: String,
+        report_file: PathBuf,
     }
 
     pub fn run() {
@@ -759,25 +765,37 @@ mod win32_app {
             prompt.trim()
         };
         let mut turn_transcript = chatpcb_desktop::ui_model::send_design_transcript(&prompt);
+        let mut pipeline_after_send =
+            chatpcb_desktop::ui_model::design_pipeline_status().to_string();
         let controls = &mut *ptr;
         match super::create_preview_workspace(prompt_for_workspace, preview_workspace_root()) {
             Ok(workspace) => {
+                let project_dir = PathBuf::from(&workspace.project_dir);
+                let kicad_check = run_kicad_pcb_check(&project_dir);
                 turn_transcript.push_str(
                     &chatpcb_desktop::ui_model::preview_workspace_saved_transcript(
                         &workspace.project_dir,
                         &workspace.release_report_file,
                     ),
                 );
+                turn_transcript.push_str(&chatpcb_desktop::ui_model::kicad_cli_check_transcript(
+                    &kicad_check.report_file.to_string_lossy(),
+                    &kicad_check.summary,
+                ));
                 let left_status = chatpcb_desktop::ui_model::preview_workspace_left_status(
                     &workspace.project_dir,
                 );
                 set_left_workspace_status(controls, &left_status);
-                let preview_body = chatpcb_desktop::ui_model::preview_workspace_body(
-                    &workspace.project_dir,
-                    &workspace.release_report_file,
-                );
+                let preview_body =
+                    chatpcb_desktop::ui_model::preview_workspace_body_with_kicad_check(
+                        &workspace.project_dir,
+                        &workspace.release_report_file,
+                        &kicad_check.report_file.to_string_lossy(),
+                        &kicad_check.summary,
+                    );
                 set_design_preview(controls, &preview_body);
-                controls.last_workspace_dir = Some(PathBuf::from(&workspace.project_dir));
+                controls.last_workspace_dir = Some(project_dir);
+                pipeline_after_send = kicad_check.summary;
             }
             Err(error) => {
                 turn_transcript.push_str(
@@ -800,12 +818,75 @@ mod win32_app {
             &turn_transcript,
         );
         set_chat_transcript_text(controls, &transcript);
-        set_pipeline_status(
-            controls,
-            chatpcb_desktop::ui_model::design_pipeline_status(),
-        );
+        set_pipeline_status(controls, &pipeline_after_send);
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
+    }
+
+    fn run_kicad_pcb_check(project_dir: &PathBuf) -> PcbCheckUiResult {
+        let pcb_file = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
+        let report_file = project_dir.join("kicad-pcb-check.txt");
+        let check = if !pcb_file.exists() {
+            chatpcb_core::validation::summarize_kicad_cli_check(
+                Some(1),
+                "",
+                "chatpcb3-esp32s3.kicad_pcb was not found",
+            )
+        } else if let Some(kicad_cli) = preferred_kicad_cli_path() {
+            match super::Command::new(kicad_cli)
+                .args(["pcb", "upgrade"])
+                .arg(&pcb_file)
+                .output()
+            {
+                Ok(output) => chatpcb_core::validation::summarize_kicad_cli_check(
+                    output.status.code(),
+                    &String::from_utf8_lossy(&output.stdout),
+                    &String::from_utf8_lossy(&output.stderr),
+                ),
+                Err(error) => chatpcb_core::validation::summarize_kicad_cli_check(
+                    None,
+                    "",
+                    &format!("failed to run kicad-cli.exe: {error}"),
+                ),
+            }
+        } else {
+            chatpcb_core::validation::summarize_kicad_cli_check(
+                None,
+                "",
+                "kicad-cli.exe was not found",
+            )
+        };
+
+        let report = format!(
+            "ChatPCB3 KiCad CLI PCB check\r\n\
+             Status: {:?}\r\n\
+             Exit code: {:?}\r\n\
+             Summary: {}\r\n\
+             \r\n\
+             PCB file:\r\n\
+             {}\r\n\
+             \r\n\
+             STDOUT:\r\n\
+             {}\r\n\
+             \r\n\
+             STDERR:\r\n\
+             {}\r\n\
+             \r\n\
+             Boundary:\r\n\
+             This is a prototype-review compatibility check, not manufacturing evidence.\r\n",
+            check.status,
+            check.exit_code,
+            check.summary,
+            pcb_file.to_string_lossy(),
+            check.stdout,
+            check.stderr
+        );
+        let _ = fs::write(&report_file, report);
+
+        PcbCheckUiResult {
+            summary: check.summary,
+            report_file,
+        }
     }
 
     unsafe fn handle_open_evidence(hwnd: HWND) {
@@ -884,6 +965,20 @@ mod win32_app {
                     .join("10.0")
                     .join("bin")
                     .join("pcbnew.exe")
+            })
+            .filter(|path| path.exists())
+    }
+
+    fn preferred_kicad_cli_path() -> Option<PathBuf> {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|local_app_data| {
+                local_app_data
+                    .join("Programs")
+                    .join("KiCad")
+                    .join("10.0")
+                    .join("bin")
+                    .join("kicad-cli.exe")
             })
             .filter(|path| path.exists())
     }

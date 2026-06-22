@@ -4,7 +4,7 @@ use chatpcb_core::{
     patch::{apply_patch_proposal, PatchProposal, PatchRisk},
     provider::{catalog_with_probe, LoginMode, ProviderKind},
     release_gate::{evaluate_release_gate, ReleaseGateStatus},
-    validation::{parse_kicad_report, Severity},
+    validation::{parse_kicad_report, summarize_kicad_cli_check, KicadCliCheckStatus, Severity},
 };
 
 fn order_ready_state(package: ManufacturingPackage) -> chatpcb_core::release_gate::PipelineState {
@@ -177,4 +177,29 @@ fn validation_parses_kicad_json_reports() {
     assert_eq!(report.warning_count, 1);
     assert_eq!(report.violations[0].severity, Severity::Error);
     assert!(report.violations[0].message.contains("Track too close"));
+}
+
+#[test]
+fn validation_summarizes_kicad_cli_acceptance_without_order_ready_claims() {
+    let report = summarize_kicad_cli_check(
+        Some(0),
+        "최신 형식으로 기판 파일을 성공적으로 저장했습니다",
+        "",
+    );
+
+    assert_eq!(report.status, KicadCliCheckStatus::Accepted);
+    assert!(report.summary.contains("KiCad accepted the preview PCB"));
+    assert!(report.summary.contains("prototype-review"));
+    assert!(report.stdout.contains("성공적으로 저장"));
+    assert!(!report.summary.to_ascii_lowercase().contains("order-ready"));
+}
+
+#[test]
+fn validation_summarizes_missing_kicad_cli_as_a_local_tool_gap() {
+    let report = summarize_kicad_cli_check(None, "", "kicad-cli.exe was not found");
+
+    assert_eq!(report.status, KicadCliCheckStatus::ToolMissing);
+    assert!(report.summary.contains("KiCad CLI was not found"));
+    assert!(report.summary.contains("prototype-review"));
+    assert!(!report.summary.to_ascii_lowercase().contains("order-ready"));
 }

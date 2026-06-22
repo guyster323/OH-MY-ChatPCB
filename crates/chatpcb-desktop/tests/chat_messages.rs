@@ -1,7 +1,8 @@
 use chatpcb_desktop::ui_model::{
     append_chat_transcript, design_pipeline_status, example_loaded_pipeline_status,
-    initial_left_workspace_status, initial_pipeline_status, initial_transcript, left_tab_body,
-    left_tab_status, preview_workspace_body, preview_workspace_left_status,
+    initial_left_workspace_status, initial_pipeline_status, initial_transcript,
+    kicad_cli_check_transcript, left_tab_body, left_tab_status, preview_workspace_body,
+    preview_workspace_body_with_kicad_check, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
     recovered_preview_workspace_body, recovered_preview_workspace_left_status,
     recovered_preview_workspace_transcript, selected_provider_model, send_design_transcript,
@@ -243,6 +244,38 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("Open PCB"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
+}
+
+#[test]
+fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
+    let body = preview_workspace_body_with_kicad_check(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
+        "KiCad accepted the preview PCB. Gate remains prototype-review.",
+    );
+
+    assert!(body.contains("KiCad CLI check"));
+    assert!(body.contains("kicad-pcb-check.txt"));
+    assert!(body.contains("KiCad accepted the preview PCB"));
+    assert!(body.contains("prototype-review"));
+    assert!(body.contains("not order-ready"));
+}
+
+#[test]
+fn kicad_cli_check_transcript_points_to_local_report_without_order_ready_claims() {
+    let transcript = kicad_cli_check_transcript(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
+        "KiCad accepted the preview PCB. Gate remains prototype-review.",
+    );
+
+    assert!(transcript.contains("KiCad CLI check"));
+    assert!(transcript.contains("KiCad accepted the preview PCB"));
+    assert!(transcript.contains("kicad-pcb-check.txt"));
+    assert!(transcript.contains("prototype-review"));
+    assert!(!transcript
+        .to_ascii_lowercase()
+        .contains("order-ready evidence"));
 }
 
 #[test]

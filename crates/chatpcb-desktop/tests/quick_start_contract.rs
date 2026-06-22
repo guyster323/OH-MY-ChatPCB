@@ -195,6 +195,24 @@ fn send_design_creates_a_local_preview_workspace_for_non_experts() {
 }
 
 #[test]
+fn send_design_runs_kicad_cli_check_after_writing_preview() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("kicad_cli_check_runs_after_send_design"));
+    assert!(ui_model.contains("preview_workspace_body_with_kicad_check"));
+    assert!(main.contains("run_kicad_pcb_check"));
+    assert!(main.contains("preferred_kicad_cli_path"));
+    assert!(main.contains("kicad-cli.exe"));
+    assert!(main.contains("kicad-pcb-check.txt"));
+    assert!(main.contains("summarize_kicad_cli_check"));
+    assert!(main.contains("preview_workspace_body_with_kicad_check"));
+}
+
+#[test]
 fn send_design_updates_the_left_workspace_status() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

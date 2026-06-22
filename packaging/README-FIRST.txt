@@ -24,14 +24,16 @@ First chat
 10. Confirm the transcript is positioned at the latest response.
 11. Confirm the chat transcript says "Preview workspace saved".
 12. Confirm the large left preview body also shows the saved KiCad scaffold files.
-13. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.
-14. Confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-15. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
-16. Close and reopen the app, then click Open evidence before sending again.
-17. Confirm the left project status says "Previous preview workspace found".
-18. Confirm the chat transcript also says "Previous preview workspace found".
-19. Confirm it reopens the same previous preview folder with the report selected.
-20. The folder path is:
+13. Confirm the chat transcript and left preview body mention "KiCad CLI check".
+14. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
+15. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb in KiCad.
+16. Confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+17. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
+18. Close and reopen the app, then click Open evidence before sending again.
+19. Confirm the left project status says "Previous preview workspace found".
+20. Confirm the chat transcript also says "Previous preview workspace found".
+21. Confirm it reopens the same previous preview folder with the report selected.
+22. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary
