@@ -17,6 +17,7 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert_eq!(contract["chat_transcript"]["read_only"], true);
     assert_eq!(contract["chat_actions"]["send_design_uses_prompt"], true);
     assert_eq!(contract["chat_actions"]["send_design_clears_prompt"], true);
+    assert_eq!(contract["chat_actions"]["use_example_fills_prompt"], true);
     assert_eq!(
         contract["chat_actions"]["provider_login_reports_cli_status"],
         true
@@ -44,6 +45,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         .as_array()
         .unwrap()
         .contains(&Value::String("Chat input".to_string())));
+    assert!(contract["right_panel"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("Use example".to_string())));
     assert!(contract["right_panel"]
         .as_array()
         .unwrap()

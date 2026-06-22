@@ -4,6 +4,7 @@ use serde::Serialize;
 pub struct ChatActionsContract {
     pub send_design_uses_prompt: bool,
     pub send_design_clears_prompt: bool,
+    pub use_example_fills_prompt: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -18,13 +19,19 @@ pub fn chat_actions_contract() -> ChatActionsContract {
     ChatActionsContract {
         send_design_uses_prompt: true,
         send_design_clears_prompt: true,
+        use_example_fills_prompt: true,
         provider_login_reports_cli_status: true,
     }
+}
+
+pub fn example_board_prompt() -> &'static str {
+    "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
 }
 
 pub fn initial_transcript() -> String {
     "Welcome to ChatPCB KiCad Preview\r\n\
      Type a board idea, then click Send design.\r\n\
+     Click Use example to refill the starter board request.\r\n\
      You can start with: ESP32-S3 USB-C sensor board with OLED display.\r\n\
      Provider Login checks local Codex, Claude Code, and Gemini CLI status without storing credentials.\r\n\
      This preview shows the native app flow before real order-ready KiCad output is connected.\r\n"
@@ -34,7 +41,7 @@ pub fn initial_transcript() -> String {
 pub fn send_design_transcript(prompt: &str) -> String {
     let prompt = prompt.trim();
     let prompt = if prompt.is_empty() {
-        "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
+        example_board_prompt()
     } else {
         prompt
     };

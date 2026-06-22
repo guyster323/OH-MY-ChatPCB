@@ -28,6 +28,7 @@ Expected result:
 - `chatpcb-core.exe` is copied into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`.
 - `ChatPCB KiCad Preview.exe` is copied into the same folder.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
+- A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The app starts automatically.
 
 ## First Run
@@ -43,6 +44,7 @@ Expected result:
 5. Confirm the right side shows:
    - Chat transcript
    - prompt input
+   - Use example
    - Send design
    - Provider Login
    - model selector
@@ -50,9 +52,10 @@ Expected result:
 6. Click `Provider Login`.
 7. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI. It should not ask for an API key.
-8. Type or keep a board prompt in the prompt input.
-9. Click `Send design`.
-10. Confirm the chat transcript reflects your prompt and updates with a preview pipeline:
+8. Click `Use example` if the prompt input is empty.
+9. Type, edit, or keep a board prompt in the prompt input.
+10. Click `Send design`.
+11. Confirm the chat transcript reflects your prompt and updates with a preview pipeline:
    - ESP32-S3 target spec
    - JLCPCB package contract
    - schematic

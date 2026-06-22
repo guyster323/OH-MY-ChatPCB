@@ -76,6 +76,7 @@ fn print_self_test() {
             "Model selector",
             "Chat transcript",
             "Chat input",
+            "Use example",
             "Send design",
             "Pipeline status",
         ],
@@ -142,6 +143,7 @@ mod win32_app {
     const ID_PROVIDER_LOGIN: usize = 1002;
     const ID_CHAT_TRANSCRIPT: usize = 1003;
     const ID_PROMPT: usize = 1004;
+    const ID_USE_EXAMPLE: usize = 1005;
     const WM_CHATPCB_SEND_DEFERRED: u32 = WM_APP + 1;
 
     struct AppControls {
@@ -150,6 +152,7 @@ mod win32_app {
         status: HWND,
         chat_transcript: HWND,
         prompt: HWND,
+        use_example_button: HWND,
         send_button: HWND,
         provider_button: HWND,
         model_choice: HWND,
@@ -265,6 +268,14 @@ mod win32_app {
             WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
             ID_PROMPT,
         );
+        let use_example_button = child(
+            parent,
+            instance,
+            "BUTTON",
+            "Use example",
+            WS_TABSTOP,
+            ID_USE_EXAMPLE,
+        );
         let send_button = child(
             parent,
             instance,
@@ -301,6 +312,7 @@ mod win32_app {
             status,
             chat_transcript,
             prompt,
+            use_example_button,
             send_button,
             provider_button,
             model_choice,
@@ -377,6 +389,11 @@ mod win32_app {
                     return 0;
                 }
 
+                if (wparam & 0xffff) == ID_USE_EXAMPLE {
+                    handle_use_example(hwnd);
+                    return 0;
+                }
+
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_CHATPCB_SEND_DEFERRED => {
@@ -448,11 +465,26 @@ mod win32_app {
             1,
         );
         MoveWindow(controls.prompt, right_x, height - 190, right_width, 58, 1);
+        let action_gap = 8;
+        let example_width = if right_width > 300 {
+            124
+        } else {
+            right_width / 3
+        };
+        let send_width = right_width - example_width - action_gap;
         MoveWindow(
-            controls.send_button,
+            controls.use_example_button,
             right_x,
             height - 122,
-            right_width,
+            example_width,
+            30,
+            1,
+        );
+        MoveWindow(
+            controls.send_button,
+            right_x + example_width + action_gap,
+            height - 122,
+            send_width,
             30,
             1,
         );
@@ -486,6 +518,11 @@ mod win32_app {
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
+    }
+
+    unsafe fn handle_use_example(hwnd: HWND) {
+        let prompt = wide(chatpcb_desktop::ui_model::example_board_prompt());
+        SetDlgItemTextW(hwnd, ID_PROMPT as i32, prompt.as_ptr());
     }
 
     unsafe fn handle_provider_login(hwnd: HWND) {
