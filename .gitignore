@@ -1,0 +1,10 @@
+target/
+build/
+dist/
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.user
+workspaces/
+artifacts/
