@@ -15,7 +15,7 @@ First chat
 1. Type a PCB request immediately after the app opens. The starter prompt is already selected.
 2. Press Enter to send it.
 3. Confirm the model selector has already picked an available local provider if one is found.
-4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status.
+4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
 5. Click Use example if the prompt box is empty.
 6. Type or edit a PCB request in the prompt box.
 7. Press Enter in the prompt box, or click Send design.

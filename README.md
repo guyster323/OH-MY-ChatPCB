@@ -109,15 +109,16 @@ Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
 selector, prompt input, `Use example`, `Send design` action, and pipeline status.
 The left tabs also show a native preview body, not an empty placeholder. `Provider
-Login` reports local CLI availability without storing provider credentials. The
-model selector also picks the first available local provider on launch, so a
-first-run user sees a realistic model choice before pressing anything. `Use
-example` refills the starter prompt after a send. On launch, the starter prompt
-is already selected, so typing replaces it immediately. Pressing Enter in the
-prompt input or clicking `Send design` appends the prompt and assistant response
-to the existing chat transcript, so Provider Login context and earlier messages
-stay visible. The transcript also moves to the latest response after updates. It
-also saves a local preview workspace under:
+Login` reports local CLI availability without storing provider credentials, and
+it appends that status without erasing earlier chat turns. The model selector
+also picks the first available local provider on launch, so a first-run user sees
+a realistic model choice before pressing anything. `Use example` refills the
+starter prompt after a send. On launch, the starter prompt is already selected,
+so typing replaces it immediately. Pressing Enter in the prompt input or clicking
+`Send design` appends the prompt and assistant response to the existing chat
+transcript, so Provider Login context and earlier messages stay visible. The
+transcript also moves to the latest response after updates. It also saves a local
+preview workspace under:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

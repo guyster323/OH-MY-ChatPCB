@@ -18,6 +18,7 @@ pub struct ChatActionsContract {
     pub prompt_enter_sends_design: bool,
     pub app_launch_focuses_prompt_input: bool,
     pub app_launch_selects_available_provider_model: bool,
+    pub provider_login_appends_chat_transcript: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +46,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         prompt_enter_sends_design: true,
         app_launch_focuses_prompt_input: true,
         app_launch_selects_available_provider_model: true,
+        provider_login_appends_chat_transcript: true,
     }
 }
 

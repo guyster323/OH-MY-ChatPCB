@@ -70,6 +70,21 @@ fn send_design_appends_to_the_existing_chat_transcript() {
 }
 
 #[test]
+fn provider_login_appends_to_the_existing_chat_transcript() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("provider_login_appends_chat_transcript"));
+    assert!(main.contains("append_provider_login_transcript"));
+    assert!(main.contains("provider_login_turn"));
+    assert!(main.contains("append_chat_transcript"));
+    assert!(main.contains("get_control_text(hwnd, ID_CHAT_TRANSCRIPT"));
+}
+
+#[test]
 fn chat_transcript_scrolls_to_the_latest_turn_after_updates() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

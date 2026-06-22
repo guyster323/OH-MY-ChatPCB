@@ -60,7 +60,8 @@ Expected result:
    Codex, Claude Code, or Gemini CLI is installed.
 10. Click `Provider Login`.
 11. Confirm the chat transcript reports local CLI provider status for Codex,
-   Claude Code, and Gemini CLI. It should not ask for an API key.
+   Claude Code, and Gemini CLI without erasing earlier chat turns. It should not
+   ask for an API key.
    If a provider is available, the model selector should move to that provider.
 12. Click `Use example` if the prompt input is empty.
 13. Type, edit, or keep a board prompt in the prompt input.

@@ -815,10 +815,20 @@ mod win32_app {
         let pipeline_status =
             chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_model);
         set_pipeline_status(controls, &pipeline_status);
-        set_chat_transcript_text(
-            controls,
-            &chatpcb_desktop::ui_model::provider_login_transcript(&statuses),
+        let provider_login_turn = chatpcb_desktop::ui_model::provider_login_transcript(&statuses);
+        append_provider_login_transcript(hwnd, controls, &provider_login_turn);
+    }
+
+    unsafe fn append_provider_login_transcript(
+        hwnd: HWND,
+        controls: &AppControls,
+        provider_login_turn: &str,
+    ) {
+        let transcript = chatpcb_desktop::ui_model::append_chat_transcript(
+            &get_control_text(hwnd, ID_CHAT_TRANSCRIPT),
+            provider_login_turn,
         );
+        set_chat_transcript_text(controls, &transcript);
     }
 
     unsafe fn set_pipeline_status(controls: &AppControls, status: &str) {
