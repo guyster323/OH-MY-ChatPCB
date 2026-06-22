@@ -58,6 +58,7 @@ try {
         "- Pipeline status transitions for first-run actions",
         "- Preview workspace evidence folder creation on Send design",
         "- Left workspace status update after Send design",
+        "- Open evidence button for the saved preview workspace",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",
         "Current boundary:",

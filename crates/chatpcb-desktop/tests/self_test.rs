@@ -35,6 +35,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["open_evidence_opens_preview_workspace"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["provider_login_reports_cli_status"],
         true
     );
@@ -69,6 +73,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         .as_array()
         .unwrap()
         .contains(&Value::String("Send design".to_string())));
+    assert!(contract["right_panel"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("Open evidence".to_string())));
 
     let serialized = String::from_utf8(output.stdout)
         .unwrap()

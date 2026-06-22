@@ -87,6 +87,22 @@ fn send_design_updates_the_left_workspace_status() {
 }
 
 #[test]
+fn native_preview_has_open_evidence_button_for_saved_workspace() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("open_evidence_opens_preview_workspace"));
+    assert!(main.contains("ID_OPEN_EVIDENCE"));
+    assert!(main.contains("Open evidence"));
+    assert!(main.contains("handle_open_evidence"));
+    assert!(main.contains("last_workspace_dir"));
+    assert!(main.contains("open_evidence_folder"));
+}
+
+#[test]
 fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

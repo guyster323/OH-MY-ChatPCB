@@ -46,6 +46,7 @@ Expected result:
    - prompt input
    - Use example
    - Send design
+   - Open evidence
    - Provider Login
    - model selector
    - pipeline status
@@ -67,7 +68,9 @@ Expected result:
 12. Confirm the chat transcript says `Preview workspace saved`.
 13. Confirm the left project area now shows `Preview workspace saved` instead
     of only the initial KiCad canvas placeholder.
-14. Confirm the preview evidence folder exists:
+14. Click `Open evidence`.
+15. Confirm Windows opens the preview evidence folder.
+16. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

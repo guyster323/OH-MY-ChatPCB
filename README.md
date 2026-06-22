@@ -26,6 +26,7 @@ Implemented in this first vertical slice:
   under `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
 - The left project status updates after `Send design`, so the design side and
   chat side both reflect the saved preview workspace.
+- `Open evidence` opens the saved preview workspace folder from inside the app.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
   - right 30 percent chat pane
@@ -107,7 +108,8 @@ in the chat transcript and saves a local preview workspace under:
 That folder contains the prompt, artifact manifest, and a prototype-review
 release evidence report. The left project status also changes from the initial
 canvas placeholder to the saved preview workspace state. It is still not an
-order-ready KiCad board. See
+order-ready KiCad board. Click `Open evidence` in the app to open that folder
+without finding `%LOCALAPPDATA%` by hand. See
 `docs/user-test-guide.md` for the user-facing check.
 
 Build a shareable preview package:

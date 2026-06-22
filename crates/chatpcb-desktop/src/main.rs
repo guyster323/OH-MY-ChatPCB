@@ -79,6 +79,7 @@ fn print_self_test() {
             "Chat input",
             "Use example",
             "Send design",
+            "Open evidence",
             "Pipeline status",
         ],
         supported_board: spec.product_name,
@@ -128,6 +129,7 @@ mod win32_app {
     use windows_sys::Win32::Graphics::Gdi::{GetStockObject, UpdateWindow, WHITE_BRUSH};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{TCIF_TEXT, TCITEMW, TCM_INSERTITEMW};
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetDlgItemTextW,
         GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
@@ -146,6 +148,7 @@ mod win32_app {
     const ID_CHAT_TRANSCRIPT: usize = 1003;
     const ID_PROMPT: usize = 1004;
     const ID_USE_EXAMPLE: usize = 1005;
+    const ID_OPEN_EVIDENCE: usize = 1006;
     const WM_CHATPCB_SEND_DEFERRED: u32 = WM_APP + 1;
 
     struct AppControls {
@@ -157,8 +160,10 @@ mod win32_app {
         use_example_button: HWND,
         send_button: HWND,
         provider_button: HWND,
+        open_evidence_button: HWND,
         model_choice: HWND,
         pipeline_status: HWND,
+        last_workspace_dir: Option<PathBuf>,
     }
 
     pub fn run() {
@@ -294,6 +299,14 @@ mod win32_app {
             WS_TABSTOP,
             ID_PROVIDER_LOGIN,
         );
+        let open_evidence_button = child(
+            parent,
+            instance,
+            "BUTTON",
+            "Open evidence",
+            WS_TABSTOP,
+            ID_OPEN_EVIDENCE,
+        );
         let model_choice = child(
             parent,
             instance,
@@ -324,8 +337,10 @@ mod win32_app {
             use_example_button,
             send_button,
             provider_button,
+            open_evidence_button,
             model_choice,
             pipeline_status,
+            last_workspace_dir: None,
         }
     }
 
@@ -400,6 +415,11 @@ mod win32_app {
 
                 if (wparam & 0xffff) == ID_USE_EXAMPLE {
                     handle_use_example(hwnd);
+                    return 0;
+                }
+
+                if (wparam & 0xffff) == ID_OPEN_EVIDENCE {
+                    handle_open_evidence(hwnd);
                     return 0;
                 }
 
@@ -497,12 +517,30 @@ mod win32_app {
             30,
             1,
         );
-        MoveWindow(controls.provider_button, right_x, height - 82, 132, 32, 1);
+        let provider_width = 122;
+        let evidence_width = 126;
+        MoveWindow(
+            controls.provider_button,
+            right_x,
+            height - 82,
+            provider_width,
+            32,
+            1,
+        );
+        MoveWindow(
+            controls.open_evidence_button,
+            right_x + provider_width + action_gap,
+            height - 82,
+            evidence_width,
+            32,
+            1,
+        );
+        let model_x = right_x + provider_width + action_gap + evidence_width + action_gap;
         MoveWindow(
             controls.model_choice,
-            right_x + 142,
+            model_x,
             height - 82,
-            right_width - 142,
+            right_width - (model_x - right_x),
             180,
             1,
         );
@@ -529,6 +567,7 @@ mod win32_app {
             prompt.trim()
         };
         let mut transcript = chatpcb_desktop::ui_model::send_design_transcript(&prompt);
+        let controls = &mut *ptr;
         match super::create_preview_workspace(prompt_for_workspace, preview_workspace_root()) {
             Ok(workspace) => {
                 transcript.push_str(
@@ -537,11 +576,11 @@ mod win32_app {
                         &workspace.release_report_file,
                     ),
                 );
-                let controls = &*ptr;
                 let left_status = chatpcb_desktop::ui_model::preview_workspace_left_status(
                     &workspace.project_dir,
                 );
                 set_left_workspace_status(controls, &left_status);
+                controls.last_workspace_dir = Some(PathBuf::from(&workspace.project_dir));
             }
             Err(error) => {
                 transcript.push_str(
@@ -549,7 +588,6 @@ mod win32_app {
                         &error.to_string(),
                     ),
                 );
-                let controls = &*ptr;
                 set_left_workspace_status(
                     controls,
                     "Preview workspace could not be saved. Check chat for the error.",
@@ -558,13 +596,40 @@ mod win32_app {
         }
         let transcript = wide(&transcript);
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
-        let controls = &*ptr;
         set_pipeline_status(
             controls,
             chatpcb_desktop::ui_model::design_pipeline_status(),
         );
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
+    }
+
+    unsafe fn handle_open_evidence(hwnd: HWND) {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
+        if ptr.is_null() {
+            return;
+        }
+
+        let controls = &*ptr;
+        if let Some(path) = &controls.last_workspace_dir {
+            open_evidence_folder(path);
+            set_pipeline_status(controls, "Opened preview evidence folder.");
+        } else {
+            set_pipeline_status(controls, "No evidence yet: click Send design first.");
+        }
+    }
+
+    unsafe fn open_evidence_folder(path: &PathBuf) {
+        let operation = wide("open");
+        let folder = wide(&path.to_string_lossy());
+        ShellExecuteW(
+            null_mut(),
+            operation.as_ptr(),
+            folder.as_ptr(),
+            null(),
+            null(),
+            SW_SHOW,
+        );
     }
 
     fn preview_workspace_root() -> PathBuf {

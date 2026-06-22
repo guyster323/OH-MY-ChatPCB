@@ -9,6 +9,7 @@ pub struct ChatActionsContract {
     pub pipeline_status_updates_after_actions: bool,
     pub send_design_writes_preview_workspace: bool,
     pub send_design_updates_left_workspace_status: bool,
+    pub open_evidence_opens_preview_workspace: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -28,6 +29,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         pipeline_status_updates_after_actions: true,
         send_design_writes_preview_workspace: true,
         send_design_updates_left_workspace_status: true,
+        open_evidence_opens_preview_workspace: true,
         provider_login_reports_cli_status: true,
     }
 }
