@@ -22,3 +22,18 @@ fn native_preview_has_use_example_button_that_fills_the_prompt() {
     assert!(main.contains("example_board_prompt"));
     assert!(ui_model.contains("use_example_fills_prompt"));
 }
+
+#[test]
+fn provider_login_updates_model_selector_to_available_cli() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("selected_provider_model"));
+    assert!(ui_model.contains("provider_login_selects_available_model"));
+    assert!(main.contains("selected_provider_model_index"));
+    assert!(main.contains("controls.model_choice"));
+    assert!(main.contains("CB_SETCURSEL"));
+}

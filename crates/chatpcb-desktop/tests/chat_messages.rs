@@ -1,5 +1,6 @@
 use chatpcb_desktop::ui_model::{
-    initial_transcript, provider_login_transcript, send_design_transcript, ProviderUiStatus,
+    initial_transcript, provider_login_transcript, selected_provider_model, send_design_transcript,
+    ProviderUiStatus,
 };
 
 #[test]
@@ -54,4 +55,30 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));
+}
+
+#[test]
+fn provider_login_selects_the_first_available_model_for_non_experts() {
+    let statuses = [
+        ProviderUiStatus {
+            display_name: "Codex".to_string(),
+            available: false,
+            version: None,
+        },
+        ProviderUiStatus {
+            display_name: "Claude Code".to_string(),
+            available: true,
+            version: Some("2.1.183".to_string()),
+        },
+        ProviderUiStatus {
+            display_name: "Gemini CLI".to_string(),
+            available: true,
+            version: Some("gemini 0.9.0".to_string()),
+        },
+    ];
+
+    assert_eq!(selected_provider_model(&statuses), Some("claude:auto"));
+
+    let transcript = provider_login_transcript(&statuses);
+    assert!(transcript.contains("Selected model: claude:auto"));
 }

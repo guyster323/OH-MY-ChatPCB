@@ -539,10 +539,25 @@ mod win32_app {
                 version: provider.version,
             })
             .collect::<Vec<_>>();
+        let controls = &*ptr;
+        if let Some(model_index) = chatpcb_desktop::ui_model::selected_provider_model(&statuses)
+            .and_then(selected_provider_model_index)
+        {
+            SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
+        }
         let transcript = wide(&chatpcb_desktop::ui_model::provider_login_transcript(
             &statuses,
         ));
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+    }
+
+    fn selected_provider_model_index(model: &str) -> Option<usize> {
+        match model {
+            "codex:auto" => Some(0),
+            "claude:auto" => Some(1),
+            "gemini:auto" => Some(2),
+            _ => None,
+        }
     }
 
     unsafe fn get_control_text(parent: HWND, control_id: usize) -> String {

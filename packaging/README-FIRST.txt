@@ -13,9 +13,10 @@ Install
 First chat
 ----------
 1. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status.
-2. Click Use example if the prompt box is empty.
-3. Type or edit a PCB request in the prompt box.
-4. Click Send design.
+2. Confirm the model selector moves to an available local provider if one is found.
+3. Click Use example if the prompt box is empty.
+4. Type or edit a PCB request in the prompt box.
+5. Click Send design.
 
 Current boundary
 ----------------

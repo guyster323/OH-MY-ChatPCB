@@ -5,6 +5,7 @@ pub struct ChatActionsContract {
     pub send_design_uses_prompt: bool,
     pub send_design_clears_prompt: bool,
     pub use_example_fills_prompt: bool,
+    pub provider_login_selects_available_model: bool,
     pub provider_login_reports_cli_status: bool,
 }
 
@@ -20,6 +21,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         send_design_uses_prompt: true,
         send_design_clears_prompt: true,
         use_example_fills_prompt: true,
+        provider_login_selects_available_model: true,
         provider_login_reports_cli_status: true,
     }
 }
@@ -75,9 +77,32 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
         }
     }
 
+    if let Some(model) = selected_provider_model(statuses) {
+        transcript.push_str(&format!("Selected model: {model}\r\n"));
+    }
+
     transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");
     transcript.push_str(
         "Pick an available provider in the model selector, then type a board idea and click Send design.\r\n",
     );
     transcript
+}
+
+pub fn selected_provider_model(statuses: &[ProviderUiStatus]) -> Option<&'static str> {
+    statuses
+        .iter()
+        .filter(|status| status.available)
+        .find_map(|status| {
+            let name = status.display_name.to_ascii_lowercase();
+
+            if name.contains("codex") {
+                Some("codex:auto")
+            } else if name.contains("claude") {
+                Some("claude:auto")
+            } else if name.contains("gemini") {
+                Some("gemini:auto")
+            } else {
+                None
+            }
+        })
 }

@@ -52,6 +52,7 @@ Expected result:
 6. Click `Provider Login`.
 7. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI. It should not ask for an API key.
+   If a provider is available, the model selector should move to that provider.
 8. Click `Use example` if the prompt input is empty.
 9. Type, edit, or keep a board prompt in the prompt input.
 10. Click `Send design`.
