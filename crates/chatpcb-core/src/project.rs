@@ -275,29 +275,38 @@ fn kicad_pcb_file() -> &'static str {
         (layer \"Edge.Cuts\")\r\n\
         (uuid \"66666666-6666-4666-8666-666666666666\")\r\n\
       )\r\n\
-      (gr_text \"ChatPCB3 ESP32-S3 USB-C Sensor Board\"\r\n\
-        (at 12 16 0)\r\n\
+      (gr_text \"ChatPCB3 ESP32-S3\"\r\n\
+        (at 35 16 0)\r\n\
         (layer \"F.SilkS\")\r\n\
         (effects\r\n\
           (font\r\n\
-            (size 1.5 1.5)\r\n\
-            (thickness 0.15)\r\n\
+            (size 1.0 1.0)\r\n\
+            (thickness 0.1)\r\n\
           )\r\n\
-          (justify left)\r\n\
         )\r\n\
         (uuid \"77777777-7777-4777-8777-777777777777\")\r\n\
       )\r\n\
-      (gr_text \"50mm x 50mm preview outline - not order-ready\"\r\n\
-        (at 12 20 0)\r\n\
+      (gr_text \"USB-C Sensor Preview\"\r\n\
+        (at 35 19 0)\r\n\
         (layer \"F.SilkS\")\r\n\
         (effects\r\n\
           (font\r\n\
-            (size 1.2 1.2)\r\n\
-            (thickness 0.12)\r\n\
+            (size 0.9 0.9)\r\n\
+            (thickness 0.09)\r\n\
           )\r\n\
-          (justify left)\r\n\
         )\r\n\
         (uuid \"88888888-8888-4888-8888-888888888888\")\r\n\
+      )\r\n\
+      (gr_text \"50mm x 50mm preview - not order-ready\"\r\n\
+        (at 35 22 0)\r\n\
+        (layer \"F.SilkS\")\r\n\
+        (effects\r\n\
+          (font\r\n\
+            (size 0.8 0.8)\r\n\
+            (thickness 0.08)\r\n\
+          )\r\n\
+        )\r\n\
+        (uuid \"99999999-9999-4999-8999-999999999999\")\r\n\
       )\r\n\
     )\r\n"
 }

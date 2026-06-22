@@ -1,4 +1,7 @@
-use chatpcb_core::project::create_preview_workspace;
+use chatpcb_core::{
+    project::create_preview_workspace,
+    validation::{parse_kicad_report, Severity},
+};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -104,11 +107,54 @@ fn generated_pcb_scaffold_has_preview_board_outline_and_silkscreen_label() {
     assert!(pcb.contains("(end 60 60)"));
     assert!(pcb.contains("(end 10 60)"));
     assert!(pcb.contains("(layer \"F.SilkS\")"));
-    assert!(pcb.contains("ChatPCB3 ESP32-S3 USB-C Sensor Board"));
-    assert!(pcb.contains("50mm x 50mm preview outline"));
+    assert!(pcb.contains("(gr_text \"ChatPCB3 ESP32-S3\""));
+    assert!(pcb.contains("(gr_text \"USB-C Sensor Preview\""));
+    assert!(pcb.contains("(gr_text \"50mm x 50mm preview - not order-ready\""));
+    assert!(!pcb.contains("(gr_text \"ChatPCB3 ESP32-S3 USB-C Sensor Board\""));
 
     let report = fs::read_to_string(&workspace.release_report_file).unwrap();
     assert!(report.contains("50mm x 50mm preview PCB outline"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn generated_pcb_scaffold_has_no_local_kicad_drc_violations_when_available() {
+    let Some(kicad_cli) = local_kicad_cli() else {
+        eprintln!("Skipping KiCad CLI DRC check because kicad-cli.exe was not found.");
+        return;
+    };
+
+    let root = unique_test_root().with_extension("kicad-drc");
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    let workspace = create_preview_workspace("ESP32-S3 starter board", &root).unwrap();
+    let project_dir = PathBuf::from(&workspace.project_dir);
+    let pcb = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
+    let drc_report = project_dir.join("drc-report.json");
+
+    let drc_status = Command::new(&kicad_cli)
+        .args(["pcb", "drc", "--format", "json", "--output"])
+        .arg(&drc_report)
+        .arg(&pcb)
+        .status()
+        .unwrap();
+    assert!(drc_status.success());
+
+    let report = fs::read_to_string(&drc_report).unwrap();
+    let parsed = parse_kicad_report(&report).unwrap();
+    assert_eq!(parsed.error_count, 0);
+    assert_eq!(parsed.warning_count, 0);
+    assert_eq!(parsed.unconnected_count, 0);
+    assert!(
+        parsed
+            .violations
+            .iter()
+            .all(|violation| violation.severity != Severity::Warning),
+        "DRC warnings should not appear in the first-run preview scaffold: {report}"
+    );
 
     fs::remove_dir_all(root).unwrap();
 }
