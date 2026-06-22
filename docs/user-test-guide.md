@@ -87,21 +87,24 @@ Expected result:
     `Preview workspace saved` instead of only the initial Schematic preview.
 19. Confirm the chat transcript and large left preview body mention the
     `KiCad CLI check` and `kicad-pcb-check.txt`.
-20. Click `Open PCB`.
-21. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
+20. Confirm the chat transcript and large left preview body mention
+    `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
+    `kicad-validation-summary.txt`.
+21. Click `Open PCB`.
+22. Confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb` and the board preview
     contains a 50mm x 50mm `Edge.Cuts` outline.
-22. Click `Open evidence`.
-23. Confirm Windows opens the preview evidence folder with
+23. Click `Open evidence`.
+24. Confirm Windows opens the preview evidence folder with
     `release-evidence-preview.md` selected.
-24. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
+25. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
-25. Confirm the left project status says `Previous preview workspace found`
+26. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
-26. Confirm the chat transcript also says `Previous preview workspace found`
+27. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Open evidence` and `Open PCB`.
-27. Confirm Windows opens the same previous preview evidence folder with the
+28. Confirm Windows opens the same previous preview evidence folder with the
     release evidence report selected.
-28. Confirm the preview evidence folder exists:
+29. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
@@ -113,6 +116,9 @@ Expected files:
 - `artifact-manifest.json`
 - `release-evidence-preview.md`
 - `kicad-pcb-check.txt`
+- `erc-report.json`
+- `drc-report.json`
+- `kicad-validation-summary.txt`
 - `chatpcb3-esp32s3.kicad_pro`
 - `chatpcb3-esp32s3.kicad_sch`
 - `chatpcb3-esp32s3.kicad_pcb`

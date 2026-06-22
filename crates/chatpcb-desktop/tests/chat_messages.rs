@@ -1,8 +1,9 @@
 use chatpcb_desktop::ui_model::{
-    append_chat_transcript, design_pipeline_status, example_loaded_pipeline_status,
-    initial_left_workspace_status, initial_pipeline_status, initial_transcript,
-    kicad_cli_check_transcript, left_tab_body, left_tab_status, preview_workspace_body,
-    preview_workspace_body_with_kicad_check, preview_workspace_left_status,
+    append_chat_transcript, design_pipeline_status, erc_drc_validation_transcript,
+    example_loaded_pipeline_status, initial_left_workspace_status, initial_pipeline_status,
+    initial_transcript, kicad_cli_check_transcript, left_tab_body, left_tab_status,
+    preview_workspace_body, preview_workspace_body_with_kicad_check,
+    preview_workspace_body_with_validation_reports, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
     recovered_preview_workspace_body, recovered_preview_workspace_left_status,
     recovered_preview_workspace_transcript, selected_provider_model, send_design_transcript,
@@ -308,6 +309,48 @@ fn kicad_cli_check_transcript_points_to_local_report_without_order_ready_claims(
 }
 
 #[test]
+fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
+    let body = preview_workspace_body_with_validation_reports(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
+        "KiCad accepted the preview PCB. Gate remains prototype-review.",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
+        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 1 warning, 0 unconnected. Gate remains prototype-review.",
+    );
+
+    assert!(body.contains("KiCad ERC/DRC reports"));
+    assert!(body.contains("erc-report.json"));
+    assert!(body.contains("drc-report.json"));
+    assert!(body.contains("kicad-validation-summary.txt"));
+    assert!(body.contains("ERC: 0 errors, 0 warnings"));
+    assert!(body.contains("DRC: 0 errors, 1 warning"));
+    assert!(body.contains("prototype-review"));
+    assert!(body.contains("not order-ready"));
+}
+
+#[test]
+fn erc_drc_validation_transcript_points_to_saved_reports_without_order_ready_claims() {
+    let transcript = erc_drc_validation_transcript(
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
+        "ERC: 0 errors, 0 warnings. DRC: 0 errors, 1 warning, 0 unconnected. Gate remains prototype-review.",
+    );
+
+    assert!(transcript.contains("KiCad ERC/DRC reports"));
+    assert!(transcript.contains("erc-report.json"));
+    assert!(transcript.contains("drc-report.json"));
+    assert!(transcript.contains("kicad-validation-summary.txt"));
+    assert!(transcript.contains("prototype-review"));
+    assert!(!transcript
+        .to_ascii_lowercase()
+        .contains("order-ready evidence"));
+}
+
+#[test]
 fn recovered_preview_workspace_text_orients_relaunch_users() {
     let project_dir =
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview";
@@ -321,6 +364,10 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(body.contains("Click Open evidence"));
     assert!(body.contains("Open PCB"));
     assert!(body.contains("release-evidence-preview.md"));
+    assert!(body.contains("kicad-pcb-check.txt"));
+    assert!(body.contains("erc-report.json"));
+    assert!(body.contains("drc-report.json"));
+    assert!(body.contains("kicad-validation-summary.txt"));
     assert!(body.contains("not order-ready"));
 }
 

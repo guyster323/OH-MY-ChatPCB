@@ -69,6 +69,7 @@ try {
         "- KiCad preview scaffold files generated on Send design",
         "- 50mm PCB preview outline in generated KiCad PCB",
         "- KiCad CLI preview compatibility check on Send design",
+        "- KiCad ERC and DRC JSON reports on Send design",
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",

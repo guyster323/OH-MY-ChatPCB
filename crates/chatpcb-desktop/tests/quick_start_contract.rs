@@ -224,7 +224,26 @@ fn send_design_runs_kicad_cli_check_after_writing_preview() {
     assert!(main.contains("kicad-cli.exe"));
     assert!(main.contains("kicad-pcb-check.txt"));
     assert!(main.contains("summarize_kicad_cli_check"));
-    assert!(main.contains("preview_workspace_body_with_kicad_check"));
+    assert!(main.contains("preview_workspace_body_with_validation_reports"));
+}
+
+#[test]
+fn send_design_runs_erc_drc_reports_after_writing_preview() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("erc_drc_reports_run_after_send_design"));
+    assert!(ui_model.contains("preview_workspace_body_with_validation_reports"));
+    assert!(ui_model.contains("erc_drc_validation_transcript"));
+    assert!(main.contains("run_kicad_erc_drc_reports"));
+    assert!(main.contains("erc-report.json"));
+    assert!(main.contains("drc-report.json"));
+    assert!(main.contains("kicad-validation-summary.txt"));
+    assert!(main.contains("summarize_erc_drc_reports"));
+    assert!(main.contains("parse_kicad_report"));
 }
 
 #[test]

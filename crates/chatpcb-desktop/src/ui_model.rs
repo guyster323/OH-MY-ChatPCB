@@ -11,6 +11,7 @@ pub struct ChatActionsContract {
     pub pipeline_status_updates_after_actions: bool,
     pub send_design_writes_preview_workspace: bool,
     pub kicad_cli_check_runs_after_send_design: bool,
+    pub erc_drc_reports_run_after_send_design: bool,
     pub send_design_updates_left_workspace_status: bool,
     pub open_evidence_opens_preview_workspace: bool,
     pub open_evidence_selects_release_report_file: bool,
@@ -48,6 +49,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         pipeline_status_updates_after_actions: true,
         send_design_writes_preview_workspace: true,
         kicad_cli_check_runs_after_send_design: true,
+        erc_drc_reports_run_after_send_design: true,
         send_design_updates_left_workspace_status: true,
         open_evidence_opens_preview_workspace: true,
         open_evidence_selects_release_report_file: true,
@@ -227,11 +229,55 @@ pub fn preview_workspace_body_with_kicad_check(
     )
 }
 
+pub fn preview_workspace_body_with_validation_reports(
+    project_dir: &str,
+    release_report_file: &str,
+    check_report_file: &str,
+    check_summary: &str,
+    erc_report_file: &str,
+    drc_report_file: &str,
+    validation_summary_file: &str,
+    validation_summary: &str,
+) -> String {
+    format!(
+        "{}\r\n\r\n\
+         KiCad ERC/DRC reports:\r\n\
+         {validation_summary}\r\n\
+         ERC report:\r\n\
+         {erc_report_file}\r\n\
+         DRC report:\r\n\
+         {drc_report_file}\r\n\
+         Summary:\r\n\
+         {validation_summary_file}",
+        preview_workspace_body_with_kicad_check(
+            project_dir,
+            release_report_file,
+            check_report_file,
+            check_summary
+        )
+    )
+}
+
 pub fn kicad_cli_check_transcript(check_report_file: &str, check_summary: &str) -> String {
     format!(
         "KiCad CLI check\r\n\
          - {check_summary}\r\n\
          - Report: {check_report_file}\r\n"
+    )
+}
+
+pub fn erc_drc_validation_transcript(
+    erc_report_file: &str,
+    drc_report_file: &str,
+    validation_summary_file: &str,
+    validation_summary: &str,
+) -> String {
+    format!(
+        "KiCad ERC/DRC reports\r\n\
+         - {validation_summary}\r\n\
+         - ERC report: {erc_report_file}\r\n\
+         - DRC report: {drc_report_file}\r\n\
+         - Summary: {validation_summary_file}\r\n"
     )
 }
 
@@ -251,7 +297,11 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          Expected files:\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
-         - release-evidence-preview.md\r\n\r\n\
+         - release-evidence-preview.md\r\n\
+         - kicad-pcb-check.txt\r\n\
+         - erc-report.json\r\n\
+         - drc-report.json\r\n\
+         - kicad-validation-summary.txt\r\n\r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."

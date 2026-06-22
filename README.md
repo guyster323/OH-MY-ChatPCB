@@ -39,6 +39,10 @@ Implemented in this first vertical slice:
 - After `Send design`, the app runs a local KiCad CLI compatibility check when
   KiCad 10 is installed and writes `kicad-pcb-check.txt` beside the preview
   files.
+- The same `Send design` path now asks KiCad CLI to run schematic ERC and PCB
+  DRC in JSON mode when available, then writes `erc-report.json`,
+  `drc-report.json`, and `kicad-validation-summary.txt` beside the preview
+  files.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
 - On app launch, the starter prompt is focused and selected so a first-run user
@@ -141,7 +145,9 @@ release evidence report. It also contains the generated KiCad preview scaffold:
 project status and preview body also change to the saved workspace state. When
 KiCad 10 is installed locally, `Send design` also runs `kicad-cli.exe pcb
 upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
-folder. It is still not an order-ready KiCad board. Click
+folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
+`erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. It is
+still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad and see the 50mm x
 50mm `Edge.Cuts` preview outline. Click `Open evidence` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the release evidence report

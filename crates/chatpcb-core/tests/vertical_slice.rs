@@ -180,6 +180,99 @@ fn validation_parses_kicad_json_reports() {
 }
 
 #[test]
+fn validation_flattens_kicad_10_erc_sheet_reports() {
+    let report = parse_kicad_report(
+        r#"{
+            "$schema": "https://schemas.kicad.org/erc.v1.json",
+            "sheets": [
+                {
+                    "path": "/",
+                    "violations": [
+                        {
+                            "severity": "error",
+                            "description": "Pin is not connected",
+                            "items": [
+                                {"description": "U1 pin EN"},
+                                {"description": "Net ESP_EN"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    assert_eq!(report.error_count, 1);
+    assert_eq!(report.warning_count, 0);
+    assert_eq!(report.violations[0].severity, Severity::Error);
+    assert_eq!(report.violations[0].message, "Pin is not connected");
+    assert_eq!(report.violations[0].items, vec!["U1 pin EN", "Net ESP_EN"]);
+}
+
+#[test]
+fn validation_parses_kicad_10_drc_description_and_unconnected_items() {
+    let report = parse_kicad_report(
+        r#"{
+            "$schema": "https://schemas.kicad.org/drc.v1.json",
+            "unconnected_items": [
+                {"description": "Net 3V3 between U1 and C1"}
+            ],
+            "violations": [
+                {
+                    "severity": "warning",
+                    "description": "Silkscreen clipped by board edge",
+                    "items": [
+                        {"description": "PCB text"},
+                        "Edge.Cuts segment"
+                    ]
+                }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    assert_eq!(report.error_count, 0);
+    assert_eq!(report.warning_count, 1);
+    assert_eq!(report.unconnected_count, 1);
+    assert_eq!(
+        report.violations[0].message,
+        "Silkscreen clipped by board edge"
+    );
+    assert_eq!(
+        report.violations[0].items,
+        vec!["PCB text", "Edge.Cuts segment"]
+    );
+}
+
+#[test]
+fn validation_summarizes_erc_drc_counts_without_order_ready_claims() {
+    let erc = parse_kicad_report(
+        r#"{
+            "sheets": [{"path": "/", "violations": []}]
+        }"#,
+    )
+    .unwrap();
+    let drc = parse_kicad_report(
+        r#"{
+            "unconnected_items": [],
+            "violations": [
+                {"severity": "warning", "description": "Silkscreen clipped by board edge"}
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let summary = chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc);
+
+    assert!(summary.contains("ERC: 0 errors, 0 warnings"));
+    assert!(summary.contains("DRC: 0 errors, 1 warning"));
+    assert!(summary.contains("0 unconnected"));
+    assert!(summary.contains("prototype-review"));
+    assert!(!summary.to_ascii_lowercase().contains("order-ready"));
+}
+
+#[test]
 fn validation_summarizes_kicad_cli_acceptance_without_order_ready_claims() {
     let report = summarize_kicad_cli_check(
         Some(0),

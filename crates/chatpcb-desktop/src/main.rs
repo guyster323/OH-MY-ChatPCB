@@ -182,6 +182,13 @@ mod win32_app {
         report_file: PathBuf,
     }
 
+    struct ValidationUiResult {
+        summary: String,
+        erc_report_file: PathBuf,
+        drc_report_file: PathBuf,
+        summary_file: PathBuf,
+    }
+
     pub fn run() {
         unsafe {
             let instance = GetModuleHandleW(null());
@@ -772,6 +779,7 @@ mod win32_app {
             Ok(workspace) => {
                 let project_dir = PathBuf::from(&workspace.project_dir);
                 let kicad_check = run_kicad_pcb_check(&project_dir);
+                let validation = run_kicad_erc_drc_reports(&project_dir);
                 turn_transcript.push_str(
                     &chatpcb_desktop::ui_model::preview_workspace_saved_transcript(
                         &workspace.project_dir,
@@ -782,20 +790,32 @@ mod win32_app {
                     &kicad_check.report_file.to_string_lossy(),
                     &kicad_check.summary,
                 ));
+                turn_transcript.push_str(
+                    &chatpcb_desktop::ui_model::erc_drc_validation_transcript(
+                        &validation.erc_report_file.to_string_lossy(),
+                        &validation.drc_report_file.to_string_lossy(),
+                        &validation.summary_file.to_string_lossy(),
+                        &validation.summary,
+                    ),
+                );
                 let left_status = chatpcb_desktop::ui_model::preview_workspace_left_status(
                     &workspace.project_dir,
                 );
                 set_left_workspace_status(controls, &left_status);
                 let preview_body =
-                    chatpcb_desktop::ui_model::preview_workspace_body_with_kicad_check(
+                    chatpcb_desktop::ui_model::preview_workspace_body_with_validation_reports(
                         &workspace.project_dir,
                         &workspace.release_report_file,
                         &kicad_check.report_file.to_string_lossy(),
                         &kicad_check.summary,
+                        &validation.erc_report_file.to_string_lossy(),
+                        &validation.drc_report_file.to_string_lossy(),
+                        &validation.summary_file.to_string_lossy(),
+                        &validation.summary,
                     );
                 set_design_preview(controls, &preview_body);
                 controls.last_workspace_dir = Some(project_dir);
-                pipeline_after_send = kicad_check.summary;
+                pipeline_after_send = validation.summary;
             }
             Err(error) => {
                 turn_transcript.push_str(
@@ -886,6 +906,108 @@ mod win32_app {
         PcbCheckUiResult {
             summary: check.summary,
             report_file,
+        }
+    }
+
+    fn run_kicad_erc_drc_reports(project_dir: &PathBuf) -> ValidationUiResult {
+        let schematic_file = project_dir.join("chatpcb3-esp32s3.kicad_sch");
+        let pcb_file = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
+        let erc_report_file = project_dir.join("erc-report.json");
+        let drc_report_file = project_dir.join("drc-report.json");
+        let summary_file = project_dir.join("kicad-validation-summary.txt");
+
+        let _ = fs::remove_file(&erc_report_file);
+        let _ = fs::remove_file(&drc_report_file);
+
+        let mut command_log = String::new();
+        let summary = if !schematic_file.exists() || !pcb_file.exists() {
+            "KiCad ERC/DRC were not run because the preview schematic or PCB file is missing. Gate remains prototype-review."
+                .to_string()
+        } else if let Some(kicad_cli) = preferred_kicad_cli_path() {
+            let erc_output = super::Command::new(&kicad_cli)
+                .args(["sch", "erc", "--format", "json", "--output"])
+                .arg(&erc_report_file)
+                .arg(&schematic_file)
+                .output();
+            let drc_output = super::Command::new(&kicad_cli)
+                .args(["pcb", "drc", "--format", "json", "--output"])
+                .arg(&drc_report_file)
+                .arg(&pcb_file)
+                .output();
+
+            command_log.push_str(&format_validation_command_log("ERC", &erc_output));
+            command_log.push_str(&format_validation_command_log("DRC", &drc_output));
+
+            match (
+                fs::read_to_string(&erc_report_file)
+                    .ok()
+                    .and_then(|report| chatpcb_core::validation::parse_kicad_report(&report).ok()),
+                fs::read_to_string(&drc_report_file)
+                    .ok()
+                    .and_then(|report| chatpcb_core::validation::parse_kicad_report(&report).ok()),
+            ) {
+                (Some(erc), Some(drc)) => {
+                    chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc)
+                }
+                _ => {
+                    "KiCad ERC/DRC reports were requested, but the JSON reports could not be parsed. Gate remains prototype-review; inspect kicad-validation-summary.txt before continuing."
+                        .to_string()
+                }
+            }
+        } else {
+            "KiCad ERC/DRC were not run because kicad-cli.exe was not found. Gate remains prototype-review; install KiCad 10 to create local ERC/DRC reports."
+                .to_string()
+        };
+
+        let report = format!(
+            "ChatPCB3 KiCad ERC/DRC validation\r\n\
+             Summary: {}\r\n\
+             \r\n\
+             Schematic:\r\n\
+             {}\r\n\
+             \r\n\
+             PCB:\r\n\
+             {}\r\n\
+             \r\n\
+             ERC report:\r\n\
+             {}\r\n\
+             \r\n\
+             DRC report:\r\n\
+             {}\r\n\
+             \r\n\
+             Command log:\r\n\
+             {}\r\n\
+             Boundary:\r\n\
+             This is prototype-review validation evidence, not manufacturing evidence.\r\n",
+            summary,
+            schematic_file.to_string_lossy(),
+            pcb_file.to_string_lossy(),
+            erc_report_file.to_string_lossy(),
+            drc_report_file.to_string_lossy(),
+            command_log
+        );
+        let _ = fs::write(&summary_file, report);
+
+        ValidationUiResult {
+            summary,
+            erc_report_file,
+            drc_report_file,
+            summary_file,
+        }
+    }
+
+    fn format_validation_command_log(
+        label: &str,
+        output: &std::io::Result<std::process::Output>,
+    ) -> String {
+        match output {
+            Ok(output) => format!(
+                "{label} exit code: {:?}\r\nSTDOUT:\r\n{}\r\nSTDERR:\r\n{}\r\n\r\n",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            Err(error) => format!("{label} failed to run: {error}\r\n\r\n"),
         }
     }
 

@@ -39,6 +39,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["erc_drc_reports_run_after_send_design"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["send_design_updates_left_workspace_status"],
         true
     );

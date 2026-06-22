@@ -106,6 +106,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("KiCad preview scaffold files"));
     assert!(script.contains("50mm PCB preview outline"));
     assert!(script.contains("KiCad CLI preview compatibility check"));
+    assert!(script.contains("KiCad ERC and DRC JSON reports on Send design"));
     assert!(script.contains("Left workspace status update"));
     assert!(script.contains("Left tab status updates"));
     assert!(script.contains("Left design preview body"));
