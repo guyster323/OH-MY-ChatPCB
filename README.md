@@ -65,7 +65,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1
 
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
-selector, prompt input, and pipeline status. See
+selector, prompt input, `Send design` action, and pipeline status. `Provider
+Login` reports local CLI availability without storing provider credentials, and
+`Send design` reflects the prompt text in the chat transcript. See
 `docs/user-test-guide.md` for the user-facing check.
 
 Run the core manually:

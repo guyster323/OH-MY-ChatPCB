@@ -35,8 +35,12 @@ Expected result:
    - Provider Login
    - model selector
    - pipeline status
-6. Click `Send design`.
-7. Confirm the chat transcript updates with a preview pipeline:
+6. Click `Provider Login`.
+7. Confirm the chat transcript reports local CLI provider status for Codex,
+   Claude Code, and Gemini CLI. It should not ask for an API key.
+8. Type or keep a board prompt in the prompt input.
+9. Click `Send design`.
+10. Confirm the chat transcript reflects your prompt and updates with a preview pipeline:
    - ESP32-S3 target spec
    - JLCPCB package contract
    - schematic

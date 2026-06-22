@@ -2,6 +2,7 @@ use chatpcb_core::design::esp32s3_usb_sensor_board_spec;
 use chatpcb_core::layout::freerouting_contract;
 use chatpcb_core::manufacturing::build_jlcpcb_package;
 use chatpcb_core::provider::catalog_with_probe;
+use chatpcb_desktop::ui_model::chat_actions_contract;
 use serde::Serialize;
 use std::process::Command;
 
@@ -12,6 +13,7 @@ struct DesktopSelfTest {
     transport: &'static str,
     layout: LayoutContract,
     chat_transcript: ChatTranscriptContract,
+    chat_actions: chatpcb_desktop::ui_model::ChatActionsContract,
     left_tabs: Vec<&'static str>,
     right_panel: Vec<&'static str>,
     supported_board: String,
@@ -62,6 +64,7 @@ fn print_self_test() {
             multiline: true,
             read_only: true,
         },
+        chat_actions: chat_actions_contract(),
         left_tabs: vec![
             "Schematic",
             "PCB Layout",
@@ -123,18 +126,23 @@ mod win32_app {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{TCIF_TEXT, TCITEMW, TCM_INSERTITEMW};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
-        GetWindowLongPtrW, LoadCursorW, MoveWindow, PostQuitMessage, RegisterClassW, SendMessageW,
-        SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, CB_ADDSTRING,
-        CB_SETCURSEL, CW_USEDEFAULT, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA,
-        HMENU, IDC_ARROW, MSG, SW_SHOW, WINDOW_EX_STYLE, WM_COMMAND, WM_DESTROY, WM_NCDESTROY,
-        WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-        WS_VISIBLE, WS_VSCROLL,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetDlgItemTextW,
+        GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
+        RegisterClassW, SendMessageW, SetDlgItemTextW, SetWindowLongPtrW, ShowWindow,
+        TranslateMessage, CB_ADDSTRING, CB_SETCURSEL, CW_USEDEFAULT, ES_AUTOHSCROLL,
+        ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, GWLP_USERDATA, HMENU, IDC_ARROW, MSG, SW_SHOW,
+        WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_DESTROY, WM_NCDESTROY, WM_SIZE, WNDCLASSW,
+        WS_BORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        WS_VSCROLL,
     };
 
     const APP_TITLE: &str = "ChatPCB KiCad Preview";
     const CLASS_NAME: &str = "ChatPcbKiCadPreviewWindow";
     const ID_SEND_DESIGN: usize = 1001;
+    const ID_PROVIDER_LOGIN: usize = 1002;
+    const ID_CHAT_TRANSCRIPT: usize = 1003;
+    const ID_PROMPT: usize = 1004;
+    const WM_CHATPCB_SEND_DEFERRED: u32 = WM_APP + 1;
 
     struct AppControls {
         left_pane: HWND,
@@ -159,7 +167,7 @@ mod win32_app {
                 0,
                 class.as_ptr(),
                 title.as_ptr(),
-                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 1280,
@@ -247,15 +255,15 @@ mod win32_app {
                 | ES_MULTILINE as u32
                 | ES_AUTOVSCROLL as u32
                 | ES_READONLY as u32,
-            0,
+            ID_CHAT_TRANSCRIPT,
         );
         let prompt = child(
             parent,
             instance,
             "EDIT",
             "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package",
-            WS_BORDER,
-            0,
+            WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
+            ID_PROMPT,
         );
         let send_button = child(
             parent,
@@ -265,7 +273,14 @@ mod win32_app {
             WS_TABSTOP,
             ID_SEND_DESIGN,
         );
-        let provider_button = child(parent, instance, "BUTTON", "Provider Login", WS_TABSTOP, 0);
+        let provider_button = child(
+            parent,
+            instance,
+            "BUTTON",
+            "Provider Login",
+            WS_TABSTOP,
+            ID_PROVIDER_LOGIN,
+        );
         let model_choice = child(parent, instance, "COMBOBOX", "", WS_TABSTOP, 0);
         add_combo_item(model_choice, "codex:auto");
         add_combo_item(model_choice, "claude:auto");
@@ -353,11 +368,20 @@ mod win32_app {
         match msg {
             WM_COMMAND => {
                 if (wparam & 0xffff) == ID_SEND_DESIGN {
-                    handle_send_design(hwnd);
+                    PostMessageW(hwnd, WM_CHATPCB_SEND_DEFERRED, 0, 0);
+                    return 0;
+                }
+
+                if (wparam & 0xffff) == ID_PROVIDER_LOGIN {
+                    handle_provider_login(hwnd);
                     return 0;
                 }
 
                 DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_CHATPCB_SEND_DEFERRED => {
+                handle_send_design(hwnd);
+                0
             }
             WM_SIZE => {
                 layout(hwnd);
@@ -457,14 +481,40 @@ mod win32_app {
             return;
         }
 
-        let controls = &*ptr;
-        let transcript = wide(
-            "User: USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package\r\n\
-             Assistant: I created the fixed ESP32-S3 target spec, selected the JLCPCB package contract, \
-             and queued schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package.\r\n\
-             Status: preview only. Full KiCad fork integration is the next implementation gate.\r\n",
+        let prompt = get_control_text(hwnd, ID_PROMPT);
+        let transcript = wide(&chatpcb_desktop::ui_model::send_design_transcript(&prompt));
+        SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+    }
+
+    unsafe fn handle_provider_login(hwnd: HWND) {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppControls;
+        if ptr.is_null() {
+            return;
+        }
+
+        let statuses = super::catalog_with_probe(super::probe_command_version)
+            .into_iter()
+            .map(|provider| chatpcb_desktop::ui_model::ProviderUiStatus {
+                display_name: provider.display_name,
+                available: provider.available,
+                version: provider.version,
+            })
+            .collect::<Vec<_>>();
+        let transcript = wide(&chatpcb_desktop::ui_model::provider_login_transcript(
+            &statuses,
+        ));
+        SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+    }
+
+    unsafe fn get_control_text(parent: HWND, control_id: usize) -> String {
+        let mut buffer = vec![0u16; 2048];
+        let copied = GetDlgItemTextW(
+            parent,
+            control_id as i32,
+            buffer.as_mut_ptr(),
+            buffer.len() as i32,
         );
-        SetWindowTextW(controls.chat_transcript, transcript.as_ptr());
+        String::from_utf16_lossy(&buffer[..copied as usize])
     }
 
     fn wide(value: &str) -> Vec<u16> {

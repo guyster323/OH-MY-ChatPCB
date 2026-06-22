@@ -15,6 +15,11 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert_eq!(contract["transport"], "stdio-jsonl");
     assert_eq!(contract["chat_transcript"]["multiline"], true);
     assert_eq!(contract["chat_transcript"]["read_only"], true);
+    assert_eq!(contract["chat_actions"]["send_design_uses_prompt"], true);
+    assert_eq!(
+        contract["chat_actions"]["provider_login_reports_cli_status"],
+        true
+    );
     assert_eq!(contract["layout"]["left_ratio"], 0.7);
     assert_eq!(contract["layout"]["right_ratio"], 0.3);
     assert_eq!(
