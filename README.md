@@ -131,9 +131,11 @@ That folder contains the prompt, artifact manifest, and a prototype-review
 release evidence report. The left project status and preview body also change
 to the saved workspace state. It is still not an order-ready KiCad board. Click
 `Open evidence` in the app to open that folder without finding `%LOCALAPPDATA%`
-by hand. After closing and reopening the app, `Open evidence` recovers the same
-preview folder if it already exists, and the left project pane marks that
-previous preview workspace before another send. The chat transcript also
+by hand; when the release evidence report exists, Windows opens the folder with
+`release-evidence-preview.md` selected. After closing and reopening the app,
+`Open evidence` recovers the same preview folder if it already exists, and the
+left project pane marks that previous preview workspace before another send. The
+chat transcript also
 mentions that recovered workspace, so a returning user can continue from the
 right pane without guessing what happened. See `docs/user-test-guide.md` for the
 user-facing check.

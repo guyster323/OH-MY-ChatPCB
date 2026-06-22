@@ -786,11 +786,33 @@ mod win32_app {
 
         let controls = &*ptr;
         if let Some(path) = &controls.last_workspace_dir {
-            open_evidence_folder(path);
-            set_pipeline_status(controls, "Opened preview evidence folder.");
+            open_evidence_report(path);
+            set_pipeline_status(controls, "Opened preview evidence report.");
         } else {
             set_pipeline_status(controls, "No evidence yet: click Send design first.");
         }
+    }
+
+    unsafe fn open_evidence_report(project_dir: &PathBuf) {
+        let release_report_file = project_dir.join("release-evidence-preview.md");
+        if release_report_file.exists() {
+            open_evidence_report_file(&release_report_file);
+        } else {
+            open_evidence_folder(project_dir);
+        }
+    }
+
+    unsafe fn open_evidence_report_file(report_file: &PathBuf) {
+        let explorer = wide("explorer.exe");
+        let parameters = wide(&format!("/select,\"{}\"", report_file.to_string_lossy()));
+        ShellExecuteW(
+            null_mut(),
+            null(),
+            explorer.as_ptr(),
+            parameters.as_ptr(),
+            null(),
+            SW_SHOW,
+        );
     }
 
     unsafe fn open_evidence_folder(path: &PathBuf) {

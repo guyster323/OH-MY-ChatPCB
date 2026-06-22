@@ -24,11 +24,11 @@ First chat
 10. Confirm the transcript is positioned at the latest response.
 11. Confirm the chat transcript says "Preview workspace saved".
 12. Confirm the large left preview body also shows the saved workspace files.
-13. Click Open evidence to inspect the first-run evidence folder.
+13. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
 14. Close and reopen the app, then click Open evidence before sending again.
 15. Confirm the left project status says "Previous preview workspace found".
 16. Confirm the chat transcript also says "Previous preview workspace found".
-17. Confirm it reopens the same previous preview folder.
+17. Confirm it reopens the same previous preview folder with the report selected.
 18. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 

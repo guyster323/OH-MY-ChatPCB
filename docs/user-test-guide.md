@@ -85,15 +85,16 @@ Expected result:
 18. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
 19. Click `Open evidence`.
-20. Confirm Windows opens the preview evidence folder.
+20. Confirm Windows opens the preview evidence folder with
+    `release-evidence-preview.md` selected.
 21. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
 22. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
 23. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Open evidence`.
-24. Confirm Windows opens the same preview evidence folder from the previous
-    run.
+24. Confirm Windows opens the same previous preview evidence folder with the
+    release evidence report selected.
 25. Confirm the preview evidence folder exists:
 
 ```text

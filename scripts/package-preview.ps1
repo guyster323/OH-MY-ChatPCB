@@ -69,6 +69,7 @@ try {
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
         "- Open evidence button for the saved preview workspace",
+        "- Open evidence selects release report file",
         "- Open evidence recovers previous preview workspace after relaunch",
         "- Relaunch shows previous preview workspace status before another send",
         "- Relaunch mentions previous preview workspace in chat",

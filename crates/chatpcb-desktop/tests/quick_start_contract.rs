@@ -261,6 +261,22 @@ fn native_preview_has_open_evidence_button_for_saved_workspace() {
 }
 
 #[test]
+fn open_evidence_selects_the_release_report_for_non_experts() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("open_evidence_selects_release_report_file"));
+    assert!(main.contains("open_evidence_report"));
+    assert!(main.contains("open_evidence_report_file"));
+    assert!(main.contains("release-evidence-preview.md"));
+    assert!(main.contains("explorer.exe"));
+    assert!(main.contains("/select,"));
+}
+
+#[test]
 fn open_evidence_recovers_previous_preview_workspace_on_launch() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
