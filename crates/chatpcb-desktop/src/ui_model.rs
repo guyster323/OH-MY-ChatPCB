@@ -13,6 +13,7 @@ pub struct ChatActionsContract {
     pub provider_login_reports_cli_status: bool,
     pub left_tabs_update_workspace_status: bool,
     pub left_tabs_update_workspace_preview: bool,
+    pub send_design_appends_chat_transcript: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +36,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         provider_login_reports_cli_status: true,
         left_tabs_update_workspace_status: true,
         left_tabs_update_workspace_preview: true,
+        send_design_appends_chat_transcript: true,
     }
 }
 
@@ -127,6 +129,17 @@ pub fn send_design_transcript(prompt: &str) -> String {
          - Full KiCad fork integration is still required before order-ready files can be trusted.\r\n\
          Status: preview only, not order-ready yet.\r\n"
     )
+}
+
+pub fn append_chat_transcript(existing: &str, next_turn: &str) -> String {
+    if existing.trim().is_empty() {
+        return next_turn.to_string();
+    }
+
+    let mut combined = existing.trim_end_matches(['\r', '\n']).to_string();
+    combined.push_str("\r\n\r\n");
+    combined.push_str(next_turn.trim_start_matches(['\r', '\n']));
+    combined
 }
 
 pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file: &str) -> String {

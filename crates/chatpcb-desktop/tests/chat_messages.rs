@@ -1,9 +1,9 @@
 use chatpcb_desktop::ui_model::{
-    design_pipeline_status, example_loaded_pipeline_status, initial_left_workspace_status,
-    initial_pipeline_status, initial_transcript, left_tab_body, left_tab_status,
-    preview_workspace_body, preview_workspace_left_status, preview_workspace_saved_transcript,
-    provider_login_pipeline_status, provider_login_transcript, selected_provider_model,
-    send_design_transcript, ProviderUiStatus,
+    append_chat_transcript, design_pipeline_status, example_loaded_pipeline_status,
+    initial_left_workspace_status, initial_pipeline_status, initial_transcript, left_tab_body,
+    left_tab_status, preview_workspace_body, preview_workspace_left_status,
+    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
+    selected_provider_model, send_design_transcript, ProviderUiStatus,
 };
 
 #[test]
@@ -84,6 +84,31 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
 
     let transcript = provider_login_transcript(&statuses);
     assert!(transcript.contains("Selected model: claude:auto"));
+}
+
+#[test]
+fn chat_transcript_appends_new_turns_without_erasing_context() {
+    let existing = provider_login_transcript(&[ProviderUiStatus {
+        display_name: "Claude Code".to_string(),
+        available: true,
+        version: Some("2.1.183".to_string()),
+    }]);
+    let next_turn = send_design_transcript("ESP32-S3 board with USB-C and IMU");
+
+    let combined = append_chat_transcript(&existing, &next_turn);
+
+    assert!(combined.contains("Provider Login"));
+    assert!(combined.contains("Claude Code: available"));
+    assert!(combined.contains("User: ESP32-S3 board with USB-C and IMU"));
+    assert!(combined.contains("Assistant: What happened"));
+    assert!(combined.find("Provider Login").unwrap() < combined.find("User: ESP32-S3").unwrap());
+}
+
+#[test]
+fn chat_transcript_append_avoids_empty_history_padding() {
+    let combined = append_chat_transcript("", "User: hello\r\n");
+
+    assert_eq!(combined, "User: hello\r\n");
 }
 
 #[test]

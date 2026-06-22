@@ -92,6 +92,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("git rev-parse --short HEAD"));
     assert!(script.contains("git status --porcelain"));
     assert!(script.contains("Working tree"));
+    assert!(script.contains("Chat transcript append flow"));
     assert!(script.contains("Pipeline status transitions"));
     assert!(script.contains("Preview workspace evidence folder"));
     assert!(script.contains("Left workspace status update"));

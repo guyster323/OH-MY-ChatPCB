@@ -56,6 +56,20 @@ fn first_run_actions_update_the_visible_pipeline_status() {
 }
 
 #[test]
+fn send_design_appends_to_the_existing_chat_transcript() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("send_design_appends_chat_transcript"));
+    assert!(ui_model.contains("append_chat_transcript"));
+    assert!(main.contains("append_chat_transcript"));
+    assert!(main.contains("get_control_text(hwnd, ID_CHAT_TRANSCRIPT"));
+}
+
+#[test]
 fn send_design_creates_a_local_preview_workspace_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

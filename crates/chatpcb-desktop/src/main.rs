@@ -615,11 +615,11 @@ mod win32_app {
         } else {
             prompt.trim()
         };
-        let mut transcript = chatpcb_desktop::ui_model::send_design_transcript(&prompt);
+        let mut turn_transcript = chatpcb_desktop::ui_model::send_design_transcript(&prompt);
         let controls = &mut *ptr;
         match super::create_preview_workspace(prompt_for_workspace, preview_workspace_root()) {
             Ok(workspace) => {
-                transcript.push_str(
+                turn_transcript.push_str(
                     &chatpcb_desktop::ui_model::preview_workspace_saved_transcript(
                         &workspace.project_dir,
                         &workspace.release_report_file,
@@ -637,7 +637,7 @@ mod win32_app {
                 controls.last_workspace_dir = Some(PathBuf::from(&workspace.project_dir));
             }
             Err(error) => {
-                transcript.push_str(
+                turn_transcript.push_str(
                     &chatpcb_desktop::ui_model::preview_workspace_failed_transcript(
                         &error.to_string(),
                     ),
@@ -652,6 +652,10 @@ mod win32_app {
                 );
             }
         }
+        let transcript = chatpcb_desktop::ui_model::append_chat_transcript(
+            &get_control_text(hwnd, ID_CHAT_TRANSCRIPT),
+            &turn_transcript,
+        );
         let transcript = wide(&transcript);
         SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
         set_pipeline_status(

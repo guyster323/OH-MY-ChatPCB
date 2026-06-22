@@ -55,6 +55,7 @@ try {
         "- Native Windows preview shell",
         "- Provider Login local CLI status detection",
         "- Prompt input and Send design transcript flow",
+        "- Chat transcript append flow across Provider Login and Send design",
         "- Pipeline status transitions for first-run actions",
         "- Preview workspace evidence folder creation on Send design",
         "- Left workspace status update after Send design",

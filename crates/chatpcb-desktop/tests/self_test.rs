@@ -50,6 +50,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         contract["chat_actions"]["left_tabs_update_workspace_preview"],
         true
     );
+    assert_eq!(
+        contract["chat_actions"]["send_design_appends_chat_transcript"],
+        true
+    );
     assert_eq!(contract["layout"]["left_ratio"], 0.7);
     assert_eq!(contract["layout"]["right_ratio"], 0.3);
     assert_eq!(
