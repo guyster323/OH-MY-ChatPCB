@@ -129,7 +129,8 @@ mod win32_app {
     use windows_sys::Win32::Graphics::Gdi::{GetStockObject, UpdateWindow, WHITE_BRUSH};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{
-        NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW, TCN_SELCHANGE,
+        EM_SCROLLCARET, EM_SETSEL, NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW,
+        TCN_SELCHANGE,
     };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -656,8 +657,7 @@ mod win32_app {
             &get_control_text(hwnd, ID_CHAT_TRANSCRIPT),
             &turn_transcript,
         );
-        let transcript = wide(&transcript);
-        SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+        set_chat_transcript_text(controls, &transcript);
         set_pipeline_status(
             controls,
             chatpcb_desktop::ui_model::design_pipeline_status(),
@@ -741,15 +741,27 @@ mod win32_app {
         let pipeline_status =
             chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_model);
         set_pipeline_status(controls, &pipeline_status);
-        let transcript = wide(&chatpcb_desktop::ui_model::provider_login_transcript(
-            &statuses,
-        ));
-        SetDlgItemTextW(hwnd, ID_CHAT_TRANSCRIPT as i32, transcript.as_ptr());
+        set_chat_transcript_text(
+            controls,
+            &chatpcb_desktop::ui_model::provider_login_transcript(&statuses),
+        );
     }
 
     unsafe fn set_pipeline_status(controls: &AppControls, status: &str) {
         let status = wide(status);
         SetWindowTextW(controls.pipeline_status, status.as_ptr());
+    }
+
+    unsafe fn set_chat_transcript_text(controls: &AppControls, transcript: &str) {
+        let text = wide(transcript);
+        SetWindowTextW(controls.chat_transcript, text.as_ptr());
+        scroll_chat_transcript_to_latest(controls, transcript);
+    }
+
+    unsafe fn scroll_chat_transcript_to_latest(controls: &AppControls, transcript: &str) {
+        let end = transcript.encode_utf16().count();
+        SendMessageW(controls.chat_transcript, EM_SETSEL, end, end as isize);
+        SendMessageW(controls.chat_transcript, EM_SCROLLCARET, 0, 0);
     }
 
     unsafe fn set_left_workspace_status(controls: &AppControls, status: &str) {

@@ -107,7 +107,8 @@ Login` reports local CLI availability without storing provider credentials, and
 selects the first available local provider in the model selector. `Use example`
 refills the starter prompt after a send. `Send design` appends the prompt and
 assistant response to the existing chat transcript, so Provider Login context
-and earlier messages stay visible. It also saves a local preview workspace under:
+and earlier messages stay visible. The transcript also moves to the latest
+response after updates. It also saves a local preview workspace under:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

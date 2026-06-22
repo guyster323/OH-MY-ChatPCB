@@ -14,6 +14,7 @@ pub struct ChatActionsContract {
     pub left_tabs_update_workspace_status: bool,
     pub left_tabs_update_workspace_preview: bool,
     pub send_design_appends_chat_transcript: bool,
+    pub chat_transcript_scrolls_to_latest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         left_tabs_update_workspace_status: true,
         left_tabs_update_workspace_preview: true,
         send_design_appends_chat_transcript: true,
+        chat_transcript_scrolls_to_latest: true,
     }
 }
 

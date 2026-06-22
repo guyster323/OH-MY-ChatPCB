@@ -70,6 +70,22 @@ fn send_design_appends_to_the_existing_chat_transcript() {
 }
 
 #[test]
+fn chat_transcript_scrolls_to_the_latest_turn_after_updates() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("chat_transcript_scrolls_to_latest"));
+    assert!(main.contains("set_chat_transcript_text"));
+    assert!(main.contains("scroll_chat_transcript_to_latest"));
+    assert!(main.contains("EM_SETSEL"));
+    assert!(main.contains("EM_SCROLLCARET"));
+    assert!(main.contains("controls.chat_transcript"));
+}
+
+#[test]
 fn send_design_creates_a_local_preview_workspace_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

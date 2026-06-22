@@ -70,11 +70,13 @@ Expected result:
    - DRC
    - manufacturing package
 13. Confirm the chat transcript says `Preview workspace saved`.
-14. Confirm the left project status and large left preview body now show
+14. Confirm the chat transcript is positioned at the latest response after the
+    send, so the new design result is visible without manually scrolling down.
+15. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-15. Click `Open evidence`.
-16. Confirm Windows opens the preview evidence folder.
-17. Confirm the preview evidence folder exists:
+16. Click `Open evidence`.
+17. Confirm Windows opens the preview evidence folder.
+18. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

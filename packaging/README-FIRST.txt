@@ -18,10 +18,11 @@ First chat
 4. Type or edit a PCB request in the prompt box.
 5. Click Send design.
 6. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-7. Confirm the chat transcript says "Preview workspace saved".
-8. Confirm the large left preview body also shows the saved workspace files.
-9. Click Open evidence to inspect the first-run evidence folder.
-10. The folder path is:
+7. Confirm the transcript is positioned at the latest response.
+8. Confirm the chat transcript says "Preview workspace saved".
+9. Confirm the large left preview body also shows the saved workspace files.
+10. Click Open evidence to inspect the first-run evidence folder.
+11. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary
