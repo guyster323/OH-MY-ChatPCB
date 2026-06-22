@@ -23,7 +23,7 @@ First chat
 9. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
 10. Confirm the transcript is positioned at the latest response.
 11. Confirm the chat transcript says "Preview workspace saved".
-12. Confirm the large left preview body also shows the saved workspace files.
+12. Confirm the large left preview body also shows the saved KiCad scaffold files.
 13. Click Open evidence to inspect the first-run evidence folder with release-evidence-preview.md selected.
 14. Close and reopen the app, then click Open evidence before sending again.
 15. Confirm the left project status says "Previous preview workspace found".

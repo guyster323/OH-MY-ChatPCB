@@ -147,6 +147,10 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("Preview workspace saved"));
     assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("release-evidence-preview.md"));
+    assert!(transcript.contains("KiCad preview scaffold"));
+    assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
+    assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("not order-ready"));
 }
@@ -227,6 +231,9 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("Preview workspace saved"));
     assert!(body.contains("artifact-manifest.json"));
     assert!(body.contains("release-evidence-preview.md"));
+    assert!(body.contains("chatpcb3-esp32s3.kicad_pro"));
+    assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
 }

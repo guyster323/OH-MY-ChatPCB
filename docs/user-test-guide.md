@@ -106,6 +106,11 @@ Expected files:
 - `prompt.txt`
 - `artifact-manifest.json`
 - `release-evidence-preview.md`
+- `chatpcb3-esp32s3.kicad_pro`
+- `chatpcb3-esp32s3.kicad_sch`
+- `chatpcb3-esp32s3.kicad_pcb`
+- `sym-lib-table`
+- `fp-lib-table`
 
 ## Current Honest Boundary
 
@@ -115,4 +120,5 @@ order readiness. The preview evidence folder is intentionally
 `prototype-review`, not an order-ready manufacturing package.
 
 The next implementation gate is to register the native workspace inside a real
-KiCad 10.0.4 fork and connect `chatpcb-core.exe` to actual KiCad project files.
+KiCad latest-stable fork and connect `chatpcb-core.exe` to actual schematic,
+layout, ERC/DRC, and manufacturing-package generation.

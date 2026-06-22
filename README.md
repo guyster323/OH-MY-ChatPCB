@@ -128,8 +128,11 @@ preview workspace under:
 ```
 
 That folder contains the prompt, artifact manifest, and a prototype-review
-release evidence report. The left project status and preview body also change
-to the saved workspace state. It is still not an order-ready KiCad board. Click
+release evidence report. It also contains the generated KiCad preview scaffold:
+`chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
+`chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
+project status and preview body also change to the saved workspace state. It is
+still not an order-ready KiCad board. Click
 `Open evidence` in the app to open that folder without finding `%LOCALAPPDATA%`
 by hand; when the release evidence report exists, Windows opens the folder with
 `release-evidence-preview.md` selected. After closing and reopening the app,

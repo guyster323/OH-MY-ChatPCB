@@ -168,6 +168,7 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
     format!(
         "Preview workspace saved\r\n\
          - Project folder: {project_dir}\r\n\
+         - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
          - Release evidence: {release_report_file}\r\n\
          Status: prototype-review, not order-ready.\r\n"
     )
@@ -183,6 +184,11 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          Project folder:\r\n\
          {project_dir}\r\n\r\n\
          Files created:\r\n\
+         - chatpcb3-esp32s3.kicad_pro\r\n\
+         - chatpcb3-esp32s3.kicad_sch\r\n\
+         - chatpcb3-esp32s3.kicad_pcb\r\n\
+         - sym-lib-table\r\n\
+         - fp-lib-table\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
          - release-evidence-preview.md\r\n\r\n\

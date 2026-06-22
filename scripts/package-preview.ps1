@@ -65,6 +65,7 @@ try {
         "- Chat transcript latest-turn scrolling after updates",
         "- Pipeline status transitions for first-run actions",
         "- Preview workspace evidence folder creation on Send design",
+        "- KiCad preview scaffold files generated on Send design",
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
@@ -77,7 +78,7 @@ try {
         "",
         "Current boundary:",
         "- Preview only; not order-ready KiCad output yet",
-        "- No real schematic, PCB autoroute, Gerber, BOM, or CPL generation yet",
+        "- No completed schematic, PCB autoroute, Gerber, BOM, or CPL generation yet",
         "- No provider credentials are stored by ChatPCB3"
     )
     Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding ASCII
