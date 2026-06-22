@@ -98,6 +98,10 @@ The zip is written under `dist\` and intentionally ignored by git.
 It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, and `SHA256SUMS.txt`
 beside the two executables and installer scripts.
 
+After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
+workflow also uploads the same zip as an Actions artifact named
+`ChatPCB-KiCad-Preview-windows-x64`.
+
 Run the core manually:
 
 ```powershell

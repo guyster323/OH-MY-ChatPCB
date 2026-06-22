@@ -1,0 +1,40 @@
+name: Build ChatPCB KiCad Preview
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows-preview:
+    name: Windows preview package
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test -- --test-threads=1
+
+      - name: Build preview package
+        shell: pwsh
+        run: .\scripts\package-preview.ps1
+
+      - name: Upload preview package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatPCB-KiCad-Preview-windows-x64
+          path: |
+            dist/ChatPCB-KiCad-Preview-windows-x64.zip
+            dist/ChatPCB-KiCad-Preview-windows-x64/RELEASE-EVIDENCE.txt
+            dist/ChatPCB-KiCad-Preview-windows-x64/SHA256SUMS.txt
+          if-no-files-found: error
