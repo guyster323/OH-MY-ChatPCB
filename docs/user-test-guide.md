@@ -63,6 +63,9 @@ Expected result:
    - Provider Login
    - model selector
    - pipeline status
+   Confirm `Open PCB` and `Open evidence` are disabled before the first preview
+   is saved. Confirm `Open PCB` and `Open evidence` become enabled after
+   `Send design` saves a preview or after a previous preview is recovered.
 9. Confirm the model selector says `built-in-preview` when no local provider is
    ready, or has already picked an available local provider if Codex, Claude
    Code, or Gemini CLI is installed.

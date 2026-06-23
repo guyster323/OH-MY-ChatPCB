@@ -361,6 +361,36 @@ fn native_preview_has_open_evidence_button_for_saved_workspace() {
 }
 
 #[test]
+fn saved_artifact_buttons_are_disabled_until_a_workspace_exists() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("open_saved_artifacts_disabled_until_workspace"));
+    assert!(ui_model.contains("open_saved_artifacts_enabled_after_preview"));
+    assert!(main.contains("set_workspace_action_buttons_enabled"));
+    assert!(main.contains("EnableWindow(controls.open_pcb_button"));
+    assert!(main.contains("EnableWindow(controls.open_evidence_button"));
+    assert!(main.contains(
+        "set_workspace_action_buttons_enabled(&controls, recovered_workspace.is_some())"
+    ));
+
+    let send_design_handler = main
+        .split("unsafe fn handle_send_design")
+        .nth(1)
+        .unwrap()
+        .split("fn run_kicad_pcb_check")
+        .next()
+        .unwrap();
+
+    assert!(send_design_handler.contains("set_workspace_action_buttons_enabled(controls, true)"));
+    assert!(send_design_handler.contains("set_workspace_action_buttons_enabled("));
+    assert!(send_design_handler.contains("controls.last_workspace_dir.is_some()"));
+}
+
+#[test]
 fn open_evidence_selects_the_first_run_summary_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
@@ -476,4 +506,19 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("Computer Use app approval timed out"));
     assert!(guide.contains("Code and installed-package checks still passed"));
     assert!(guide.contains("Do not treat this as fresh GUI control proof"));
+}
+
+#[test]
+fn docs_explain_open_buttons_wait_for_a_saved_preview() {
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+
+    assert!(root_readme
+        .contains("Open PCB` and `Open evidence` stay disabled until a preview workspace exists"));
+    assert!(root_readme.contains("then become enabled after `Send design` saves the preview"));
+    assert!(root_readme.contains("previous"));
+    assert!(root_readme.contains("preview is recovered"));
+    assert!(guide.contains("Confirm `Open PCB` and `Open evidence` are disabled"));
+    assert!(guide.contains("before the first preview"));
+    assert!(guide.contains("Confirm `Open PCB` and `Open evidence` become enabled"));
 }

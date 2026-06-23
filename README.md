@@ -128,7 +128,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
 selector, prompt input, `Use example`, `Send design`, `Open PCB`, and pipeline status.
-The left tabs also show a native preview body, not an empty placeholder. `Provider
+`Open PCB` and `Open evidence` stay disabled until a preview workspace exists,
+then become enabled after `Send design` saves the preview or after a previous
+preview is recovered. The left tabs also show a native preview body, not an
+empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. If no local provider
 is ready yet, the model selector stays on `built-in-preview` and Provider Login

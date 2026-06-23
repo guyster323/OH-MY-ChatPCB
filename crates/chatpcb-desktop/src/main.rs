@@ -127,6 +127,12 @@ fn print_self_test_summary() {
         "Use example must select prompt text so typing immediately overwrites it"
     );
     println!("PASS Use example selects prompt text for immediate overwrite");
+    assert!(
+        chat_actions.open_saved_artifacts_disabled_until_workspace
+            && chat_actions.open_saved_artifacts_enabled_after_preview,
+        "Open PCB/evidence must wait until a preview workspace exists"
+    );
+    println!("PASS Open PCB/evidence wait for a saved preview");
     println!("PASS KiCad preview scaffold and validation reports are wired");
     println!(
         "PASS bundled autorouter contract: {} {}",
@@ -220,7 +226,7 @@ mod win32_app {
         EM_SCROLLCARET, EM_SETSEL, NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW,
         TCN_SELCHANGE,
     };
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VK_RETURN};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus, VK_RETURN};
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
@@ -495,7 +501,7 @@ mod win32_app {
             0,
         );
 
-        AppControls {
+        let controls = AppControls {
             left_pane,
             tabs,
             design_preview,
@@ -509,8 +515,10 @@ mod win32_app {
             open_evidence_button,
             model_choice,
             pipeline_status,
-            last_workspace_dir: recovered_workspace,
-        }
+            last_workspace_dir: recovered_workspace.clone(),
+        };
+        set_workspace_action_buttons_enabled(&controls, recovered_workspace.is_some());
+        controls
     }
 
     unsafe fn child(
@@ -571,6 +579,12 @@ mod win32_app {
 
     unsafe fn focus_prompt_after_action(controls: &AppControls) {
         SetFocus(controls.prompt);
+    }
+
+    unsafe fn set_workspace_action_buttons_enabled(controls: &AppControls, enabled: bool) {
+        let enabled = if enabled { 1 } else { 0 };
+        EnableWindow(controls.open_pcb_button, enabled);
+        EnableWindow(controls.open_evidence_button, enabled);
     }
 
     unsafe fn initialize_provider_model_selection(controls: &AppControls) {
@@ -909,6 +923,7 @@ mod win32_app {
                     );
                 set_design_preview(controls, &preview_body);
                 controls.last_workspace_dir = Some(project_dir);
+                set_workspace_action_buttons_enabled(controls, true);
                 pipeline_after_send =
                     chatpcb_desktop::ui_model::validation_pipeline_status(&validation.summary);
             }
@@ -925,6 +940,10 @@ mod win32_app {
                 set_design_preview(
                     controls,
                     "Preview workspace was not saved.\r\nCheck the chat transcript for the error.\r\nGate: preview only.",
+                );
+                set_workspace_action_buttons_enabled(
+                    controls,
+                    controls.last_workspace_dir.is_some(),
                 );
             }
         }

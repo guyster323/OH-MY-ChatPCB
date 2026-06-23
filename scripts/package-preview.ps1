@@ -78,6 +78,7 @@ try {
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
+        "- Open PCB/evidence waits until a preview workspace exists",
         "- Open evidence button for the saved preview workspace",
         "- Open evidence selects FIRST-RUN-SUMMARY.txt for non-expert review",
         "- Open PCB button launches the generated KiCad PCB preview",
