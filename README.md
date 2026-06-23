@@ -112,8 +112,10 @@ Install ChatPCB KiCad Preview.cmd
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
 shortcut plus Start Menu shortcuts, adds a `First Chat Guide` Start Menu
-shortcut, writes `INSTALL-SELF-TEST.txt` with the installed executable's PASS
-summary, copies `README-FIRST.txt` beside the installed app, and starts the app.
+shortcut, adds a `Run First Chat Smoke Test` shortcut, writes
+`INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
+`INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, copies
+`README-FIRST.txt` beside the installed app, and starts the app.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 
@@ -195,8 +197,9 @@ The zip is written under `dist\` and intentionally ignored by git.
 It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, `SHA256SUMS.txt`, and
 `Run ChatPCB Self Test.cmd` beside the two executables and installer scripts.
 Both the packaged installer and source-tree installer add Start Menu shortcuts
-for the app, `First Chat Guide`, and self-test. A first-run user can verify the
-installed executable contract with a short PASS summary. That summary also
+for the app, `First Chat Guide`, self-test, and `Run First Chat Smoke Test`. A
+first-run user can verify the installed executable contract with a short PASS
+summary. That summary also
 verifies the first-run evidence points back to follow-up chat, blocks JLCPCB
 upload for this preview, keeps the model selector on `built-in-preview` when no
 provider is ready, and prints these first-chat PASS lines:
@@ -210,6 +213,10 @@ PASS Use example selects prompt text for immediate overwrite
 
 The installers also write the same first-run confidence check to
 `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-SELF-TEST.txt`.
+They also run `ChatPCB KiCad Preview.exe --first-chat-smoke` and write
+`%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-FIRST-CHAT-SMOKE.txt`,
+which proves the installed app can turn the starter chat prompt into a saved
+prototype-review preview workspace without provider login.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named

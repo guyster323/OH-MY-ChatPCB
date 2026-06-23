@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::process::Command;
+use std::{fs, process::Command};
 
 #[test]
 fn desktop_self_test_describes_non_web_native_workspace() {
@@ -201,4 +201,47 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("Boundary: prototype-review, not order-ready"));
     assert!(!summary.contains("provider_login_shows_local_cli_login_hints"));
     assert!(!summary.trim_start().starts_with('{'));
+}
+
+#[test]
+fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() {
+    let exe = option_env!("CARGO_BIN_EXE_chatpcb-desktop")
+        .expect("chatpcb-desktop binary must be built by Cargo");
+    let root = std::env::temp_dir().join(format!(
+        "chatpcb3-first-chat-smoke-test-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    let output = Command::new(exe)
+        .arg("--first-chat-smoke")
+        .env("CHATPCB_FIRST_CHAT_SMOKE_ROOT", &root)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let summary = String::from_utf8(output.stdout).unwrap();
+
+    assert!(summary.contains("ChatPCB First Chat Smoke Test"));
+    assert!(summary.contains("PASS beginner prompt accepted"));
+    assert!(summary.contains("PASS preview workspace saved"));
+    assert!(summary.contains("PASS generated KiCad preview scaffold"));
+    assert!(summary.contains("PASS first-run summary points back to follow-up chat"));
+    assert!(summary.contains("PASS first-run summary blocks JLCPCB upload"));
+    assert!(summary.contains("Boundary: prototype-review, not order-ready"));
+    assert!(!summary.trim_start().starts_with('{'));
+
+    let workspace = root.join("chatpcb3-esp32s3-preview");
+    assert!(workspace.join("prompt.txt").exists());
+    assert!(workspace.join("artifact-manifest.json").exists());
+    assert!(workspace.join("chatpcb3-esp32s3.kicad_pro").exists());
+    assert!(workspace.join("chatpcb3-esp32s3.kicad_sch").exists());
+    assert!(workspace.join("chatpcb3-esp32s3.kicad_pcb").exists());
+    let first_run_summary = fs::read_to_string(workspace.join("FIRST-RUN-SUMMARY.txt")).unwrap();
+    assert!(first_run_summary.contains("type a follow-up"));
+    assert!(first_run_summary.contains("Do not upload this preview to JLCPCB"));
+
+    fs::remove_dir_all(&root).unwrap();
 }

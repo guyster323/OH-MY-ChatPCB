@@ -29,6 +29,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\Install ChatPCB KiCad Preview.cmd" -Destination "$stagingRoot\Install ChatPCB KiCad Preview.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$stagingRoot\Uninstall ChatPCB KiCad Preview.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\Run ChatPCB Self Test.cmd" -Destination "$stagingRoot\Run ChatPCB Self Test.cmd"
+    Copy-Item -Force -Path "$repoRoot\packaging\Run First Chat Smoke Test.cmd" -Destination "$stagingRoot\Run First Chat Smoke Test.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\install-from-package.ps1" -Destination "$stagingRoot\install-from-package.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$stagingRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$stagingRoot\README-FIRST.txt"
@@ -65,6 +66,8 @@ try {
         "- Provider Login shows local CLI login hints",
         "- Self-test shortcut for installed package verification",
         "- Installer writes INSTALL-SELF-TEST.txt after copying executables",
+        "- First chat smoke test shortcut for non-expert verification",
+        "- Installer writes INSTALL-FIRST-CHAT-SMOKE.txt after copying executables",
         "- First Chat Guide Start Menu shortcut",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",

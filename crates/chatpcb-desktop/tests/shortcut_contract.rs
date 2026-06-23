@@ -49,6 +49,44 @@ fn packaged_installer_adds_start_menu_self_test_shortcut() {
 }
 
 #[test]
+fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+    let smoke_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Run First Chat Smoke Test.cmd"))
+            .unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("Run First Chat Smoke Test.cmd"));
+        assert!(script.contains("Run First Chat Smoke Test.lnk"));
+        assert!(script.contains("Verify the first ChatPCB chat-to-preview path"));
+        assert!(script.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+        assert!(script.contains("--first-chat-smoke"));
+        assert!(script.contains("First chat smoke test shortcut:"));
+        assert!(script.contains("First chat smoke test:"));
+    }
+
+    assert!(package_script.contains("Run First Chat Smoke Test.cmd"));
+    assert!(package_script.contains("First chat smoke test shortcut"));
+    assert!(package_script.contains("Installer writes INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(smoke_cmd.contains("--first-chat-smoke"));
+    assert!(root_readme.contains("Run First Chat Smoke Test"));
+    assert!(root_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(guide.contains("Run First Chat Smoke Test"));
+    assert!(guide.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(package_readme.contains("Run First Chat Smoke Test"));
+    assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+}
+
+#[test]
 fn source_installer_adds_start_menu_self_test_shortcut() {
     let installer = fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
 
@@ -178,6 +216,7 @@ fn package_script_creates_zip_with_first_run_files() {
     assert!(script.contains("Install ChatPCB KiCad Preview.cmd"));
     assert!(script.contains("Uninstall ChatPCB KiCad Preview.cmd"));
     assert!(script.contains("Run ChatPCB Self Test.cmd"));
+    assert!(script.contains("Run First Chat Smoke Test.cmd"));
     assert!(script.contains("install-from-package.ps1"));
 }
 

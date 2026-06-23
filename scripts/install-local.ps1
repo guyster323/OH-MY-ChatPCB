@@ -21,6 +21,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$InstallRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\Run ChatPCB Self Test.cmd" -Destination "$InstallRoot\Run ChatPCB Self Test.cmd"
+    Copy-Item -Force -Path "$repoRoot\packaging\Run First Chat Smoke Test.cmd" -Destination "$InstallRoot\Run First Chat Smoke Test.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$InstallRoot\README-FIRST.txt"
 
     $installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
@@ -32,6 +33,15 @@ try {
         throw "Installed ChatPCB KiCad Preview self-test did not return the expected summary header."
     }
     $selfTestSummary | Set-Content -Path $installSelfTestPath -Encoding ASCII
+    $installFirstChatSmokePath = Join-Path $InstallRoot "INSTALL-FIRST-CHAT-SMOKE.txt"
+    $firstChatSmokeSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --first-chat-smoke
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed ChatPCB KiCad Preview first chat smoke test failed with exit code $LASTEXITCODE."
+    }
+    if (-not ($firstChatSmokeSummary -match "ChatPCB First Chat Smoke Test")) {
+        throw "Installed ChatPCB KiCad Preview first chat smoke test did not return the expected summary header."
+    }
+    $firstChatSmokeSummary | Set-Content -Path $installFirstChatSmokePath -Encoding ASCII
 
     $shell = New-Object -ComObject WScript.Shell
     $desktopPath = $shell.SpecialFolders.Item('Desktop')
@@ -64,6 +74,12 @@ try {
     $selfTestShortcut.WorkingDirectory = $InstallRoot
     $selfTestShortcut.Description = "Verify the ChatPCB KiCad Preview installation"
     $selfTestShortcut.Save()
+    $firstChatSmokeShortcutPath = Join-Path $startMenuPath "Run First Chat Smoke Test.lnk"
+    $firstChatSmokeShortcut = $shell.CreateShortcut($firstChatSmokeShortcutPath)
+    $firstChatSmokeShortcut.TargetPath = "$InstallRoot\Run First Chat Smoke Test.cmd"
+    $firstChatSmokeShortcut.WorkingDirectory = $InstallRoot
+    $firstChatSmokeShortcut.Description = "Verify the first ChatPCB chat-to-preview path"
+    $firstChatSmokeShortcut.Save()
     $firstGuideShortcutPath = Join-Path $startMenuPath "First Chat Guide.lnk"
     $firstGuideShortcut = $shell.CreateShortcut($firstGuideShortcutPath)
     $firstGuideShortcut.TargetPath = "$InstallRoot\README-FIRST.txt"
@@ -75,8 +91,10 @@ try {
     Write-Host "Desktop shortcut: $shortcutPath"
     Write-Host "Start menu shortcut: $startShortcutPath"
     Write-Host "Self-test shortcut: $selfTestShortcutPath"
+    Write-Host "First chat smoke test shortcut: $firstChatSmokeShortcutPath"
     Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
     Write-Host "Install self-test: $installSelfTestPath"
+    Write-Host "First chat smoke test: $installFirstChatSmokePath"
     Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
 
     if ($Launch) {

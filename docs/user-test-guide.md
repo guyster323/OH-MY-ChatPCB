@@ -30,11 +30,14 @@ Expected result:
 - `INSTALL-SELF-TEST.txt` is written into the same folder with the installed
   executable's PASS summary, including
   `PASS Open PCB/evidence wait for a saved preview`.
+- `INSTALL-FIRST-CHAT-SMOKE.txt` is written into the same folder with the
+  installed executable's chat-to-preview smoke summary.
 - `README-FIRST.txt` is copied beside the installed app for the first chat
   steps.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.
+- The Start Menu folder includes `Run First Chat Smoke Test`.
 - The Start Menu folder includes `First Chat Guide`.
 - Running `Run ChatPCB Self Test` prints a short PASS summary with
   `PASS Provider Login shows local CLI login hints` and
@@ -44,6 +47,9 @@ Expected result:
   `PASS Send design returns focus for follow-up chat` and
   `PASS Use example selects prompt text for immediate overwrite` and
   `Boundary: prototype-review, not order-ready`.
+- Running `Run First Chat Smoke Test` prints `ChatPCB First Chat Smoke Test`,
+  `PASS preview workspace saved`, and
+  `PASS first-run summary blocks JLCPCB upload`.
 - The app starts automatically.
 
 ## First Run
@@ -161,7 +167,8 @@ Expected files:
 ## Computer Use Verification Status
 
 Checked on 2026-06-23 after installing the current preview package and retrying
-Computer Use launch.
+Computer Use launch. Retried again after commit `a75b3ee`; launch still stopped
+at the same approval timeout before a window could be captured.
 
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
 - Computer Use `launch_app` stopped at `Computer Use app approval timed out`

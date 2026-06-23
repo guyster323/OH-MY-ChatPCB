@@ -5,7 +5,7 @@ use chatpcb_core::project::create_preview_workspace;
 use chatpcb_core::provider::catalog_with_probe;
 use chatpcb_desktop::ui_model::chat_actions_contract;
 use serde::Serialize;
-use std::{fs, process::Command};
+use std::{fs, path::PathBuf, process::Command};
 
 #[derive(Debug, Serialize)]
 struct DesktopSelfTest {
@@ -36,6 +36,11 @@ struct ChatTranscriptContract {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--first-chat-smoke") {
+        print_first_chat_smoke();
+        return;
+    }
+
     if std::env::args().any(|arg| arg == "--self-test-summary") {
         print_self_test_summary();
         return;
@@ -173,6 +178,66 @@ fn print_self_test_summary() {
     println!("PASS first-run evidence blocks JLCPCB upload");
     println!("Board: {}", spec.product_name);
     println!("Boundary: prototype-review, not order-ready");
+}
+
+fn print_first_chat_smoke() {
+    let prompt = chatpcb_desktop::ui_model::example_board_prompt();
+    let root = first_chat_smoke_root();
+    let workspace = create_preview_workspace(prompt, &root)
+        .expect("first chat smoke test must create a preview workspace");
+    let first_run_summary = fs::read_to_string(&workspace.first_run_summary_file)
+        .expect("first chat smoke test must read FIRST-RUN-SUMMARY.txt");
+
+    assert!(
+        !prompt.trim().is_empty(),
+        "first chat smoke test prompt must not be empty"
+    );
+    assert!(
+        workspace
+            .files
+            .iter()
+            .any(|file| file.ends_with(".kicad_pro"))
+            && workspace
+                .files
+                .iter()
+                .any(|file| file.ends_with(".kicad_sch"))
+            && workspace
+                .files
+                .iter()
+                .any(|file| file.ends_with(".kicad_pcb")),
+        "first chat smoke test must write KiCad preview scaffold files"
+    );
+    assert!(
+        first_run_summary.contains("type a follow-up"),
+        "first chat smoke test summary must point users back to follow-up chat"
+    );
+    assert!(
+        first_run_summary.contains("Do not upload this preview to JLCPCB"),
+        "first chat smoke test summary must block JLCPCB upload"
+    );
+
+    println!("ChatPCB First Chat Smoke Test");
+    println!("PASS beginner prompt accepted");
+    println!("PASS preview workspace saved");
+    println!("PASS generated KiCad preview scaffold");
+    println!("PASS first-run summary points back to follow-up chat");
+    println!("PASS first-run summary blocks JLCPCB upload");
+    println!("Prompt: {prompt}");
+    println!("Workspace: {}", workspace.project_dir);
+    println!("Evidence: {}", workspace.first_run_summary_file);
+    println!("Boundary: prototype-review, not order-ready");
+}
+
+fn first_chat_smoke_root() -> PathBuf {
+    if let Some(root) = std::env::var_os("CHATPCB_FIRST_CHAT_SMOKE_ROOT") {
+        return PathBuf::from(root);
+    }
+
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("ChatPCB3")
+        .join("FirstChatSmoke")
 }
 
 struct EvidenceSummaryContract {

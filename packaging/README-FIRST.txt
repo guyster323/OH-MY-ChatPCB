@@ -9,9 +9,11 @@ Install
 2. A desktop shortcut named "ChatPCB KiCad Preview" will be created.
 3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
 4. A Start Menu shortcut named "Run ChatPCB Self Test" will be created.
-5. A Start Menu shortcut named "First Chat Guide" will be created.
-6. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
-7. The app starts after installation.
+5. A Start Menu shortcut named "Run First Chat Smoke Test" will be created.
+6. A Start Menu shortcut named "First Chat Guide" will be created.
+7. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
+8. INSTALL-FIRST-CHAT-SMOKE.txt will be written beside the installed app with the chat-to-preview smoke result.
+9. The app starts after installation.
 
 Self-test
 ---------
@@ -24,6 +26,10 @@ installed executable prints a short PASS summary. It should include
 "PASS Send design returns focus for follow-up chat" and
 "PASS first-run evidence blocks JLCPCB upload" and
 "Boundary: prototype-review, not order-ready".
+
+Open "Run First Chat Smoke Test" to verify the installed app can turn the
+starter chat prompt into a saved preview workspace without provider login. It
+should also match INSTALL-FIRST-CHAT-SMOKE.txt beside the installed app.
 
 First chat
 ----------
