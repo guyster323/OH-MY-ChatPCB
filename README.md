@@ -161,7 +161,7 @@ upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
 folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
 those local reports are clear, the bottom pipeline status says
-`Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review.`
+`Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
 It is still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
 see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,

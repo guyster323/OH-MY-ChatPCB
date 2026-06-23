@@ -205,10 +205,11 @@ fn validation_pipeline_status_keeps_next_actions_visible_for_non_experts() {
 
     assert_eq!(
         status,
-        "Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review."
+        "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."
     );
     assert!(status.contains("Open PCB"));
-    assert!(status.contains("Open evidence"));
+    assert!(status.contains("evidence"));
+    assert!(status.contains("type a follow-up"));
     assert!(status.contains("prototype-review"));
     assert!(
         status.len() <= 90,

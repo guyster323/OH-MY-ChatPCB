@@ -100,7 +100,7 @@ Expected result:
     `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
     `kicad-validation-summary.txt`.
 22. Confirm the bottom pipeline status stays short and says
-    `Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review.`
+    `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
     when local ERC/DRC reports are clear.
 23. Click `Open PCB`.
 24. Confirm the bottom status says either `Opened preview PCB in KiCad PCB

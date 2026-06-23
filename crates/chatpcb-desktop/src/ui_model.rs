@@ -136,7 +136,7 @@ pub fn validation_pipeline_status(validation_summary: &str) -> String {
     if validation_summary.contains("ERC: 0 errors, 0 warnings")
         && validation_summary.contains("DRC: 0 errors, 0 warnings, 0 unconnected")
     {
-        return "Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review."
+        return "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."
             .to_string();
     }
 
