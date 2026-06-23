@@ -88,7 +88,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
 }
 
 pub fn initial_left_workspace_status() -> &'static str {
-    "Schematic: preview target file chatpcb3-esp32s3.kicad_sch. Native KiCad editor embedding is next."
+    "Schematic: Type a board idea, then press Enter to create chatpcb3-esp32s3.kicad_sch."
 }
 
 pub fn left_tab_status(index: usize) -> &'static str {
@@ -104,10 +104,10 @@ pub fn left_tab_status(index: usize) -> &'static str {
 pub fn left_tab_body(index: usize) -> &'static str {
     match index {
         0 => "Schematic Preview\r\n\
-              - Target board: ESP32-S3 USB-C sensor board.\r\n\
-              - Planned nets: USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, and I2C_SDA.\r\n\
-              - Native KiCad schematic embedding is the next fork milestone.\r\n\
-              - This preview is safe for first-run orientation, not order-ready evidence.",
+              - Type a board idea on the right, then press Enter.\r\n\
+              - Target: ESP32-S3 USB-C sensor board.\r\n\
+              - Nets: USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, I2C_SDA.\r\n\
+              - Gate: prototype-review, not order-ready.",
         1 => "PCB Layout Preview\r\n\
               - A 50mm x 50mm Edge.Cuts board outline is generated for visual orientation.\r\n\
               - Component placement and Freerouting route data are not generated yet.\r\n\
@@ -127,7 +127,7 @@ pub fn left_tab_body(index: usize) -> &'static str {
 }
 
 pub fn initial_pipeline_status() -> &'static str {
-    "Ready: check provider, edit prompt, then press Enter or Send design."
+    "Ready: type a board idea, then press Enter."
 }
 
 pub fn example_loaded_pipeline_status() -> &'static str {
@@ -194,9 +194,8 @@ pub fn example_board_prompt() -> &'static str {
 
 pub fn initial_transcript() -> String {
     "Welcome to ChatPCB KiCad Preview\r\n\
-     Type a board idea, then press Enter or Send design.\r\n\
-     built-in-preview works before Provider Login.\r\n\
-     Saved evidence is prototype-review only, not JLCPCB order-ready.\r\n"
+     Type a board idea in Chat prompt, then press Enter.\r\n\
+     Provider Login is optional; built-in-preview creates prototype-review evidence, not JLCPCB order-ready files.\r\n"
         .to_string()
 }
 

@@ -21,16 +21,18 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
         .count();
 
     assert!(transcript.contains("Welcome to ChatPCB KiCad Preview"));
-    assert!(transcript.contains("Type a board idea"));
+    assert!(transcript.contains("Type a board idea in Chat prompt, then press Enter."));
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("built-in-preview"));
-    assert!(transcript.contains("Send design"));
+    assert!(transcript.contains("optional"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("JLCPCB"));
     assert!(
-        non_empty_lines <= 4,
+        non_empty_lines <= 3,
         "first-run chat should stay concise, got {non_empty_lines} lines: {transcript}"
     );
+    assert!(!transcript.contains("works before"));
+    assert!(!transcript.contains("Saved evidence"));
     assert!(!transcript.contains("Click Open PCB"));
     assert!(!transcript.contains("Click Use example"));
     assert!(!transcript.contains("KiCad 10 when installed"));
@@ -233,7 +235,7 @@ fn chat_transcript_append_avoids_empty_history_padding() {
 fn pipeline_status_text_tracks_the_first_run_actions() {
     assert_eq!(
         initial_pipeline_status(),
-        "Ready: check provider, edit prompt, then press Enter or Send design."
+        "Ready: type a board idea, then press Enter."
     );
     assert_eq!(
         example_loaded_pipeline_status(),
@@ -324,8 +326,9 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
 #[test]
 fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
     assert!(initial_left_workspace_status().contains("Schematic"));
+    assert!(initial_left_workspace_status().contains("Type a board idea"));
     assert!(initial_left_workspace_status().contains("chatpcb3-esp32s3.kicad_sch"));
-    assert!(initial_left_workspace_status().contains("Native KiCad editor embedding"));
+    assert!(!initial_left_workspace_status().contains("Native KiCad editor embedding"));
 
     let status = preview_workspace_left_status(
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
@@ -363,10 +366,18 @@ fn left_tab_status_describes_each_current_project_view() {
 #[test]
 fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     let schematic = left_tab_body(0);
+    let schematic_lines = schematic
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
     assert!(schematic.contains("Schematic"));
     assert!(schematic.contains("ESP32-S3"));
     assert!(schematic.contains("USB-C"));
-    assert!(schematic.contains("nets"));
+    assert!(schematic.contains("I2C_SCL"));
+    assert!(schematic.contains("Type a board idea"));
+    assert!(schematic.contains("not order-ready"));
+    assert!(schematic_lines <= 5);
+    assert!(!schematic.contains("Native KiCad schematic embedding"));
 
     let pcb = left_tab_body(1);
     assert!(pcb.contains("PCB Layout"));
