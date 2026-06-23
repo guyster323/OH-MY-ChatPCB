@@ -199,8 +199,15 @@ for the app, `First Chat Guide`, and self-test. A first-run user can verify the
 installed executable contract with a short PASS summary. That summary also
 verifies the first-run evidence points back to follow-up chat, blocks JLCPCB
 upload for this preview, keeps the model selector on `built-in-preview` when no
-provider is ready, and prints
-`PASS Use example selects prompt text for immediate overwrite`.
+provider is ready, and prints these first-chat PASS lines:
+
+```text
+PASS app launch focuses the prompt for immediate first chat
+PASS pressing Enter sends the first design
+PASS Send design returns focus for follow-up chat
+PASS Use example selects prompt text for immediate overwrite
+```
+
 The installers also write the same first-run confidence check to
 `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-SELF-TEST.txt`.
 

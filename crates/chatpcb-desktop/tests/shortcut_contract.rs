@@ -78,6 +78,9 @@ fn installers_write_install_self_test_summary_for_first_run_confidence() {
     assert!(root_readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(guide.contains("INSTALL-SELF-TEST.txt"));
     assert!(guide.contains("PASS Open PCB/evidence wait for a saved preview"));
+    assert!(guide.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(guide.contains("PASS pressing Enter sends the first design"));
+    assert!(guide.contains("PASS Send design returns focus for follow-up chat"));
 }
 
 #[test]
@@ -186,6 +189,9 @@ fn package_first_readme_matches_current_validation_status_copy() {
         .contains("Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."));
     assert!(readme.contains("The example text is selected, so typing replaces it."));
     assert!(readme.contains("INSTALL-SELF-TEST.txt"));
+    assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(readme.contains("PASS pressing Enter sends the first design"));
+    assert!(readme.contains("PASS Send design returns focus for follow-up chat"));
     assert!(!readme.contains("Validated: ERC/DRC clear. Next: Open PCB or Open evidence."));
 }
 
@@ -197,6 +203,9 @@ fn root_readme_matches_current_self_test_shortcut_paths() {
     assert!(readme.contains("Start Menu shortcuts"));
     assert!(readme.contains("First Chat Guide"));
     assert!(readme.contains("self-test"));
+    assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(readme.contains("PASS pressing Enter sends the first design"));
+    assert!(readme.contains("PASS Send design returns focus for follow-up chat"));
     assert!(readme.contains("PASS Use example selects prompt text for immediate overwrite"));
     assert!(!readme.contains("The packaged installer also adds a Start Menu self-test shortcut"));
 }
@@ -205,6 +214,9 @@ fn root_readme_matches_current_self_test_shortcut_paths() {
 fn user_test_guide_mentions_prompt_overwrite_self_test_line() {
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
 
+    assert!(guide.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(guide.contains("PASS pressing Enter sends the first design"));
+    assert!(guide.contains("PASS Send design returns focus for follow-up chat"));
     assert!(guide.contains("PASS Use example selects prompt text for immediate overwrite"));
 }
 

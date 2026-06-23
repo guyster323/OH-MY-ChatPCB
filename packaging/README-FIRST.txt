@@ -19,6 +19,9 @@ Open the Start Menu folder and click "Run ChatPCB Self Test" to verify the
 installed executable prints a short PASS summary. It should include
 "PASS Provider Login shows local CLI login hints" and
 "PASS model selector falls back to built-in preview" and
+"PASS app launch focuses the prompt for immediate first chat" and
+"PASS pressing Enter sends the first design" and
+"PASS Send design returns focus for follow-up chat" and
 "PASS first-run evidence blocks JLCPCB upload" and
 "Boundary: prototype-review, not order-ready".
 

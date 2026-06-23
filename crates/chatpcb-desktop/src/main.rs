@@ -121,6 +121,21 @@ fn print_self_test_summary() {
         "model selector must fall back to built-in preview when no provider is ready"
     );
     println!("PASS model selector falls back to built-in preview");
+    assert!(
+        chat_actions.app_launch_focuses_prompt_input,
+        "app launch must focus the prompt so first-run users can type immediately"
+    );
+    println!("PASS app launch focuses the prompt for immediate first chat");
+    assert!(
+        chat_actions.prompt_enter_sends_design,
+        "Enter must send the first design through the native chat path"
+    );
+    println!("PASS pressing Enter sends the first design");
+    assert!(
+        chat_actions.send_design_returns_focus_to_prompt,
+        "Send design must return focus to the prompt for follow-up chat"
+    );
+    println!("PASS Send design returns focus for follow-up chat");
     println!("PASS first chat can create the built-in ESP32-S3 preview");
     assert!(
         chat_actions.use_example_selects_prompt_for_overwrite,

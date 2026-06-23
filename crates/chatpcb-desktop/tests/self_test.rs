@@ -190,6 +190,9 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS native Windows app"));
     assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
     assert!(summary.contains("PASS model selector falls back to built-in preview"));
+    assert!(summary.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(summary.contains("PASS pressing Enter sends the first design"));
+    assert!(summary.contains("PASS Send design returns focus for follow-up chat"));
     assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
     assert!(summary.contains("PASS Use example selects prompt text for immediate overwrite"));
     assert!(summary.contains("PASS Open PCB/evidence wait for a saved preview"));
