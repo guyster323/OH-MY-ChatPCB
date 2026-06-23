@@ -1273,7 +1273,7 @@ mod win32_app {
             controls,
             chatpcb_desktop::ui_model::example_loaded_pipeline_status(),
         );
-        focus_prompt_after_action(controls);
+        focus_prompt_for_first_chat(controls);
     }
 
     unsafe fn handle_provider_login(hwnd: HWND) {

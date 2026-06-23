@@ -38,6 +38,25 @@ fn use_example_returns_focus_to_the_prompt_for_immediate_editing() {
 }
 
 #[test]
+fn use_example_selects_the_example_for_immediate_overwrite() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+    let use_example_handler = main
+        .split("unsafe fn handle_use_example")
+        .nth(1)
+        .unwrap()
+        .split("unsafe fn handle_provider_login")
+        .next()
+        .unwrap();
+
+    assert!(ui_model.contains("use_example_selects_prompt_for_overwrite"));
+    assert!(use_example_handler.contains("focus_prompt_for_first_chat(controls)"));
+}
+
+#[test]
 fn provider_login_updates_model_selector_to_available_cli() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
