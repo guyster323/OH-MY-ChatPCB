@@ -42,6 +42,22 @@ try {
         throw "Installed ChatPCB KiCad Preview first chat smoke test did not return the expected summary header."
     }
     $firstChatSmokeSummary | Set-Content -Path $installFirstChatSmokePath -Encoding ASCII
+    $installReadyPath = Join-Path $InstallRoot "INSTALL-READY.txt"
+    $installReady = @(
+        "ChatPCB KiCad Preview is installed.",
+        "",
+        "Start here:",
+        "1. Open ChatPCB KiCad Preview.",
+        "2. Type a board idea in Chat prompt, then press Enter.",
+        "3. Click Open evidence after the preview is saved.",
+        "",
+        "Verification written during install:",
+        "- INSTALL-SELF-TEST.txt",
+        "- INSTALL-FIRST-CHAT-SMOKE.txt",
+        "",
+        "Boundary: prototype-review, not order-ready."
+    )
+    $installReady | Set-Content -Path $installReadyPath -Encoding ASCII
 
     $shell = New-Object -ComObject WScript.Shell
     $desktopPath = $shell.SpecialFolders.Item('Desktop')
@@ -95,6 +111,7 @@ try {
     Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
     Write-Host "Install self-test: $installSelfTestPath"
     Write-Host "First chat smoke test: $installFirstChatSmokePath"
+    Write-Host "Install ready summary: $installReadyPath"
     Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
 
     if ($Launch) {

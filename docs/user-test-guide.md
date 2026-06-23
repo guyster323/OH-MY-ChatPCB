@@ -32,6 +32,9 @@ Expected result:
   `PASS Open PCB/evidence wait for a saved preview`.
 - `INSTALL-FIRST-CHAT-SMOKE.txt` is written into the same folder with the
   installed executable's chat-to-preview smoke summary.
+- `INSTALL-READY.txt` is written into the same folder with
+  `Type a board idea in Chat prompt, then press Enter.` and the
+  `prototype-review` boundary.
 - `README-FIRST.txt` is copied beside the installed app for the first chat
   steps.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.

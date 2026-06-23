@@ -70,11 +70,14 @@ try {
 
     $firstReadme = Get-Content -Raw -Path $firstReadmePath
     Assert-Contains $firstReadme "First chat" "README-FIRST.txt must explain the first chat path."
+    Assert-Contains $firstReadme "INSTALL-READY.txt" "README-FIRST.txt must mention the install-ready summary."
     Assert-Contains $firstReadme "Boundary: prototype-review, not order-ready" "README-FIRST.txt must preserve the preview boundary."
 
     $installer = Get-Content -Raw -Path $installerPath
     Assert-Contains $installer "First Chat Guide.lnk" "Packaged installer must create the First Chat Guide Start Menu shortcut."
     Assert-Contains $installer "README-FIRST.txt" "Packaged installer must copy README-FIRST.txt beside the installed app."
+    Assert-Contains $installer "INSTALL-READY.txt" "Packaged installer must write the install-ready summary."
+    Assert-Contains $installer "Type a board idea in Chat prompt, then press Enter." "Install-ready summary must tell a first-run user how to start."
 
     if ($CheckRemoteHead) {
         $remoteHead = (git ls-remote origin refs/heads/main).Trim()

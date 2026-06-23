@@ -13,7 +13,8 @@ Install
 6. A Start Menu shortcut named "First Chat Guide" will be created.
 7. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
 8. INSTALL-FIRST-CHAT-SMOKE.txt will be written beside the installed app with the chat-to-preview smoke result.
-9. The app starts after installation.
+9. INSTALL-READY.txt will be written beside the installed app with "Type a board idea in Chat prompt, then press Enter."
+10. The app starts after installation.
 
 Self-test
 ---------
@@ -85,6 +86,7 @@ order-ready KiCad PCB files.
 
 Evidence files
 --------------
+- INSTALL-READY.txt says where to start after install and keeps the Boundary: prototype-review, not order-ready.
 - RELEASE-EVIDENCE.txt records the source commit and package contents.
 - SHA256SUMS.txt records hashes for the packaged files.
 - INSTALL-SELF-TEST.txt in the installed app folder records the installed executable PASS summary.

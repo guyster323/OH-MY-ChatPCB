@@ -70,6 +70,7 @@ try {
         "- Installer writes INSTALL-SELF-TEST.txt after copying executables",
         "- First chat smoke test shortcut for non-expert verification",
         "- Installer writes INSTALL-FIRST-CHAT-SMOKE.txt after copying executables",
+        "- Installer writes INSTALL-READY.txt with immediate first-chat instructions",
         "- First Chat Guide Start Menu shortcut",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",

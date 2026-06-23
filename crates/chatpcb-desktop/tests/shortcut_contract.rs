@@ -157,6 +157,37 @@ fn installers_write_install_self_test_summary_for_first_run_confidence() {
 }
 
 #[test]
+fn installers_write_install_ready_summary_for_non_experts() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("INSTALL-READY.txt"));
+        assert!(script.contains("Type a board idea in Chat prompt, then press Enter."));
+        assert!(script.contains("INSTALL-SELF-TEST.txt"));
+        assert!(script.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+        assert!(script.contains("Boundary: prototype-review, not order-ready."));
+        assert!(script.contains("Install ready summary:"));
+    }
+
+    assert!(package_script.contains("Installer writes INSTALL-READY.txt"));
+    assert!(root_readme.contains("INSTALL-READY.txt"));
+    assert!(guide.contains("INSTALL-READY.txt"));
+    assert!(package_readme.contains("INSTALL-READY.txt"));
+    assert!(root_readme.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(guide.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(package_readme.contains("Type a board idea in Chat prompt, then press Enter."));
+}
+
+#[test]
 fn installers_copy_first_chat_readme_next_to_installed_app() {
     let source_installer =
         fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();

@@ -122,8 +122,9 @@ into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
 shortcut plus Start Menu shortcuts, adds a `First Chat Guide` Start Menu
 shortcut, adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
-`INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, copies
-`README-FIRST.txt` beside the installed app, and starts the app.
+`INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, writes
+`INSTALL-READY.txt` with `Type a board idea in Chat prompt, then press Enter.`,
+copies `README-FIRST.txt` beside the installed app, and starts the app.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 
@@ -248,6 +249,9 @@ evidence and a next-action checklist before opening the full app. The saved
 preview workspace includes `BEGINNER-NEXT-STEPS.txt`,
 `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
 `manufacturing-readiness-preview.txt`.
+The installed folder also includes `INSTALL-READY.txt`, a one-screen start
+summary that says `Type a board idea in Chat prompt, then press Enter.` and
+points back to the install self-test and first-chat smoke files.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named
