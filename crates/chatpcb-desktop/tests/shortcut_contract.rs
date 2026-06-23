@@ -122,6 +122,23 @@ fn package_first_readme_matches_current_validation_status_copy() {
 }
 
 #[test]
+fn root_readme_matches_current_self_test_shortcut_paths() {
+    let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+
+    assert!(readme.contains("Both the packaged installer and source-tree installer"));
+    assert!(readme.contains("self-test shortcut"));
+    assert!(readme.contains("PASS Use example selects prompt text for immediate overwrite"));
+    assert!(!readme.contains("The packaged installer also adds a Start Menu self-test shortcut"));
+}
+
+#[test]
+fn user_test_guide_mentions_prompt_overwrite_self_test_line() {
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+
+    assert!(guide.contains("PASS Use example selects prompt text for immediate overwrite"));
+}
+
+#[test]
 fn package_script_writes_release_evidence_and_hashes() {
     let script = fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
 

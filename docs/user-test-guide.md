@@ -33,6 +33,7 @@ Expected result:
 - Running `Run ChatPCB Self Test` prints a short PASS summary with
   `PASS Provider Login shows local CLI login hints` and
   `PASS model selector falls back to built-in preview` and
+  `PASS Use example selects prompt text for immediate overwrite` and
   `Boundary: prototype-review, not order-ready`.
 - The app starts automatically.
 
