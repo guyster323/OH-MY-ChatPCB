@@ -115,6 +115,26 @@ fn send_design_appends_to_the_existing_chat_transcript() {
 }
 
 #[test]
+fn send_design_returns_focus_to_the_prompt_for_follow_up_chat() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("send_design_returns_focus_to_prompt"));
+    let send_design_handler = main
+        .split("unsafe fn handle_send_design")
+        .nth(1)
+        .unwrap()
+        .split("fn run_kicad_pcb_check")
+        .next()
+        .unwrap();
+    assert!(send_design_handler.contains("SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr())"));
+    assert!(send_design_handler.contains("focus_prompt_after_action(controls)"));
+}
+
+#[test]
 fn provider_login_appends_to_the_existing_chat_transcript() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

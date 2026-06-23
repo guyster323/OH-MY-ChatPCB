@@ -90,34 +90,36 @@ Expected result:
 16. Confirm the chat transcript says `Preview workspace saved`.
 17. Confirm the chat transcript is positioned at the latest response after the
     send, so the new design result is visible without manually scrolling down.
-18. Confirm the left project status and large left preview body now show
+18. Without clicking back inside the prompt box, type another short follow-up
+    request and confirm it appears in the prompt input.
+19. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-19. Confirm the chat transcript and large left preview body mention the
+20. Confirm the chat transcript and large left preview body mention the
     `KiCad CLI check` and `kicad-pcb-check.txt`.
-20. Confirm the chat transcript and large left preview body mention
+21. Confirm the chat transcript and large left preview body mention
     `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
     `kicad-validation-summary.txt`.
-21. Confirm the bottom pipeline status stays short and says
+22. Confirm the bottom pipeline status stays short and says
     `Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review.`
     when local ERC/DRC reports are clear.
-22. Click `Open PCB`.
-23. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
+23. Click `Open PCB`.
+24. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
     Editor.` or `Opened preview PCB file. Install KiCad 10 if PCB Editor did
     not open.`
-24. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
+25. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
     and the board preview contains a 50mm x 50mm `Edge.Cuts` outline.
-25. Click `Open evidence`.
-26. Confirm Windows opens the preview evidence folder with
+26. Click `Open evidence`.
+27. Confirm Windows opens the preview evidence folder with
     `FIRST-RUN-SUMMARY.txt` selected.
-27. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
+28. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
-28. Confirm the left project status says `Previous preview workspace found`
+29. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
-29. Confirm the chat transcript also says `Previous preview workspace found`
+30. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Open evidence` and `Open PCB`.
-30. Confirm Windows opens the same previous preview evidence folder with the
+31. Confirm Windows opens the same previous preview evidence folder with the
     first-run summary selected.
-31. Confirm the preview evidence folder exists:
+32. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

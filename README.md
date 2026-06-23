@@ -52,6 +52,8 @@ Implemented in this first vertical slice:
   full report summary.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
+- After `Send design`, the prompt is cleared and focus returns to the prompt so
+  a follow-up chat can be typed immediately.
 - On app launch, the starter prompt is focused and selected so a first-run user
   can type immediately, then press Enter.
 - On app launch, the model selector checks local CLI availability and selects
@@ -140,8 +142,9 @@ without another click. On launch, the starter prompt is already selected, so
 typing replaces it immediately. Pressing Enter in the prompt input or clicking
 `Send design` appends the prompt and assistant response to the existing chat
 transcript, so Provider Login context and earlier messages stay visible. The
-transcript also moves to the latest response after updates. It also saves a local
-preview workspace under:
+transcript also moves to the latest response after updates, clears the prompt,
+and returns focus to the prompt so a follow-up chat can be typed immediately.
+It also saves a local preview workspace under:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

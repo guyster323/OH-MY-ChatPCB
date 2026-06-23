@@ -876,6 +876,7 @@ mod win32_app {
         set_pipeline_status(controls, &pipeline_after_send);
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());
+        focus_prompt_after_action(controls);
     }
 
     fn run_kicad_pcb_check(project_dir: &PathBuf) -> PcbCheckUiResult {
