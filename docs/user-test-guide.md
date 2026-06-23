@@ -30,6 +30,8 @@ Expected result:
 - `INSTALL-SELF-TEST.txt` is written into the same folder with the installed
   executable's PASS summary, including
   `PASS Open PCB/evidence wait for a saved preview`.
+- `README-FIRST.txt` is copied beside the installed app for the first chat
+  steps.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.

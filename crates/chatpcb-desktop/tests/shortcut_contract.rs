@@ -81,6 +81,25 @@ fn installers_write_install_self_test_summary_for_first_run_confidence() {
 }
 
 #[test]
+fn installers_copy_first_chat_readme_next_to_installed_app() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("README-FIRST.txt"));
+        assert!(script.contains("First chat guide:"));
+    }
+
+    assert!(root_readme.contains("README-FIRST.txt"));
+    assert!(root_readme.contains("installed app"));
+    assert!(guide.contains("`README-FIRST.txt` is copied beside the installed app"));
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();

@@ -112,7 +112,8 @@ Install ChatPCB KiCad Preview.cmd
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
 shortcut plus Start Menu shortcuts, writes `INSTALL-SELF-TEST.txt` with the
-installed executable's PASS summary, and starts the app.
+installed executable's PASS summary, copies `README-FIRST.txt` beside the
+installed app, and starts the app.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 

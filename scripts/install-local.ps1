@@ -21,6 +21,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$InstallRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\Run ChatPCB Self Test.cmd" -Destination "$InstallRoot\Run ChatPCB Self Test.cmd"
+    Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$InstallRoot\README-FIRST.txt"
 
     $installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
     $selfTestSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --self-test-summary
@@ -69,6 +70,7 @@ try {
     Write-Host "Start menu shortcut: $startShortcutPath"
     Write-Host "Self-test shortcut: $selfTestShortcutPath"
     Write-Host "Install self-test: $installSelfTestPath"
+    Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
 
     if ($Launch) {
         Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot
