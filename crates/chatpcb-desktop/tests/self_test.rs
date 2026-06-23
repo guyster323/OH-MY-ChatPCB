@@ -18,6 +18,11 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert_eq!(contract["chat_actions"]["send_design_uses_prompt"], true);
     assert_eq!(contract["chat_actions"]["send_design_clears_prompt"], true);
     assert_eq!(
+        contract["chat_actions"]["prompt_input_has_visible_label"],
+        true
+    );
+    assert_eq!(contract["chat_actions"]["prompt_input_has_empty_cue"], true);
+    assert_eq!(
         contract["chat_actions"]["empty_prompt_uses_visible_builtin_example"],
         true
     );
@@ -149,6 +154,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert!(contract["right_panel"]
         .as_array()
         .unwrap()
+        .contains(&Value::String("Chat prompt label".to_string())));
+    assert!(contract["right_panel"]
+        .as_array()
+        .unwrap()
         .contains(&Value::String("Chat input".to_string())));
     assert!(contract["right_panel"]
         .as_array()
@@ -195,6 +204,7 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
     assert!(summary.contains("PASS model selector falls back to built-in preview"));
     assert!(summary.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(summary.contains("PASS prompt input has a visible label and empty cue"));
     assert!(summary.contains("PASS pressing Enter sends the first design"));
     assert!(summary.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(summary.contains("PASS Send design returns focus for follow-up chat"));

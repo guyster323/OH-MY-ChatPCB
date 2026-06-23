@@ -58,6 +58,7 @@ try {
         "- Provider Login local CLI status detection",
         "- App launch focuses prompt input for immediate first chat",
         "- App launch selects available provider model",
+        "- Prompt input has visible label and empty cue",
         "- Prompt input and Send design transcript flow",
         "- Prompt Enter key sends design",
         "- Empty prompt visibly uses the built-in ESP32-S3 example",

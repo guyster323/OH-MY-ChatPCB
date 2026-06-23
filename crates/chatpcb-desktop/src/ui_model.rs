@@ -4,6 +4,8 @@ use serde::Serialize;
 pub struct ChatActionsContract {
     pub send_design_uses_prompt: bool,
     pub send_design_clears_prompt: bool,
+    pub prompt_input_has_visible_label: bool,
+    pub prompt_input_has_empty_cue: bool,
     pub empty_prompt_uses_visible_builtin_example: bool,
     pub use_example_fills_prompt: bool,
     pub use_example_focuses_prompt_input: bool,
@@ -49,6 +51,8 @@ pub fn chat_actions_contract() -> ChatActionsContract {
     ChatActionsContract {
         send_design_uses_prompt: true,
         send_design_clears_prompt: true,
+        prompt_input_has_visible_label: true,
+        prompt_input_has_empty_cue: true,
         empty_prompt_uses_visible_builtin_example: true,
         use_example_fills_prompt: true,
         use_example_focuses_prompt_input: true,

@@ -22,6 +22,7 @@ installed executable prints a short PASS summary. It should include
 "PASS Provider Login shows local CLI login hints" and
 "PASS model selector falls back to built-in preview" and
 "PASS app launch focuses the prompt for immediate first chat" and
+"PASS prompt input has a visible label and empty cue" and
 "PASS pressing Enter sends the first design" and
 "PASS empty prompt visibly uses the built-in ESP32-S3 example" and
 "PASS Send design returns focus for follow-up chat" and

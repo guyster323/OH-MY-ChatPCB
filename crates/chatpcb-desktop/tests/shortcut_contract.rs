@@ -138,6 +138,7 @@ fn installers_write_install_self_test_summary_for_first_run_confidence() {
     assert!(guide.contains("INSTALL-SELF-TEST.txt"));
     assert!(guide.contains("PASS Open PCB/evidence wait for a saved preview"));
     assert!(guide.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(guide.contains("PASS prompt input has a visible label and empty cue"));
     assert!(guide.contains("PASS pressing Enter sends the first design"));
     assert!(guide.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(guide.contains("PASS Send design returns focus for follow-up chat"));
@@ -251,6 +252,7 @@ fn package_first_readme_matches_current_validation_status_copy() {
     assert!(readme.contains("The example text is selected, so typing replaces it."));
     assert!(readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(readme.contains("PASS prompt input has a visible label and empty cue"));
     assert!(readme.contains("PASS pressing Enter sends the first design"));
     assert!(readme.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(readme.contains("PASS Send design returns focus for follow-up chat"));
@@ -268,6 +270,7 @@ fn root_readme_matches_current_self_test_shortcut_paths() {
     assert!(readme.contains("First Chat Guide"));
     assert!(readme.contains("self-test"));
     assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(readme.contains("PASS prompt input has a visible label and empty cue"));
     assert!(readme.contains("PASS pressing Enter sends the first design"));
     assert!(readme.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(readme.contains("PASS Send design returns focus for follow-up chat"));
@@ -280,6 +283,7 @@ fn user_test_guide_mentions_prompt_overwrite_self_test_line() {
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
 
     assert!(guide.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(guide.contains("PASS prompt input has a visible label and empty cue"));
     assert!(guide.contains("PASS pressing Enter sends the first design"));
     assert!(guide.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(guide.contains("PASS Send design returns focus for follow-up chat"));
@@ -298,6 +302,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Working tree"));
     assert!(script.contains("App launch focuses prompt input"));
     assert!(script.contains("App launch selects available provider model"));
+    assert!(script.contains("Prompt input has visible label and empty cue"));
     assert!(script.contains("Chat transcript append flow"));
     assert!(script.contains("Empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(script.contains("Provider Login appends without erasing chat"));

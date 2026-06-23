@@ -214,6 +214,7 @@ provider is ready, and prints these first-chat PASS lines:
 
 ```text
 PASS app launch focuses the prompt for immediate first chat
+PASS prompt input has a visible label and empty cue
 PASS pressing Enter sends the first design
 PASS empty prompt visibly uses the built-in ESP32-S3 example
 PASS Send design returns focus for follow-up chat

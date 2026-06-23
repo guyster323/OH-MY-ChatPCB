@@ -86,6 +86,7 @@ fn print_self_test() {
             "Provider Login",
             "Model selector",
             "Chat transcript",
+            "Chat prompt label",
             "Chat input",
             "Use example",
             "Send design",
@@ -131,6 +132,11 @@ fn print_self_test_summary() {
         "app launch must focus the prompt so first-run users can type immediately"
     );
     println!("PASS app launch focuses the prompt for immediate first chat");
+    assert!(
+        chat_actions.prompt_input_has_visible_label && chat_actions.prompt_input_has_empty_cue,
+        "prompt input must have a visible label and empty cue for first-run users"
+    );
+    println!("PASS prompt input has a visible label and empty cue");
     assert!(
         chat_actions.prompt_enter_sends_design,
         "Enter must send the first design through the native chat path"
@@ -507,8 +513,8 @@ mod win32_app {
     use windows_sys::Win32::Graphics::Gdi::{GetStockObject, UpdateWindow, WHITE_BRUSH};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{
-        EM_SCROLLCARET, EM_SETSEL, NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL, TCM_INSERTITEMW,
-        TCN_SELCHANGE,
+        EM_SCROLLCARET, EM_SETCUEBANNER, EM_SETSEL, NMHDR, TCIF_TEXT, TCITEMW, TCM_GETCURSEL,
+        TCM_INSERTITEMW, TCN_SELCHANGE,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus, VK_RETURN};
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -533,6 +539,7 @@ mod win32_app {
     const ID_USE_EXAMPLE: usize = 1005;
     const ID_OPEN_EVIDENCE: usize = 1006;
     const ID_OPEN_PCB: usize = 1007;
+    const ID_PROMPT_LABEL: usize = 1008;
     const WM_CHATPCB_SEND_DEFERRED: u32 = WM_APP + 1;
     static mut ORIGINAL_PROMPT_PROC: WNDPROC = None;
 
@@ -542,6 +549,7 @@ mod win32_app {
         design_preview: HWND,
         status: HWND,
         chat_transcript: HWND,
+        prompt_label: HWND,
         prompt: HWND,
         use_example_button: HWND,
         send_button: HWND,
@@ -715,6 +723,14 @@ mod win32_app {
                 | ES_READONLY as u32,
             ID_CHAT_TRANSCRIPT,
         );
+        let prompt_label = child(
+            parent,
+            instance,
+            "STATIC",
+            "Chat prompt",
+            0,
+            ID_PROMPT_LABEL,
+        );
         let prompt = child(
             parent,
             instance,
@@ -723,6 +739,7 @@ mod win32_app {
             WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
             ID_PROMPT,
         );
+        set_prompt_empty_cue(prompt);
         subclass_prompt_input(parent, prompt);
         let use_example_button = child(
             parent,
@@ -791,6 +808,7 @@ mod win32_app {
             design_preview,
             status,
             chat_transcript,
+            prompt_label,
             prompt,
             use_example_button,
             send_button,
@@ -854,6 +872,11 @@ mod win32_app {
     unsafe fn add_combo_item(combo: HWND, label: &str) {
         let text = wide(label);
         SendMessageW(combo, CB_ADDSTRING, 0, text.as_ptr() as isize);
+    }
+
+    unsafe fn set_prompt_empty_cue(prompt: HWND) {
+        let cue = wide("Type a board request, then press Enter");
+        SendMessageW(prompt, EM_SETCUEBANNER, 0, cue.as_ptr() as isize);
     }
 
     unsafe fn focus_prompt_for_first_chat(controls: &AppControls) {
@@ -1074,7 +1097,15 @@ mod win32_app {
             right_x,
             margin,
             right_width,
-            height - 214,
+            height - 236,
+            1,
+        );
+        MoveWindow(
+            controls.prompt_label,
+            right_x,
+            height - 212,
+            right_width,
+            18,
             1,
         );
         MoveWindow(controls.prompt, right_x, height - 190, right_width, 58, 1);

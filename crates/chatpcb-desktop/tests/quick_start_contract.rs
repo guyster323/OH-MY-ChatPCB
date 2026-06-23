@@ -220,6 +220,25 @@ fn app_launch_focuses_and_selects_prompt_for_immediate_chat() {
 }
 
 #[test]
+fn prompt_input_has_accessible_label_and_empty_cue() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(ui_model.contains("prompt_input_has_visible_label"));
+    assert!(ui_model.contains("prompt_input_has_empty_cue"));
+    assert!(main.contains("ID_PROMPT_LABEL"));
+    assert!(main.contains("prompt_label"));
+    assert!(main.contains("\"Chat prompt\""));
+    assert!(main.contains("EM_SETCUEBANNER"));
+    assert!(main.contains("Type a board request"));
+    let compact_main = main.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(compact_main.contains("MoveWindow( controls.prompt_label"));
+}
+
+#[test]
 fn app_launch_selects_available_provider_model_for_first_chat() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
