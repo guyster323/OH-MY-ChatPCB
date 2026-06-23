@@ -181,6 +181,7 @@ pub fn initial_transcript() -> String {
      Click Use example to refill the starter board request.\r\n\
      You can start with: ESP32-S3 USB-C sensor board with OLED display.\r\n\
      Provider Login checks local Codex, Claude Code, and Gemini CLI status without storing credentials.\r\n\
+     If no provider is ready, built-in-preview still lets you press Enter and create the preview.\r\n\
      This preview shows the native app flow before real order-ready KiCad output is connected.\r\n"
         .to_string()
 }

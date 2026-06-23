@@ -19,6 +19,8 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
     assert!(transcript.contains("Type a board idea"));
     assert!(transcript.contains("Use example"));
     assert!(transcript.contains("Provider Login"));
+    assert!(transcript.contains("built-in-preview"));
+    assert!(transcript.contains("no provider is ready"));
     assert!(transcript.contains("Send design"));
     assert!(transcript.contains("Open PCB"));
     assert!(transcript.contains("KiCad 10 when installed"));

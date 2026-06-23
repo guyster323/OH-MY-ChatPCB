@@ -153,8 +153,11 @@ Computer Use launch.
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
 - Computer Use `launch_app` stopped at `Computer Use app approval timed out`
   before a targetable app window appeared.
-- A follow-up Computer Use app-list check still showed the app entry, but no
-  running target window.
+- After the installed exe was started directly, Computer Use found a targetable
+  `ChatPCB KiCad Preview` window.
+- Computer Use snapshot/control still stopped at
+  `Computer Use app approval timed out`, so no screenshot or input proof was
+  captured.
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, installed exe self-test summary, and GitHub replacement
   dry run.
