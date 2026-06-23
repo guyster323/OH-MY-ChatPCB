@@ -216,18 +216,16 @@ Latest run after installing the current preview package was checked on
 - Computer Use verified the fresh first-chat view lists
   `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
   `manufacturing-readiness-preview.txt` in the native left preview pane.
-- The empty prompt fallback was not proven through Computer Use. The prompt box
-  is proven by Rust tests and installed self-test output; the latest Computer
-  Use run instead proved a typed first-chat request.
-- No fresh Computer Use proof was captured for the empty prompt transcript note.
-  The empty-prompt behavior is currently proven by Rust tests and the installed
-  self-test summary, not by a successful end-to-end UI input capture.
+- Computer Use also verified the empty prompt fallback. It selected the prompt,
+  cleared it, pressed Enter, and captured the chat log showing
+  `No prompt was typed` plus the `built-in ESP32-S3 example` note.
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.
-- Do not treat the empty prompt fallback as fresh GUI control proof. Treat the
-  latest Computer Use run as fresh proof that the installed native app launches,
-  exposes a targetable window, and renders the expected first-run workspace.
+- Treat the latest Computer Use run as fresh proof that the installed native app
+  launches, exposes a targetable window, renders the expected first-run
+  workspace, accepts a typed first-chat request, and handles an empty prompt
+  through the visible built-in example fallback.
 
 ## Current Honest Boundary
 

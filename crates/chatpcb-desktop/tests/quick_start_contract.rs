@@ -534,12 +534,14 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`jlcpcb-bom-preview.csv`"));
     assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
     assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
-    assert!(guide.contains("empty prompt fallback was not proven through Computer Use"));
-    assert!(guide.contains("No fresh Computer Use proof was captured for the empty prompt"));
+    assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
+    assert!(guide.contains("No prompt was typed"));
+    assert!(guide.contains("built-in ESP32-S3 example"));
+    assert!(!guide.contains("empty prompt fallback was not proven through Computer Use"));
+    assert!(!guide.contains("No fresh Computer Use proof was captured for the empty prompt"));
     assert!(guide.contains("latest Computer Use run"));
     assert!(!guide.contains("latest run's screenshot or typing proof"));
     assert!(guide.contains("Code and installed-package checks still passed"));
-    assert!(guide.contains("Do not treat the empty prompt fallback as fresh GUI control proof"));
 }
 
 #[test]
