@@ -30,26 +30,27 @@ First chat
 6. If no local provider is ready yet, continue anyway; the built-in preview still works.
 7. Type immediately after Provider Login; focus returns to the prompt box.
 8. Click Use example if the prompt box is empty.
-9. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
-10. Press Enter in the prompt box, or click Send design.
-11. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-12. Confirm the transcript is positioned at the latest response.
-13. Confirm the chat transcript says "Preview workspace saved".
-14. Confirm the large left preview body also shows the saved KiCad scaffold files.
-15. Confirm the chat transcript and left preview body mention "KiCad CLI check".
-16. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
-17. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
-18. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
-19. Confirm the bottom status says "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
-20. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
-21. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
-22. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-23. Click Open evidence to inspect the first-run evidence folder with FIRST-RUN-SUMMARY.txt selected.
-24. Close and reopen the app, then click Open evidence before sending again.
-25. Confirm the left project status says "Previous preview workspace found".
-26. Confirm the chat transcript also says "Previous preview workspace found".
-27. Confirm it reopens the same previous preview folder with FIRST-RUN-SUMMARY.txt selected.
-28. The folder path is:
+9. The example text is selected, so typing replaces it.
+10. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
+11. Press Enter in the prompt box, or click Send design.
+12. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
+13. Confirm the transcript is positioned at the latest response.
+14. Confirm the chat transcript says "Preview workspace saved".
+15. Confirm the large left preview body also shows the saved KiCad scaffold files.
+16. Confirm the chat transcript and left preview body mention "KiCad CLI check".
+17. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
+18. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
+19. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
+20. Confirm the bottom status says "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
+21. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
+22. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
+23. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+24. Click Open evidence to inspect the first-run evidence folder with FIRST-RUN-SUMMARY.txt selected.
+25. Close and reopen the app, then click Open evidence before sending again.
+26. Confirm the left project status says "Previous preview workspace found".
+27. Confirm the chat transcript also says "Previous preview workspace found".
+28. Confirm it reopens the same previous preview folder with FIRST-RUN-SUMMARY.txt selected.
+29. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

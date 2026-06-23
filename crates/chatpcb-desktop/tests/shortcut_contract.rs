@@ -49,6 +49,16 @@ fn packaged_installer_adds_start_menu_self_test_shortcut() {
 }
 
 #[test]
+fn source_installer_adds_start_menu_self_test_shortcut() {
+    let installer = fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+
+    assert!(installer.contains("Run ChatPCB Self Test.cmd"));
+    assert!(installer.contains("Run ChatPCB Self Test.lnk"));
+    assert!(installer.contains("Verify the ChatPCB KiCad Preview installation"));
+    assert!(installer.contains("Self-test shortcut:"));
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
@@ -107,6 +117,7 @@ fn package_first_readme_matches_current_validation_status_copy() {
 
     assert!(readme
         .contains("Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."));
+    assert!(readme.contains("The example text is selected, so typing replaces it."));
     assert!(!readme.contains("Validated: ERC/DRC clear. Next: Open PCB or Open evidence."));
 }
 
@@ -128,6 +139,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Provider Login shows local CLI login hints"));
     assert!(script.contains("Provider Login returns focus to prompt"));
     assert!(script.contains("Use example returns focus to prompt"));
+    assert!(script.contains("Use example selects prompt text for immediate overwrite"));
     assert!(script.contains("Chat transcript latest-turn scrolling"));
     assert!(script.contains("Prompt Enter key sends design"));
     assert!(script.contains("Pipeline status transitions"));

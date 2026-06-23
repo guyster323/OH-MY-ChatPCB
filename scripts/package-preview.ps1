@@ -66,6 +66,7 @@ try {
         "- Self-test shortcut for installed package verification",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",
+        "- Use example selects prompt text for immediate overwrite",
         "- Chat transcript latest-turn scrolling after updates",
         "- Pipeline status transitions for first-run actions",
         "- Preview workspace evidence folder creation on Send design",

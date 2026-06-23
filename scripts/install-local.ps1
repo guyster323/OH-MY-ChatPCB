@@ -20,6 +20,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\target\release\chatpcb-desktop.exe" -Destination "$InstallRoot\ChatPCB KiCad Preview.exe"
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$InstallRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
+    Copy-Item -Force -Path "$repoRoot\packaging\Run ChatPCB Self Test.cmd" -Destination "$InstallRoot\Run ChatPCB Self Test.cmd"
 
     $shell = New-Object -ComObject WScript.Shell
     $desktopPath = $shell.SpecialFolders.Item('Desktop')
@@ -46,10 +47,17 @@ try {
     $uninstallShortcut.WorkingDirectory = $InstallRoot
     $uninstallShortcut.Description = "Remove ChatPCB KiCad Preview"
     $uninstallShortcut.Save()
+    $selfTestShortcutPath = Join-Path $startMenuPath "Run ChatPCB Self Test.lnk"
+    $selfTestShortcut = $shell.CreateShortcut($selfTestShortcutPath)
+    $selfTestShortcut.TargetPath = "$InstallRoot\Run ChatPCB Self Test.cmd"
+    $selfTestShortcut.WorkingDirectory = $InstallRoot
+    $selfTestShortcut.Description = "Verify the ChatPCB KiCad Preview installation"
+    $selfTestShortcut.Save()
 
     Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
     Write-Host "Desktop shortcut: $shortcutPath"
     Write-Host "Start menu shortcut: $startShortcutPath"
+    Write-Host "Self-test shortcut: $selfTestShortcutPath"
 
     if ($Launch) {
         Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot
