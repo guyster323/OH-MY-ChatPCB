@@ -151,8 +151,9 @@ It also saves a local preview workspace under:
 ```
 
 That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
-and a prototype-review release evidence report. It also contains the generated
-KiCad preview scaffold:
+and a prototype-review release evidence report. The first-run summary points a
+non-expert back to the focused prompt for follow-up chat and says not to upload
+the preview to JLCPCB. It also contains the generated KiCad preview scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
 project status and preview body also change to the saved workspace state. When

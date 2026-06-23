@@ -111,6 +111,8 @@ Expected result:
 26. Click `Open evidence`.
 27. Confirm Windows opens the preview evidence folder with
     `FIRST-RUN-SUMMARY.txt` selected.
+    Confirm the summary says to return to the focused prompt, type a follow-up,
+    and not upload this preview to JLCPCB.
 28. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
 29. Confirm the left project status says `Previous preview workspace found`

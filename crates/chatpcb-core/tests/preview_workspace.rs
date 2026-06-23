@@ -43,6 +43,8 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     assert!(first_run_summary.contains("Start here"));
     assert!(first_run_summary.contains("Open PCB"));
     assert!(first_run_summary.contains("Open evidence"));
+    assert!(first_run_summary.contains("type a follow-up"));
+    assert!(first_run_summary.contains("Do not upload this preview to JLCPCB"));
     assert!(first_run_summary.contains("prototype-review"));
     assert!(first_run_summary.contains("not order-ready"));
     assert!(workspace.files.contains(&workspace.first_run_summary_file));

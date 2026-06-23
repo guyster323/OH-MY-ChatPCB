@@ -118,6 +118,7 @@ fn first_run_summary(prompt: &str) -> String {
          What to click next in the app:\r\n\
          - Open PCB: inspect the generated board outline in KiCad.\r\n\
          - Open evidence: return to this folder and review saved reports.\r\n\
+         - Or return to the focused prompt, type a follow-up, and press Enter.\r\n\
          \r\n\
          Current gate:\r\n\
          - prototype-review\r\n\
@@ -126,7 +127,8 @@ fn first_run_summary(prompt: &str) -> String {
          Why it is not order-ready yet:\r\n\
          - Component placement and routing are not generated yet.\r\n\
          - Gerber, drill, BOM, and CPL files are not generated yet.\r\n\
-         - A human must review real manufacturing evidence before ordering.\r\n",
+         - A human must review real manufacturing evidence before ordering.\r\n\
+         - Do not upload this preview to JLCPCB.\r\n",
         prompt = prompt.trim()
     )
 }
