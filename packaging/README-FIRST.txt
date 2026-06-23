@@ -9,7 +9,8 @@ Install
 2. A desktop shortcut named "ChatPCB KiCad Preview" will be created.
 3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
 4. A Start Menu shortcut named "Run ChatPCB Self Test" will be created.
-5. The app starts after installation.
+5. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
+6. The app starts after installation.
 
 Self-test
 ---------
@@ -63,6 +64,7 @@ Evidence files
 --------------
 - RELEASE-EVIDENCE.txt records the source commit and package contents.
 - SHA256SUMS.txt records hashes for the packaged files.
+- INSTALL-SELF-TEST.txt in the installed app folder records the installed executable PASS summary.
 
 Uninstall
 ---------

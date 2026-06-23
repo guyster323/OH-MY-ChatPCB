@@ -27,6 +27,9 @@ Expected result:
 
 - `chatpcb-core.exe` is copied into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`.
 - `ChatPCB KiCad Preview.exe` is copied into the same folder.
+- `INSTALL-SELF-TEST.txt` is written into the same folder with the installed
+  executable's PASS summary, including
+  `PASS Open PCB/evidence wait for a saved preview`.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.

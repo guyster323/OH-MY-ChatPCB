@@ -39,6 +39,16 @@ Copy-Item -Force -Path $uninstallScript -Destination "$InstallRoot\uninstall-pre
 Copy-Item -Force -Path $uninstallCommand -Destination "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
 Copy-Item -Force -Path $selfTestCommand -Destination "$InstallRoot\Run ChatPCB Self Test.cmd"
 
+$installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
+$selfTestSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --self-test-summary
+if ($LASTEXITCODE -ne 0) {
+    throw "Installed ChatPCB KiCad Preview self-test failed with exit code $LASTEXITCODE."
+}
+if (-not ($selfTestSummary -match "ChatPCB KiCad Preview Self Test")) {
+    throw "Installed ChatPCB KiCad Preview self-test did not return the expected summary header."
+}
+$selfTestSummary | Set-Content -Path $installSelfTestPath -Encoding ASCII
+
 $shell = New-Object -ComObject WScript.Shell
 $desktopPath = $shell.SpecialFolders.Item('Desktop')
 New-Item -ItemType Directory -Force -Path $desktopPath | Out-Null
@@ -75,6 +85,7 @@ Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
 Write-Host "Desktop shortcut: $shortcutPath"
 Write-Host "Start menu shortcut: $startShortcutPath"
 Write-Host "Self-test shortcut: $selfTestShortcutPath"
+Write-Host "Install self-test: $installSelfTestPath"
 
 if ($Launch) {
     Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot

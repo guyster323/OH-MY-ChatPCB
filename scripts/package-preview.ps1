@@ -64,6 +64,7 @@ try {
         "- Provider Login keeps built-in preview unblocked when no CLI is ready",
         "- Provider Login shows local CLI login hints",
         "- Self-test shortcut for installed package verification",
+        "- Installer writes INSTALL-SELF-TEST.txt after copying executables",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",
         "- Use example selects prompt text for immediate overwrite",

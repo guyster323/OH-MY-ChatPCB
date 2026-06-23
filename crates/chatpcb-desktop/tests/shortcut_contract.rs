@@ -59,6 +59,28 @@ fn source_installer_adds_start_menu_self_test_shortcut() {
 }
 
 #[test]
+fn installers_write_install_self_test_summary_for_first_run_confidence() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("INSTALL-SELF-TEST.txt"));
+        assert!(script.contains("--self-test-summary"));
+        assert!(script.contains("ChatPCB KiCad Preview Self Test"));
+        assert!(script.contains("Set-Content"));
+        assert!(script.contains("Install self-test:"));
+    }
+
+    assert!(root_readme.contains("INSTALL-SELF-TEST.txt"));
+    assert!(guide.contains("INSTALL-SELF-TEST.txt"));
+    assert!(guide.contains("PASS Open PCB/evidence wait for a saved preview"));
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
@@ -118,6 +140,7 @@ fn package_first_readme_matches_current_validation_status_copy() {
     assert!(readme
         .contains("Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."));
     assert!(readme.contains("The example text is selected, so typing replaces it."));
+    assert!(readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(!readme.contains("Validated: ERC/DRC clear. Next: Open PCB or Open evidence."));
 }
 
@@ -170,6 +193,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Left tab status updates"));
     assert!(script.contains("Left design preview body"));
     assert!(script.contains("Open PCB/evidence waits until a preview workspace exists"));
+    assert!(script.contains("Installer writes INSTALL-SELF-TEST.txt"));
     assert!(script.contains("Open evidence button"));
     assert!(script.contains("Open evidence selects FIRST-RUN-SUMMARY.txt"));
     assert!(script.contains("Open PCB button"));

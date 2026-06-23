@@ -111,7 +111,8 @@ Install ChatPCB KiCad Preview.cmd
 
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
-shortcut plus Start Menu shortcuts, and starts the app.
+shortcut plus Start Menu shortcuts, writes `INSTALL-SELF-TEST.txt` with the
+installed executable's PASS summary, and starts the app.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 
@@ -198,6 +199,8 @@ contract with a short PASS summary. That summary also verifies the first-run
 evidence points back to follow-up chat, blocks JLCPCB upload for this preview,
 keeps the model selector on `built-in-preview` when no provider is ready, and
 prints `PASS Use example selects prompt text for immediate overwrite`.
+The installers also write the same first-run confidence check to
+`%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-SELF-TEST.txt`.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named
