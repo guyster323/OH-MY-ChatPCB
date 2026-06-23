@@ -5,7 +5,7 @@ use chatpcb_core::project::create_preview_workspace;
 use chatpcb_core::provider::catalog_with_probe;
 use chatpcb_desktop::ui_model::chat_actions_contract;
 use serde::Serialize;
-use std::process::Command;
+use std::{fs, process::Command};
 
 #[derive(Debug, Serialize)]
 struct DesktopSelfTest {
@@ -102,6 +102,8 @@ fn print_self_test_summary() {
     let package = build_jlcpcb_package(&spec);
     let route = freerouting_contract();
     let chat_actions = chat_actions_contract();
+    let evidence = first_run_evidence_summary_contract()
+        .expect("first-run evidence summary contract must be readable");
 
     println!("ChatPCB KiCad Preview Self Test");
     println!("PASS native Windows app");
@@ -121,8 +123,42 @@ fn print_self_test_summary() {
         "PASS Open evidence selects FIRST-RUN-SUMMARY.txt: {}",
         chat_actions.open_evidence_selects_first_run_summary_file
     );
+    assert!(
+        evidence.points_back_to_follow_up_chat,
+        "FIRST-RUN-SUMMARY.txt must point users back to follow-up chat"
+    );
+    assert!(
+        evidence.blocks_jlcpcb_upload,
+        "FIRST-RUN-SUMMARY.txt must block JLCPCB upload"
+    );
+    println!("PASS first-run evidence points back to follow-up chat");
+    println!("PASS first-run evidence blocks JLCPCB upload");
     println!("Board: {}", spec.product_name);
     println!("Boundary: prototype-review, not order-ready");
+}
+
+struct EvidenceSummaryContract {
+    points_back_to_follow_up_chat: bool,
+    blocks_jlcpcb_upload: bool,
+}
+
+fn first_run_evidence_summary_contract() -> std::io::Result<EvidenceSummaryContract> {
+    let root = std::env::temp_dir().join(format!("chatpcb3-self-test-{}", std::process::id()));
+    if root.exists() {
+        fs::remove_dir_all(&root)?;
+    }
+
+    let workspace = create_preview_workspace(
+        "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package",
+        &root,
+    )?;
+    let summary = fs::read_to_string(&workspace.first_run_summary_file)?;
+    fs::remove_dir_all(&root)?;
+
+    Ok(EvidenceSummaryContract {
+        points_back_to_follow_up_chat: summary.contains("type a follow-up"),
+        blocks_jlcpcb_upload: summary.contains("Do not upload this preview to JLCPCB"),
+    })
 }
 
 fn probe_command_version(command: &str) -> Option<String> {

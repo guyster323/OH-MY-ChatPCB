@@ -102,6 +102,15 @@ fn package_script_creates_zip_with_first_run_files() {
 }
 
 #[test]
+fn package_first_readme_matches_current_validation_status_copy() {
+    let readme = fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    assert!(readme
+        .contains("Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."));
+    assert!(!readme.contains("Validated: ERC/DRC clear. Next: Open PCB or Open evidence."));
+}
+
+#[test]
 fn package_script_writes_release_evidence_and_hashes() {
     let script = fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
 

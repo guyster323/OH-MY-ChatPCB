@@ -178,6 +178,8 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS native Windows app"));
     assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
     assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
+    assert!(summary.contains("PASS first-run evidence points back to follow-up chat"));
+    assert!(summary.contains("PASS first-run evidence blocks JLCPCB upload"));
     assert!(summary.contains("Boundary: prototype-review, not order-ready"));
     assert!(!summary.contains("provider_login_shows_local_cli_login_hints"));
     assert!(!summary.trim_start().starts_with('{'));

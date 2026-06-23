@@ -16,6 +16,7 @@ Self-test
 Open the Start Menu folder and click "Run ChatPCB Self Test" to verify the
 installed executable prints a short PASS summary. It should include
 "PASS Provider Login shows local CLI login hints" and
+"PASS first-run evidence blocks JLCPCB upload" and
 "Boundary: prototype-review, not order-ready".
 
 First chat
@@ -38,7 +39,7 @@ First chat
 16. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
 17. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
 18. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
-19. Confirm the bottom status says "Validated: ERC/DRC clear. Next: Open PCB or Open evidence. Still prototype-review." when local ERC/DRC reports are clear.
+19. Confirm the bottom status says "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
 20. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
 21. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
 22. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
