@@ -102,12 +102,14 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
 
     assert!(transcript.contains("No local provider is ready yet"));
     assert!(transcript.contains("You can still press Send design"));
+    assert!(transcript.contains("Use built-in-preview now"));
     assert!(transcript.contains("CLI login later"));
     assert!(transcript.contains("Install Codex CLI"));
     assert!(transcript.contains("Install Claude Code"));
     assert!(transcript.contains("Install Gemini CLI"));
     assert!(transcript.contains("click Provider Login again"));
     assert!(!transcript.contains("Selected model:"));
+    assert!(!transcript.contains("Pick an available provider"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));

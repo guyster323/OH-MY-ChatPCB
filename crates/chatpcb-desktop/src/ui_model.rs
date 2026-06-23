@@ -390,6 +390,9 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
 
     if let Some(model) = selected_provider_model(statuses) {
         transcript.push_str(&format!("Selected model: {model}\r\n"));
+        transcript.push_str(
+            "Pick an available provider in the model selector, then type a board idea and press Enter or click Send design.\r\n",
+        );
     } else {
         transcript.push_str("No local provider is ready yet.\r\n");
         transcript.push_str(
@@ -398,12 +401,12 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
         transcript.push_str(
             "Provider-backed design will require CLI login later; complete a local CLI login, then click Provider Login again.\r\n",
         );
+        transcript.push_str(
+            "Use built-in-preview now, then type a board idea and press Enter or click Send design.\r\n",
+        );
     }
 
     transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");
-    transcript.push_str(
-        "Pick an available provider in the model selector, then type a board idea and press Enter or click Send design.\r\n",
-    );
     transcript
 }
 
