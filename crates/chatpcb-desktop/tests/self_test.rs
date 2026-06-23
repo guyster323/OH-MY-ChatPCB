@@ -161,3 +161,24 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert!(!serialized.contains("http://"));
     assert!(!serialized.contains("https://"));
 }
+
+#[test]
+fn desktop_self_test_summary_is_readable_for_first_run_users() {
+    let exe = option_env!("CARGO_BIN_EXE_chatpcb-desktop")
+        .expect("chatpcb-desktop binary must be built by Cargo");
+    let output = Command::new(exe)
+        .arg("--self-test-summary")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let summary = String::from_utf8(output.stdout).unwrap();
+
+    assert!(summary.contains("ChatPCB KiCad Preview Self Test"));
+    assert!(summary.contains("PASS native Windows app"));
+    assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
+    assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
+    assert!(summary.contains("Boundary: prototype-review, not order-ready"));
+    assert!(!summary.contains("provider_login_shows_local_cli_login_hints"));
+    assert!(!summary.trim_start().starts_with('{'));
+}

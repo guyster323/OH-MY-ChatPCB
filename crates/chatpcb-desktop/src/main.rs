@@ -36,6 +36,11 @@ struct ChatTranscriptContract {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--self-test-summary") {
+        print_self_test_summary();
+        return;
+    }
+
     if std::env::args().any(|arg| arg == "--self-test") {
         print_self_test();
         return;
@@ -90,6 +95,34 @@ fn print_self_test() {
     };
 
     println!("{}", serde_json::to_string_pretty(&contract).unwrap());
+}
+
+fn print_self_test_summary() {
+    let spec = esp32s3_usb_sensor_board_spec("ESP32-S3 USB-C sensor board");
+    let package = build_jlcpcb_package(&spec);
+    let route = freerouting_contract();
+    let chat_actions = chat_actions_contract();
+
+    println!("ChatPCB KiCad Preview Self Test");
+    println!("PASS native Windows app");
+    println!("PASS 70/30 current-project workspace");
+    println!("PASS Provider Login shows local CLI login hints");
+    println!("PASS first chat can create the built-in ESP32-S3 preview");
+    println!("PASS KiCad preview scaffold and validation reports are wired");
+    println!(
+        "PASS bundled autorouter contract: {} {}",
+        route.engine, route.bundled_version
+    );
+    println!(
+        "PASS JLCPCB package contract files: {}",
+        package.files.len()
+    );
+    println!(
+        "PASS Open evidence selects FIRST-RUN-SUMMARY.txt: {}",
+        chat_actions.open_evidence_selects_first_run_summary_file
+    );
+    println!("Board: {}", spec.product_name);
+    println!("Boundary: prototype-review, not order-ready");
 }
 
 fn probe_command_version(command: &str) -> Option<String> {

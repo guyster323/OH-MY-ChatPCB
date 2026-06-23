@@ -36,12 +36,16 @@ fn packaged_installer_adds_start_menu_self_test_shortcut() {
         fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
     let package_script =
         fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+    let self_test_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Run ChatPCB Self Test.cmd")).unwrap();
 
     assert!(installer.contains("Run ChatPCB Self Test.cmd"));
     assert!(installer.contains("Run ChatPCB Self Test.lnk"));
     assert!(installer.contains("Verify the ChatPCB KiCad Preview installation"));
     assert!(package_script.contains("Run ChatPCB Self Test.cmd"));
     assert!(package_script.contains("Self-test shortcut for installed package verification"));
+    assert!(self_test_cmd.contains("--self-test-summary"));
+    assert!(!self_test_cmd.contains("--self-test\r"));
 }
 
 #[test]

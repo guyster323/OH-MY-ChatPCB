@@ -30,8 +30,9 @@ Expected result:
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.
-- Running `Run ChatPCB Self Test` prints JSON with
-  `provider_login_shows_local_cli_login_hints: true`.
+- Running `Run ChatPCB Self Test` prints a short PASS summary with
+  `PASS Provider Login shows local CLI login hints` and
+  `Boundary: prototype-review, not order-ready`.
 - The app starts automatically.
 
 ## First Run

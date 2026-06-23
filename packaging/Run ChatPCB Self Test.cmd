@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 echo Running ChatPCB KiCad Preview self-test...
 echo.
-"%~dp0ChatPCB KiCad Preview.exe" --self-test
+"%~dp0ChatPCB KiCad Preview.exe" --self-test-summary
 if errorlevel 1 (
     echo.
     echo Self-test failed. Reinstall ChatPCB KiCad Preview from the package folder.
@@ -11,5 +11,5 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo Self-test finished. Look for provider_login_shows_local_cli_login_hints: true and prototype-review boundaries in the JSON above.
+echo Self-test finished. This preview is prototype-review only, not order-ready.
 pause

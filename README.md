@@ -184,7 +184,8 @@ The zip is written under `dist\` and intentionally ignored by git.
 It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, `SHA256SUMS.txt`, and
 `Run ChatPCB Self Test.cmd` beside the two executables and installer scripts.
 The packaged installer also adds a Start Menu self-test shortcut so a first-run
-user can verify the installed executable contract without building from source.
+user can verify the installed executable contract with a short PASS summary
+without building from source.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named

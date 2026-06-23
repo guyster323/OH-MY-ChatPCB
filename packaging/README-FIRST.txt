@@ -14,8 +14,9 @@ Install
 Self-test
 ---------
 Open the Start Menu folder and click "Run ChatPCB Self Test" to verify the
-installed executable prints the native app contract. The JSON should include
-"provider_login_shows_local_cli_login_hints": true.
+installed executable prints a short PASS summary. It should include
+"PASS Provider Login shows local CLI login hints" and
+"Boundary: prototype-review, not order-ready".
 
 First chat
 ----------
