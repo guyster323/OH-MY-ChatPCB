@@ -177,6 +177,7 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("ChatPCB KiCad Preview Self Test"));
     assert!(summary.contains("PASS native Windows app"));
     assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
+    assert!(summary.contains("PASS model selector falls back to built-in preview"));
     assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
     assert!(summary.contains("PASS first-run evidence points back to follow-up chat"));
     assert!(summary.contains("PASS first-run evidence blocks JLCPCB upload"));

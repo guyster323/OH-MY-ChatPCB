@@ -102,6 +102,8 @@ fn print_self_test_summary() {
     let package = build_jlcpcb_package(&spec);
     let route = freerouting_contract();
     let chat_actions = chat_actions_contract();
+    let model_items = chatpcb_desktop::ui_model::model_selector_items();
+    let fallback_model = chatpcb_desktop::ui_model::selected_model_for_statuses(&[]);
     let evidence = first_run_evidence_summary_contract()
         .expect("first-run evidence summary contract must be readable");
 
@@ -109,6 +111,16 @@ fn print_self_test_summary() {
     println!("PASS native Windows app");
     println!("PASS 70/30 current-project workspace");
     println!("PASS Provider Login shows local CLI login hints");
+    assert_eq!(
+        model_items.first().copied(),
+        Some("built-in-preview"),
+        "model selector must show built-in preview before provider-backed models"
+    );
+    assert_eq!(
+        fallback_model, "built-in-preview",
+        "model selector must fall back to built-in preview when no provider is ready"
+    );
+    println!("PASS model selector falls back to built-in preview");
     println!("PASS first chat can create the built-in ESP32-S3 preview");
     println!("PASS KiCad preview scaffold and validation reports are wired");
     println!(
@@ -465,9 +477,9 @@ mod win32_app {
             WS_TABSTOP | CBS_DROPDOWNLIST as u32,
             0,
         );
-        add_combo_item(model_choice, "codex:auto");
-        add_combo_item(model_choice, "claude:auto");
-        add_combo_item(model_choice, "gemini:auto");
+        for model in chatpcb_desktop::ui_model::model_selector_items() {
+            add_combo_item(model_choice, model);
+        }
         SendMessageW(model_choice, CB_SETCURSEL, 0, 0);
         let pipeline_status = child(
             parent,
@@ -567,16 +579,15 @@ mod win32_app {
             })
             .collect::<Vec<_>>();
 
-        if let Some(selected_model) = chatpcb_desktop::ui_model::selected_provider_model(&statuses)
-        {
-            if let Some(model_index) = selected_provider_model_index(selected_model) {
-                SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
-            }
-
-            let pipeline_status =
-                chatpcb_desktop::ui_model::provider_login_pipeline_status(Some(selected_model));
-            set_pipeline_status(controls, &pipeline_status);
+        let selected_provider = chatpcb_desktop::ui_model::selected_provider_model(&statuses);
+        let selected_model = chatpcb_desktop::ui_model::selected_model_for_statuses(&statuses);
+        if let Some(model_index) = selected_provider_model_index(selected_model) {
+            SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
         }
+
+        let pipeline_status =
+            chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_provider);
+        set_pipeline_status(controls, &pipeline_status);
     }
 
     unsafe fn subclass_prompt_input(parent: HWND, prompt: HWND) {
@@ -1273,14 +1284,13 @@ mod win32_app {
             })
             .collect::<Vec<_>>();
         let controls = &*ptr;
-        if let Some(model_index) = chatpcb_desktop::ui_model::selected_provider_model(&statuses)
-            .and_then(selected_provider_model_index)
-        {
+        let selected_provider = chatpcb_desktop::ui_model::selected_provider_model(&statuses);
+        let selected_model = chatpcb_desktop::ui_model::selected_model_for_statuses(&statuses);
+        if let Some(model_index) = selected_provider_model_index(selected_model) {
             SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
         }
-        let selected_model = chatpcb_desktop::ui_model::selected_provider_model(&statuses);
         let pipeline_status =
-            chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_model);
+            chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_provider);
         set_pipeline_status(controls, &pipeline_status);
         let provider_login_turn = chatpcb_desktop::ui_model::provider_login_transcript(&statuses);
         append_provider_login_transcript(hwnd, controls, &provider_login_turn);
@@ -1327,12 +1337,7 @@ mod win32_app {
     }
 
     fn selected_provider_model_index(model: &str) -> Option<usize> {
-        match model {
-            "codex:auto" => Some(0),
-            "claude:auto" => Some(1),
-            "gemini:auto" => Some(2),
-            _ => None,
-        }
+        chatpcb_desktop::ui_model::model_selector_index(model)
     }
 
     unsafe fn get_control_text(parent: HWND, control_id: usize) -> String {

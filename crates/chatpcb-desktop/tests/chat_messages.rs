@@ -2,11 +2,12 @@ use chatpcb_desktop::ui_model::{
     append_chat_transcript, design_pipeline_status, erc_drc_validation_transcript,
     example_loaded_pipeline_status, initial_left_workspace_status, initial_pipeline_status,
     initial_transcript, kicad_cli_check_transcript, left_tab_body, left_tab_status,
-    open_pcb_pipeline_status, preview_workspace_body, preview_workspace_body_with_kicad_check,
-    preview_workspace_body_with_validation_reports, preview_workspace_left_status,
-    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
-    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
-    recovered_preview_workspace_transcript, selected_provider_model, send_design_transcript,
+    model_selector_items, open_pcb_pipeline_status, preview_workspace_body,
+    preview_workspace_body_with_kicad_check, preview_workspace_body_with_validation_reports,
+    preview_workspace_left_status, preview_workspace_saved_transcript,
+    provider_login_pipeline_status, provider_login_transcript, recovered_preview_workspace_body,
+    recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
+    selected_model_for_statuses, selected_provider_model, send_design_transcript,
     validation_pipeline_status, ProviderUiStatus,
 };
 
@@ -144,6 +145,34 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
 
     let transcript = provider_login_transcript(&statuses);
     assert!(transcript.contains("Selected model: claude:auto"));
+}
+
+#[test]
+fn model_selector_uses_builtin_preview_when_no_provider_is_ready() {
+    let statuses = [
+        ProviderUiStatus {
+            display_name: "Codex".to_string(),
+            available: false,
+            version: None,
+            login_hint: "Install Codex CLI and complete local login before invoking this provider."
+                .to_string(),
+        },
+        ProviderUiStatus {
+            display_name: "Claude Code".to_string(),
+            available: false,
+            version: None,
+            login_hint:
+                "Install Claude Code and complete local login before invoking this provider."
+                    .to_string(),
+        },
+    ];
+
+    let items = model_selector_items();
+
+    assert_eq!(items[0], "built-in-preview");
+    assert!(items.contains(&"codex:auto"));
+    assert_eq!(selected_provider_model(&statuses), None);
+    assert_eq!(selected_model_for_statuses(&statuses), "built-in-preview");
 }
 
 #[test]

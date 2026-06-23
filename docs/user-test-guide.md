@@ -32,6 +32,7 @@ Expected result:
 - The Start Menu folder includes `Run ChatPCB Self Test`.
 - Running `Run ChatPCB Self Test` prints a short PASS summary with
   `PASS Provider Login shows local CLI login hints` and
+  `PASS model selector falls back to built-in preview` and
   `Boundary: prototype-review, not order-ready`.
 - The app starts automatically.
 
@@ -61,8 +62,9 @@ Expected result:
    - Provider Login
    - model selector
    - pipeline status
-9. Confirm the model selector has already picked an available local provider if
-   Codex, Claude Code, or Gemini CLI is installed.
+9. Confirm the model selector says `built-in-preview` when no local provider is
+   ready, or has already picked an available local provider if Codex, Claude
+   Code, or Gemini CLI is installed.
 10. Click `Provider Login`.
 11. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI without erasing earlier chat turns. It should not

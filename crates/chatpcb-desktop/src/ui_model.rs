@@ -128,6 +128,25 @@ pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     }
 }
 
+pub fn model_selector_items() -> [&'static str; 4] {
+    [
+        "built-in-preview",
+        "codex:auto",
+        "claude:auto",
+        "gemini:auto",
+    ]
+}
+
+pub fn model_selector_index(model: &str) -> Option<usize> {
+    model_selector_items()
+        .iter()
+        .position(|item| *item == model)
+}
+
+pub fn selected_model_for_statuses(statuses: &[ProviderUiStatus]) -> &'static str {
+    selected_provider_model(statuses).unwrap_or("built-in-preview")
+}
+
 pub fn design_pipeline_status() -> &'static str {
     "Preview plan queued: schematic -> layout -> DRC -> JLCPCB."
 }

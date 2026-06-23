@@ -16,6 +16,7 @@ Self-test
 Open the Start Menu folder and click "Run ChatPCB Self Test" to verify the
 installed executable prints a short PASS summary. It should include
 "PASS Provider Login shows local CLI login hints" and
+"PASS model selector falls back to built-in preview" and
 "PASS first-run evidence blocks JLCPCB upload" and
 "Boundary: prototype-review, not order-ready".
 
@@ -23,7 +24,7 @@ First chat
 ----------
 1. Type a PCB request immediately after the app opens. The starter prompt is already selected.
 2. Press Enter to send it.
-3. Confirm the model selector has already picked an available local provider if one is found.
+3. Confirm the model selector says built-in-preview when no local provider is ready, or has already picked an available local provider if one is found.
 4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
 5. If a provider is missing, confirm the chat transcript shows a local CLI install/login hint and says to click Provider Login again after local CLI login.
 6. If no local provider is ready yet, continue anyway; the built-in preview still works.

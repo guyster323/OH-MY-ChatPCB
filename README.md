@@ -56,8 +56,9 @@ Implemented in this first vertical slice:
   a follow-up chat can be typed immediately.
 - On app launch, the starter prompt is focused and selected so a first-run user
   can type immediately, then press Enter.
-- On app launch, the model selector checks local CLI availability and selects
-  the first available provider model when one is found.
+- On app launch, the model selector shows `built-in-preview` when no local CLI
+  provider is ready, then selects the first available provider model when one is
+  found.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
   - right 30 percent chat pane
@@ -130,12 +131,13 @@ selector, prompt input, `Use example`, `Send design`, `Open PCB`, and pipeline s
 The left tabs also show a native preview body, not an empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. If no local provider
-is ready yet, Provider Login says the built-in preview can still be created, so a
-first-run user is not blocked before pressing `Send design`. It also shows the
-local CLI install/login hint for each missing provider and tells the user to
-click `Provider Login` again after completing local CLI login. The model selector
-also picks the first available local provider on launch, so a first-run user sees
-a realistic model choice before pressing anything when a CLI is available. `Use
+is ready yet, the model selector stays on `built-in-preview` and Provider Login
+says the built-in preview can still be created, so a first-run user is not
+blocked before pressing `Send design`. It also shows the local CLI install/login
+hint for each missing provider and tells the user to click `Provider Login`
+again after completing local CLI login. The model selector also picks the first
+available local provider on launch, so a first-run user sees a realistic model
+choice before pressing anything when a CLI is available. `Use
 example` refills the starter prompt after a send. Both `Provider Login` and `Use
 example` return focus to the prompt, so the next typed request or Enter key works
 without another click. On launch, the starter prompt is already selected, so
@@ -190,7 +192,8 @@ It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, `SHA256SUMS.txt`, and
 The packaged installer also adds a Start Menu self-test shortcut so a first-run
 user can verify the installed executable contract with a short PASS summary
 without building from source. That summary also verifies the first-run evidence
-points back to follow-up chat and blocks JLCPCB upload for this preview.
+points back to follow-up chat, blocks JLCPCB upload for this preview, and keeps
+the model selector on `built-in-preview` when no provider is ready.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named

@@ -78,7 +78,8 @@ fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
     assert!(ui_model.contains("login_hint"));
     assert!(ui_model.contains("No local provider found; built-in preview still works."));
     assert!(ui_model.contains("You can still press Send design"));
-    assert!(main.contains("provider_login_pipeline_status(selected_model)"));
+    assert!(ui_model.contains("selected_model_for_statuses"));
+    assert!(main.contains("provider_login_pipeline_status(selected_provider)"));
     assert!(main.contains("handle_provider_login"));
     assert!(main.contains("login_hint: provider.login_hint"));
 }
@@ -422,9 +423,16 @@ fn app_launch_mentions_recovered_preview_workspace_in_chat() {
 fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
 
     assert!(main.contains("CBS_DROPDOWNLIST"));
     assert!(main.contains("WS_TABSTOP | CBS_DROPDOWNLIST"));
+    assert!(main.contains("model_selector_items()"));
+    assert!(main.contains("selected_model_for_statuses"));
+    assert!(ui_model.contains("\"built-in-preview\""));
+    assert!(ui_model.contains("selected_model_for_statuses"));
 }
 
 #[test]
