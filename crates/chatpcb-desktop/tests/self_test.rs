@@ -23,6 +23,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["use_example_selects_prompt_for_overwrite"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["provider_login_selects_available_model"],
         true
     );
@@ -179,6 +183,7 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
     assert!(summary.contains("PASS model selector falls back to built-in preview"));
     assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
+    assert!(summary.contains("PASS Use example selects prompt text for immediate overwrite"));
     assert!(summary.contains("PASS first-run evidence points back to follow-up chat"));
     assert!(summary.contains("PASS first-run evidence blocks JLCPCB upload"));
     assert!(summary.contains("Boundary: prototype-review, not order-ready"));

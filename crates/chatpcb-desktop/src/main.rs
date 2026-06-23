@@ -122,6 +122,11 @@ fn print_self_test_summary() {
     );
     println!("PASS model selector falls back to built-in preview");
     println!("PASS first chat can create the built-in ESP32-S3 preview");
+    assert!(
+        chat_actions.use_example_selects_prompt_for_overwrite,
+        "Use example must select prompt text so typing immediately overwrites it"
+    );
+    println!("PASS Use example selects prompt text for immediate overwrite");
     println!("PASS KiCad preview scaffold and validation reports are wired");
     println!(
         "PASS bundled autorouter contract: {} {}",
