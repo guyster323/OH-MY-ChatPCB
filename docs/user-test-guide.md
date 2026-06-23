@@ -167,17 +167,22 @@ Expected files:
 ## Computer Use Verification Status
 
 Checked on 2026-06-23 after installing the current preview package and retrying
-Computer Use launch. Retried again after commit `a75b3ee`; launch still stopped
-at the same approval timeout before a window could be captured.
+Computer Use launch. Retried again after commit `1c8ba06`.
 
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
 - Computer Use `launch_app` stopped at `Computer Use app approval timed out`
   before a targetable app window appeared.
-- No screenshot, text-tree, or input proof was captured in this run because the
-  Computer Use app approval timed out before window inspection could proceed.
+- After the installed exe was started directly, Computer Use listed one
+  targetable `ChatPCB KiCad Preview` window with window title
+  `ChatPCB KiCad Preview`.
+- Computer Use `get_window_state` / activation stopped at
+  `Computer Use app approval timed out` before screenshot, text-tree, or input
+  proof could be captured.
+- No screenshot, text-tree, or input proof was captured because the Computer
+  Use app approval timed out before window inspection or typing could proceed.
 - Code and installed-package checks still passed: full Cargo tests, package
-  self-test summary, installed exe self-test summary, and GitHub replacement
-  dry run.
+  self-test summary, package first-chat smoke test, installed exe self-test
+  summary, installed first-chat smoke test, and GitHub replacement dry run.
 - Do not treat this as fresh GUI control proof. It proves the current Computer
   Use approval boundary, while the shell-side code and package checks prove the
   installable preview contract.

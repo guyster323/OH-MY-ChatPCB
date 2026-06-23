@@ -498,11 +498,17 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide
         .contains("Computer Use `launch_app` stopped at `Computer Use app approval timed out`"));
     assert!(guide.contains("before a targetable app window appeared"));
-    assert!(guide.contains("No screenshot, text-tree, or input proof was captured in this run"));
+    assert!(guide.contains("After the installed exe was started directly"));
+    assert!(guide.contains("Computer Use listed one"));
+    assert!(guide.contains("targetable `ChatPCB KiCad Preview` window"));
+    assert!(guide.contains("window title"));
+    assert!(guide.contains("`ChatPCB KiCad Preview`"));
+    assert!(guide.contains("`get_window_state` / activation stopped"));
+    assert!(guide.contains("`Computer Use app approval timed out` before screenshot"));
+    assert!(guide.contains("No screenshot, text-tree, or input proof was captured"));
     assert!(guide.contains("Computer Use app approval timed out"));
     assert!(guide.contains("Code and installed-package checks still passed"));
     assert!(guide.contains("Do not treat this as fresh GUI control proof"));
-    assert!(!guide.contains("After the installed exe was started directly"));
 }
 
 #[test]
