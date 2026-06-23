@@ -9,6 +9,23 @@ fn workspace_root() -> PathBuf {
 }
 
 #[test]
+fn root_readme_puts_non_expert_install_and_chat_path_first() {
+    let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+
+    let start_here = readme.find("## Start Here").unwrap();
+    let current_status = readme.find("## Current Status").unwrap();
+
+    assert!(start_here < current_status);
+    assert!(readme.contains("Download `ChatPCB-KiCad-Preview-windows-x64.zip`"));
+    assert!(readme.contains("Double-click `Install ChatPCB KiCad Preview.cmd`"));
+    assert!(readme.contains("Open `ChatPCB KiCad Preview`"));
+    assert!(readme.contains("Type a board idea in `Chat prompt`, then press Enter."));
+    assert!(readme.contains("Click `Review checklist` after the preview is saved."));
+    assert!(readme.contains("Boundary: `prototype-review`, not order-ready."));
+    assert!(readme.contains("Do not upload this preview to JLCPCB."));
+}
+
+#[test]
 fn native_preview_has_use_example_button_that_fills_the_prompt() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

@@ -7,6 +7,19 @@ workspace, and a Rust core runtime.
 This repository intentionally avoids browser, WebView, Electron, Tauri, HTTP,
 and WebSocket UI surfaces for the v1 product shell.
 
+## Start Here
+
+For a non-expert first run from GitHub:
+
+1. Download `ChatPCB-KiCad-Preview-windows-x64.zip` from the latest release or
+   workflow artifact.
+2. Unzip it. Double-click `Install ChatPCB KiCad Preview.cmd`.
+3. Open `ChatPCB KiCad Preview`.
+4. Type a board idea in `Chat prompt`, then press Enter.
+5. Click `Review checklist` after the preview is saved.
+
+Boundary: `prototype-review`, not order-ready. Do not upload this preview to JLCPCB.
+
 ## Current Status
 
 Implemented in this first vertical slice:
