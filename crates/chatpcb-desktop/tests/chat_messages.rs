@@ -48,11 +48,16 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
             display_name: "Codex".to_string(),
             available: true,
             version: Some("codex 0.41.0".to_string()),
+            login_hint: "Install Codex CLI and complete local login before invoking this provider."
+                .to_string(),
         },
         ProviderUiStatus {
             display_name: "Claude Code".to_string(),
             available: false,
             version: None,
+            login_hint:
+                "Install Claude Code and complete local login before invoking this provider."
+                    .to_string(),
         },
     ]);
 
@@ -73,22 +78,34 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
             display_name: "Codex".to_string(),
             available: false,
             version: None,
+            login_hint: "Install Codex CLI and complete local login before invoking this provider."
+                .to_string(),
         },
         ProviderUiStatus {
             display_name: "Claude Code".to_string(),
             available: false,
             version: None,
+            login_hint:
+                "Install Claude Code and complete local login before invoking this provider."
+                    .to_string(),
         },
         ProviderUiStatus {
             display_name: "Gemini CLI".to_string(),
             available: false,
             version: None,
+            login_hint:
+                "Install Gemini CLI and complete local login before invoking this provider."
+                    .to_string(),
         },
     ]);
 
     assert!(transcript.contains("No local provider is ready yet"));
     assert!(transcript.contains("You can still press Send design"));
     assert!(transcript.contains("CLI login later"));
+    assert!(transcript.contains("Install Codex CLI"));
+    assert!(transcript.contains("Install Claude Code"));
+    assert!(transcript.contains("Install Gemini CLI"));
+    assert!(transcript.contains("click Provider Login again"));
     assert!(!transcript.contains("Selected model:"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
@@ -102,16 +119,24 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
             display_name: "Codex".to_string(),
             available: false,
             version: None,
+            login_hint: "Install Codex CLI and complete local login before invoking this provider."
+                .to_string(),
         },
         ProviderUiStatus {
             display_name: "Claude Code".to_string(),
             available: true,
             version: Some("2.1.183".to_string()),
+            login_hint:
+                "Install Claude Code and complete local login before invoking this provider."
+                    .to_string(),
         },
         ProviderUiStatus {
             display_name: "Gemini CLI".to_string(),
             available: true,
             version: Some("gemini 0.9.0".to_string()),
+            login_hint:
+                "Install Gemini CLI and complete local login before invoking this provider."
+                    .to_string(),
         },
     ];
 
@@ -127,6 +152,8 @@ fn chat_transcript_appends_new_turns_without_erasing_context() {
         display_name: "Claude Code".to_string(),
         available: true,
         version: Some("2.1.183".to_string()),
+        login_hint: "Install Claude Code and complete local login before invoking this provider."
+            .to_string(),
     }]);
     let next_turn = send_design_transcript("ESP32-S3 board with USB-C and IMU");
 

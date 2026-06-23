@@ -129,7 +129,9 @@ The left tabs also show a native preview body, not an empty placeholder. `Provid
 Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. If no local provider
 is ready yet, Provider Login says the built-in preview can still be created, so a
-first-run user is not blocked before pressing `Send design`. The model selector
+first-run user is not blocked before pressing `Send design`. It also shows the
+local CLI install/login hint for each missing provider and tells the user to
+click `Provider Login` again after completing local CLI login. The model selector
 also picks the first available local provider on launch, so a first-run user sees
 a realistic model choice before pressing anything when a CLI is available. `Use
 example` refills the starter prompt after a send. Both `Provider Login` and `Use

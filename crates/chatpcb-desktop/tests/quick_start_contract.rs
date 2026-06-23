@@ -75,10 +75,12 @@ fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
             .unwrap();
 
     assert!(ui_model.contains("provider_login_keeps_builtin_preview_unblocked"));
+    assert!(ui_model.contains("login_hint"));
     assert!(ui_model.contains("No local provider found; built-in preview still works."));
     assert!(ui_model.contains("You can still press Send design"));
     assert!(main.contains("provider_login_pipeline_status(selected_model)"));
     assert!(main.contains("handle_provider_login"));
+    assert!(main.contains("login_hint: provider.login_hint"));
 }
 
 #[test]

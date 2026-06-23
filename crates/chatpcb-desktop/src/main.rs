@@ -494,6 +494,7 @@ mod win32_app {
                 display_name: provider.display_name,
                 available: provider.available,
                 version: provider.version,
+                login_hint: provider.login_hint,
             })
             .collect::<Vec<_>>();
 
@@ -1198,6 +1199,7 @@ mod win32_app {
                 display_name: provider.display_name,
                 available: provider.available,
                 version: provider.version,
+                login_hint: provider.login_hint,
             })
             .collect::<Vec<_>>();
         let controls = &*ptr;

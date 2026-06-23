@@ -37,6 +37,10 @@ fn provider_catalog_reports_local_cli_statuses_without_secrets() {
     assert!(providers[1].available);
     assert_eq!(providers[2].kind, ProviderKind::Gemini);
     assert!(!providers[2].available);
+    assert!(providers[0].login_hint.contains("Install Codex CLI"));
+    assert!(providers[1].login_hint.contains("Install Claude Code"));
+    assert!(providers[2].login_hint.contains("Install Gemini CLI"));
+    assert!(providers[2].login_hint.contains("complete local login"));
 
     let serialized = serde_json::to_string(&providers).unwrap();
     assert!(!serialized.to_ascii_lowercase().contains("api_key"));

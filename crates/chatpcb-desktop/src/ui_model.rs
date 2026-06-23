@@ -36,6 +36,7 @@ pub struct ProviderUiStatus {
     pub display_name: String,
     pub available: bool,
     pub version: Option<String>,
+    pub login_hint: String,
 }
 
 pub fn chat_actions_contract() -> ChatActionsContract {
@@ -360,6 +361,7 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
             ));
         } else {
             transcript.push_str(&format!(" - {}: not found\r\n", status.display_name));
+            transcript.push_str(&format!("   {}\r\n", status.login_hint));
         }
     }
 
@@ -370,7 +372,9 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
         transcript.push_str(
             "You can still press Send design to create the built-in ESP32-S3 preview.\r\n",
         );
-        transcript.push_str("Provider-backed design will require CLI login later.\r\n");
+        transcript.push_str(
+            "Provider-backed design will require CLI login later; complete a local CLI login, then click Provider Login again.\r\n",
+        );
     }
 
     transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");

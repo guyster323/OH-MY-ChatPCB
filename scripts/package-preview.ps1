@@ -61,6 +61,7 @@ try {
         "- Chat transcript append flow across Provider Login and Send design",
         "- Provider Login appends without erasing chat",
         "- Provider Login keeps built-in preview unblocked when no CLI is ready",
+        "- Provider Login shows local CLI login hints",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",
         "- Chat transcript latest-turn scrolling after updates",

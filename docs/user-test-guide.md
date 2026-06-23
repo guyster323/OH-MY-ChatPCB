@@ -63,6 +63,9 @@ Expected result:
 11. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI without erasing earlier chat turns. It should not
    ask for an API key.
+   If a provider is missing, confirm the transcript shows that provider's local
+   CLI install/login hint and says to click `Provider Login` again after local
+   CLI login.
    If a provider is available, the model selector should move to that provider.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
