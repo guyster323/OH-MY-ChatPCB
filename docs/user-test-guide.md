@@ -184,27 +184,30 @@ Latest run after installing the current preview package was checked on
 2026-06-24.
 
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
-- Computer Use `launch_app` stopped at `Computer Use app approval timed out`
-  before a targetable app window appeared.
-- No targetable window, screenshot, text-tree, or input proof was captured in
-  the latest run because the Computer Use app approval timed out during
-  `launch_app`.
-- Earlier same-day evidence, before this latest package rebuild, showed that
-  after the installed exe was started directly, Computer Use listed one
-  targetable `ChatPCB KiCad Preview` window with window title
-  `ChatPCB KiCad Preview`. Treat that as prior window-discovery evidence, not
-  the latest run's screenshot or typing proof.
-- Computer Use `get_window_state` / activation stopped at
-  `Computer Use app approval timed out` before screenshot, text-tree, or input
-  proof could be captured.
-- No screenshot, text-tree, or input proof was captured because the Computer
-  Use app approval timed out before window inspection or typing could proceed.
+- Computer Use launched the installed app from
+  `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\ChatPCB KiCad Preview.exe`.
+- Computer Use listed one targetable `ChatPCB KiCad Preview` window with title
+  `ChatPCB KiCad Preview`.
+- Computer Use captured a screenshot of the native 70/30 workspace. The capture
+  showed the left current-project preview pane, the right chat pane, the prompt
+  input, `Use example`, `Send design`, `Open PCB`, `Provider Login`,
+  `Open evidence`, the model selector, and the bottom pipeline status.
+- Computer Use also captured an accessibility text tree for the same window,
+  including the Schematic / PCB Layout / Validation / Manufacturing Preview
+  tabs and the Provider Login / Open evidence / Open PCB controls.
+- The empty prompt fallback was not proven through Computer Use. The prompt box
+  was visually cleared, but subsequent Send attempts did not produce a fresh
+  accessibility-text match for `No prompt was typed` or
+  `built-in ESP32-S3 example`.
+- No fresh Computer Use proof was captured for the empty prompt transcript note.
+  The empty-prompt behavior is currently proven by Rust tests and the installed
+  self-test summary, not by a successful end-to-end UI input capture.
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.
-- Do not treat this as fresh GUI control proof. It proves the current Computer
-  Use approval boundary, while the shell-side code and package checks prove the
-  installable preview contract.
+- Do not treat the empty prompt fallback as fresh GUI control proof. Treat the
+  latest Computer Use run as fresh proof that the installed native app launches,
+  exposes a targetable window, and renders the expected first-run workspace.
 
 ## Current Honest Boundary
 

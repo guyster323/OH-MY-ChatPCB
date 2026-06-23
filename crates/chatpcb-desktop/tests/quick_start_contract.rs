@@ -506,19 +506,16 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
 
     assert!(guide.contains("Computer Use Verification Status"));
     assert!(guide.contains("Latest run after installing the current preview package"));
-    assert!(!guide.contains("Retried again after commit"));
     assert!(guide.contains("Computer Use found the installed `ChatPCB KiCad Preview` app entry"));
-    assert!(guide
-        .contains("Computer Use `launch_app` stopped at `Computer Use app approval timed out`"));
-    assert!(guide.contains("No targetable window"));
-    assert!(guide.contains("latest run"));
-    assert!(guide.contains("Earlier same-day evidence"));
-    assert!(guide.contains("`get_window_state` / activation stopped"));
-    assert!(guide.contains("`Computer Use app approval timed out` before screenshot"));
-    assert!(guide.contains("No screenshot, text-tree, or input proof was captured"));
-    assert!(guide.contains("Computer Use app approval timed out"));
+    assert!(guide.contains("Computer Use launched the installed app"));
+    assert!(guide.contains("one targetable `ChatPCB KiCad Preview` window"));
+    assert!(guide.contains("captured a screenshot of the native 70/30 workspace"));
+    assert!(guide.contains("empty prompt fallback was not proven through Computer Use"));
+    assert!(guide.contains("No fresh Computer Use proof was captured for the empty prompt"));
+    assert!(guide.contains("latest Computer Use run"));
+    assert!(!guide.contains("latest run's screenshot or typing proof"));
     assert!(guide.contains("Code and installed-package checks still passed"));
-    assert!(guide.contains("Do not treat this as fresh GUI control proof"));
+    assert!(guide.contains("Do not treat the empty prompt fallback as fresh GUI control proof"));
 }
 
 #[test]
