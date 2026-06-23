@@ -426,3 +426,13 @@ fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
     assert!(main.contains("CBS_DROPDOWNLIST"));
     assert!(main.contains("WS_TABSTOP | CBS_DROPDOWNLIST"));
 }
+
+#[test]
+fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+
+    assert!(guide.contains("Computer Use Verification Status"));
+    assert!(guide.contains("Computer Use app approval timed out"));
+    assert!(guide.contains("Code and installed-package checks still passed"));
+    assert!(guide.contains("Do not treat this as fresh GUI control proof"));
+}

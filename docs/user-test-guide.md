@@ -141,6 +141,21 @@ Expected files:
 - `sym-lib-table`
 - `fp-lib-table`
 
+## Computer Use Verification Status
+
+Checked on 2026-06-23 after installing the package built from local HEAD.
+
+- Computer Use found the installed `ChatPCB KiCad Preview` app entry.
+- Computer Use launch/control stopped at `Computer Use app approval timed out`.
+- A follow-up Computer Use app-list check still showed the app entry, but no
+  running target window.
+- Code and installed-package checks still passed: full Cargo tests, package
+  self-test summary, installed exe self-test summary, and GitHub replacement
+  dry run.
+- Do not treat this as fresh GUI control proof. It proves the current Computer
+  Use approval boundary, while the shell-side code and package checks prove the
+  installable preview contract.
+
 ## Current Honest Boundary
 
 This preview proves the native app shell and Rust runtime contract. It does not
