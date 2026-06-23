@@ -184,7 +184,9 @@ Editor did not open. Click `Open evidence` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
 exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
 same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
-boundary and `release-evidence-preview.md` for saved evidence.
+boundary and `release-evidence-preview.md` for saved evidence. The bottom status
+says `Opened BEGINNER-NEXT-STEPS.txt in evidence folder.` so a first-run user
+knows which file was selected.
 After closing and reopening the app,
 `Open evidence` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The

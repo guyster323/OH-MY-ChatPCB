@@ -137,6 +137,8 @@ Expected result:
 27. Click `Open evidence`.
 28. Confirm Windows opens the preview evidence folder with
     `BEGINNER-NEXT-STEPS.txt` selected.
+    Confirm the bottom status says
+    `Opened BEGINNER-NEXT-STEPS.txt in evidence folder.`
     Confirm it says to click Open PCB, click Open evidence, ask a follow-up in
     chat, and not order yet.
 29. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and

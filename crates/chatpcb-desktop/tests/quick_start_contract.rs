@@ -399,8 +399,10 @@ fn open_evidence_selects_beginner_next_steps_for_non_experts() {
             .unwrap();
 
     assert!(ui_model.contains("open_evidence_selects_beginner_next_steps_file"));
+    assert!(ui_model.contains("open_evidence_pipeline_status"));
     assert!(main.contains("open_evidence_report"));
     assert!(main.contains("open_evidence_report_file"));
+    assert!(main.contains("open_evidence_pipeline_status()"));
     assert!(main.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(main.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(main.contains("release-evidence-preview.md"));
@@ -413,6 +415,7 @@ fn open_evidence_selects_beginner_next_steps_for_non_experts() {
         beginner_next_steps_index < first_run_summary_index,
         "Open evidence should select BEGINNER-NEXT-STEPS.txt before falling back to FIRST-RUN-SUMMARY.txt"
     );
+    assert!(!main.contains("Opened first-run summary in evidence folder."));
 }
 
 #[test]

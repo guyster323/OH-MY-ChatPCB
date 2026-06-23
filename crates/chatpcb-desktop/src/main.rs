@@ -1414,7 +1414,10 @@ mod win32_app {
         let controls = &*ptr;
         if let Some(path) = &controls.last_workspace_dir {
             open_evidence_report(path);
-            set_pipeline_status(controls, "Opened first-run summary in evidence folder.");
+            set_pipeline_status(
+                controls,
+                chatpcb_desktop::ui_model::open_evidence_pipeline_status(),
+            );
         } else {
             set_pipeline_status(controls, "No evidence yet: click Send design first.");
         }

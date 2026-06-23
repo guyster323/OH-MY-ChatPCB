@@ -176,6 +176,10 @@ pub fn open_pcb_pipeline_status(opened_with_kicad: bool) -> &'static str {
     }
 }
 
+pub fn open_evidence_pipeline_status() -> &'static str {
+    "Opened BEGINNER-NEXT-STEPS.txt in evidence folder."
+}
+
 pub fn example_board_prompt() -> &'static str {
     "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
 }

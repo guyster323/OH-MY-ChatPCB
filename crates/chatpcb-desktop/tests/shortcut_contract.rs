@@ -88,6 +88,7 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(guide.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(guide.contains("Windows opens the preview evidence folder with"));
     assert!(guide.contains("`BEGINNER-NEXT-STEPS.txt` selected"));
+    assert!(guide.contains("Opened BEGINNER-NEXT-STEPS.txt in evidence folder."));
     assert!(guide.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
     assert!(package_readme.contains("Run First Chat Smoke Test"));
     assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
@@ -102,6 +103,7 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(root_readme.contains("PASS ERC/DRC validation summary written"));
     assert!(root_readme.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(root_readme.contains("with `BEGINNER-NEXT-STEPS.txt` selected"));
+    assert!(root_readme.contains("Opened BEGINNER-NEXT-STEPS.txt in evidence folder."));
     assert!(root_readme.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
 }
 

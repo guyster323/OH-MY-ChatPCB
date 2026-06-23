@@ -2,13 +2,14 @@ use chatpcb_desktop::ui_model::{
     append_chat_transcript, design_pipeline_status, erc_drc_validation_transcript,
     example_loaded_pipeline_status, initial_left_workspace_status, initial_pipeline_status,
     initial_transcript, kicad_cli_check_transcript, left_tab_body, left_tab_status,
-    model_selector_items, open_pcb_pipeline_status, preview_workspace_body,
-    preview_workspace_body_with_kicad_check, preview_workspace_body_with_validation_reports,
-    preview_workspace_left_status, preview_workspace_saved_transcript,
-    provider_login_pipeline_status, provider_login_transcript, recovered_preview_workspace_body,
-    recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
-    saved_preview_tab_body, saved_preview_tab_status, selected_model_for_statuses,
-    selected_provider_model, send_design_transcript, validation_pipeline_status, ProviderUiStatus,
+    model_selector_items, open_evidence_pipeline_status, open_pcb_pipeline_status,
+    preview_workspace_body, preview_workspace_body_with_kicad_check,
+    preview_workspace_body_with_validation_reports, preview_workspace_left_status,
+    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
+    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
+    recovered_preview_workspace_transcript, saved_preview_tab_body, saved_preview_tab_status,
+    selected_model_for_statuses, selected_provider_model, send_design_transcript,
+    validation_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -269,6 +270,16 @@ fn open_pcb_pipeline_status_distinguishes_kicad_from_file_fallback() {
     assert!(fallback_status.contains("Install KiCad 10"));
     assert!(fallback_status.contains("PCB Editor did not open"));
     assert_ne!(kicad_status, fallback_status);
+}
+
+#[test]
+fn open_evidence_pipeline_status_names_the_beginner_next_steps_file() {
+    let status = open_evidence_pipeline_status();
+
+    assert_eq!(status, "Opened BEGINNER-NEXT-STEPS.txt in evidence folder.");
+    assert!(status.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(status.contains("evidence folder"));
+    assert!(status.len() <= 70);
 }
 
 #[test]
