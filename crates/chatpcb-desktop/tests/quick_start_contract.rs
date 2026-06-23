@@ -494,17 +494,14 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
 
     assert!(guide.contains("Computer Use Verification Status"));
-    assert!(guide.contains("latest installed preview package"));
+    assert!(guide.contains("Latest run after installing the current preview package"));
     assert!(!guide.contains("Retried again after commit"));
     assert!(guide.contains("Computer Use found the installed `ChatPCB KiCad Preview` app entry"));
     assert!(guide
         .contains("Computer Use `launch_app` stopped at `Computer Use app approval timed out`"));
-    assert!(guide.contains("before a targetable app window appeared"));
-    assert!(guide.contains("After the installed exe was started directly"));
-    assert!(guide.contains("Computer Use listed one"));
-    assert!(guide.contains("targetable `ChatPCB KiCad Preview` window"));
-    assert!(guide.contains("window title"));
-    assert!(guide.contains("`ChatPCB KiCad Preview`"));
+    assert!(guide.contains("No targetable window"));
+    assert!(guide.contains("latest run"));
+    assert!(guide.contains("Earlier same-day evidence"));
     assert!(guide.contains("`get_window_state` / activation stopped"));
     assert!(guide.contains("`Computer Use app approval timed out` before screenshot"));
     assert!(guide.contains("No screenshot, text-tree, or input proof was captured"));

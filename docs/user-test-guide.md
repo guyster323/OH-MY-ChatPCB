@@ -175,15 +175,20 @@ Expected files:
 
 ## Computer Use Verification Status
 
-Checked on 2026-06-24 after installing the latest installed preview package and
-retrying Computer Use launch/window discovery.
+Latest run after installing the current preview package was checked on
+2026-06-24.
 
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
 - Computer Use `launch_app` stopped at `Computer Use app approval timed out`
   before a targetable app window appeared.
-- After the installed exe was started directly, Computer Use listed one
+- No targetable window, screenshot, text-tree, or input proof was captured in
+  the latest run because the Computer Use app approval timed out during
+  `launch_app`.
+- Earlier same-day evidence, before this latest package rebuild, showed that
+  after the installed exe was started directly, Computer Use listed one
   targetable `ChatPCB KiCad Preview` window with window title
-  `ChatPCB KiCad Preview`.
+  `ChatPCB KiCad Preview`. Treat that as prior window-discovery evidence, not
+  the latest run's screenshot or typing proof.
 - Computer Use `get_window_state` / activation stopped at
   `Computer Use app approval timed out` before screenshot, text-tree, or input
   proof could be captured.
