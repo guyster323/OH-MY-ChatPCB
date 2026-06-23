@@ -41,6 +41,7 @@ Expected result:
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.
 - The Start Menu folder includes `Run First Chat Smoke Test`.
+- The Start Menu folder includes `Start Here`.
 - The Start Menu folder includes `First Chat Guide`.
 - Running `Run ChatPCB Self Test` prints a short PASS summary with
   `PASS Provider Login shows local CLI login hints` and

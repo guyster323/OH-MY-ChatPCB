@@ -123,6 +123,12 @@ $firstChatSmokeShortcut.TargetPath = "$InstallRoot\Run First Chat Smoke Test.cmd
 $firstChatSmokeShortcut.WorkingDirectory = $InstallRoot
 $firstChatSmokeShortcut.Description = "Verify the first ChatPCB chat-to-preview path"
 $firstChatSmokeShortcut.Save()
+$startHereShortcutPath = Join-Path $startMenuPath "Start Here.lnk"
+$startHereShortcut = $shell.CreateShortcut($startHereShortcutPath)
+$startHereShortcut.TargetPath = "$InstallRoot\INSTALL-READY.txt"
+$startHereShortcut.WorkingDirectory = $InstallRoot
+$startHereShortcut.Description = "Open the ChatPCB KiCad install-ready start note"
+$startHereShortcut.Save()
 $firstGuideShortcutPath = Join-Path $startMenuPath "First Chat Guide.lnk"
 $firstGuideShortcut = $shell.CreateShortcut($firstGuideShortcutPath)
 $firstGuideShortcut.TargetPath = "$InstallRoot\README-FIRST.txt"
@@ -135,6 +141,7 @@ Write-Host "Desktop shortcut: $shortcutPath"
 Write-Host "Start menu shortcut: $startShortcutPath"
 Write-Host "Self-test shortcut: $selfTestShortcutPath"
 Write-Host "First chat smoke test shortcut: $firstChatSmokeShortcutPath"
+Write-Host "Start here shortcut: $startHereShortcutPath"
 Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
 Write-Host "Install self-test: $installSelfTestPath"
 Write-Host "First chat smoke test: $installFirstChatSmokePath"

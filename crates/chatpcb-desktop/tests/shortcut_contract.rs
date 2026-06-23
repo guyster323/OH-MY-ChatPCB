@@ -188,6 +188,32 @@ fn installers_write_install_ready_summary_for_non_experts() {
 }
 
 #[test]
+fn installers_add_start_here_shortcut_to_install_ready_summary() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("Start Here.lnk"));
+        assert!(script.contains("INSTALL-READY.txt"));
+        assert!(script.contains("Open the ChatPCB KiCad install-ready start note"));
+        assert!(script.contains("Start here shortcut:"));
+    }
+
+    assert!(package_script.contains("Start Here Start Menu shortcut"));
+    assert!(root_readme.contains("Start Here"));
+    assert!(guide.contains("Start Here"));
+    assert!(package_readme.contains("Start Here"));
+}
+
+#[test]
 fn installers_copy_first_chat_readme_next_to_installed_app() {
     let source_installer =
         fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();

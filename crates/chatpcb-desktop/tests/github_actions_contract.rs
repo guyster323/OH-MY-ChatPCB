@@ -59,6 +59,8 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("install-from-package.ps1"));
     assert!(script.contains("INSTALL-READY.txt"));
     assert!(script.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(script.contains("Start Here.lnk"));
+    assert!(script.contains("Start Here Start Menu shortcut"));
     assert!(script.contains("First Chat Guide Start Menu shortcut"));
     assert!(script.contains("Git commit: $head"));
     assert!(script.contains("Working tree: clean"));

@@ -10,11 +10,12 @@ Install
 3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
 4. A Start Menu shortcut named "Run ChatPCB Self Test" will be created.
 5. A Start Menu shortcut named "Run First Chat Smoke Test" will be created.
-6. A Start Menu shortcut named "First Chat Guide" will be created.
-7. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
-8. INSTALL-FIRST-CHAT-SMOKE.txt will be written beside the installed app with the chat-to-preview smoke result.
-9. INSTALL-READY.txt will be written beside the installed app with "Type a board idea in Chat prompt, then press Enter."
-10. The app starts after installation.
+6. A Start Menu shortcut named "Start Here" will be created.
+7. A Start Menu shortcut named "First Chat Guide" will be created.
+8. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
+9. INSTALL-FIRST-CHAT-SMOKE.txt will be written beside the installed app with the chat-to-preview smoke result.
+10. INSTALL-READY.txt will be written beside the installed app with "Type a board idea in Chat prompt, then press Enter."
+11. The app starts after installation.
 
 Self-test
 ---------

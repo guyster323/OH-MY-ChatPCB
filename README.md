@@ -120,7 +120,8 @@ Install ChatPCB KiCad Preview.cmd
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
 shortcut plus Start Menu shortcuts, adds a `First Chat Guide` Start Menu
-shortcut, adds a `Run First Chat Smoke Test` shortcut, writes
+shortcut, adds a `Start Here` shortcut to the install-ready note, adds a
+`Run First Chat Smoke Test` shortcut, writes
 `INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
 `INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, writes
 `INSTALL-READY.txt` with `Type a board idea in Chat prompt, then press Enter.`,
@@ -219,7 +220,8 @@ The zip is written under `dist\` and intentionally ignored by git.
 It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, `SHA256SUMS.txt`, and
 `Run ChatPCB Self Test.cmd` beside the two executables and installer scripts.
 Both the packaged installer and source-tree installer add Start Menu shortcuts
-for the app, `First Chat Guide`, self-test, and `Run First Chat Smoke Test`. A
+for the app, `Start Here`, `First Chat Guide`, self-test, and
+`Run First Chat Smoke Test`. A
 first-run user can verify the installed executable contract with a short PASS
 summary. That summary also
 verifies the first-run evidence points back to follow-up chat, blocks JLCPCB

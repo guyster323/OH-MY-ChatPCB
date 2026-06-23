@@ -59,6 +59,7 @@ try {
     Assert-Contains $releaseEvidence "Git commit: $head" "RELEASE-EVIDENCE.txt does not match HEAD $head."
     Assert-Contains $releaseEvidence "Working tree: clean" "RELEASE-EVIDENCE.txt must record a clean working tree."
     Assert-Contains $releaseEvidence "ChatPCB KiCad Preview release evidence" "RELEASE-EVIDENCE.txt is not the expected package evidence."
+    Assert-Contains $releaseEvidence "Start Here Start Menu shortcut" "Release evidence must include the start-here shortcut."
     Assert-Contains $releaseEvidence "First Chat Guide Start Menu shortcut" "Release evidence must include the first chat guide shortcut."
     Assert-Contains $releaseEvidence "Preview only; not order-ready KiCad output yet" "Release boundary must stay honest before GitHub replacement."
 
@@ -74,6 +75,7 @@ try {
     Assert-Contains $firstReadme "Boundary: prototype-review, not order-ready" "README-FIRST.txt must preserve the preview boundary."
 
     $installer = Get-Content -Raw -Path $installerPath
+    Assert-Contains $installer "Start Here.lnk" "Packaged installer must create the Start Here Start Menu shortcut."
     Assert-Contains $installer "First Chat Guide.lnk" "Packaged installer must create the First Chat Guide Start Menu shortcut."
     Assert-Contains $installer "README-FIRST.txt" "Packaged installer must copy README-FIRST.txt beside the installed app."
     Assert-Contains $installer "INSTALL-READY.txt" "Packaged installer must write the install-ready summary."
