@@ -382,6 +382,10 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(manufacturing.contains("Gerber"));
     assert!(manufacturing.contains("BOM"));
     assert!(manufacturing.contains("CPL"));
+    assert!(manufacturing.contains("Gerber and Drill files are not generated yet"));
+    assert!(manufacturing.contains("BOM/CPL preview files are generated after Send design"));
+    assert!(manufacturing.contains("not upload-ready"));
+    assert!(!manufacturing.contains("Gerber, Drill, BOM, and CPL files are not generated yet"));
 
     assert_eq!(left_tab_body(99), left_tab_body(0));
 }

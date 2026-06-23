@@ -118,8 +118,9 @@ pub fn left_tab_body(index: usize) -> &'static str {
               - DRC has not run yet.\r\n\
               - The release gate stays prototype-review until KiCad reports and artifacts exist.",
         3 => "Manufacturing Preview\r\n\
-              - Gerber, Drill, BOM, and CPL files are not generated yet.\r\n\
-              - JLCPCB upload package creation is blocked until schematic, layout, ERC, and DRC evidence exist.\r\n\
+              - Gerber and Drill files are not generated yet.\r\n\
+              - BOM/CPL preview files are generated after Send design, but are not upload-ready.\r\n\
+              - JLCPCB upload package creation is blocked until schematic, layout, ERC, DRC, Gerber, drill, and placement-reviewed CPL evidence exist.\r\n\
               - The app must stop before real ordering and ask for user signoff.",
         _ => left_tab_body(0),
     }
