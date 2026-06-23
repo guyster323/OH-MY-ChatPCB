@@ -190,6 +190,8 @@ fn print_first_chat_smoke() {
     let validation = run_first_chat_smoke_erc_drc_reports(&project_dir);
     let first_run_summary = fs::read_to_string(&workspace.first_run_summary_file)
         .expect("first chat smoke test must read FIRST-RUN-SUMMARY.txt");
+    let beginner_next_steps = fs::read_to_string(&workspace.beginner_next_steps_file)
+        .expect("first chat smoke test must read BEGINNER-NEXT-STEPS.txt");
 
     assert!(
         !prompt.trim().is_empty(),
@@ -218,17 +220,25 @@ fn print_first_chat_smoke() {
         first_run_summary.contains("Do not upload this preview to JLCPCB"),
         "first chat smoke test summary must block JLCPCB upload"
     );
+    assert!(
+        beginner_next_steps.contains("First thing to do")
+            && beginner_next_steps.contains("Ask a follow-up in chat")
+            && beginner_next_steps.contains("Do not order yet"),
+        "first chat smoke test must write beginner next-step guidance"
+    );
 
     println!("ChatPCB First Chat Smoke Test");
     println!("PASS beginner prompt accepted");
     println!("PASS preview workspace saved");
     println!("PASS generated KiCad preview scaffold");
+    println!("PASS beginner next steps written");
     println!("PASS KiCad compatibility report written");
     println!("PASS ERC/DRC validation summary written");
     println!("PASS first-run summary points back to follow-up chat");
     println!("PASS first-run summary blocks JLCPCB upload");
     println!("Prompt: {prompt}");
     println!("Workspace: {}", workspace.project_dir);
+    println!("Next steps: {}", workspace.beginner_next_steps_file);
     println!("KiCad check: {}", kicad_check.report_file.to_string_lossy());
     println!(
         "ERC/DRC summary: {}",

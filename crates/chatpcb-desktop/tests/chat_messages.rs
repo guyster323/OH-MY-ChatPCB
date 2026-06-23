@@ -288,6 +288,8 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(transcript.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(transcript.contains("Ask a follow-up"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("not order-ready"));
 }
@@ -414,6 +416,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("Preview workspace saved"));
     assert!(body.contains("artifact-manifest.json"));
     assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
+    assert!(body.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
@@ -421,6 +424,8 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("50mm x 50mm Edge.Cuts"));
     assert!(body.contains("Open PCB"));
     assert!(body.contains("KiCad 10 when installed"));
+    assert!(body.contains("Open evidence"));
+    assert!(body.contains("type a follow-up"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
 }
@@ -514,6 +519,7 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(body.contains("Open PCB"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
+    assert!(body.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(body.contains("kicad-pcb-check.txt"));
     assert!(body.contains("erc-report.json"));
     assert!(body.contains("drc-report.json"));

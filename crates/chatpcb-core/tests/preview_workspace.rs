@@ -49,6 +49,21 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     assert!(first_run_summary.contains("not order-ready"));
     assert!(workspace.files.contains(&workspace.first_run_summary_file));
 
+    let beginner_next_steps_file = project_dir.join("BEGINNER-NEXT-STEPS.txt");
+    assert!(beginner_next_steps_file.exists());
+    assert!(workspace
+        .files
+        .contains(&beginner_next_steps_file.to_string_lossy().to_string()));
+    let beginner_next_steps = fs::read_to_string(beginner_next_steps_file).unwrap();
+    assert!(beginner_next_steps.contains("First thing to do"));
+    assert!(beginner_next_steps.contains("Open PCB"));
+    assert!(beginner_next_steps.contains("Open evidence"));
+    assert!(beginner_next_steps.contains("Ask a follow-up in chat"));
+    assert!(beginner_next_steps.contains("Do not order yet"));
+    assert!(beginner_next_steps.contains("Gerber"));
+    assert!(beginner_next_steps.contains("BOM"));
+    assert!(beginner_next_steps.contains("CPL"));
+
     let prompt = fs::read_to_string(&workspace.prompt_file).unwrap();
     assert!(prompt.contains("USB-C ESP32-S3"));
 

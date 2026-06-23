@@ -79,6 +79,7 @@ try {
         "- 50mm PCB preview outline in generated KiCad PCB",
         "- KiCad CLI preview compatibility check on Send design",
         "- KiCad ERC and DRC JSON reports on Send design",
+        "- Beginner next steps file for first-run users",
         "- Actionable validation status points to Open PCB and Open evidence",
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",

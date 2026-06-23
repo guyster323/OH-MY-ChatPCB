@@ -24,6 +24,7 @@ pub struct PreviewWorkspace {
     pub manifest_file: String,
     pub release_report_file: String,
     pub first_run_summary_file: String,
+    pub beginner_next_steps_file: String,
     pub prompt_file: String,
     pub files: Vec<String>,
     pub artifact_manifest: ArtifactManifest,
@@ -58,6 +59,7 @@ pub fn create_preview_workspace(
     let manifest_file = project_dir.join("artifact-manifest.json");
     let release_report_file = project_dir.join("release-evidence-preview.md");
     let first_run_summary_file = project_dir.join("FIRST-RUN-SUMMARY.txt");
+    let beginner_next_steps_file = project_dir.join("BEGINNER-NEXT-STEPS.txt");
     let prompt_file = project_dir.join("prompt.txt");
     let project_file = project_dir.join(&created.artifact_manifest.project_file);
     let schematic_file = project_dir.join(&created.artifact_manifest.schematic_file);
@@ -81,12 +83,14 @@ pub fn create_preview_workspace(
         preview_release_report(prompt, &created.artifact_manifest),
     )?;
     fs::write(&first_run_summary_file, first_run_summary(prompt))?;
+    fs::write(&beginner_next_steps_file, beginner_next_steps(prompt))?;
 
     Ok(PreviewWorkspace {
         project_dir: path_to_string(&project_dir),
         manifest_file: path_to_string(&manifest_file),
         release_report_file: path_to_string(&release_report_file),
         first_run_summary_file: path_to_string(&first_run_summary_file),
+        beginner_next_steps_file: path_to_string(&beginner_next_steps_file),
         prompt_file: path_to_string(&prompt_file),
         files: vec![
             path_to_string(&project_file),
@@ -97,6 +101,7 @@ pub fn create_preview_workspace(
             path_to_string(&manifest_file),
             path_to_string(&release_report_file),
             path_to_string(&first_run_summary_file),
+            path_to_string(&beginner_next_steps_file),
             path_to_string(&prompt_file),
         ],
         artifact_manifest: created.artifact_manifest,
@@ -116,6 +121,7 @@ fn first_run_summary(prompt: &str) -> String {
          - A 50mm x 50mm PCB outline for visual inspection.\r\n\
          \r\n\
          What to click next in the app:\r\n\
+         - BEGINNER-NEXT-STEPS.txt: read the short checklist if you are not sure what happened.\r\n\
          - Open PCB: inspect the generated board outline in KiCad.\r\n\
          - Open evidence: return to this folder and review saved reports.\r\n\
          - Or return to the focused prompt, type a follow-up, and press Enter.\r\n\
@@ -129,6 +135,37 @@ fn first_run_summary(prompt: &str) -> String {
          - Gerber, drill, BOM, and CPL files are not generated yet.\r\n\
          - A human must review real manufacturing evidence before ordering.\r\n\
          - Do not upload this preview to JLCPCB.\r\n",
+        prompt = prompt.trim()
+    )
+}
+
+fn beginner_next_steps(prompt: &str) -> String {
+    format!(
+        "ChatPCB3 Beginner Next Steps\r\n\
+         ============================\r\n\
+         \r\n\
+         Your first request:\r\n\
+         {prompt}\r\n\
+         \r\n\
+         First thing to do:\r\n\
+         1. Click Open PCB in ChatPCB KiCad Preview.\r\n\
+         2. Confirm KiCad opens the 50mm x 50mm board outline.\r\n\
+         3. Click Open evidence and keep this folder open while you review.\r\n\
+         \r\n\
+         What the files mean:\r\n\
+         - chatpcb3-esp32s3.kicad_sch is the schematic preview scaffold.\r\n\
+         - chatpcb3-esp32s3.kicad_pcb is the PCB outline preview.\r\n\
+         - kicad-validation-summary.txt is the local ERC/DRC summary when KiCad CLI is available.\r\n\
+         - FIRST-RUN-SUMMARY.txt explains the prototype-review boundary.\r\n\
+         \r\n\
+         Ask a follow-up in chat:\r\n\
+         - Ask for the missing sensor, connector, board size, or power change next.\r\n\
+         - Keep using chat until the app can generate real placement, routing, and manufacturing files.\r\n\
+         \r\n\
+         Do not order yet:\r\n\
+         - Gerber files are not generated yet.\r\n\
+         - BOM and CPL files are not generated yet.\r\n\
+         - Human review is still required before JLCPCB upload.\r\n",
         prompt = prompt.trim()
     )
 }
@@ -147,6 +184,7 @@ fn preview_release_report(prompt: &str, manifest: &ArtifactManifest) -> String {
          - {pcb_file}\r\n\
          - sym-lib-table\r\n\
          - fp-lib-table\r\n\
+         - BEGINNER-NEXT-STEPS.txt\r\n\
          \r\n\
          Current boundary:\r\n\
          - The KiCad project shell is parseable preview scaffolding, not a completed circuit or PCB layout.\r\n\

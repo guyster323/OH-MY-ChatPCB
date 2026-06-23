@@ -160,9 +160,12 @@ It also saves a local preview workspace under:
 ```
 
 That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
-and a prototype-review release evidence report. The first-run summary points a
-non-expert back to the focused prompt for follow-up chat and says not to upload
-the preview to JLCPCB. It also contains the generated KiCad preview scaffold:
+`BEGINNER-NEXT-STEPS.txt`, and a prototype-review release evidence report. The
+first-run summary points a non-expert back to the focused prompt for follow-up
+chat and says not to upload the preview to JLCPCB. The beginner next-steps file
+spells out the first clicks: Open PCB, Open evidence, then ask a follow-up in
+chat while Gerber/BOM/CPL remain blocked. It also contains the generated KiCad
+preview scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
 project status and preview body also change to the saved workspace state. When
@@ -217,9 +220,11 @@ They also run `ChatPCB KiCad Preview.exe --first-chat-smoke` and write
 `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-FIRST-CHAT-SMOKE.txt`,
 which proves the installed app can turn the starter chat prompt into a saved
 prototype-review preview workspace without provider login. The smoke summary
-also prints `PASS KiCad compatibility report written` and
+also prints `PASS beginner next steps written`,
+`PASS KiCad compatibility report written`, and
 `PASS ERC/DRC validation summary written`, so a non-expert has local validation
-evidence before opening the full app.
+evidence and a next-action checklist before opening the full app. The saved
+preview workspace includes `BEGINNER-NEXT-STEPS.txt`.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named

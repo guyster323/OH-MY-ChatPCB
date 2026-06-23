@@ -82,14 +82,20 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(root_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
     assert!(guide.contains("Run First Chat Smoke Test"));
     assert!(guide.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(guide.contains("PASS beginner next steps written"));
     assert!(guide.contains("PASS KiCad compatibility report written"));
     assert!(guide.contains("PASS ERC/DRC validation summary written"));
+    assert!(guide.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(package_readme.contains("Run First Chat Smoke Test"));
     assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(package_readme.contains("PASS beginner next steps written"));
     assert!(package_readme.contains("PASS KiCad compatibility report written"));
     assert!(package_readme.contains("PASS ERC/DRC validation summary written"));
+    assert!(package_readme.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(root_readme.contains("PASS beginner next steps written"));
     assert!(root_readme.contains("PASS KiCad compatibility report written"));
     assert!(root_readme.contains("PASS ERC/DRC validation summary written"));
+    assert!(root_readme.contains("BEGINNER-NEXT-STEPS.txt"));
 }
 
 #[test]
@@ -237,6 +243,8 @@ fn package_first_readme_matches_current_validation_status_copy() {
     assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
     assert!(readme.contains("PASS pressing Enter sends the first design"));
     assert!(readme.contains("PASS Send design returns focus for follow-up chat"));
+    assert!(readme.contains("PASS beginner next steps written"));
+    assert!(readme.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(!readme.contains("Validated: ERC/DRC clear. Next: Open PCB or Open evidence."));
 }
 
@@ -292,6 +300,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("50mm PCB preview outline"));
     assert!(script.contains("KiCad CLI preview compatibility check"));
     assert!(script.contains("KiCad ERC and DRC JSON reports on Send design"));
+    assert!(script.contains("Beginner next steps file for first-run users"));
     assert!(script.contains("Actionable validation status"));
     assert!(script.contains("Left workspace status update"));
     assert!(script.contains("Left tab status updates"));

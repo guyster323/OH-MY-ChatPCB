@@ -225,6 +225,7 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
         "Preview workspace saved\r\n\
          - Project folder: {project_dir}\r\n\
          - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
+         - Beginner next steps: BEGINNER-NEXT-STEPS.txt. Ask a follow-up in chat after reviewing Open PCB/Open evidence.\r\n\
          - PCB preview: 50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\
          - Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\
          - Release evidence: {release_report_file}\r\n\
@@ -323,10 +324,12 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
          - FIRST-RUN-SUMMARY.txt\r\n\
+         - BEGINNER-NEXT-STEPS.txt\r\n\
          - release-evidence-preview.md\r\n\r\n\
          PCB preview:\r\n\
          50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\r\n\
          Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\r\n\
+         Click Open evidence to read BEGINNER-NEXT-STEPS.txt, then type a follow-up in chat.\r\n\r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."
@@ -418,6 +421,7 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
          - FIRST-RUN-SUMMARY.txt\r\n\
+         - BEGINNER-NEXT-STEPS.txt\r\n\
          - release-evidence-preview.md\r\n\
          - kicad-pcb-check.txt\r\n\
          - erc-report.json\r\n\
