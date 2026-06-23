@@ -34,8 +34,9 @@ Implemented in this first vertical slice:
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.
 - `Open evidence` opens the saved preview workspace folder from inside the app
-  with `FIRST-RUN-SUMMARY.txt` selected, including after relaunch when a
-  previous preview workspace already exists.
+  with `BEGINNER-NEXT-STEPS.txt` selected for first-run users. The same folder
+  still contains `FIRST-RUN-SUMMARY.txt` and the release evidence report,
+  including after relaunch when a previous preview workspace already exists.
 - `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview with KiCad
   10's PCB Editor when it is installed; otherwise it falls back to the Windows
   file association and tells the user to install KiCad 10 if PCB Editor did not
@@ -180,8 +181,10 @@ It is still not an order-ready KiCad board. Click
 see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,
 the app opens the PCB file through Windows and says to install KiCad 10 if PCB
 Editor did not open. Click `Open evidence` in the app to open that
-folder without finding `%LOCALAPPDATA%` by hand; when the summary exists,
-Windows opens the folder with `FIRST-RUN-SUMMARY.txt` selected.
+folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
+exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
+same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
+boundary and `release-evidence-preview.md` for saved evidence.
 After closing and reopening the app,
 `Open evidence` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The

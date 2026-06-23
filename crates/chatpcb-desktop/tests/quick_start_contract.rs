@@ -391,20 +391,28 @@ fn saved_artifact_buttons_are_disabled_until_a_workspace_exists() {
 }
 
 #[test]
-fn open_evidence_selects_the_first_run_summary_for_non_experts() {
+fn open_evidence_selects_beginner_next_steps_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
     let ui_model =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
             .unwrap();
 
-    assert!(ui_model.contains("open_evidence_selects_first_run_summary_file"));
+    assert!(ui_model.contains("open_evidence_selects_beginner_next_steps_file"));
     assert!(main.contains("open_evidence_report"));
     assert!(main.contains("open_evidence_report_file"));
+    assert!(main.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(main.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(main.contains("release-evidence-preview.md"));
     assert!(main.contains("explorer.exe"));
     assert!(main.contains("/select,"));
+
+    let beginner_next_steps_index = main.find("BEGINNER-NEXT-STEPS.txt").unwrap();
+    let first_run_summary_index = main.find("FIRST-RUN-SUMMARY.txt").unwrap();
+    assert!(
+        beginner_next_steps_index < first_run_summary_index,
+        "Open evidence should select BEGINNER-NEXT-STEPS.txt before falling back to FIRST-RUN-SUMMARY.txt"
+    );
 }
 
 #[test]

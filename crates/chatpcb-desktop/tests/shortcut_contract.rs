@@ -86,16 +86,23 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(guide.contains("PASS KiCad compatibility report written"));
     assert!(guide.contains("PASS ERC/DRC validation summary written"));
     assert!(guide.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(guide.contains("Windows opens the preview evidence folder with"));
+    assert!(guide.contains("`BEGINNER-NEXT-STEPS.txt` selected"));
+    assert!(guide.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
     assert!(package_readme.contains("Run First Chat Smoke Test"));
     assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
     assert!(package_readme.contains("PASS beginner next steps written"));
     assert!(package_readme.contains("PASS KiCad compatibility report written"));
     assert!(package_readme.contains("PASS ERC/DRC validation summary written"));
     assert!(package_readme.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(package_readme.contains("with BEGINNER-NEXT-STEPS.txt selected"));
+    assert!(package_readme.contains("FIRST-RUN-SUMMARY.txt stays in the same folder"));
     assert!(root_readme.contains("PASS beginner next steps written"));
     assert!(root_readme.contains("PASS KiCad compatibility report written"));
     assert!(root_readme.contains("PASS ERC/DRC validation summary written"));
     assert!(root_readme.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(root_readme.contains("with `BEGINNER-NEXT-STEPS.txt` selected"));
+    assert!(root_readme.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
 }
 
 #[test]
@@ -308,7 +315,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Open PCB/evidence waits until a preview workspace exists"));
     assert!(script.contains("Installer writes INSTALL-SELF-TEST.txt"));
     assert!(script.contains("Open evidence button"));
-    assert!(script.contains("Open evidence selects FIRST-RUN-SUMMARY.txt"));
+    assert!(script.contains("Open evidence selects BEGINNER-NEXT-STEPS.txt"));
     assert!(script.contains("Open PCB button"));
     assert!(script.contains("Open PCB status distinguishes KiCad editor from file fallback"));
     assert!(script.contains("Open evidence recovers previous preview workspace"));

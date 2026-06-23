@@ -163,8 +163,8 @@ fn print_self_test_summary() {
         package.files.len()
     );
     println!(
-        "PASS Open evidence selects FIRST-RUN-SUMMARY.txt: {}",
-        chat_actions.open_evidence_selects_first_run_summary_file
+        "PASS Open evidence selects BEGINNER-NEXT-STEPS.txt: {}",
+        chat_actions.open_evidence_selects_beginner_next_steps_file
     );
     assert!(
         evidence.points_back_to_follow_up_chat,
@@ -1505,6 +1505,12 @@ mod win32_app {
     }
 
     unsafe fn open_evidence_report(project_dir: &PathBuf) {
+        let beginner_next_steps_file = project_dir.join("BEGINNER-NEXT-STEPS.txt");
+        if beginner_next_steps_file.exists() {
+            open_evidence_report_file(&beginner_next_steps_file);
+            return;
+        }
+
         let first_run_summary_file = project_dir.join("FIRST-RUN-SUMMARY.txt");
         if first_run_summary_file.exists() {
             open_evidence_report_file(&first_run_summary_file);

@@ -86,7 +86,7 @@ try {
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
         "- Open PCB/evidence waits until a preview workspace exists",
         "- Open evidence button for the saved preview workspace",
-        "- Open evidence selects FIRST-RUN-SUMMARY.txt for non-expert review",
+        "- Open evidence selects BEGINNER-NEXT-STEPS.txt for non-expert review",
         "- Open PCB button launches the generated KiCad PCB preview",
         "- Open PCB status distinguishes KiCad editor from file fallback",
         "- Open evidence recovers previous preview workspace after relaunch",

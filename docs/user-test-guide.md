@@ -136,12 +136,12 @@ Expected result:
     and the board preview contains a 50mm x 50mm `Edge.Cuts` outline.
 27. Click `Open evidence`.
 28. Confirm Windows opens the preview evidence folder with
-    `FIRST-RUN-SUMMARY.txt` selected.
-    Confirm the summary says to return to the focused prompt, type a follow-up,
+    `BEGINNER-NEXT-STEPS.txt` selected.
+    Confirm it says to click Open PCB, click Open evidence, ask a follow-up in
+    chat, and not order yet.
+29. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and
+    confirm the summary says to return to the focused prompt, type a follow-up,
     and not upload this preview to JLCPCB.
-29. Open `BEGINNER-NEXT-STEPS.txt` from the same folder and confirm it says to
-    click Open PCB, click Open evidence, ask a follow-up in chat, and not order
-    yet.
 30. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
     sending another prompt.
 31. Confirm the left project status says `Previous preview workspace found`
