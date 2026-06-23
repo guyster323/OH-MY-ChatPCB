@@ -29,7 +29,7 @@ Expected result:
 - `ChatPCB KiCad Preview.exe` is copied into the same folder.
 - `INSTALL-SELF-TEST.txt` is written into the same folder with the installed
   executable's PASS summary, including
-  `PASS Open PCB/evidence wait for a saved preview`.
+  `PASS Open PCB/checklist wait for a saved preview`.
 - `INSTALL-FIRST-CHAT-SMOKE.txt` is written into the same folder with the
   installed executable's chat-to-preview smoke summary.
 - `INSTALL-READY.txt` is written into the same folder with
@@ -85,12 +85,12 @@ Expected result:
    - Use example
    - Send design
    - Open PCB
-   - Open evidence
+   - Review checklist
    - Provider Login
    - model selector
    - pipeline status
-   Confirm `Open PCB` and `Open evidence` are disabled before the first preview
-   is saved. Confirm `Open PCB` and `Open evidence` become enabled after
+   Confirm `Open PCB` and `Review checklist` are disabled before the first preview
+   is saved. Confirm `Open PCB` and `Review checklist` become enabled after
    `Send design` saves a preview or after a previous preview is recovered.
 9. Confirm the model selector says `built-in-preview` when no local provider is
    ready, or has already picked an available local provider if Codex, Claude
@@ -137,7 +137,7 @@ Expected result:
     `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
     `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
 23. Confirm the bottom pipeline status stays short and says
-    `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
+    `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
     when local ERC/DRC reports are clear.
 24. Click `Open PCB`.
 25. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
@@ -145,22 +145,22 @@ Expected result:
     not open.`
 26. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
     and the board preview contains a 50mm x 50mm `Edge.Cuts` outline.
-27. Click `Open evidence`.
-28. Confirm Windows opens the preview evidence folder with
+27. Click `Review checklist`.
+28. Confirm Review checklist opens the preview evidence folder with
     `BEGINNER-NEXT-STEPS.txt` selected.
     Confirm the bottom status says
-    `Opened BEGINNER-NEXT-STEPS.txt in evidence folder.`
-    Confirm it says to click Open PCB, click Open evidence, ask a follow-up in
+    `Opened BEGINNER-NEXT-STEPS.txt for checklist review.`
+    Confirm it says to click Open PCB, click Review checklist, ask a follow-up in
     chat, and not order yet.
 29. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and
     confirm the summary says to return to the focused prompt, type a follow-up,
     and not upload this preview to JLCPCB.
-30. Close and reopen `ChatPCB KiCad Preview`, then click `Open evidence` before
+30. Close and reopen `ChatPCB KiCad Preview`, then click `Review checklist` before
     sending another prompt.
 31. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
 32. Confirm the chat transcript also says `Previous preview workspace found`
-    and points you to `Open evidence` and `Open PCB`.
+    and points you to `Review checklist` and `Open PCB`.
 33. Confirm Windows opens the same previous preview evidence folder with the
     first-run summary selected.
 34. Confirm the preview evidence folder exists:
@@ -202,16 +202,16 @@ Latest run after installing the current preview package was checked on
 - Computer Use captured a screenshot of the native 70/30 workspace. The capture
   showed the left current-project preview pane, the right chat pane, the
   `Chat prompt` label, the prompt input, `Use example`, `Send design`,
-  `Open PCB`, `Provider Login`, `Open evidence`, the model selector, and the
+  `Open PCB`, `Provider Login`, `Review checklist`, the model selector, and the
   bottom pipeline status.
 - Computer Use also captured an accessibility text tree for the same window,
   including the Schematic / PCB Layout / Validation / Manufacturing Preview
   tabs, `Chat prompt` label, focused `Chat prompt` edit control, and the
-  Provider Login / Open evidence / Open PCB controls.
+  Provider Login / Review checklist / Open PCB controls.
 - Computer Use typed
   `USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package`, pressed
   Enter, and verified the installed app reached
-  `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
+  `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
   with the prompt refocused.
 - Computer Use verified the fresh first-chat view lists
   `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and

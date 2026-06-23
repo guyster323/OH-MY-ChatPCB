@@ -373,7 +373,8 @@ fn native_preview_has_open_evidence_button_for_saved_workspace() {
 
     assert!(ui_model.contains("open_evidence_opens_preview_workspace"));
     assert!(main.contains("ID_OPEN_EVIDENCE"));
-    assert!(main.contains("Open evidence"));
+    assert!(main.contains("Review checklist"));
+    assert!(!main.contains("\"Open evidence\""));
     assert!(main.contains("handle_open_evidence"));
     assert!(main.contains("last_workspace_dir"));
     assert!(main.contains("open_evidence_folder"));
@@ -432,7 +433,7 @@ fn open_evidence_selects_beginner_next_steps_for_non_experts() {
     let first_run_summary_index = main.find("FIRST-RUN-SUMMARY.txt").unwrap();
     assert!(
         beginner_next_steps_index < first_run_summary_index,
-        "Open evidence should select BEGINNER-NEXT-STEPS.txt before falling back to FIRST-RUN-SUMMARY.txt"
+        "Review checklist should select BEGINNER-NEXT-STEPS.txt before falling back to FIRST-RUN-SUMMARY.txt"
     );
     assert!(!main.contains("Opened first-run summary in evidence folder."));
 }
@@ -546,12 +547,13 @@ fn docs_explain_open_buttons_wait_for_a_saved_preview() {
     let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
 
-    assert!(root_readme
-        .contains("Open PCB` and `Open evidence` stay disabled until a preview workspace exists"));
+    assert!(root_readme.contains(
+        "Open PCB` and `Review checklist` stay disabled until a preview workspace exists"
+    ));
     assert!(root_readme.contains("then become enabled after `Send design` saves the preview"));
     assert!(root_readme.contains("previous"));
     assert!(root_readme.contains("preview is recovered"));
-    assert!(guide.contains("Confirm `Open PCB` and `Open evidence` are disabled"));
+    assert!(guide.contains("Confirm `Open PCB` and `Review checklist` are disabled"));
     assert!(guide.contains("before the first preview"));
-    assert!(guide.contains("Confirm `Open PCB` and `Open evidence` become enabled"));
+    assert!(guide.contains("Confirm `Open PCB` and `Review checklist` become enabled"));
 }

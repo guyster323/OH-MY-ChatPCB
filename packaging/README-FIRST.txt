@@ -65,14 +65,14 @@ First chat
 20. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
 21. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
 22. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
-23. Confirm the bottom status says "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
+23. Confirm the bottom status says "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
 24. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
 25. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
 26. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-27. Click Open evidence to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
+27. Click Review checklist to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
 28. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
 29. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
-30. Close and reopen the app, then click Open evidence before sending again.
+30. Close and reopen the app, then click Review checklist before sending again.
 31. Confirm the left project status says "Previous preview workspace found".
 32. Confirm the chat transcript also says "Previous preview workspace found".
 33. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.

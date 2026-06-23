@@ -91,7 +91,7 @@ fn print_self_test() {
             "Use example",
             "Send design",
             "Open PCB",
-            "Open evidence",
+            "Review checklist",
             "Pipeline status",
         ],
         supported_board: spec.product_name,
@@ -161,9 +161,9 @@ fn print_self_test_summary() {
     assert!(
         chat_actions.open_saved_artifacts_disabled_until_workspace
             && chat_actions.open_saved_artifacts_enabled_after_preview,
-        "Open PCB/evidence must wait until a preview workspace exists"
+        "Open PCB/checklist must wait until a preview workspace exists"
     );
-    println!("PASS Open PCB/evidence wait for a saved preview");
+    println!("PASS Open PCB/checklist wait for a saved preview");
     println!("PASS KiCad preview scaffold and validation reports are wired");
     println!(
         "PASS bundled autorouter contract: {} {}",
@@ -174,7 +174,7 @@ fn print_self_test_summary() {
         package.files.len()
     );
     println!(
-        "PASS Open evidence selects BEGINNER-NEXT-STEPS.txt: {}",
+        "PASS Review checklist selects BEGINNER-NEXT-STEPS.txt: {}",
         chat_actions.open_evidence_selects_beginner_next_steps_file
     );
     assert!(
@@ -796,7 +796,7 @@ mod win32_app {
             parent,
             instance,
             "BUTTON",
-            "Open evidence",
+            "Review checklist",
             WS_TABSTOP,
             ID_OPEN_EVIDENCE,
         );
@@ -1165,7 +1165,7 @@ mod win32_app {
             1,
         );
         let provider_width = 122;
-        let evidence_width = 126;
+        let evidence_width = 140;
         MoveWindow(
             controls.provider_button,
             right_x,
@@ -1474,7 +1474,7 @@ mod win32_app {
                 chatpcb_desktop::ui_model::open_evidence_pipeline_status(),
             );
         } else {
-            set_pipeline_status(controls, "No evidence yet: click Send design first.");
+            set_pipeline_status(controls, "No checklist yet: click Send design first.");
         }
     }
 

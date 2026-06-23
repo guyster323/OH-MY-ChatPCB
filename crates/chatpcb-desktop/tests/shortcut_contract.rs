@@ -90,9 +90,9 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(guide.contains("jlcpcb-bom-preview.csv"));
     assert!(guide.contains("jlcpcb-cpl-preview.csv"));
     assert!(guide.contains("manufacturing-readiness-preview.txt"));
-    assert!(guide.contains("Windows opens the preview evidence folder with"));
+    assert!(guide.contains("Review checklist opens the preview evidence folder with"));
     assert!(guide.contains("`BEGINNER-NEXT-STEPS.txt` selected"));
-    assert!(guide.contains("Opened BEGINNER-NEXT-STEPS.txt in evidence folder."));
+    assert!(guide.contains("Opened BEGINNER-NEXT-STEPS.txt for checklist review."));
     assert!(guide.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
     assert!(package_readme.contains("Run First Chat Smoke Test"));
     assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
@@ -115,7 +115,7 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(root_readme.contains("jlcpcb-cpl-preview.csv"));
     assert!(root_readme.contains("manufacturing-readiness-preview.txt"));
     assert!(root_readme.contains("with `BEGINNER-NEXT-STEPS.txt` selected"));
-    assert!(root_readme.contains("Opened BEGINNER-NEXT-STEPS.txt in evidence folder."));
+    assert!(root_readme.contains("Opened BEGINNER-NEXT-STEPS.txt for checklist review."));
     assert!(root_readme.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
 }
 
@@ -148,7 +148,7 @@ fn installers_write_install_self_test_summary_for_first_run_confidence() {
 
     assert!(root_readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(guide.contains("INSTALL-SELF-TEST.txt"));
-    assert!(guide.contains("PASS Open PCB/evidence wait for a saved preview"));
+    assert!(guide.contains("PASS Open PCB/checklist wait for a saved preview"));
     assert!(guide.contains("PASS app launch focuses the prompt for immediate first chat"));
     assert!(guide.contains("PASS prompt input has a visible label and empty cue"));
     assert!(guide.contains("PASS pressing Enter sends the first design"));
@@ -172,6 +172,8 @@ fn installers_write_install_ready_summary_for_non_experts() {
     for script in [source_installer, package_installer] {
         assert!(script.contains("INSTALL-READY.txt"));
         assert!(script.contains("Type a board idea in Chat prompt, then press Enter."));
+        assert!(script.contains("Click Review checklist after the preview is saved."));
+        assert!(!script.contains("Click Open evidence after the preview is saved."));
         assert!(script.contains("INSTALL-SELF-TEST.txt"));
         assert!(script.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
         assert!(script.contains("Boundary: prototype-review, not order-ready."));
@@ -317,7 +319,7 @@ fn package_first_readme_matches_current_validation_status_copy() {
     let readme = fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
     assert!(readme
-        .contains("Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."));
+        .contains("Validated: Open PCB/checklist, or type a follow-up. Still prototype-review."));
     assert!(readme.contains("The example text is selected, so typing replaces it."));
     assert!(readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
@@ -328,6 +330,7 @@ fn package_first_readme_matches_current_validation_status_copy() {
     assert!(readme.contains("PASS beginner next steps written"));
     assert!(readme.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(!readme.contains("Validated: ERC/DRC clear. Next: Open PCB or Open evidence."));
+    assert!(!readme.contains("Validated: Open PCB/evidence"));
 }
 
 #[test]
@@ -394,13 +397,13 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Left workspace status update"));
     assert!(script.contains("Left tab status updates"));
     assert!(script.contains("Left design preview body"));
-    assert!(script.contains("Open PCB/evidence waits until a preview workspace exists"));
+    assert!(script.contains("Open PCB/checklist waits until a preview workspace exists"));
     assert!(script.contains("Installer writes INSTALL-SELF-TEST.txt"));
-    assert!(script.contains("Open evidence button"));
-    assert!(script.contains("Open evidence selects BEGINNER-NEXT-STEPS.txt"));
+    assert!(script.contains("Review checklist button"));
+    assert!(script.contains("Review checklist selects BEGINNER-NEXT-STEPS.txt"));
     assert!(script.contains("Open PCB button"));
     assert!(script.contains("Open PCB status distinguishes KiCad editor from file fallback"));
-    assert!(script.contains("Open evidence recovers previous preview workspace"));
+    assert!(script.contains("Review checklist recovers previous preview workspace"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
     assert!(script.contains("Relaunch mentions previous preview workspace in chat"));
     assert!(script.contains("KiCad fork CMake drop-in target"));

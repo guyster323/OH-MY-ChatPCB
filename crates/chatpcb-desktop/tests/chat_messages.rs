@@ -261,10 +261,10 @@ fn validation_pipeline_status_keeps_next_actions_visible_for_non_experts() {
 
     assert_eq!(
         status,
-        "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review."
+        "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review."
     );
     assert!(status.contains("Open PCB"));
-    assert!(status.contains("evidence"));
+    assert!(status.contains("checklist"));
     assert!(status.contains("type a follow-up"));
     assert!(status.contains("prototype-review"));
     assert!(
@@ -289,9 +289,12 @@ fn open_pcb_pipeline_status_distinguishes_kicad_from_file_fallback() {
 fn open_evidence_pipeline_status_names_the_beginner_next_steps_file() {
     let status = open_evidence_pipeline_status();
 
-    assert_eq!(status, "Opened BEGINNER-NEXT-STEPS.txt in evidence folder.");
+    assert_eq!(
+        status,
+        "Opened BEGINNER-NEXT-STEPS.txt for checklist review."
+    );
     assert!(status.contains("BEGINNER-NEXT-STEPS.txt"));
-    assert!(status.contains("evidence folder"));
+    assert!(status.contains("checklist review"));
     assert!(status.len() <= 70);
 }
 
@@ -456,7 +459,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("50mm x 50mm Edge.Cuts"));
     assert!(body.contains("Open PCB"));
     assert!(body.contains("KiCad 10 when installed"));
-    assert!(body.contains("Open evidence"));
+    assert!(body.contains("Review checklist"));
     assert!(body.contains("type a follow-up"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("not order-ready"));
@@ -547,7 +550,7 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(status.contains("chatpcb3-esp32s3-preview"));
     assert!(status.contains("prototype-review"));
     assert!(body.contains("Previous preview workspace found"));
-    assert!(body.contains("Click Open evidence"));
+    assert!(body.contains("Click Review checklist"));
     assert!(body.contains("Open PCB"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
@@ -569,7 +572,7 @@ fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
     let transcript = recovered_preview_workspace_transcript(project_dir);
 
     assert!(transcript.contains("Previous preview workspace found"));
-    assert!(transcript.contains("Open evidence"));
+    assert!(transcript.contains("Review checklist"));
     assert!(transcript.contains("Open PCB"));
     assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("prototype-review"));

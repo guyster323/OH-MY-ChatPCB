@@ -49,7 +49,7 @@ try {
         "Start here:",
         "1. Open ChatPCB KiCad Preview.",
         "2. Type a board idea in Chat prompt, then press Enter.",
-        "3. Click Open evidence after the preview is saved.",
+        "3. Click Review checklist after the preview is saved.",
         "",
         "Verification written during install:",
         "- INSTALL-SELF-TEST.txt",

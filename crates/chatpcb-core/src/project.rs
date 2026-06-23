@@ -154,7 +154,7 @@ fn first_run_summary(prompt: &str) -> String {
          What to click next in the app:\r\n\
          - BEGINNER-NEXT-STEPS.txt: read the short checklist if you are not sure what happened.\r\n\
          - Open PCB: inspect the generated board outline in KiCad.\r\n\
-         - Open evidence: return to this folder and review saved reports.\r\n\
+         - Review checklist: return to this folder and review saved reports.\r\n\
          - Or return to the focused prompt, type a follow-up, and press Enter.\r\n\
          \r\n\
          Current gate:\r\n\
@@ -182,7 +182,7 @@ fn beginner_next_steps(prompt: &str) -> String {
          First thing to do:\r\n\
          1. Click Open PCB in ChatPCB KiCad Preview.\r\n\
          2. Confirm KiCad opens the 50mm x 50mm board outline.\r\n\
-         3. Click Open evidence and keep this folder open while you review.\r\n\
+         3. Click Review checklist and keep this folder open while you review.\r\n\
          \r\n\
          What the files mean:\r\n\
          - chatpcb3-esp32s3.kicad_sch is the schematic preview scaffold.\r\n\

@@ -42,7 +42,7 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     let first_run_summary = fs::read_to_string(&workspace.first_run_summary_file).unwrap();
     assert!(first_run_summary.contains("Start here"));
     assert!(first_run_summary.contains("Open PCB"));
-    assert!(first_run_summary.contains("Open evidence"));
+    assert!(first_run_summary.contains("Review checklist"));
     assert!(first_run_summary.contains("type a follow-up"));
     assert!(first_run_summary.contains("Do not upload this preview to JLCPCB"));
     assert!(first_run_summary.contains("prototype-review"));
@@ -90,7 +90,7 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     let beginner_next_steps = fs::read_to_string(beginner_next_steps_file).unwrap();
     assert!(beginner_next_steps.contains("First thing to do"));
     assert!(beginner_next_steps.contains("Open PCB"));
-    assert!(beginner_next_steps.contains("Open evidence"));
+    assert!(beginner_next_steps.contains("Review checklist"));
     assert!(beginner_next_steps.contains("Ask a follow-up in chat"));
     assert!(beginner_next_steps.contains("Do not order yet"));
     assert!(beginner_next_steps.contains("Gerber"));

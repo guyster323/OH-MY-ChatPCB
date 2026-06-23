@@ -33,7 +33,7 @@ Implemented in this first vertical slice:
 - The left design pane shows a native read-only preview body for each tab, so a
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.
-- `Open evidence` opens the saved preview workspace folder from inside the app
+- `Review checklist` opens the saved preview workspace folder from inside the app
   with `BEGINNER-NEXT-STEPS.txt` selected for first-run users. The same folder
   still contains `FIRST-RUN-SUMMARY.txt` and the release evidence report,
   including after relaunch when a previous preview workspace already exists.
@@ -53,7 +53,7 @@ Implemented in this first vertical slice:
   `manufacturing-readiness-preview.txt`. The readiness report blocks upload and
   keeps the package at `prototype-review`, not order-ready.
 - After local ERC/DRC reports are clear, the bottom pipeline status stays short
-  and points the user to `Open PCB` or `Open evidence` instead of truncating the
+  and points the user to `Open PCB` or `Review checklist` instead of truncating the
   full report summary.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
@@ -142,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
 selector, prompt input, `Use example`, `Send design`, `Open PCB`, and pipeline status.
-`Open PCB` and `Open evidence` stay disabled until a preview workspace exists,
+`Open PCB` and `Review checklist` stay disabled until a preview workspace exists,
 then become enabled after `Send design` saves the preview or after a previous
 preview is recovered. The left tabs also show a native preview body, not an
 empty placeholder. `Provider
@@ -175,7 +175,7 @@ That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
 prototype-review release evidence report. The first-run summary points a
 non-expert back to the focused prompt for follow-up chat and says not to upload
 the preview to JLCPCB. The beginner next-steps file spells out the first
-clicks: Open PCB, Open evidence, then ask a follow-up in chat while Gerber,
+clicks: Open PCB, Review checklist, then ask a follow-up in chat while Gerber,
 drill, and placement-reviewed JLCPCB files remain blocked. The BOM/CPL preview
 files are for review only. It also contains the generated KiCad preview
 scaffold:
@@ -187,7 +187,7 @@ upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
 folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
 those local reports are clear, the bottom pipeline status says
-`Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
+`Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
 The JLCPCB preview blocker report is saved as
 `manufacturing-readiness-preview.txt` and says not to upload this preview to
 JLCPCB.
@@ -195,15 +195,15 @@ It is still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
 see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,
 the app opens the PCB file through Windows and says to install KiCad 10 if PCB
-Editor did not open. Click `Open evidence` in the app to open that
+Editor did not open. Click `Review checklist` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
 exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
 same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
 boundary and `release-evidence-preview.md` for saved evidence. The bottom status
-says `Opened BEGINNER-NEXT-STEPS.txt in evidence folder.` so a first-run user
+says `Opened BEGINNER-NEXT-STEPS.txt for checklist review.` so a first-run user
 knows which file was selected.
 After closing and reopening the app,
-`Open evidence` recovers the same preview folder if it already exists, and the
+`Review checklist` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The
 chat transcript also
 mentions that recovered workspace, so a returning user can continue from the
