@@ -82,8 +82,14 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(root_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
     assert!(guide.contains("Run First Chat Smoke Test"));
     assert!(guide.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(guide.contains("PASS KiCad compatibility report written"));
+    assert!(guide.contains("PASS ERC/DRC validation summary written"));
     assert!(package_readme.contains("Run First Chat Smoke Test"));
     assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
+    assert!(package_readme.contains("PASS KiCad compatibility report written"));
+    assert!(package_readme.contains("PASS ERC/DRC validation summary written"));
+    assert!(root_readme.contains("PASS KiCad compatibility report written"));
+    assert!(root_readme.contains("PASS ERC/DRC validation summary written"));
 }
 
 #[test]

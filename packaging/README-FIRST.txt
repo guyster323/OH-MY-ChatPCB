@@ -29,7 +29,11 @@ installed executable prints a short PASS summary. It should include
 
 Open "Run First Chat Smoke Test" to verify the installed app can turn the
 starter chat prompt into a saved preview workspace without provider login. It
-should also match INSTALL-FIRST-CHAT-SMOKE.txt beside the installed app.
+should also match INSTALL-FIRST-CHAT-SMOKE.txt beside the installed app and
+include these lines:
+
+"PASS KiCad compatibility report written" and
+"PASS ERC/DRC validation summary written".
 
 First chat
 ----------

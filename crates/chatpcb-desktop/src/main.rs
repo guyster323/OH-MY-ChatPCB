@@ -185,6 +185,9 @@ fn print_first_chat_smoke() {
     let root = first_chat_smoke_root();
     let workspace = create_preview_workspace(prompt, &root)
         .expect("first chat smoke test must create a preview workspace");
+    let project_dir = PathBuf::from(&workspace.project_dir);
+    let kicad_check = run_first_chat_smoke_kicad_pcb_check(&project_dir);
+    let validation = run_first_chat_smoke_erc_drc_reports(&project_dir);
     let first_run_summary = fs::read_to_string(&workspace.first_run_summary_file)
         .expect("first chat smoke test must read FIRST-RUN-SUMMARY.txt");
 
@@ -220,10 +223,17 @@ fn print_first_chat_smoke() {
     println!("PASS beginner prompt accepted");
     println!("PASS preview workspace saved");
     println!("PASS generated KiCad preview scaffold");
+    println!("PASS KiCad compatibility report written");
+    println!("PASS ERC/DRC validation summary written");
     println!("PASS first-run summary points back to follow-up chat");
     println!("PASS first-run summary blocks JLCPCB upload");
     println!("Prompt: {prompt}");
     println!("Workspace: {}", workspace.project_dir);
+    println!("KiCad check: {}", kicad_check.report_file.to_string_lossy());
+    println!(
+        "ERC/DRC summary: {}",
+        validation.summary_file.to_string_lossy()
+    );
     println!("Evidence: {}", workspace.first_run_summary_file);
     println!("Boundary: prototype-review, not order-ready");
 }
@@ -238,6 +248,185 @@ fn first_chat_smoke_root() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
         .join("ChatPCB3")
         .join("FirstChatSmoke")
+}
+
+struct SmokePcbCheckResult {
+    report_file: PathBuf,
+}
+
+struct SmokeValidationResult {
+    summary_file: PathBuf,
+}
+
+fn run_first_chat_smoke_kicad_pcb_check(project_dir: &PathBuf) -> SmokePcbCheckResult {
+    let pcb_file = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
+    let report_file = project_dir.join("kicad-pcb-check.txt");
+    let check = if !pcb_file.exists() {
+        chatpcb_core::validation::summarize_kicad_cli_check(
+            Some(1),
+            "",
+            "chatpcb3-esp32s3.kicad_pcb was not found",
+        )
+    } else if let Some(kicad_cli) = preferred_kicad_cli_path() {
+        match Command::new(kicad_cli)
+            .args(["pcb", "upgrade"])
+            .arg(&pcb_file)
+            .output()
+        {
+            Ok(output) => chatpcb_core::validation::summarize_kicad_cli_check(
+                output.status.code(),
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ),
+            Err(error) => chatpcb_core::validation::summarize_kicad_cli_check(
+                None,
+                "",
+                &format!("failed to run kicad-cli.exe: {error}"),
+            ),
+        }
+    } else {
+        chatpcb_core::validation::summarize_kicad_cli_check(None, "", "kicad-cli.exe was not found")
+    };
+
+    let report = format!(
+        "ChatPCB3 KiCad CLI PCB check\r\n\
+         Status: {:?}\r\n\
+         Exit code: {:?}\r\n\
+         Summary: {}\r\n\
+         \r\n\
+         PCB file:\r\n\
+         {}\r\n\
+         \r\n\
+         STDOUT:\r\n\
+         {}\r\n\
+         \r\n\
+         STDERR:\r\n\
+         {}\r\n\
+         \r\n\
+         Boundary:\r\n\
+         This is a prototype-review compatibility check, not manufacturing evidence.\r\n",
+        check.status,
+        check.exit_code,
+        check.summary,
+        pcb_file.to_string_lossy(),
+        check.stdout,
+        check.stderr
+    );
+    fs::write(&report_file, report).expect("first chat smoke test must write kicad-pcb-check.txt");
+
+    SmokePcbCheckResult { report_file }
+}
+
+fn run_first_chat_smoke_erc_drc_reports(project_dir: &PathBuf) -> SmokeValidationResult {
+    let schematic_file = project_dir.join("chatpcb3-esp32s3.kicad_sch");
+    let pcb_file = project_dir.join("chatpcb3-esp32s3.kicad_pcb");
+    let erc_report_file = project_dir.join("erc-report.json");
+    let drc_report_file = project_dir.join("drc-report.json");
+    let summary_file = project_dir.join("kicad-validation-summary.txt");
+
+    let _ = fs::remove_file(&erc_report_file);
+    let _ = fs::remove_file(&drc_report_file);
+
+    let mut command_log = String::new();
+    let summary = if !schematic_file.exists() || !pcb_file.exists() {
+        "KiCad ERC/DRC were not run because the preview schematic or PCB file is missing. Gate remains prototype-review."
+            .to_string()
+    } else if let Some(kicad_cli) = preferred_kicad_cli_path() {
+        let erc_output = Command::new(&kicad_cli)
+            .args(["sch", "erc", "--format", "json", "--output"])
+            .arg(&erc_report_file)
+            .arg(&schematic_file)
+            .output();
+        let drc_output = Command::new(&kicad_cli)
+            .args(["pcb", "drc", "--format", "json", "--output"])
+            .arg(&drc_report_file)
+            .arg(&pcb_file)
+            .output();
+
+        command_log.push_str(&format_validation_command_log("ERC", &erc_output));
+        command_log.push_str(&format_validation_command_log("DRC", &drc_output));
+
+        match (
+            fs::read_to_string(&erc_report_file)
+                .ok()
+                .and_then(|report| chatpcb_core::validation::parse_kicad_report(&report).ok()),
+            fs::read_to_string(&drc_report_file)
+                .ok()
+                .and_then(|report| chatpcb_core::validation::parse_kicad_report(&report).ok()),
+        ) {
+            (Some(erc), Some(drc)) => {
+                chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc)
+            }
+            _ => {
+                "KiCad ERC/DRC reports were requested, but the JSON reports could not be parsed. Gate remains prototype-review; inspect kicad-validation-summary.txt before continuing."
+                    .to_string()
+            }
+        }
+    } else {
+        "KiCad ERC/DRC were not run because kicad-cli.exe was not found. Gate remains prototype-review; install KiCad 10 to create local ERC/DRC reports."
+            .to_string()
+    };
+
+    let report = format!(
+        "ChatPCB3 KiCad ERC/DRC validation\r\n\
+         Summary: {}\r\n\
+         \r\n\
+         Schematic:\r\n\
+         {}\r\n\
+         \r\n\
+         PCB:\r\n\
+         {}\r\n\
+         \r\n\
+         ERC report:\r\n\
+         {}\r\n\
+         \r\n\
+         DRC report:\r\n\
+         {}\r\n\
+         \r\n\
+         Command log:\r\n\
+         {}\r\n\
+         Boundary:\r\n\
+         This is prototype-review validation evidence, not manufacturing evidence.\r\n",
+        summary,
+        schematic_file.to_string_lossy(),
+        pcb_file.to_string_lossy(),
+        erc_report_file.to_string_lossy(),
+        drc_report_file.to_string_lossy(),
+        command_log
+    );
+    fs::write(&summary_file, report)
+        .expect("first chat smoke test must write kicad-validation-summary.txt");
+
+    SmokeValidationResult { summary_file }
+}
+
+fn format_validation_command_log(
+    label: &str,
+    output: &std::io::Result<std::process::Output>,
+) -> String {
+    match output {
+        Ok(output) => format!(
+            "{label} exit code: {:?}\r\nSTDOUT:\r\n{}\r\nSTDERR:\r\n{}\r\n\r\n",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+        Err(error) => format!("{label} failed to run: {error}\r\n\r\n"),
+    }
+}
+
+fn preferred_kicad_cli_path() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|local_app_data| {
+            local_app_data
+                .join("Programs")
+                .join("KiCad")
+                .join("10.0")
+                .join("bin")
+                .join("kicad-cli.exe")
+        })
+        .filter(|path| path.exists())
 }
 
 struct EvidenceSummaryContract {

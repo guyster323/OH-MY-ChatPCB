@@ -48,7 +48,9 @@ Expected result:
   `PASS Use example selects prompt text for immediate overwrite` and
   `Boundary: prototype-review, not order-ready`.
 - Running `Run First Chat Smoke Test` prints `ChatPCB First Chat Smoke Test`,
-  `PASS preview workspace saved`, and
+  `PASS preview workspace saved`,
+  `PASS KiCad compatibility report written`,
+  `PASS ERC/DRC validation summary written`, and
   `PASS first-run summary blocks JLCPCB upload`.
 - The app starts automatically.
 

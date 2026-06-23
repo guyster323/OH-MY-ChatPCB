@@ -216,7 +216,10 @@ The installers also write the same first-run confidence check to
 They also run `ChatPCB KiCad Preview.exe --first-chat-smoke` and write
 `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-FIRST-CHAT-SMOKE.txt`,
 which proves the installed app can turn the starter chat prompt into a saved
-prototype-review preview workspace without provider login.
+prototype-review preview workspace without provider login. The smoke summary
+also prints `PASS KiCad compatibility report written` and
+`PASS ERC/DRC validation summary written`, so a non-expert has local validation
+evidence before opening the full app.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named
