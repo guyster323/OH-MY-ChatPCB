@@ -1,5 +1,6 @@
 #include "chatpcb_workspace_panel.h"
 
+#include <wx/event.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
@@ -21,6 +22,7 @@ CHATPCB_WORKSPACE_PANEL::CHATPCB_WORKSPACE_PANEL( wxWindow* parent ) :
         m_designTabs( nullptr ),
         m_chatTranscript( nullptr ),
         m_promptInput( nullptr ),
+        m_sendDesignButton( nullptr ),
         m_providerLoginButton( nullptr ),
         m_modelChoice( nullptr )
 {
@@ -34,6 +36,27 @@ CHATPCB_WORKSPACE_PANEL::CHATPCB_WORKSPACE_PANEL( wxWindow* parent ) :
     m_splitter->SplitVertically( designPane, chatPane );
     m_splitter->SetSashGravity( CHATPCB_WORKSPACE_LEFT_RATIO );
     m_splitter->SetMinimumPaneSize( 320 );
+
+    m_providerLoginButton->Bind( wxEVT_BUTTON,
+            [this]( wxCommandEvent& )
+            {
+                SendCoreRequest( "provider.list", "{}" );
+            } );
+
+    m_sendDesignButton->Bind( wxEVT_BUTTON,
+            [this]( wxCommandEvent& )
+            {
+                wxString prompt = m_promptInput->GetValue();
+                prompt.Replace( "\\", "\\\\" );
+                prompt.Replace( "\"", "\\\"" );
+                SendCoreRequest( "project.create",
+                        wxString::Format( "{\"prompt\":\"%s\"}", prompt ) );
+            } );
+}
+
+void CHATPCB_WORKSPACE_PANEL::SetCoreExecutablePath( const wxString& executablePath )
+{
+    m_coreClient.SetExecutablePath( executablePath );
 }
 
 wxPanel* CHATPCB_WORKSPACE_PANEL::BuildDesignPane()
@@ -65,13 +88,30 @@ wxPanel* CHATPCB_WORKSPACE_PANEL::BuildChatPane()
                                        wxDefaultSize, wxTE_MULTILINE | wxTE_READONLY | wxBORDER_NONE );
     m_promptInput = new wxTextCtrl( panel, wxID_ANY, wxEmptyString, wxDefaultPosition,
                                     wxDefaultSize, wxTE_MULTILINE );
+    m_sendDesignButton = new wxButton( panel, wxID_ANY, "Send design" );
 
     sizer->Add( m_chatTranscript, 1, wxEXPAND | wxALL, 8 );
+    sizer->Add( new wxStaticText( panel, wxID_ANY, "Chat prompt" ), 0,
+                wxEXPAND | wxLEFT | wxRIGHT, 8 );
     sizer->Add( m_promptInput, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8 );
+    sizer->Add( m_sendDesignButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8 );
     sizer->Add( BuildProviderBar( panel ), 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8 );
 
     panel->SetSizer( sizer );
     return panel;
+}
+
+void CHATPCB_WORKSPACE_PANEL::SendCoreRequest( const wxString& method, const wxString& paramsJson )
+{
+    wxString responseJson;
+    wxString errorMessage;
+
+    m_chatTranscript->AppendText( "ChatPCB core request: " + method + "\n" );
+
+    if( m_coreClient.Request( method, paramsJson, &responseJson, &errorMessage ) )
+        m_chatTranscript->AppendText( responseJson + "\n" );
+    else
+        m_chatTranscript->AppendText( "ChatPCB core error: " + errorMessage + "\n" );
 }
 
 wxPanel* CHATPCB_WORKSPACE_PANEL::BuildProviderBar( wxWindow* parent )

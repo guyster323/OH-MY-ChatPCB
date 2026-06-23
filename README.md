@@ -66,6 +66,9 @@ Implemented in this first vertical slice:
   - Schematic, PCB Layout, Validation, and Manufacturing Preview tabs
   - Provider Login button and model selector
   - no `wxWebView`
+- KiCad fork drop-in source now includes a `chatpcb_native_workspace` CMake drop-in target
+  and a stdio `chatpcb-core.exe` bridge skeleton. This is the next integration
+  unit for a real KiCad source tree, not the full KiCad fork.
 
 Not implemented yet:
 

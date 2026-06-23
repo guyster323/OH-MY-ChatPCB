@@ -94,6 +94,8 @@ try {
         "- Open evidence recovers previous preview workspace after relaunch",
         "- Relaunch shows previous preview workspace status before another send",
         "- Relaunch mentions previous preview workspace in chat",
+        "- KiCad fork CMake drop-in target",
+        "- KiCad fork stdio chatpcb-core bridge skeleton",
         "- Local install into %LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview",
         "",
         "Current boundary:",

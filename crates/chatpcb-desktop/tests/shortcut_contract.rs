@@ -333,4 +333,16 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Open evidence recovers previous preview workspace"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
     assert!(script.contains("Relaunch mentions previous preview workspace in chat"));
+    assert!(script.contains("KiCad fork CMake drop-in target"));
+    assert!(script.contains("KiCad fork stdio chatpcb-core bridge skeleton"));
+}
+
+#[test]
+fn root_readme_reports_kicad_fork_drop_in_progress_without_overstating_completion() {
+    let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+
+    assert!(readme.contains("CMake drop-in target"));
+    assert!(readme.contains("stdio `chatpcb-core.exe` bridge skeleton"));
+    assert!(readme.contains("not the full KiCad fork"));
+    assert!(readme.contains("Full KiCad fork rebased on KiCad 10.0.4 source."));
 }
