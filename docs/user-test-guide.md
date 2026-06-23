@@ -168,8 +168,8 @@ Expected files:
 
 ## Computer Use Verification Status
 
-Checked on 2026-06-23 after installing the current preview package and retrying
-Computer Use launch. Retried again after commit `1c8ba06`.
+Checked on 2026-06-24 after installing the latest installed preview package and
+retrying Computer Use launch/window discovery.
 
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
 - Computer Use `launch_app` stopped at `Computer Use app approval timed out`

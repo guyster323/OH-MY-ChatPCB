@@ -494,6 +494,8 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
 
     assert!(guide.contains("Computer Use Verification Status"));
+    assert!(guide.contains("latest installed preview package"));
+    assert!(!guide.contains("Retried again after commit"));
     assert!(guide.contains("Computer Use found the installed `ChatPCB KiCad Preview` app entry"));
     assert!(guide
         .contains("Computer Use `launch_app` stopped at `Computer Use app approval timed out`"));
