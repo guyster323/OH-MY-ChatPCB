@@ -28,6 +28,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\target\release\chatpcb-desktop.exe" -Destination "$stagingRoot\ChatPCB KiCad Preview.exe"
     Copy-Item -Force -Path "$repoRoot\packaging\Install ChatPCB KiCad Preview.cmd" -Destination "$stagingRoot\Install ChatPCB KiCad Preview.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\Uninstall ChatPCB KiCad Preview.cmd" -Destination "$stagingRoot\Uninstall ChatPCB KiCad Preview.cmd"
+    Copy-Item -Force -Path "$repoRoot\packaging\Run ChatPCB Self Test.cmd" -Destination "$stagingRoot\Run ChatPCB Self Test.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\install-from-package.ps1" -Destination "$stagingRoot\install-from-package.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$stagingRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$stagingRoot\README-FIRST.txt"
@@ -62,6 +63,7 @@ try {
         "- Provider Login appends without erasing chat",
         "- Provider Login keeps built-in preview unblocked when no CLI is ready",
         "- Provider Login shows local CLI login hints",
+        "- Self-test shortcut for installed package verification",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",
         "- Chat transcript latest-turn scrolling after updates",

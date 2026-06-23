@@ -8,7 +8,14 @@ Install
 1. Double-click "Install ChatPCB KiCad Preview.cmd".
 2. A desktop shortcut named "ChatPCB KiCad Preview" will be created.
 3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
-4. The app starts after installation.
+4. A Start Menu shortcut named "Run ChatPCB Self Test" will be created.
+5. The app starts after installation.
+
+Self-test
+---------
+Open the Start Menu folder and click "Run ChatPCB Self Test" to verify the
+installed executable prints the native app contract. The JSON should include
+"provider_login_shows_local_cli_login_hints": true.
 
 First chat
 ----------

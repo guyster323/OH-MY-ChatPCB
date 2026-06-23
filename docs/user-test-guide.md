@@ -29,6 +29,9 @@ Expected result:
 - `ChatPCB KiCad Preview.exe` is copied into the same folder.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
+- The Start Menu folder includes `Run ChatPCB Self Test`.
+- Running `Run ChatPCB Self Test` prints JSON with
+  `provider_login_shows_local_cli_login_hints: true`.
 - The app starts automatically.
 
 ## First Run

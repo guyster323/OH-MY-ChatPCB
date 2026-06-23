@@ -31,6 +31,20 @@ fn installers_create_start_menu_shortcut_for_relaunch() {
 }
 
 #[test]
+fn packaged_installer_adds_start_menu_self_test_shortcut() {
+    let installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+
+    assert!(installer.contains("Run ChatPCB Self Test.cmd"));
+    assert!(installer.contains("Run ChatPCB Self Test.lnk"));
+    assert!(installer.contains("Verify the ChatPCB KiCad Preview installation"));
+    assert!(package_script.contains("Run ChatPCB Self Test.cmd"));
+    assert!(package_script.contains("Self-test shortcut for installed package verification"));
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
@@ -79,6 +93,7 @@ fn package_script_creates_zip_with_first_run_files() {
     assert!(script.contains("README-FIRST.txt"));
     assert!(script.contains("Install ChatPCB KiCad Preview.cmd"));
     assert!(script.contains("Uninstall ChatPCB KiCad Preview.cmd"));
+    assert!(script.contains("Run ChatPCB Self Test.cmd"));
     assert!(script.contains("install-from-package.ps1"));
 }
 
