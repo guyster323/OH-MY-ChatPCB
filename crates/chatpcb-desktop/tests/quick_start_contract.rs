@@ -529,6 +529,10 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("Computer Use launched the installed app"));
     assert!(guide.contains("one targetable `ChatPCB KiCad Preview` window"));
     assert!(guide.contains("captured a screenshot of the native 70/30 workspace"));
+    assert!(guide.contains("Computer Use verified the fresh first-chat view lists"));
+    assert!(guide.contains("`jlcpcb-bom-preview.csv`"));
+    assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
+    assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
     assert!(guide.contains("empty prompt fallback was not proven through Computer Use"));
     assert!(guide.contains("No fresh Computer Use proof was captured for the empty prompt"));
     assert!(guide.contains("latest Computer Use run"));

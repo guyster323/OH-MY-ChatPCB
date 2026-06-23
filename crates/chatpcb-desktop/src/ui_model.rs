@@ -243,6 +243,7 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
          - Project folder: {project_dir}\r\n\
          - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
          - Beginner next steps: BEGINNER-NEXT-STEPS.txt. Ask a follow-up in chat after reviewing Open PCB/Open evidence.\r\n\
+         - JLCPCB preview blockers: manufacturing-readiness-preview.txt, jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv.\r\n\
          - PCB preview: 50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\
          - Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\
          - Release evidence: {release_report_file}\r\n\
@@ -314,11 +315,14 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
             "Manufacturing Preview\r\n\
              Project folder:\r\n\
              {project_dir}\r\n\r\n\
-             JLCPCB upload remains blocked until these are generated and reviewed:\r\n\
+             JLCPCB upload remains blocked. Review these preview files first:\r\n\
+             - {project_dir}\\jlcpcb-bom-preview.csv\r\n\
+             - {project_dir}\\jlcpcb-cpl-preview.csv\r\n\
+             - {project_dir}\\manufacturing-readiness-preview.txt\r\n\r\n\
+             Still missing for upload:\r\n\
              - Gerber zip\r\n\
              - Drill files\r\n\
-             - BOM with JLCPCB/LCSC fields\r\n\
-             - CPL/position file\r\n\
+             - Placement-reviewed CPL/position file\r\n\
              - Release evidence report\r\n\r\n\
              The app must stop before real ordering and ask for user signoff.\r\n\
              Gate: prototype-review, not order-ready."
@@ -342,6 +346,9 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - artifact-manifest.json\r\n\
          - FIRST-RUN-SUMMARY.txt\r\n\
          - BEGINNER-NEXT-STEPS.txt\r\n\
+         - jlcpcb-bom-preview.csv\r\n\
+         - jlcpcb-cpl-preview.csv\r\n\
+         - manufacturing-readiness-preview.txt\r\n\
          - release-evidence-preview.md\r\n\r\n\
          PCB preview:\r\n\
          50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\r\n\
@@ -444,6 +451,10 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          - erc-report.json\r\n\
          - drc-report.json\r\n\
          - kicad-validation-summary.txt\r\n\r\n\
+         - jlcpcb-bom-preview.csv\r\n\
+         - jlcpcb-cpl-preview.csv\r\n\
+         - manufacturing-readiness-preview.txt\r\n\
+         \r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, not order-ready."

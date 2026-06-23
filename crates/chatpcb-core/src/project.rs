@@ -1,4 +1,5 @@
 use crate::design::{esp32s3_usb_sensor_board_spec, BoardSpec};
+use crate::manufacturing::{build_jlcpcb_package, PartSelection};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -25,6 +26,9 @@ pub struct PreviewWorkspace {
     pub release_report_file: String,
     pub first_run_summary_file: String,
     pub beginner_next_steps_file: String,
+    pub bom_preview_file: String,
+    pub cpl_preview_file: String,
+    pub manufacturing_readiness_file: String,
     pub prompt_file: String,
     pub files: Vec<String>,
     pub artifact_manifest: ArtifactManifest,
@@ -43,6 +47,9 @@ pub fn create_esp32s3_project(prompt: &str) -> CreatedProject {
                 "chatpcb3-esp32s3.kicad_pcb".to_string(),
                 "sym-lib-table".to_string(),
                 "fp-lib-table".to_string(),
+                "jlcpcb-bom-preview.csv".to_string(),
+                "jlcpcb-cpl-preview.csv".to_string(),
+                "manufacturing-readiness-preview.txt".to_string(),
             ],
         },
     }
@@ -60,6 +67,9 @@ pub fn create_preview_workspace(
     let release_report_file = project_dir.join("release-evidence-preview.md");
     let first_run_summary_file = project_dir.join("FIRST-RUN-SUMMARY.txt");
     let beginner_next_steps_file = project_dir.join("BEGINNER-NEXT-STEPS.txt");
+    let bom_preview_file = project_dir.join("jlcpcb-bom-preview.csv");
+    let cpl_preview_file = project_dir.join("jlcpcb-cpl-preview.csv");
+    let manufacturing_readiness_file = project_dir.join("manufacturing-readiness-preview.txt");
     let prompt_file = project_dir.join("prompt.txt");
     let project_file = project_dir.join(&created.artifact_manifest.project_file);
     let schematic_file = project_dir.join(&created.artifact_manifest.schematic_file);
@@ -73,6 +83,20 @@ pub fn create_preview_workspace(
     fs::write(&pcb_file, kicad_pcb_file())?;
     fs::write(&symbol_table_file, "(sym_lib_table)\r\n")?;
     fs::write(&footprint_table_file, "(fp_lib_table)\r\n")?;
+
+    let manufacturing_package = build_jlcpcb_package(&created.board_spec);
+    fs::write(
+        &bom_preview_file,
+        jlcpcb_bom_preview_csv(&manufacturing_package.parts),
+    )?;
+    fs::write(
+        &cpl_preview_file,
+        jlcpcb_cpl_preview_csv(&manufacturing_package.parts),
+    )?;
+    fs::write(
+        &manufacturing_readiness_file,
+        manufacturing_readiness_preview(prompt),
+    )?;
 
     let manifest_json = serde_json::to_string_pretty(&created)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -91,6 +115,9 @@ pub fn create_preview_workspace(
         release_report_file: path_to_string(&release_report_file),
         first_run_summary_file: path_to_string(&first_run_summary_file),
         beginner_next_steps_file: path_to_string(&beginner_next_steps_file),
+        bom_preview_file: path_to_string(&bom_preview_file),
+        cpl_preview_file: path_to_string(&cpl_preview_file),
+        manufacturing_readiness_file: path_to_string(&manufacturing_readiness_file),
         prompt_file: path_to_string(&prompt_file),
         files: vec![
             path_to_string(&project_file),
@@ -102,6 +129,9 @@ pub fn create_preview_workspace(
             path_to_string(&release_report_file),
             path_to_string(&first_run_summary_file),
             path_to_string(&beginner_next_steps_file),
+            path_to_string(&bom_preview_file),
+            path_to_string(&cpl_preview_file),
+            path_to_string(&manufacturing_readiness_file),
             path_to_string(&prompt_file),
         ],
         artifact_manifest: created.artifact_manifest,
@@ -119,6 +149,7 @@ fn first_run_summary(prompt: &str) -> String {
          - A native ChatPCB3 preview workspace for: {prompt}\r\n\
          - A KiCad project shell with schematic and PCB preview files.\r\n\
          - A 50mm x 50mm PCB outline for visual inspection.\r\n\
+         - JLCPCB BOM/CPL preview files for review, not upload.\r\n\
          \r\n\
          What to click next in the app:\r\n\
          - BEGINNER-NEXT-STEPS.txt: read the short checklist if you are not sure what happened.\r\n\
@@ -132,7 +163,8 @@ fn first_run_summary(prompt: &str) -> String {
          \r\n\
          Why it is not order-ready yet:\r\n\
          - Component placement and routing are not generated yet.\r\n\
-         - Gerber, drill, BOM, and CPL files are not generated yet.\r\n\
+         - Gerber and drill files are not generated yet.\r\n\
+         - BOM/CPL preview files are not placement-reviewed upload files yet.\r\n\
          - A human must review real manufacturing evidence before ordering.\r\n\
          - Do not upload this preview to JLCPCB.\r\n",
         prompt = prompt.trim()
@@ -156,6 +188,9 @@ fn beginner_next_steps(prompt: &str) -> String {
          - chatpcb3-esp32s3.kicad_sch is the schematic preview scaffold.\r\n\
          - chatpcb3-esp32s3.kicad_pcb is the PCB outline preview.\r\n\
          - kicad-validation-summary.txt is the local ERC/DRC summary when KiCad CLI is available.\r\n\
+         - jlcpcb-bom-preview.csv is a BOM preview with LCSC/JLCPCB part evidence.\r\n\
+         - jlcpcb-cpl-preview.csv is a CPL preview with placeholder UNPLACED coordinates.\r\n\
+         - manufacturing-readiness-preview.txt explains why upload is blocked.\r\n\
          - FIRST-RUN-SUMMARY.txt explains the prototype-review boundary.\r\n\
          \r\n\
          Ask a follow-up in chat:\r\n\
@@ -164,7 +199,7 @@ fn beginner_next_steps(prompt: &str) -> String {
          \r\n\
          Do not order yet:\r\n\
          - Gerber files are not generated yet.\r\n\
-         - BOM and CPL files are not generated yet.\r\n\
+         - BOM preview and CPL preview files are for review only, not JLCPCB upload.\r\n\
          - Human review is still required before JLCPCB upload.\r\n",
         prompt = prompt.trim()
     )
@@ -186,17 +221,94 @@ fn preview_release_report(prompt: &str, manifest: &ArtifactManifest) -> String {
          - fp-lib-table\r\n\
          - BEGINNER-NEXT-STEPS.txt\r\n\
          \r\n\
+         JLCPCB manufacturing preview files:\r\n\
+         - jlcpcb-bom-preview.csv\r\n\
+         - jlcpcb-cpl-preview.csv\r\n\
+         - manufacturing-readiness-preview.txt\r\n\
+         \r\n\
          Current boundary:\r\n\
          - The KiCad project shell is parseable preview scaffolding, not a completed circuit or PCB layout.\r\n\
          - 50mm x 50mm preview PCB outline on Edge.Cuts is included for visual orientation.\r\n\
          - KiCad fork integration is still required before these scaffold artifacts can be trusted.\r\n\
-         - No Gerber, drill, BOM, CPL, ERC, or DRC result has been generated yet.\r\n\
+         - No Gerber or drill file has been generated yet.\r\n\
+         - BOM/CPL preview files are review evidence only, not upload-ready placement files.\r\n\
          - Keep this package at prototype-review until real KiCad validation evidence exists.\r\n",
         prompt = prompt.trim(),
         project_file = manifest.project_file.as_str(),
         schematic_file = manifest.schematic_file.as_str(),
         pcb_file = manifest.pcb_file.as_str()
     )
+}
+
+fn jlcpcb_bom_preview_csv(parts: &[PartSelection]) -> String {
+    let mut csv = "Designator,Footprint,Quantity,Value,LCSC Part #\r\n".to_string();
+
+    for part in parts {
+        csv.push_str(&format!(
+            "{},{},{},{},{}\r\n",
+            csv_field(&part.designator),
+            csv_field(&part.footprint),
+            part_quantity(&part.designator),
+            csv_field(&part.value),
+            csv_field(&part.lcsc_part_number)
+        ));
+    }
+
+    csv
+}
+
+fn jlcpcb_cpl_preview_csv(parts: &[PartSelection]) -> String {
+    let mut csv = "Designator,Mid X,Mid Y,Rotation,Layer\r\n".to_string();
+
+    for part in parts {
+        csv.push_str(&format!(
+            "{},UNPLACED,UNPLACED,0,{}\r\n",
+            csv_field(&part.designator),
+            csv_field(&part.placement_layer)
+        ));
+    }
+
+    csv
+}
+
+fn manufacturing_readiness_preview(prompt: &str) -> String {
+    format!(
+        "JLCPCB Manufacturing Preview\r\n\
+         =============================\r\n\
+         \r\n\
+         Request:\r\n\
+         {prompt}\r\n\
+         \r\n\
+         Files in this preview:\r\n\
+         - BOM preview: jlcpcb-bom-preview.csv\r\n\
+         - CPL preview: jlcpcb-cpl-preview.csv\r\n\
+         \r\n\
+         Upload blockers:\r\n\
+         - Gerber zip: blocked until PCB layout and plot output exist.\r\n\
+         - Drill file: blocked until PCB layout output exists.\r\n\
+         - BOM: preview only until schematic symbols and quantities are reviewed.\r\n\
+         - CPL: preview only; UNPLACED coordinates must be replaced by real placement.\r\n\
+         - Release gate: prototype-review, not order-ready.\r\n\
+         \r\n\
+         Do not upload this preview to JLCPCB.\r\n",
+        prompt = prompt.trim()
+    )
+}
+
+fn part_quantity(designator: &str) -> usize {
+    designator
+        .split(',')
+        .filter(|part| !part.trim().is_empty())
+        .count()
+        .max(1)
+}
+
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\r', '\n']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
 }
 
 fn kicad_project_file() -> &'static str {

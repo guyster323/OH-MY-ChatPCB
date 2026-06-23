@@ -81,6 +81,7 @@ try {
         "- 50mm PCB preview outline in generated KiCad PCB",
         "- KiCad CLI preview compatibility check on Send design",
         "- KiCad ERC and DRC JSON reports on Send design",
+        "- JLCPCB BOM/CPL preview blockers for non-upload review",
         "- Beginner next steps file for first-run users",
         "- Actionable validation status points to Open PCB and Open evidence",
         "- Left workspace status update after Send design",
@@ -100,7 +101,7 @@ try {
         "",
         "Current boundary:",
         "- Preview only; not order-ready KiCad output yet",
-        "- No completed schematic, PCB autoroute, Gerber, BOM, or CPL generation yet",
+        "- No completed schematic, PCB autoroute, Gerber, drill, or placement-reviewed BOM/CPL generation yet",
         "- No provider credentials are stored by ChatPCB3"
     )
     Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding ASCII

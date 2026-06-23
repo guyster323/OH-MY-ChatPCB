@@ -53,7 +53,8 @@ Expected result:
   `PASS preview workspace saved`,
   `PASS beginner next steps written`,
   `PASS KiCad compatibility report written`,
-  `PASS ERC/DRC validation summary written`, and
+  `PASS ERC/DRC validation summary written`,
+  `PASS JLCPCB manufacturing preview blockers written`, and
   `PASS first-run summary blocks JLCPCB upload`.
 - The app starts automatically.
 
@@ -129,7 +130,8 @@ Expected result:
     `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
     `kicad-validation-summary.txt`.
 22. Confirm the chat transcript or large left preview body mentions
-    `BEGINNER-NEXT-STEPS.txt`.
+    `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
+    `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
 23. Confirm the bottom pipeline status stays short and says
     `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
     when local ERC/DRC reports are clear.
@@ -169,6 +171,9 @@ Expected files:
 - `artifact-manifest.json`
 - `FIRST-RUN-SUMMARY.txt`
 - `BEGINNER-NEXT-STEPS.txt`
+- `jlcpcb-bom-preview.csv`
+- `jlcpcb-cpl-preview.csv`
+- `manufacturing-readiness-preview.txt`
 - `release-evidence-preview.md`
 - `kicad-pcb-check.txt`
 - `erc-report.json`
@@ -204,6 +209,9 @@ Latest run after installing the current preview package was checked on
   Enter, and verified the installed app reached
   `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
   with the prompt refocused.
+- Computer Use verified the fresh first-chat view lists
+  `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
+  `manufacturing-readiness-preview.txt` in the native left preview pane.
 - The empty prompt fallback was not proven through Computer Use. The prompt box
   is proven by Rust tests and installed self-test output; the latest Computer
   Use run instead proved a typed first-chat request.

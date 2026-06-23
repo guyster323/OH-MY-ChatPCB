@@ -203,6 +203,8 @@ fn print_first_chat_smoke() {
         .expect("first chat smoke test must read FIRST-RUN-SUMMARY.txt");
     let beginner_next_steps = fs::read_to_string(&workspace.beginner_next_steps_file)
         .expect("first chat smoke test must read BEGINNER-NEXT-STEPS.txt");
+    let manufacturing_readiness = fs::read_to_string(&workspace.manufacturing_readiness_file)
+        .expect("first chat smoke test must read manufacturing-readiness-preview.txt");
 
     assert!(
         !prompt.trim().is_empty(),
@@ -237,12 +239,29 @@ fn print_first_chat_smoke() {
             && beginner_next_steps.contains("Do not order yet"),
         "first chat smoke test must write beginner next-step guidance"
     );
+    assert!(
+        workspace
+            .files
+            .iter()
+            .any(|file| file.ends_with("jlcpcb-bom-preview.csv"))
+            && workspace
+                .files
+                .iter()
+                .any(|file| file.ends_with("jlcpcb-cpl-preview.csv"))
+            && workspace
+                .files
+                .iter()
+                .any(|file| file.ends_with("manufacturing-readiness-preview.txt"))
+            && manufacturing_readiness.contains("Do not upload this preview to JLCPCB"),
+        "first chat smoke test must write manufacturing preview blockers"
+    );
 
     println!("ChatPCB First Chat Smoke Test");
     println!("PASS beginner prompt accepted");
     println!("PASS preview workspace saved");
     println!("PASS generated KiCad preview scaffold");
     println!("PASS beginner next steps written");
+    println!("PASS JLCPCB manufacturing preview blockers written");
     println!("PASS KiCad compatibility report written");
     println!("PASS ERC/DRC validation summary written");
     println!("PASS first-run summary points back to follow-up chat");

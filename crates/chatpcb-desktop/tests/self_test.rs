@@ -244,6 +244,7 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(summary.contains("PASS preview workspace saved"));
     assert!(summary.contains("PASS generated KiCad preview scaffold"));
     assert!(summary.contains("PASS beginner next steps written"));
+    assert!(summary.contains("PASS JLCPCB manufacturing preview blockers written"));
     assert!(summary.contains("PASS KiCad compatibility report written"));
     assert!(summary.contains("PASS ERC/DRC validation summary written"));
     assert!(summary.contains("PASS first-run summary points back to follow-up chat"));
@@ -258,6 +259,11 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(workspace.join("chatpcb3-esp32s3.kicad_sch").exists());
     assert!(workspace.join("chatpcb3-esp32s3.kicad_pcb").exists());
     assert!(workspace.join("BEGINNER-NEXT-STEPS.txt").exists());
+    assert!(workspace.join("jlcpcb-bom-preview.csv").exists());
+    assert!(workspace.join("jlcpcb-cpl-preview.csv").exists());
+    assert!(workspace
+        .join("manufacturing-readiness-preview.txt")
+        .exists());
     assert!(workspace.join("kicad-pcb-check.txt").exists());
     assert!(workspace.join("kicad-validation-summary.txt").exists());
     let pcb_check = fs::read_to_string(workspace.join("kicad-pcb-check.txt")).unwrap();
@@ -273,6 +279,10 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(next_steps.contains("First thing to do"));
     assert!(next_steps.contains("Ask a follow-up in chat"));
     assert!(next_steps.contains("Do not order yet"));
+    let manufacturing_readiness =
+        fs::read_to_string(workspace.join("manufacturing-readiness-preview.txt")).unwrap();
+    assert!(manufacturing_readiness.contains("Do not upload this preview to JLCPCB"));
+    assert!(manufacturing_readiness.contains("prototype-review, not order-ready"));
 
     fs::remove_dir_all(&root).unwrap();
 }

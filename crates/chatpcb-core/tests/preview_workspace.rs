@@ -49,6 +49,39 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     assert!(first_run_summary.contains("not order-ready"));
     assert!(workspace.files.contains(&workspace.first_run_summary_file));
 
+    let bom_preview_file = project_dir.join("jlcpcb-bom-preview.csv");
+    let cpl_preview_file = project_dir.join("jlcpcb-cpl-preview.csv");
+    let manufacturing_readiness_file = project_dir.join("manufacturing-readiness-preview.txt");
+    assert!(bom_preview_file.exists());
+    assert!(cpl_preview_file.exists());
+    assert!(manufacturing_readiness_file.exists());
+    assert!(workspace
+        .files
+        .contains(&bom_preview_file.to_string_lossy().to_string()));
+    assert!(workspace
+        .files
+        .contains(&cpl_preview_file.to_string_lossy().to_string()));
+    assert!(workspace
+        .files
+        .contains(&manufacturing_readiness_file.to_string_lossy().to_string()));
+
+    let bom_preview = fs::read_to_string(bom_preview_file).unwrap();
+    assert!(bom_preview.contains("Designator,Footprint,Quantity,Value,LCSC Part #"));
+    assert!(bom_preview.contains("ESP32-S3-WROOM-1-N8R8"));
+    assert!(bom_preview.contains("C2913204"));
+
+    let cpl_preview = fs::read_to_string(cpl_preview_file).unwrap();
+    assert!(cpl_preview.contains("Designator,Mid X,Mid Y,Rotation,Layer"));
+    assert!(cpl_preview.contains("U1,UNPLACED,UNPLACED,0,Top"));
+
+    let manufacturing_readiness = fs::read_to_string(manufacturing_readiness_file).unwrap();
+    assert!(manufacturing_readiness.contains("JLCPCB Manufacturing Preview"));
+    assert!(manufacturing_readiness.contains("BOM preview: jlcpcb-bom-preview.csv"));
+    assert!(manufacturing_readiness.contains("CPL preview: jlcpcb-cpl-preview.csv"));
+    assert!(manufacturing_readiness.contains("Gerber zip: blocked"));
+    assert!(manufacturing_readiness.contains("Do not upload this preview to JLCPCB"));
+    assert!(manufacturing_readiness.contains("prototype-review, not order-ready"));
+
     let beginner_next_steps_file = project_dir.join("BEGINNER-NEXT-STEPS.txt");
     assert!(beginner_next_steps_file.exists());
     assert!(workspace
@@ -61,8 +94,8 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     assert!(beginner_next_steps.contains("Ask a follow-up in chat"));
     assert!(beginner_next_steps.contains("Do not order yet"));
     assert!(beginner_next_steps.contains("Gerber"));
-    assert!(beginner_next_steps.contains("BOM"));
-    assert!(beginner_next_steps.contains("CPL"));
+    assert!(beginner_next_steps.contains("BOM preview"));
+    assert!(beginner_next_steps.contains("CPL preview"));
 
     let prompt = fs::read_to_string(&workspace.prompt_file).unwrap();
     assert!(prompt.contains("USB-C ESP32-S3"));
@@ -110,6 +143,9 @@ fn creates_real_kicad_project_scaffold_files() {
 
     let report = fs::read_to_string(&workspace.release_report_file).unwrap();
     assert!(report.contains("Generated KiCad preview scaffold files"));
+    assert!(report.contains("JLCPCB manufacturing preview files"));
+    assert!(report.contains("jlcpcb-bom-preview.csv"));
+    assert!(report.contains("manufacturing-readiness-preview.txt"));
 
     fs::remove_dir_all(root).unwrap();
 }

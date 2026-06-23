@@ -419,8 +419,9 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(manufacturing.contains("Manufacturing Preview"));
     assert!(manufacturing.contains("JLCPCB upload remains blocked"));
     assert!(manufacturing.contains("Gerber"));
-    assert!(manufacturing.contains("BOM"));
-    assert!(manufacturing.contains("CPL"));
+    assert!(manufacturing.contains("jlcpcb-bom-preview.csv"));
+    assert!(manufacturing.contains("jlcpcb-cpl-preview.csv"));
+    assert!(manufacturing.contains("manufacturing-readiness-preview.txt"));
     assert!(manufacturing.contains("prototype-review"));
     assert!(manufacturing.contains("not order-ready"));
 
@@ -442,6 +443,9 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(body.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(body.contains("release-evidence-preview.md"));
+    assert!(body.contains("jlcpcb-bom-preview.csv"));
+    assert!(body.contains("jlcpcb-cpl-preview.csv"));
+    assert!(body.contains("manufacturing-readiness-preview.txt"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
@@ -548,6 +552,9 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(body.contains("erc-report.json"));
     assert!(body.contains("drc-report.json"));
     assert!(body.contains("kicad-validation-summary.txt"));
+    assert!(body.contains("jlcpcb-bom-preview.csv"));
+    assert!(body.contains("jlcpcb-cpl-preview.csv"));
+    assert!(body.contains("manufacturing-readiness-preview.txt"));
     assert!(body.contains("not order-ready"));
 }
 

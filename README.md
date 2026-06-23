@@ -48,6 +48,10 @@ Implemented in this first vertical slice:
   DRC in JSON mode when available, then writes `erc-report.json`,
   `drc-report.json`, and `kicad-validation-summary.txt` beside the preview
   files.
+- The first-run preview workspace also writes JLCPCB review-only manufacturing
+  preview files: `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
+  `manufacturing-readiness-preview.txt`. The readiness report blocks upload and
+  keeps the package at `prototype-review`, not order-ready.
 - After local ERC/DRC reports are clear, the bottom pipeline status stays short
   and points the user to `Open PCB` or `Open evidence` instead of truncating the
   full report summary.
@@ -164,12 +168,15 @@ It also saves a local preview workspace under:
 ```
 
 That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
-`BEGINNER-NEXT-STEPS.txt`, and a prototype-review release evidence report. The
-first-run summary points a non-expert back to the focused prompt for follow-up
-chat and says not to upload the preview to JLCPCB. The beginner next-steps file
-spells out the first clicks: Open PCB, Open evidence, then ask a follow-up in
-chat while Gerber/BOM/CPL remain blocked. It also contains the generated KiCad
-preview scaffold:
+`BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
+`jlcpcb-cpl-preview.csv`, `manufacturing-readiness-preview.txt`, and a
+prototype-review release evidence report. The first-run summary points a
+non-expert back to the focused prompt for follow-up chat and says not to upload
+the preview to JLCPCB. The beginner next-steps file spells out the first
+clicks: Open PCB, Open evidence, then ask a follow-up in chat while Gerber,
+drill, and placement-reviewed JLCPCB files remain blocked. The BOM/CPL preview
+files are for review only. It also contains the generated KiCad preview
+scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
 project status and preview body also change to the saved workspace state. When
@@ -179,6 +186,9 @@ folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
 those local reports are clear, the bottom pipeline status says
 `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
+The JLCPCB preview blocker report is saved as
+`manufacturing-readiness-preview.txt` and says not to upload this preview to
+JLCPCB.
 It is still not an order-ready KiCad board. Click
 `Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
 see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,
@@ -231,10 +241,13 @@ They also run `ChatPCB KiCad Preview.exe --first-chat-smoke` and write
 which proves the installed app can turn the starter chat prompt into a saved
 prototype-review preview workspace without provider login. The smoke summary
 also prints `PASS beginner next steps written`,
+`PASS JLCPCB manufacturing preview blockers written`,
 `PASS KiCad compatibility report written`, and
 `PASS ERC/DRC validation summary written`, so a non-expert has local validation
 evidence and a next-action checklist before opening the full app. The saved
-preview workspace includes `BEGINNER-NEXT-STEPS.txt`.
+preview workspace includes `BEGINNER-NEXT-STEPS.txt`,
+`jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
+`manufacturing-readiness-preview.txt`.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named
