@@ -21,6 +21,10 @@ The script verifies:
 - `RELEASE-EVIDENCE.txt` matches the current commit and says the working tree
   was clean.
 - `SHA256SUMS.txt` includes both native executables.
+- `README-FIRST.txt` is present and keeps the first-chat path and
+  `prototype-review` boundary visible.
+- `install-from-package.ps1` is present and creates the `First Chat Guide`
+  Start Menu shortcut.
 - The package boundary remains honest: `Preview only; not order-ready`.
 
 The script is intentionally a dry run. It prints `NO_PUSH_PERFORMED` and does

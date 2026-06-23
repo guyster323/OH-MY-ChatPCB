@@ -55,6 +55,9 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("ChatPCB-KiCad-Preview-windows-x64.zip"));
     assert!(script.contains("RELEASE-EVIDENCE.txt"));
     assert!(script.contains("SHA256SUMS.txt"));
+    assert!(script.contains("README-FIRST.txt"));
+    assert!(script.contains("install-from-package.ps1"));
+    assert!(script.contains("First Chat Guide Start Menu shortcut"));
     assert!(script.contains("Git commit: $head"));
     assert!(script.contains("Working tree: clean"));
     assert!(script.contains("CheckRemoteHead"));
@@ -74,5 +77,7 @@ fn github_replacement_runbook_keeps_the_external_action_explicit() {
     assert!(runbook.contains("explicit action-time approval"));
     assert!(runbook.contains("Do not push"));
     assert!(runbook.contains("ChatPCB-KiCad-Preview-windows-x64.zip"));
+    assert!(runbook.contains("README-FIRST.txt"));
+    assert!(runbook.contains("First Chat Guide"));
     assert!(runbook.contains("Preview only; not order-ready"));
 }

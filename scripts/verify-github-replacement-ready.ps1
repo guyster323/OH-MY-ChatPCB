@@ -11,6 +11,8 @@ $packageRoot = Join-Path $repoRoot "dist\$packageName"
 $zipPath = Join-Path $repoRoot "dist\$packageName.zip"
 $releaseEvidencePath = Join-Path $packageRoot "RELEASE-EVIDENCE.txt"
 $sha256Path = Join-Path $packageRoot "SHA256SUMS.txt"
+$firstReadmePath = Join-Path $packageRoot "README-FIRST.txt"
+$installerPath = Join-Path $packageRoot "install-from-package.ps1"
 
 function Assert-Contains {
     param(
@@ -47,7 +49,7 @@ try {
         throw "Working tree must be clean before replacement readiness check."
     }
 
-    foreach ($path in @($zipPath, $packageRoot, $releaseEvidencePath, $sha256Path)) {
+    foreach ($path in @($zipPath, $packageRoot, $releaseEvidencePath, $sha256Path, $firstReadmePath, $installerPath)) {
         if (-not (Test-Path $path)) {
             throw "Missing required preview package artifact: $path"
         }
@@ -57,11 +59,22 @@ try {
     Assert-Contains $releaseEvidence "Git commit: $head" "RELEASE-EVIDENCE.txt does not match HEAD $head."
     Assert-Contains $releaseEvidence "Working tree: clean" "RELEASE-EVIDENCE.txt must record a clean working tree."
     Assert-Contains $releaseEvidence "ChatPCB KiCad Preview release evidence" "RELEASE-EVIDENCE.txt is not the expected package evidence."
+    Assert-Contains $releaseEvidence "First Chat Guide Start Menu shortcut" "Release evidence must include the first chat guide shortcut."
     Assert-Contains $releaseEvidence "Preview only; not order-ready KiCad output yet" "Release boundary must stay honest before GitHub replacement."
 
     $sha256 = Get-Content -Raw -Path $sha256Path
     Assert-Contains $sha256 "ChatPCB KiCad Preview.exe" "SHA256SUMS.txt must include the desktop executable."
     Assert-Contains $sha256 "chatpcb-core.exe" "SHA256SUMS.txt must include the Rust core executable."
+    Assert-Contains $sha256 "README-FIRST.txt" "SHA256SUMS.txt must include the first chat guide."
+    Assert-Contains $sha256 "install-from-package.ps1" "SHA256SUMS.txt must include the packaged installer."
+
+    $firstReadme = Get-Content -Raw -Path $firstReadmePath
+    Assert-Contains $firstReadme "First chat" "README-FIRST.txt must explain the first chat path."
+    Assert-Contains $firstReadme "Boundary: prototype-review, not order-ready" "README-FIRST.txt must preserve the preview boundary."
+
+    $installer = Get-Content -Raw -Path $installerPath
+    Assert-Contains $installer "First Chat Guide.lnk" "Packaged installer must create the First Chat Guide Start Menu shortcut."
+    Assert-Contains $installer "README-FIRST.txt" "Packaged installer must copy README-FIRST.txt beside the installed app."
 
     if ($CheckRemoteHead) {
         $remoteHead = (git ls-remote origin refs/heads/main).Trim()
