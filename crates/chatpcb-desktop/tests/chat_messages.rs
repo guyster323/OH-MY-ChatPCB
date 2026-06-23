@@ -7,8 +7,8 @@ use chatpcb_desktop::ui_model::{
     preview_workspace_left_status, preview_workspace_saved_transcript,
     provider_login_pipeline_status, provider_login_transcript, recovered_preview_workspace_body,
     recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
-    selected_model_for_statuses, selected_provider_model, send_design_transcript,
-    validation_pipeline_status, ProviderUiStatus,
+    saved_preview_tab_body, saved_preview_tab_status, selected_model_for_statuses,
+    selected_provider_model, send_design_transcript, validation_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -349,6 +349,50 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(manufacturing.contains("CPL"));
 
     assert_eq!(left_tab_body(99), left_tab_body(0));
+}
+
+#[test]
+fn saved_preview_tabs_keep_workspace_context_after_send_design() {
+    let project_dir =
+        "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview";
+
+    let schematic_status = saved_preview_tab_status(0, project_dir);
+    assert!(schematic_status.contains("Schematic"));
+    assert!(schematic_status.contains("Preview workspace saved"));
+    assert!(schematic_status.contains(project_dir));
+
+    let schematic = saved_preview_tab_body(0, project_dir);
+    assert!(schematic.contains("Preview workspace saved"));
+    assert!(schematic.contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(schematic.contains(project_dir));
+
+    let pcb = saved_preview_tab_body(1, project_dir);
+    assert!(pcb.contains("PCB Layout"));
+    assert!(pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(pcb.contains("50mm x 50mm Edge.Cuts"));
+    assert!(pcb.contains("Open PCB"));
+
+    let validation = saved_preview_tab_body(2, project_dir);
+    assert!(validation.contains("KiCad ERC/DRC reports"));
+    assert!(validation.contains("kicad-pcb-check.txt"));
+    assert!(validation.contains("erc-report.json"));
+    assert!(validation.contains("drc-report.json"));
+    assert!(validation.contains("kicad-validation-summary.txt"));
+    assert!(validation.contains("prototype-review"));
+
+    let manufacturing = saved_preview_tab_body(3, project_dir);
+    assert!(manufacturing.contains("Manufacturing Preview"));
+    assert!(manufacturing.contains("JLCPCB upload remains blocked"));
+    assert!(manufacturing.contains("Gerber"));
+    assert!(manufacturing.contains("BOM"));
+    assert!(manufacturing.contains("CPL"));
+    assert!(manufacturing.contains("prototype-review"));
+    assert!(manufacturing.contains("not order-ready"));
+
+    assert_eq!(
+        saved_preview_tab_body(99, project_dir),
+        saved_preview_tab_body(0, project_dir)
+    );
 }
 
 #[test]

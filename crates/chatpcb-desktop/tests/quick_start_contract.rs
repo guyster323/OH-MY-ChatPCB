@@ -314,10 +314,15 @@ fn left_project_tabs_show_a_native_preview_body() {
     assert!(ui_model.contains("left_tabs_update_workspace_preview"));
     assert!(ui_model.contains("left_tab_body"));
     assert!(ui_model.contains("preview_workspace_body"));
+    assert!(ui_model.contains("saved_preview_tab_body"));
+    assert!(ui_model.contains("saved_preview_tab_status"));
     assert!(main.contains("design_preview"));
     assert!(main.contains("set_design_preview"));
     assert!(main.contains("controls.design_preview"));
     assert!(main.contains("preview_workspace_body"));
+    assert!(main.contains("controls.last_workspace_dir"));
+    assert!(main.contains("saved_preview_tab_body"));
+    assert!(main.contains("saved_preview_tab_status"));
 }
 
 #[test]

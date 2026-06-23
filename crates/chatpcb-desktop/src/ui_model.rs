@@ -234,6 +234,79 @@ pub fn preview_workspace_left_status(project_dir: &str) -> String {
     format!("Preview workspace saved: {project_dir} | prototype-review, not order-ready.")
 }
 
+pub fn saved_preview_tab_status(index: usize, project_dir: &str) -> String {
+    match index {
+        0 => format!(
+            "Schematic: Preview workspace saved at {project_dir}. Open chatpcb3-esp32s3.kicad_sch for prototype-review."
+        ),
+        1 => format!(
+            "PCB Layout: Preview workspace saved at {project_dir}. Open chatpcb3-esp32s3.kicad_pcb for the 50mm x 50mm outline."
+        ),
+        2 => format!(
+            "Validation: Preview workspace saved at {project_dir}. Inspect KiCad ERC/DRC reports; gate remains prototype-review."
+        ),
+        3 => format!(
+            "Manufacturing Preview: Preview workspace saved at {project_dir}. Gerber/BOM/CPL are still not order-ready."
+        ),
+        _ => saved_preview_tab_status(0, project_dir),
+    }
+}
+
+pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
+    match index {
+        0 => format!(
+            "Preview workspace saved\r\n\
+             Schematic\r\n\
+             Project folder:\r\n\
+             {project_dir}\r\n\r\n\
+             Open file:\r\n\
+             {project_dir}\\chatpcb3-esp32s3.kicad_sch\r\n\r\n\
+             Expected nets:\r\n\
+             - USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, and I2C_SDA.\r\n\
+             - Review symbols and connectivity in KiCad before trusting manufacturing output.\r\n\r\n\
+             Gate: prototype-review, not order-ready."
+        ),
+        1 => format!(
+            "PCB Layout\r\n\
+             Project folder:\r\n\
+             {project_dir}\r\n\r\n\
+             Open PCB:\r\n\
+             {project_dir}\\chatpcb3-esp32s3.kicad_pcb\r\n\r\n\
+             Current preview:\r\n\
+             - 50mm x 50mm Edge.Cuts outline.\r\n\
+             - Placement and routing are still preview-stage.\r\n\
+             - Use Open PCB to inspect the saved board outline with KiCad 10 when installed.\r\n\r\n\
+             Gate: prototype-review, not order-ready."
+        ),
+        2 => format!(
+            "KiCad ERC/DRC reports\r\n\
+             Project folder:\r\n\
+             {project_dir}\r\n\r\n\
+             Reports to inspect:\r\n\
+             - {project_dir}\\kicad-pcb-check.txt\r\n\
+             - {project_dir}\\erc-report.json\r\n\
+             - {project_dir}\\drc-report.json\r\n\
+             - {project_dir}\\kicad-validation-summary.txt\r\n\r\n\
+             Validation must be reviewed before manufacturing output can be trusted.\r\n\
+             Gate: prototype-review, not order-ready."
+        ),
+        3 => format!(
+            "Manufacturing Preview\r\n\
+             Project folder:\r\n\
+             {project_dir}\r\n\r\n\
+             JLCPCB upload remains blocked until these are generated and reviewed:\r\n\
+             - Gerber zip\r\n\
+             - Drill files\r\n\
+             - BOM with JLCPCB/LCSC fields\r\n\
+             - CPL/position file\r\n\
+             - Release evidence report\r\n\r\n\
+             The app must stop before real ordering and ask for user signoff.\r\n\
+             Gate: prototype-review, not order-ready."
+        ),
+        _ => saved_preview_tab_body(0, project_dir),
+    }
+}
+
 pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> String {
     format!(
         "Preview workspace saved\r\n\

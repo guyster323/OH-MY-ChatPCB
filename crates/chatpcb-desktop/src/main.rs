@@ -707,14 +707,22 @@ mod win32_app {
         let controls = &*ptr;
         let selected = SendMessageW(controls.tabs, TCM_GETCURSEL, 0, 0);
         if selected >= 0 {
-            set_left_workspace_status(
-                controls,
-                chatpcb_desktop::ui_model::left_tab_status(selected as usize),
-            );
-            set_design_preview(
-                controls,
-                chatpcb_desktop::ui_model::left_tab_body(selected as usize),
-            );
+            let selected = selected as usize;
+            if let Some(project_dir) = controls.last_workspace_dir.as_ref() {
+                let project_dir = project_dir.to_string_lossy();
+                let status =
+                    chatpcb_desktop::ui_model::saved_preview_tab_status(selected, &project_dir);
+                let body =
+                    chatpcb_desktop::ui_model::saved_preview_tab_body(selected, &project_dir);
+                set_left_workspace_status(controls, &status);
+                set_design_preview(controls, &body);
+            } else {
+                set_left_workspace_status(
+                    controls,
+                    chatpcb_desktop::ui_model::left_tab_status(selected),
+                );
+                set_design_preview(controls, chatpcb_desktop::ui_model::left_tab_body(selected));
+            }
         }
     }
 
