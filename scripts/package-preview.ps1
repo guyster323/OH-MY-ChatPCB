@@ -60,6 +60,7 @@ try {
         "- App launch selects available provider model",
         "- Prompt input and Send design transcript flow",
         "- Prompt Enter key sends design",
+        "- Empty prompt visibly uses the built-in ESP32-S3 example",
         "- Chat transcript append flow across Provider Login and Send design",
         "- Provider Login appends without erasing chat",
         "- Provider Login keeps built-in preview unblocked when no CLI is ready",

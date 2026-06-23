@@ -55,6 +55,19 @@ fn send_design_transcript_uses_the_user_prompt() {
 }
 
 #[test]
+fn send_design_transcript_explains_empty_prompt_builtin_example() {
+    let transcript = send_design_transcript("  ");
+
+    assert!(
+        transcript.contains("User: USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package")
+    );
+    assert!(transcript.contains("No prompt was typed"));
+    assert!(transcript.contains("built-in ESP32-S3 example"));
+    assert!(transcript.contains("edit the prompt"));
+    assert!(!transcript.contains("User:   "));
+}
+
+#[test]
 fn provider_login_transcript_reports_local_cli_status_without_secrets() {
     let transcript = provider_login_transcript(&[
         ProviderUiStatus {

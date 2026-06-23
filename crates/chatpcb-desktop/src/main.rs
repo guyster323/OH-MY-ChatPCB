@@ -137,6 +137,11 @@ fn print_self_test_summary() {
     );
     println!("PASS pressing Enter sends the first design");
     assert!(
+        chat_actions.empty_prompt_uses_visible_builtin_example,
+        "Empty prompt sends must visibly explain the built-in example fallback"
+    );
+    println!("PASS empty prompt visibly uses the built-in ESP32-S3 example");
+    assert!(
         chat_actions.send_design_returns_focus_to_prompt,
         "Send design must return focus to the prompt for follow-up chat"
     );

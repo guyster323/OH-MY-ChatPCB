@@ -23,6 +23,7 @@ installed executable prints a short PASS summary. It should include
 "PASS model selector falls back to built-in preview" and
 "PASS app launch focuses the prompt for immediate first chat" and
 "PASS pressing Enter sends the first design" and
+"PASS empty prompt visibly uses the built-in ESP32-S3 example" and
 "PASS Send design returns focus for follow-up chat" and
 "PASS first-run evidence blocks JLCPCB upload" and
 "Boundary: prototype-review, not order-ready".
@@ -49,26 +50,27 @@ First chat
 9. The example text is selected, so typing replaces it.
 10. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
 11. Press Enter in the prompt box, or click Send design.
-12. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-13. Confirm the transcript is positioned at the latest response.
-14. Confirm the chat transcript says "Preview workspace saved".
-15. Confirm the large left preview body also shows the saved KiCad scaffold files.
-16. Confirm the chat transcript and left preview body mention "KiCad CLI check".
-17. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
-18. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
-19. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
-20. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
-21. Confirm the bottom status says "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
-22. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
-23. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
-24. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-25. Click Open evidence to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
-26. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
-27. Close and reopen the app, then click Open evidence before sending again.
-28. Confirm the left project status says "Previous preview workspace found".
-29. Confirm the chat transcript also says "Previous preview workspace found".
-30. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
-31. The folder path is:
+12. If the prompt was empty, confirm the chat transcript says no prompt was typed and that the built-in ESP32-S3 example was used.
+13. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
+14. Confirm the transcript is positioned at the latest response.
+15. Confirm the chat transcript says "Preview workspace saved".
+16. Confirm the large left preview body also shows the saved KiCad scaffold files.
+17. Confirm the chat transcript and left preview body mention "KiCad CLI check".
+18. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
+19. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
+20. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
+21. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
+22. Confirm the bottom status says "Validated: Open PCB/evidence, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
+23. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
+24. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
+25. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+26. Click Open evidence to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
+27. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
+28. Close and reopen the app, then click Open evidence before sending again.
+29. Confirm the left project status says "Previous preview workspace found".
+30. Confirm the chat transcript also says "Previous preview workspace found".
+31. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
+32. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

@@ -4,6 +4,7 @@ use serde::Serialize;
 pub struct ChatActionsContract {
     pub send_design_uses_prompt: bool,
     pub send_design_clears_prompt: bool,
+    pub empty_prompt_uses_visible_builtin_example: bool,
     pub use_example_fills_prompt: bool,
     pub use_example_focuses_prompt_input: bool,
     pub use_example_selects_prompt_for_overwrite: bool,
@@ -48,6 +49,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
     ChatActionsContract {
         send_design_uses_prompt: true,
         send_design_clears_prompt: true,
+        empty_prompt_uses_visible_builtin_example: true,
         use_example_fills_prompt: true,
         use_example_focuses_prompt_input: true,
         use_example_selects_prompt_for_overwrite: true,
@@ -194,14 +196,21 @@ pub fn initial_transcript() -> String {
 
 pub fn send_design_transcript(prompt: &str) -> String {
     let prompt = prompt.trim();
-    let prompt = if prompt.is_empty() {
+    let prompt_was_empty = prompt.is_empty();
+    let prompt = if prompt_was_empty {
         example_board_prompt()
     } else {
         prompt
     };
+    let input_note = if prompt_was_empty {
+        "Input note: No prompt was typed, so ChatPCB used the built-in ESP32-S3 example. Next time, edit the prompt before pressing Enter.\r\n"
+    } else {
+        ""
+    };
 
     format!(
         "User: {prompt}\r\n\
+         {input_note}\
          Assistant: What happened\r\n\
          - Created the fixed ESP32-S3 target spec.\r\n\
          - Selected the JLCPCB package contract.\r\n\

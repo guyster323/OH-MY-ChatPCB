@@ -17,6 +17,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert_eq!(contract["chat_transcript"]["read_only"], true);
     assert_eq!(contract["chat_actions"]["send_design_uses_prompt"], true);
     assert_eq!(contract["chat_actions"]["send_design_clears_prompt"], true);
+    assert_eq!(
+        contract["chat_actions"]["empty_prompt_uses_visible_builtin_example"],
+        true
+    );
     assert_eq!(contract["chat_actions"]["use_example_fills_prompt"], true);
     assert_eq!(
         contract["chat_actions"]["use_example_focuses_prompt_input"],
@@ -192,6 +196,7 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS model selector falls back to built-in preview"));
     assert!(summary.contains("PASS app launch focuses the prompt for immediate first chat"));
     assert!(summary.contains("PASS pressing Enter sends the first design"));
+    assert!(summary.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(summary.contains("PASS Send design returns focus for follow-up chat"));
     assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
     assert!(summary.contains("PASS Use example selects prompt text for immediate overwrite"));

@@ -44,6 +44,7 @@ Expected result:
   `PASS model selector falls back to built-in preview` and
   `PASS app launch focuses the prompt for immediate first chat` and
   `PASS pressing Enter sends the first design` and
+  `PASS empty prompt visibly uses the built-in ESP32-S3 example` and
   `PASS Send design returns focus for follow-up chat` and
   `PASS Use example selects prompt text for immediate overwrite` and
   `Boundary: prototype-review, not order-ready`.
@@ -102,6 +103,8 @@ Expected result:
     `Use example`, pressing Enter should work without clicking back into the
     prompt box.
 14. Press Enter in the prompt input, or click `Send design`.
+    If the prompt is empty, confirm the chat transcript says no prompt was
+    typed and that the built-in ESP32-S3 example was used.
 15. Confirm the chat transcript still includes the earlier Provider Login
     status and also appends your prompt plus a preview pipeline:
    - ESP32-S3 target spec
