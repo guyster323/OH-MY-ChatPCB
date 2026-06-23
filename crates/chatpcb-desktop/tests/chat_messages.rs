@@ -14,17 +14,26 @@ use chatpcb_desktop::ui_model::{
 #[test]
 fn initial_transcript_invites_a_non_expert_first_chat() {
     let transcript = initial_transcript();
+    let non_empty_lines = transcript
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
 
     assert!(transcript.contains("Welcome to ChatPCB KiCad Preview"));
     assert!(transcript.contains("Type a board idea"));
-    assert!(transcript.contains("Use example"));
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("built-in-preview"));
-    assert!(transcript.contains("no provider is ready"));
     assert!(transcript.contains("Send design"));
-    assert!(transcript.contains("Open PCB"));
-    assert!(transcript.contains("KiCad 10 when installed"));
-    assert!(transcript.contains("preview"));
+    assert!(transcript.contains("prototype-review"));
+    assert!(transcript.contains("JLCPCB"));
+    assert!(
+        non_empty_lines <= 4,
+        "first-run chat should stay concise, got {non_empty_lines} lines: {transcript}"
+    );
+    assert!(!transcript.contains("Click Open PCB"));
+    assert!(!transcript.contains("Click Use example"));
+    assert!(!transcript.contains("KiCad 10 when installed"));
+    assert!(!transcript.contains("no provider is ready"));
 }
 
 #[test]

@@ -182,13 +182,9 @@ pub fn example_board_prompt() -> &'static str {
 
 pub fn initial_transcript() -> String {
     "Welcome to ChatPCB KiCad Preview\r\n\
-     Type a board idea, then press Enter or click Send design.\r\n\
-     Click Open PCB after a preview is saved to inspect the board outline with KiCad 10 when installed.\r\n\
-     Click Use example to refill the starter board request.\r\n\
-     You can start with: ESP32-S3 USB-C sensor board with OLED display.\r\n\
-     Provider Login checks local Codex, Claude Code, and Gemini CLI status without storing credentials.\r\n\
-     If no provider is ready, built-in-preview still lets you press Enter and create the preview.\r\n\
-     This preview shows the native app flow before real order-ready KiCad output is connected.\r\n"
+     Type a board idea, then press Enter or Send design.\r\n\
+     built-in-preview works before Provider Login.\r\n\
+     Saved evidence is prototype-review only, not JLCPCB order-ready.\r\n"
         .to_string()
 }
 
