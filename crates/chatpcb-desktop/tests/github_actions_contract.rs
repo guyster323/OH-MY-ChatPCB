@@ -72,6 +72,29 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
 }
 
 #[test]
+fn github_replacement_published_verifier_confirms_remote_matches_local_head() {
+    let script = fs::read_to_string(
+        workspace_root().join("scripts/verify-github-replacement-published.ps1"),
+    )
+    .unwrap();
+
+    assert!(script.contains("guyster323/OH-MY-ChatPCB"));
+    assert!(script.contains("[string]$ExpectedRemote"));
+    assert!(script.contains("[string]$ExpectedHead"));
+    assert!(script.contains("git remote get-url origin"));
+    assert!(script.contains("git rev-parse HEAD"));
+    assert!(script.contains("git rev-parse --short HEAD"));
+    assert!(script.contains("git status --porcelain"));
+    assert!(script.contains("git ls-remote origin refs/heads/main"));
+    assert!(script.contains("RELEASE-EVIDENCE.txt"));
+    assert!(script.contains("Git commit: $shortHead"));
+    assert!(script.contains("Working tree: clean"));
+    assert!(script.contains("Remote main matches local HEAD"));
+    assert!(script.contains("GitHub replacement published verification passed"));
+    assert!(!script.contains("git push"));
+}
+
+#[test]
 fn github_replacement_runbook_keeps_the_external_action_explicit() {
     let runbook =
         fs::read_to_string(workspace_root().join("docs/github-replacement-runbook.md")).unwrap();
@@ -84,4 +107,16 @@ fn github_replacement_runbook_keeps_the_external_action_explicit() {
     assert!(runbook.contains("README-FIRST.txt"));
     assert!(runbook.contains("First Chat Guide"));
     assert!(runbook.contains("Preview only; not order-ready"));
+}
+
+#[test]
+fn github_replacement_runbook_requires_post_push_verification() {
+    let runbook =
+        fs::read_to_string(workspace_root().join("docs/github-replacement-runbook.md")).unwrap();
+
+    assert!(runbook.contains("scripts\\verify-github-replacement-published.ps1"));
+    assert!(runbook.contains("After the approved push"));
+    assert!(runbook.contains("Remote main matches local HEAD"));
+    assert!(runbook.contains("GitHub replacement published verification passed"));
+    assert!(runbook.contains("Do not treat the replacement as verified"));
 }

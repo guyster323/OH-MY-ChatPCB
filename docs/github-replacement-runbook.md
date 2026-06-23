@@ -38,3 +38,23 @@ action.
 
 After approval, rerun the dry run first, then perform only the approved remote
 action and verify the resulting GitHub state.
+
+## Published Verification
+
+After the approved push, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-github-replacement-published.ps1
+```
+
+The script verifies:
+
+- `origin` still targets `OH-MY-ChatPCB`.
+- The local branch is `main`.
+- The working tree is clean.
+- `origin/main` resolves to the same commit as local `HEAD`.
+- `RELEASE-EVIDENCE.txt` still matches the published commit.
+
+Do not treat the replacement as verified until the script prints
+`Remote main matches local HEAD` and
+`GitHub replacement published verification passed`.
