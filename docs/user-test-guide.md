@@ -191,16 +191,22 @@ Latest run after installing the current preview package was checked on
 - Computer Use listed one targetable `ChatPCB KiCad Preview` window with title
   `ChatPCB KiCad Preview`.
 - Computer Use captured a screenshot of the native 70/30 workspace. The capture
-  showed the left current-project preview pane, the right chat pane, the prompt
-  input, `Use example`, `Send design`, `Open PCB`, `Provider Login`,
-  `Open evidence`, the model selector, and the bottom pipeline status.
+  showed the left current-project preview pane, the right chat pane, the
+  `Chat prompt` label, the prompt input, `Use example`, `Send design`,
+  `Open PCB`, `Provider Login`, `Open evidence`, the model selector, and the
+  bottom pipeline status.
 - Computer Use also captured an accessibility text tree for the same window,
   including the Schematic / PCB Layout / Validation / Manufacturing Preview
-  tabs and the Provider Login / Open evidence / Open PCB controls.
+  tabs, `Chat prompt` label, focused `Chat prompt` edit control, and the
+  Provider Login / Open evidence / Open PCB controls.
+- Computer Use typed
+  `USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package`, pressed
+  Enter, and verified the installed app reached
+  `Validated: Open PCB/evidence, or type a follow-up. Still prototype-review.`
+  with the prompt refocused.
 - The empty prompt fallback was not proven through Computer Use. The prompt box
-  was visually cleared, but subsequent Send attempts did not produce a fresh
-  accessibility-text match for `No prompt was typed` or
-  `built-in ESP32-S3 example`.
+  is proven by Rust tests and installed self-test output; the latest Computer
+  Use run instead proved a typed first-chat request.
 - No fresh Computer Use proof was captured for the empty prompt transcript note.
   The empty-prompt behavior is currently proven by Rust tests and the installed
   self-test summary, not by a successful end-to-end UI input capture.
