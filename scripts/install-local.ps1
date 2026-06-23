@@ -64,11 +64,18 @@ try {
     $selfTestShortcut.WorkingDirectory = $InstallRoot
     $selfTestShortcut.Description = "Verify the ChatPCB KiCad Preview installation"
     $selfTestShortcut.Save()
+    $firstGuideShortcutPath = Join-Path $startMenuPath "First Chat Guide.lnk"
+    $firstGuideShortcut = $shell.CreateShortcut($firstGuideShortcutPath)
+    $firstGuideShortcut.TargetPath = "$InstallRoot\README-FIRST.txt"
+    $firstGuideShortcut.WorkingDirectory = $InstallRoot
+    $firstGuideShortcut.Description = "Open the ChatPCB KiCad first chat guide"
+    $firstGuideShortcut.Save()
 
     Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
     Write-Host "Desktop shortcut: $shortcutPath"
     Write-Host "Start menu shortcut: $startShortcutPath"
     Write-Host "Self-test shortcut: $selfTestShortcutPath"
+    Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
     Write-Host "Install self-test: $installSelfTestPath"
     Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
 

@@ -9,8 +9,9 @@ Install
 2. A desktop shortcut named "ChatPCB KiCad Preview" will be created.
 3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
 4. A Start Menu shortcut named "Run ChatPCB Self Test" will be created.
-5. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
-6. The app starts after installation.
+5. A Start Menu shortcut named "First Chat Guide" will be created.
+6. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
+7. The app starts after installation.
 
 Self-test
 ---------

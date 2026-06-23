@@ -100,6 +100,32 @@ fn installers_copy_first_chat_readme_next_to_installed_app() {
 }
 
 #[test]
+fn installers_add_start_menu_first_chat_guide_shortcut() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("First Chat Guide.lnk"));
+        assert!(script.contains("README-FIRST.txt"));
+        assert!(script.contains("Open the ChatPCB KiCad first chat guide"));
+        assert!(script.contains("First chat guide shortcut:"));
+    }
+
+    assert!(package_script.contains("First Chat Guide Start Menu shortcut"));
+    assert!(root_readme.contains("First Chat Guide"));
+    assert!(guide.contains("First Chat Guide"));
+    assert!(package_readme.contains("First Chat Guide"));
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
@@ -168,7 +194,9 @@ fn root_readme_matches_current_self_test_shortcut_paths() {
     let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
 
     assert!(readme.contains("Both the packaged installer and source-tree installer"));
-    assert!(readme.contains("self-test shortcut"));
+    assert!(readme.contains("Start Menu shortcuts"));
+    assert!(readme.contains("First Chat Guide"));
+    assert!(readme.contains("self-test"));
     assert!(readme.contains("PASS Use example selects prompt text for immediate overwrite"));
     assert!(!readme.contains("The packaged installer also adds a Start Menu self-test shortcut"));
 }

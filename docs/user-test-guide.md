@@ -35,6 +35,7 @@ Expected result:
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.
+- The Start Menu folder includes `First Chat Guide`.
 - Running `Run ChatPCB Self Test` prints a short PASS summary with
   `PASS Provider Login shows local CLI login hints` and
   `PASS model selector falls back to built-in preview` and

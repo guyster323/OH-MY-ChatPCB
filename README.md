@@ -111,9 +111,9 @@ Install ChatPCB KiCad Preview.cmd
 
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
-shortcut plus Start Menu shortcuts, writes `INSTALL-SELF-TEST.txt` with the
-installed executable's PASS summary, copies `README-FIRST.txt` beside the
-installed app, and starts the app.
+shortcut plus Start Menu shortcuts, adds a `First Chat Guide` Start Menu
+shortcut, writes `INSTALL-SELF-TEST.txt` with the installed executable's PASS
+summary, copies `README-FIRST.txt` beside the installed app, and starts the app.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 
@@ -194,12 +194,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-preview.ps1
 The zip is written under `dist\` and intentionally ignored by git.
 It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, `SHA256SUMS.txt`, and
 `Run ChatPCB Self Test.cmd` beside the two executables and installer scripts.
-Both the packaged installer and source-tree installer add a Start Menu
-self-test shortcut so a first-run user can verify the installed executable
-contract with a short PASS summary. That summary also verifies the first-run
-evidence points back to follow-up chat, blocks JLCPCB upload for this preview,
-keeps the model selector on `built-in-preview` when no provider is ready, and
-prints `PASS Use example selects prompt text for immediate overwrite`.
+Both the packaged installer and source-tree installer add Start Menu shortcuts
+for the app, `First Chat Guide`, and self-test. A first-run user can verify the
+installed executable contract with a short PASS summary. That summary also
+verifies the first-run evidence points back to follow-up chat, blocks JLCPCB
+upload for this preview, keeps the model selector on `built-in-preview` when no
+provider is ready, and prints
+`PASS Use example selects prompt text for immediate overwrite`.
 The installers also write the same first-run confidence check to
 `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-SELF-TEST.txt`.
 
