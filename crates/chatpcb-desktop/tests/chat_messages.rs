@@ -573,25 +573,25 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
     );
+    let visible_lines = body.lines().filter(|line| !line.trim().is_empty()).count();
 
     assert!(body.contains("미리보기 저장 완료"));
-    assert!(body.contains("artifact-manifest.json"));
-    assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
-    assert!(body.contains("BEGINNER-NEXT-STEPS.txt"));
-    assert!(body.contains("release-evidence-preview.md"));
-    assert!(body.contains("jlcpcb-bom-preview.csv"));
-    assert!(body.contains("jlcpcb-cpl-preview.csv"));
-    assert!(body.contains("manufacturing-readiness-preview.txt"));
-    assert!(body.contains("chatpcb3-esp32s3.kicad_pro"));
-    assert!(body.contains("chatpcb3-esp32s3.kicad_sch"));
-    assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(body.contains("검토 목록"));
+    assert!(body.contains("채팅 입력칸"));
     assert!(body.contains("50mm x 50mm Edge.Cuts"));
     assert!(body.contains("PCB 열기"));
     assert!(body.contains("KiCad 10"));
-    assert!(body.contains("검토 목록"));
     assert!(body.contains("후속 입력"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("order-ready 아님"));
+    assert!(visible_lines <= 10);
+    assert!(!body.contains("생성된 파일:"));
+    assert!(!body.contains("artifact-manifest.json"));
+    assert!(!body.contains("FIRST-RUN-SUMMARY.txt"));
+    assert!(!body.contains("jlcpcb-bom-preview.csv"));
+    assert!(!body.contains("jlcpcb-cpl-preview.csv"));
+    assert!(!body.contains("manufacturing-readiness-preview.txt"));
+    assert!(!body.contains("release-evidence-preview.md"));
     assert!(!body.contains("Click Review checklist"));
 }
 
@@ -705,6 +705,7 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview";
     let status = recovered_preview_workspace_left_status(project_dir);
     let body = recovered_preview_workspace_body(project_dir);
+    let visible_lines = body.lines().filter(|line| !line.trim().is_empty()).count();
 
     assert!(status.contains("이전 미리보기 발견"));
     assert!(status.contains("chatpcb3-esp32s3-preview"));
@@ -712,18 +713,16 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(status.contains("order-ready 아님"));
     assert!(body.contains("이전 미리보기 발견"));
     assert!(body.contains("검토 목록으로 저장 파일을 확인"));
+    assert!(body.contains("채팅 입력칸"));
     assert!(body.contains("PCB 열기"));
-    assert!(body.contains("release-evidence-preview.md"));
-    assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
-    assert!(body.contains("BEGINNER-NEXT-STEPS.txt"));
-    assert!(body.contains("kicad-pcb-check.txt"));
-    assert!(body.contains("erc-report.json"));
-    assert!(body.contains("drc-report.json"));
-    assert!(body.contains("kicad-validation-summary.txt"));
-    assert!(body.contains("jlcpcb-bom-preview.csv"));
-    assert!(body.contains("jlcpcb-cpl-preview.csv"));
-    assert!(body.contains("manufacturing-readiness-preview.txt"));
     assert!(body.contains("order-ready 아님"));
+    assert!(visible_lines <= 8);
+    assert!(!body.contains("예상 파일:"));
+    assert!(!body.contains("release-evidence-preview.md"));
+    assert!(!body.contains("FIRST-RUN-SUMMARY.txt"));
+    assert!(!body.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(!body.contains("kicad-pcb-check.txt"));
+    assert!(!body.contains("jlcpcb-bom-preview.csv"));
     assert!(!body.contains("Previous preview workspace found"));
     assert!(!body.contains("Click Review checklist"));
 }

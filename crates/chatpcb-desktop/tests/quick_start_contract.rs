@@ -708,10 +708,12 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("Computer Use launched the installed app"));
     assert!(guide.contains("one targetable `ChatPCB KiCad Preview` window"));
     assert!(guide.contains("captured a screenshot of the native 70/30 workspace"));
-    assert!(guide.contains("Computer Use verified the fresh first-chat view lists"));
-    assert!(guide.contains("`jlcpcb-bom-preview.csv`"));
-    assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
-    assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
+    assert!(guide.contains(
+        "Computer Use verified the fresh first-chat view keeps the native left preview concise"
+    ));
+    assert!(guide.contains("`다음 행동`"));
+    assert!(guide.contains("`채팅 입력칸에 바꿀 점을 적고 Enter`"));
+    assert!(!guide.contains("Computer Use verified the fresh first-chat view lists"));
     assert!(guide.contains("Computer Use verified the recovered preview launch status"));
     assert!(guide.contains("`이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.`"));
     assert!(guide.contains("not hidden by automatic provider detection"));

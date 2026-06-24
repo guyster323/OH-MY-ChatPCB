@@ -355,32 +355,16 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
     }
 }
 
-pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> String {
+pub fn preview_workspace_body(project_dir: &str, _release_report_file: &str) -> String {
     format!(
         "미리보기 저장 완료\r\n\
          프로젝트 폴더:\r\n\
          {project_dir}\r\n\r\n\
-         생성된 파일:\r\n\
-         - chatpcb3-esp32s3.kicad_pro\r\n\
-         - chatpcb3-esp32s3.kicad_sch\r\n\
-         - chatpcb3-esp32s3.kicad_pcb\r\n\
-         - sym-lib-table\r\n\
-         - fp-lib-table\r\n\
-         - prompt.txt\r\n\
-         - artifact-manifest.json\r\n\
-         - FIRST-RUN-SUMMARY.txt\r\n\
-         - BEGINNER-NEXT-STEPS.txt\r\n\
-         - jlcpcb-bom-preview.csv\r\n\
-         - jlcpcb-cpl-preview.csv\r\n\
-         - manufacturing-readiness-preview.txt\r\n\
-         - release-evidence-preview.md\r\n\r\n\
-         PCB preview:\r\n\
-         50mm x 50mm Edge.Cuts 외곽선만 있음. 배치/배선은 아직 없습니다.\r\n\r\n\
-         PCB 열기로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\r\n\
-         검토 목록으로 BEGINNER-NEXT-STEPS.txt를 읽고 chat에서 후속 입력을 하세요.\r\n\r\n\
-         Release evidence:\r\n\
-         {release_report_file}\r\n\r\n\
-         Gate: prototype-review, order-ready 아님."
+         다음 행동\r\n\
+         - PCB 열기로 KiCad 10에서 50mm x 50mm Edge.Cuts 외곽선을 확인하세요.\r\n\
+         - 검토 목록으로 자세한 파일 목록과 beginner next steps를 확인하세요.\r\n\
+         - 채팅 입력칸에 바꿀 점을 적고 Enter로 후속 입력을 보내세요.\r\n\r\n\
+         상태: prototype-review, order-ready 아님."
     )
 }
 
@@ -457,31 +441,15 @@ pub fn recovered_preview_workspace_left_status(project_dir: &str) -> String {
 }
 
 pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
-    let release_report_file = format!("{project_dir}\\release-evidence-preview.md");
-
     format!(
         "이전 미리보기 발견\r\n\
          프로젝트 폴더:\r\n\
          {project_dir}\r\n\r\n\
-         검토 목록으로 저장 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
-         PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
-         예상 파일:\r\n\
-         - prompt.txt\r\n\
-         - artifact-manifest.json\r\n\
-         - FIRST-RUN-SUMMARY.txt\r\n\
-         - BEGINNER-NEXT-STEPS.txt\r\n\
-         - release-evidence-preview.md\r\n\
-         - kicad-pcb-check.txt\r\n\
-         - erc-report.json\r\n\
-         - drc-report.json\r\n\
-         - kicad-validation-summary.txt\r\n\r\n\
-         - jlcpcb-bom-preview.csv\r\n\
-         - jlcpcb-cpl-preview.csv\r\n\
-         - manufacturing-readiness-preview.txt\r\n\
-         \r\n\
-         Release evidence:\r\n\
-         {release_report_file}\r\n\r\n\
-         Gate: prototype-review, order-ready 아님."
+         이어가기\r\n\
+         - 검토 목록으로 저장 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
+         - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
+         - 채팅 입력칸에 바꿀 점을 적고 Enter로 후속 입력을 보내세요.\r\n\r\n\
+         상태: prototype-review, order-ready 아님."
     )
 }
 

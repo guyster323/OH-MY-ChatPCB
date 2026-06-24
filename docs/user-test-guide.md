@@ -281,9 +281,10 @@ Latest run after installing the current preview package was checked on
   `ESP32-S3 자이로 센서 보드`, pressed Enter, and verified the bottom status now
   says `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
   with focus returned to `채팅 입력칸`.
-- Computer Use verified the fresh first-chat view lists
-  `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
-  `manufacturing-readiness-preview.txt` in the native left preview pane.
+- Computer Use verified the fresh first-chat view keeps the native left preview concise:
+  it shows `미리보기 저장 완료`, `다음 행동`, `PCB 열기`, `검토 목록`, and
+  `채팅 입력칸에 바꿀 점을 적고 Enter`, while the detailed file list stays behind
+  `검토 목록`.
 - Computer Use also verified the empty prompt fallback. It selected the prompt,
   cleared it, pressed Enter, and the bottom pipeline status showed
   `내장 예시 사용.` before the validation status.
