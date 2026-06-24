@@ -375,26 +375,28 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
     );
 
-    assert!(transcript.contains("Preview workspace saved"));
+    assert!(transcript.contains("미리보기 저장 완료"));
     assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("release-evidence-preview.md"));
     assert!(transcript.contains("KiCad preview scaffold"));
     assert!(transcript.contains("50mm x 50mm Edge.Cuts"));
     assert!(transcript.contains("Open PCB"));
-    assert!(transcript.contains("KiCad 10 when installed"));
+    assert!(transcript.contains("KiCad 10"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(transcript.contains("BEGINNER-NEXT-STEPS.txt"));
-    assert!(transcript.contains("Ask a follow-up"));
+    assert!(transcript.contains("후속 입력"));
     assert!(transcript.contains("prototype-review"));
-    assert!(transcript.contains("not order-ready"));
+    assert!(transcript.contains("order-ready 아님"));
+    assert!(!transcript.contains("Preview workspace saved"));
+    assert!(!transcript.contains("Ask a follow-up"));
 }
 
 #[test]
 fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
     assert!(initial_left_workspace_status().contains("Schematic"));
-    assert!(initial_left_workspace_status().contains("Type a board idea"));
+    assert!(initial_left_workspace_status().contains("만들 보드"));
     assert!(initial_left_workspace_status().contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(!initial_left_workspace_status().contains("Native KiCad editor embedding"));
 
@@ -402,10 +404,11 @@ fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
     );
 
-    assert!(status.contains("Preview workspace saved"));
+    assert!(status.contains("미리보기 저장 완료"));
     assert!(status.contains("ChatPCB3\\Projects"));
     assert!(status.contains("prototype-review"));
-    assert!(status.contains("not order-ready"));
+    assert!(status.contains("order-ready 아님"));
+    assert!(!status.contains("Preview workspace saved"));
 }
 
 #[test]
@@ -421,12 +424,12 @@ fn left_tab_status_describes_each_current_project_view() {
     let validation = left_tab_status(2);
     assert!(validation.contains("Validation"));
     assert!(validation.contains("ERC/DRC"));
-    assert!(validation.contains("not run yet"));
+    assert!(validation.contains("아직 실행 전"));
 
     let manufacturing = left_tab_status(3);
     assert!(manufacturing.contains("Manufacturing Preview"));
     assert!(manufacturing.contains("Gerber/BOM/CPL"));
-    assert!(manufacturing.contains("not generated yet"));
+    assert!(manufacturing.contains("아직 생성 전"));
 
     assert_eq!(left_tab_status(99), initial_left_workspace_status());
 }
@@ -442,8 +445,8 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(schematic.contains("ESP32-S3"));
     assert!(schematic.contains("USB-C"));
     assert!(schematic.contains("I2C_SCL"));
-    assert!(schematic.contains("Type a board idea"));
-    assert!(schematic.contains("not order-ready"));
+    assert!(schematic.contains("오른쪽 Chat prompt"));
+    assert!(schematic.contains("order-ready 아님"));
     assert!(schematic_lines <= 5);
     assert!(!schematic.contains("Native KiCad schematic embedding"));
 
@@ -464,9 +467,9 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(manufacturing.contains("Gerber"));
     assert!(manufacturing.contains("BOM"));
     assert!(manufacturing.contains("CPL"));
-    assert!(manufacturing.contains("Gerber and Drill files are not generated yet"));
-    assert!(manufacturing.contains("BOM/CPL preview files are generated after Send design"));
-    assert!(manufacturing.contains("not upload-ready"));
+    assert!(manufacturing.contains("Gerber/Drill 파일은 아직 생성 전"));
+    assert!(manufacturing.contains("BOM/CPL preview 파일은 Send design 후 확인용으로 생성"));
+    assert!(manufacturing.contains("업로드 가능 상태가 아님"));
     assert!(!manufacturing.contains("Gerber, Drill, BOM, and CPL files are not generated yet"));
 
     assert_eq!(left_tab_body(99), left_tab_body(0));
@@ -479,11 +482,11 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
 
     let schematic_status = saved_preview_tab_status(0, project_dir);
     assert!(schematic_status.contains("Schematic"));
-    assert!(schematic_status.contains("Preview workspace saved"));
+    assert!(schematic_status.contains("저장된 미리보기"));
     assert!(schematic_status.contains(project_dir));
 
     let schematic = saved_preview_tab_body(0, project_dir);
-    assert!(schematic.contains("Preview workspace saved"));
+    assert!(schematic.contains("미리보기 저장 완료"));
     assert!(schematic.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(schematic.contains(project_dir));
 
@@ -492,6 +495,7 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(pcb.contains("50mm x 50mm Edge.Cuts"));
     assert!(pcb.contains("Open PCB"));
+    assert!(pcb.contains("배치와 배선은 아직 preview 단계"));
 
     let validation = saved_preview_tab_body(2, project_dir);
     assert!(validation.contains("KiCad ERC/DRC reports"));
@@ -503,13 +507,13 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
 
     let manufacturing = saved_preview_tab_body(3, project_dir);
     assert!(manufacturing.contains("Manufacturing Preview"));
-    assert!(manufacturing.contains("JLCPCB upload remains blocked"));
+    assert!(manufacturing.contains("JLCPCB 업로드는 아직 막힌 상태"));
     assert!(manufacturing.contains("Gerber"));
     assert!(manufacturing.contains("jlcpcb-bom-preview.csv"));
     assert!(manufacturing.contains("jlcpcb-cpl-preview.csv"));
     assert!(manufacturing.contains("manufacturing-readiness-preview.txt"));
     assert!(manufacturing.contains("prototype-review"));
-    assert!(manufacturing.contains("not order-ready"));
+    assert!(manufacturing.contains("order-ready 아님"));
 
     assert_eq!(
         saved_preview_tab_body(99, project_dir),
@@ -524,7 +528,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
     );
 
-    assert!(body.contains("Preview workspace saved"));
+    assert!(body.contains("미리보기 저장 완료"));
     assert!(body.contains("artifact-manifest.json"));
     assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
     assert!(body.contains("BEGINNER-NEXT-STEPS.txt"));
@@ -537,11 +541,12 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(body.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(body.contains("50mm x 50mm Edge.Cuts"));
     assert!(body.contains("Open PCB"));
-    assert!(body.contains("KiCad 10 when installed"));
+    assert!(body.contains("KiCad 10"));
     assert!(body.contains("Review checklist"));
-    assert!(body.contains("type a follow-up"));
+    assert!(body.contains("후속 입력"));
     assert!(body.contains("prototype-review"));
-    assert!(body.contains("not order-ready"));
+    assert!(body.contains("order-ready 아님"));
+    assert!(!body.contains("Click Review checklist"));
 }
 
 #[test]
@@ -557,7 +562,7 @@ fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
     assert!(body.contains("kicad-pcb-check.txt"));
     assert!(body.contains("KiCad accepted the preview PCB"));
     assert!(body.contains("prototype-review"));
-    assert!(body.contains("not order-ready"));
+    assert!(body.contains("order-ready 아님"));
 }
 
 #[test]
@@ -596,7 +601,7 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
     assert!(body.contains("ERC: 0 errors, 0 warnings"));
     assert!(body.contains("DRC: 0 errors, 0 warnings"));
     assert!(body.contains("prototype-review"));
-    assert!(body.contains("not order-ready"));
+    assert!(body.contains("order-ready 아님"));
 }
 
 #[test]
@@ -643,11 +648,12 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     let status = recovered_preview_workspace_left_status(project_dir);
     let body = recovered_preview_workspace_body(project_dir);
 
-    assert!(status.contains("Previous preview workspace found"));
+    assert!(status.contains("이전 미리보기 발견"));
     assert!(status.contains("chatpcb3-esp32s3-preview"));
     assert!(status.contains("prototype-review"));
-    assert!(body.contains("Previous preview workspace found"));
-    assert!(body.contains("Click Review checklist"));
+    assert!(status.contains("order-ready 아님"));
+    assert!(body.contains("이전 미리보기 발견"));
+    assert!(body.contains("Review checklist로 저장 파일을 확인"));
     assert!(body.contains("Open PCB"));
     assert!(body.contains("release-evidence-preview.md"));
     assert!(body.contains("FIRST-RUN-SUMMARY.txt"));
@@ -659,7 +665,9 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(body.contains("jlcpcb-bom-preview.csv"));
     assert!(body.contains("jlcpcb-cpl-preview.csv"));
     assert!(body.contains("manufacturing-readiness-preview.txt"));
-    assert!(body.contains("not order-ready"));
+    assert!(body.contains("order-ready 아님"));
+    assert!(!body.contains("Previous preview workspace found"));
+    assert!(!body.contains("Click Review checklist"));
 }
 
 #[test]
@@ -668,12 +676,13 @@ fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview";
     let transcript = recovered_preview_workspace_transcript(project_dir);
 
-    assert!(transcript.contains("Previous preview workspace found"));
+    assert!(transcript.contains("이전 미리보기 발견"));
     assert!(transcript.contains("Review checklist"));
     assert!(transcript.contains("Open PCB"));
     assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("prototype-review"));
-    assert!(transcript.contains("not order-ready"));
+    assert!(transcript.contains("order-ready 아님"));
+    assert!(!transcript.contains("Previous preview workspace found"));
     assert!(!transcript
         .to_ascii_lowercase()
         .contains("order-ready evidence"));

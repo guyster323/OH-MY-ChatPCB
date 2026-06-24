@@ -60,7 +60,7 @@ First chat
 13. If the prompt was empty, confirm the chat transcript says no prompt was typed and that the built-in ESP32-S3 example was used.
 14. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
 15. Confirm the transcript is positioned at the latest response.
-16. Confirm the chat transcript says "Preview workspace saved".
+16. Confirm the chat transcript says "미리보기 저장 완료".
 17. Confirm the large left preview body also shows the saved KiCad scaffold files.
 18. Confirm the chat transcript and left preview body mention "KiCad CLI check".
 19. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
@@ -76,8 +76,8 @@ First chat
 29. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
 30. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
 31. Close and reopen the app, then click Review checklist before sending again.
-32. Confirm the left project status says "Previous preview workspace found".
-33. Confirm the chat transcript also says "Previous preview workspace found".
+32. Confirm the left project status says "이전 미리보기 발견".
+33. Confirm the chat transcript also says "이전 미리보기 발견" and keeps the boundary visible as "order-ready 아님".
 34. Confirm the short bottom status says "Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."
 35. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
 36. The folder path is:

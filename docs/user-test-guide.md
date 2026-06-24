@@ -132,13 +132,14 @@ Expected result:
    - Freerouting autoroute
    - DRC
    - manufacturing package
-17. Confirm the chat transcript says `Preview workspace saved`.
+17. Confirm the chat transcript says `미리보기 저장 완료`.
 18. Confirm the chat transcript is positioned at the latest response after the
     send, so the new design result is visible without manually scrolling down.
 19. Without clicking back inside the prompt box, type another short follow-up
     request and confirm it appears in the prompt input.
 20. Confirm the left project status and large left preview body now show
-    `Preview workspace saved` instead of only the initial Schematic preview.
+    `미리보기 저장 완료` and `order-ready 아님` instead of only the initial
+    Schematic preview.
 21. Confirm the chat transcript and large left preview body mention the
     `KiCad CLI check` and `kicad-pcb-check.txt`.
 22. Confirm the chat transcript and large left preview body mention
@@ -168,10 +169,11 @@ Expected result:
     and not upload this preview to JLCPCB.
 31. Close and reopen `ChatPCB KiCad Preview`, then click `Review checklist` before
     sending another prompt.
-32. Confirm the left project status says `Previous preview workspace found`
+32. Confirm the left project status says `이전 미리보기 발견`
     before you send another prompt.
-33. Confirm the chat transcript also says `Previous preview workspace found`
-    and points you to `Review checklist` and `Open PCB`.
+33. Confirm the chat transcript also says `이전 미리보기 발견`, keeps
+    `order-ready 아님` visible, and points you to `Review checklist` and
+    `Open PCB`.
 34. Confirm the short bottom status says
     `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`
     instead of a long local path.
@@ -274,6 +276,14 @@ Latest run after installing the current preview package was checked on
   Enter, and verified the installed app cleared the prompt, returned focus to
   `Chat prompt`, and kept the bottom status at
   `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
+- Computer Use reinstalled the current package after the saved/recovered copy localization
+  and verified the recovered launch now shows `이전 미리보기 발견` and
+  `order-ready 아님`, with no old `Previous preview workspace found` heading.
+- Computer Use then sent `ESP32-S3 proximity sensor board` and verified the
+  saved preview state shows `미리보기 저장 완료`, keeps `order-ready 아님`,
+  clears the prompt, returns focus to `Chat prompt`, and has no old
+  `Preview workspace saved` heading.
+  This is the current proof of no old `Preview workspace saved` heading.
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.

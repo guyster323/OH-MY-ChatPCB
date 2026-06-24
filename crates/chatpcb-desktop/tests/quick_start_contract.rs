@@ -633,6 +633,14 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("Computer Use verified the recovered preview launch status"));
     assert!(guide.contains("`Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`"));
     assert!(guide.contains("not hidden by automatic provider detection"));
+    assert!(guide.contains(
+        "Computer Use reinstalled the current package after the saved/recovered copy localization"
+    ));
+    assert!(guide.contains("`이전 미리보기 발견`"));
+    assert!(guide.contains("`미리보기 저장 완료`"));
+    assert!(guide.contains("`order-ready 아님`"));
+    assert!(guide.contains("no old `Previous preview workspace found` heading"));
+    assert!(guide.contains("no old `Preview workspace saved` heading"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
     assert!(guide.contains("`내장 예시 사용.`"));

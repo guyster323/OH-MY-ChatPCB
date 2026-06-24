@@ -92,15 +92,15 @@ pub fn chat_actions_contract() -> ChatActionsContract {
 }
 
 pub fn initial_left_workspace_status() -> &'static str {
-    "Schematic: Type a board idea, then press Enter to create chatpcb3-esp32s3.kicad_sch."
+    "Schematic: 만들 보드를 입력한 뒤 Enter. chatpcb3-esp32s3.kicad_sch 미리보기를 생성합니다."
 }
 
 pub fn left_tab_status(index: usize) -> &'static str {
     match index {
         0 => initial_left_workspace_status(),
-        1 => "PCB Layout: preview target file chatpcb3-esp32s3.kicad_pcb. Placement and routing are not generated yet.",
-        2 => "Validation: ERC/DRC not run yet. Send design creates prototype-review evidence only.",
-        3 => "Manufacturing Preview: Gerber/BOM/CPL not generated yet. JLCPCB upload package is still blocked.",
+        1 => "PCB Layout: chatpcb3-esp32s3.kicad_pcb 미리보기. 배치/배선은 아직 생성 전입니다.",
+        2 => "Validation: ERC/DRC 아직 실행 전. Send design은 prototype-review 증거만 만듭니다.",
+        3 => "Manufacturing Preview: Gerber/BOM/CPL 아직 생성 전. JLCPCB 업로드 패키지는 계속 blocked입니다.",
         _ => initial_left_workspace_status(),
     }
 }
@@ -108,24 +108,24 @@ pub fn left_tab_status(index: usize) -> &'static str {
 pub fn left_tab_body(index: usize) -> &'static str {
     match index {
         0 => "Schematic Preview\r\n\
-              - Type a board idea on the right, then press Enter.\r\n\
+              - 오른쪽 Chat prompt에 만들 보드를 적고 Enter.\r\n\
               - Target: ESP32-S3 USB-C sensor board.\r\n\
               - Nets: USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, I2C_SDA.\r\n\
-              - Gate: prototype-review, not order-ready.",
+              - Gate: prototype-review, order-ready 아님.",
         1 => "PCB Layout Preview\r\n\
-              - A 50mm x 50mm Edge.Cuts board outline is generated for visual orientation.\r\n\
-              - Component placement and Freerouting route data are not generated yet.\r\n\
+              - 50mm x 50mm Edge.Cuts 보드 외곽선을 preview로 생성합니다.\r\n\
+              - Component placement와 Freerouting route data는 아직 생성 전입니다.\r\n\
               - Planned flow: component placement -> DSN export -> Freerouting -> SES import.\r\n\
-              - DRC must pass before manufacturing output can be trusted.",
+              - 제조 출력은 DRC 통과 후에만 신뢰할 수 있습니다.",
         2 => "Validation Preview\r\n\
-              - ERC has not run yet.\r\n\
-              - DRC has not run yet.\r\n\
-              - The release gate stays prototype-review until KiCad reports and artifacts exist.",
+              - ERC는 아직 실행 전입니다.\r\n\
+              - DRC는 아직 실행 전입니다.\r\n\
+              - KiCad report와 artifact가 생길 때까지 release gate는 prototype-review입니다.",
         3 => "Manufacturing Preview\r\n\
-              - Gerber and Drill files are not generated yet.\r\n\
-              - BOM/CPL preview files are generated after Send design, but are not upload-ready.\r\n\
-              - JLCPCB upload package creation is blocked until schematic, layout, ERC, DRC, Gerber, drill, and placement-reviewed CPL evidence exist.\r\n\
-              - The app must stop before real ordering and ask for user signoff.",
+              - Gerber/Drill 파일은 아직 생성 전입니다.\r\n\
+              - BOM/CPL preview 파일은 Send design 후 확인용으로 생성되지만 업로드 가능 상태가 아님.\r\n\
+              - schematic, layout, ERC, DRC, Gerber, drill, placement-reviewed CPL 증거 전까지 JLCPCB upload는 blocked입니다.\r\n\
+              - 실제 주문 전에는 반드시 멈추고 사용자 확인을 받아야 합니다.",
         _ => left_tab_body(0),
     }
 }
@@ -255,15 +255,15 @@ pub fn append_chat_transcript(existing: &str, next_turn: &str) -> String {
 
 pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file: &str) -> String {
     format!(
-        "Preview workspace saved\r\n\
-         - Project folder: {project_dir}\r\n\
+        "미리보기 저장 완료\r\n\
+         - 프로젝트 폴더: {project_dir}\r\n\
          - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
-         - Beginner next steps: BEGINNER-NEXT-STEPS.txt. Ask a follow-up in chat after reviewing Open PCB/Review checklist.\r\n\
-         - JLCPCB preview blockers: manufacturing-readiness-preview.txt, jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv.\r\n\
-         - PCB preview: 50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\
-         - Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\
+         - 다음 단계: BEGINNER-NEXT-STEPS.txt와 Open PCB/Review checklist 확인 후 chat에서 후속 입력.\r\n\
+         - JLCPCB 확인 파일: manufacturing-readiness-preview.txt, jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv.\r\n\
+         - PCB preview: 50mm x 50mm Edge.Cuts 외곽선만 있음. 배치/배선은 아직 없음.\r\n\
+         - Open PCB로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\
          - Release evidence: {release_report_file}\r\n\
-         Status: prototype-review, not order-ready.\r\n"
+         Status: prototype-review, order-ready 아님.\r\n"
     )
 }
 
@@ -274,22 +274,22 @@ pub fn preview_result_summary_transcript() -> &'static str {
 }
 
 pub fn preview_workspace_left_status(project_dir: &str) -> String {
-    format!("Preview workspace saved: {project_dir} | prototype-review, not order-ready.")
+    format!("미리보기 저장 완료: {project_dir} | prototype-review, order-ready 아님.")
 }
 
 pub fn saved_preview_tab_status(index: usize, project_dir: &str) -> String {
     match index {
         0 => format!(
-            "Schematic: Preview workspace saved at {project_dir}. Open chatpcb3-esp32s3.kicad_sch for prototype-review."
+            "Schematic: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_sch를 prototype-review로 확인하세요."
         ),
         1 => format!(
-            "PCB Layout: Preview workspace saved at {project_dir}. Open chatpcb3-esp32s3.kicad_pcb for the 50mm x 50mm outline."
+            "PCB Layout: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_pcb 50mm x 50mm outline 확인."
         ),
         2 => format!(
-            "Validation: Preview workspace saved at {project_dir}. Inspect KiCad ERC/DRC reports; gate remains prototype-review."
+            "Validation: 저장된 미리보기 {project_dir}. KiCad ERC/DRC report를 확인하세요; gate는 prototype-review."
         ),
         3 => format!(
-            "Manufacturing Preview: Preview workspace saved at {project_dir}. Gerber/BOM/CPL are still not order-ready."
+            "Manufacturing Preview: 저장된 미리보기 {project_dir}. Gerber/BOM/CPL은 아직 order-ready 아님."
         ),
         _ => saved_preview_tab_status(0, project_dir),
     }
@@ -298,56 +298,56 @@ pub fn saved_preview_tab_status(index: usize, project_dir: &str) -> String {
 pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
     match index {
         0 => format!(
-            "Preview workspace saved\r\n\
+            "미리보기 저장 완료\r\n\
              Schematic\r\n\
-             Project folder:\r\n\
+             프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
-             Open file:\r\n\
+             열 파일:\r\n\
              {project_dir}\\chatpcb3-esp32s3.kicad_sch\r\n\r\n\
              Expected nets:\r\n\
              - USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, and I2C_SDA.\r\n\
-             - Review symbols and connectivity in KiCad before trusting manufacturing output.\r\n\r\n\
-             Gate: prototype-review, not order-ready."
+             - 제조 출력을 믿기 전 KiCad에서 symbol과 연결을 확인하세요.\r\n\r\n\
+             Gate: prototype-review, order-ready 아님."
         ),
         1 => format!(
             "PCB Layout\r\n\
-             Project folder:\r\n\
+             프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
              Open PCB:\r\n\
              {project_dir}\\chatpcb3-esp32s3.kicad_pcb\r\n\r\n\
-             Current preview:\r\n\
+             현재 preview:\r\n\
              - 50mm x 50mm Edge.Cuts outline.\r\n\
-             - Placement and routing are still preview-stage.\r\n\
-             - Use Open PCB to inspect the saved board outline with KiCad 10 when installed.\r\n\r\n\
-             Gate: prototype-review, not order-ready."
+             - 배치와 배선은 아직 preview 단계입니다.\r\n\
+             - Open PCB로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
+             Gate: prototype-review, order-ready 아님."
         ),
         2 => format!(
             "KiCad ERC/DRC reports\r\n\
-             Project folder:\r\n\
+             프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
-             Reports to inspect:\r\n\
+             확인할 report:\r\n\
              - {project_dir}\\kicad-pcb-check.txt\r\n\
              - {project_dir}\\erc-report.json\r\n\
              - {project_dir}\\drc-report.json\r\n\
              - {project_dir}\\kicad-validation-summary.txt\r\n\r\n\
-             Validation must be reviewed before manufacturing output can be trusted.\r\n\
-             Gate: prototype-review, not order-ready."
+             제조 출력을 믿기 전 validation을 검토해야 합니다.\r\n\
+             Gate: prototype-review, order-ready 아님."
         ),
         3 => format!(
             "Manufacturing Preview\r\n\
-             Project folder:\r\n\
+             프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
-             JLCPCB upload remains blocked. Review these preview files first:\r\n\
+             JLCPCB 업로드는 아직 막힌 상태입니다. 먼저 이 preview 파일을 확인하세요:\r\n\
              - {project_dir}\\jlcpcb-bom-preview.csv\r\n\
              - {project_dir}\\jlcpcb-cpl-preview.csv\r\n\
              - {project_dir}\\manufacturing-readiness-preview.txt\r\n\r\n\
-             Still missing for upload:\r\n\
+             업로드 전 아직 필요한 것:\r\n\
              - Gerber zip\r\n\
              - Drill files\r\n\
              - Placement-reviewed CPL/position file\r\n\
              - Release evidence report\r\n\r\n\
-             The app must stop before real ordering and ask for user signoff.\r\n\
-             Gate: prototype-review, not order-ready."
+             실제 주문 전에는 앱이 멈추고 사용자 확인을 받아야 합니다.\r\n\
+             Gate: prototype-review, order-ready 아님."
         ),
         _ => saved_preview_tab_body(0, project_dir),
     }
@@ -355,10 +355,10 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
 
 pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> String {
     format!(
-        "Preview workspace saved\r\n\
-         Project folder:\r\n\
+        "미리보기 저장 완료\r\n\
+         프로젝트 폴더:\r\n\
          {project_dir}\r\n\r\n\
-         Files created:\r\n\
+         생성된 파일:\r\n\
          - chatpcb3-esp32s3.kicad_pro\r\n\
          - chatpcb3-esp32s3.kicad_sch\r\n\
          - chatpcb3-esp32s3.kicad_pcb\r\n\
@@ -373,12 +373,12 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - manufacturing-readiness-preview.txt\r\n\
          - release-evidence-preview.md\r\n\r\n\
          PCB preview:\r\n\
-         50mm x 50mm Edge.Cuts outline only; no placement or routing yet.\r\n\r\n\
-         Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb with KiCad 10 when installed.\r\n\r\n\
-         Click Review checklist to read BEGINNER-NEXT-STEPS.txt, then type a follow-up in chat.\r\n\r\n\
+         50mm x 50mm Edge.Cuts 외곽선만 있음. 배치/배선은 아직 없습니다.\r\n\r\n\
+         Open PCB로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\r\n\
+         Review checklist로 BEGINNER-NEXT-STEPS.txt를 읽고 chat에서 후속 입력을 하세요.\r\n\r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
-         Gate: prototype-review, not order-ready."
+         Gate: prototype-review, order-ready 아님."
     )
 }
 
@@ -451,19 +451,19 @@ pub fn erc_drc_validation_transcript(
 }
 
 pub fn recovered_preview_workspace_left_status(project_dir: &str) -> String {
-    format!("Previous preview workspace found: {project_dir} | prototype-review, not order-ready.")
+    format!("이전 미리보기 발견: {project_dir} | prototype-review, order-ready 아님.")
 }
 
 pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
     let release_report_file = format!("{project_dir}\\release-evidence-preview.md");
 
     format!(
-        "Previous preview workspace found\r\n\
-         Project folder:\r\n\
+        "이전 미리보기 발견\r\n\
+         프로젝트 폴더:\r\n\
          {project_dir}\r\n\r\n\
-         Click Review checklist to inspect the saved files before sending another design.\r\n\
-         Click Open PCB to inspect the saved board outline with KiCad 10 when installed.\r\n\r\n\
-         Expected files:\r\n\
+         Review checklist로 저장 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
+         Open PCB로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
+         예상 파일:\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
          - FIRST-RUN-SUMMARY.txt\r\n\
@@ -479,17 +479,17 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
          \r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
-         Gate: prototype-review, not order-ready."
+         Gate: prototype-review, order-ready 아님."
     )
 }
 
 pub fn recovered_preview_workspace_transcript(project_dir: &str) -> String {
     format!(
-        "Previous preview workspace found\r\n\
-         - Project folder: {project_dir}\r\n\
-         - Click Review checklist to inspect saved files.\r\n\
-         - Click Open PCB to inspect the saved board outline with KiCad 10 when installed.\r\n\
-         Status: prototype-review, not order-ready.\r\n"
+        "이전 미리보기 발견\r\n\
+         - 프로젝트 폴더: {project_dir}\r\n\
+         - Review checklist로 저장 파일을 확인하세요.\r\n\
+         - Open PCB로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
+         Status: prototype-review, order-ready 아님.\r\n"
     )
 }
 
