@@ -6,10 +6,11 @@ use chatpcb_desktop::ui_model::{
     preview_workspace_body, preview_workspace_body_with_kicad_check,
     preview_workspace_body_with_validation_reports, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
-    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
-    recovered_preview_workspace_transcript, saved_preview_tab_body, saved_preview_tab_status,
-    selected_model_for_statuses, selected_provider_model, send_design_transcript,
-    validation_pipeline_status, visible_empty_prompt_pipeline_status, ProviderUiStatus,
+    recovered_preview_pipeline_status, recovered_preview_workspace_body,
+    recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
+    saved_preview_tab_body, saved_preview_tab_status, selected_model_for_statuses,
+    selected_provider_model, send_design_transcript, validation_pipeline_status,
+    visible_empty_prompt_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -310,6 +311,22 @@ fn open_evidence_pipeline_status_names_the_beginner_next_steps_file() {
     assert!(status.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(status.contains("checklist review"));
     assert!(status.len() <= 70);
+}
+
+#[test]
+fn recovered_preview_pipeline_status_keeps_relaunch_next_action_visible() {
+    let status = recovered_preview_pipeline_status();
+
+    assert_eq!(
+        status,
+        "Recovered preview: type a follow-up, Open PCB, or Review checklist."
+    );
+    assert!(status.contains("type a follow-up"));
+    assert!(status.contains("Open PCB"));
+    assert!(status.contains("Review checklist"));
+    assert!(status.len() <= 80);
+    assert!(!status.contains("C:\\"));
+    assert!(!status.contains("AppData"));
 }
 
 #[test]

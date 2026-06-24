@@ -273,6 +273,38 @@ fn app_launch_selects_available_provider_model_for_first_chat() {
 }
 
 #[test]
+fn app_launch_provider_detection_keeps_immediate_chat_status_visible() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+
+    let initializer = main
+        .split("unsafe fn initialize_provider_model_selection")
+        .nth(1)
+        .unwrap()
+        .split("unsafe fn subclass_prompt_input")
+        .next()
+        .unwrap();
+    let provider_login_handler = main
+        .split("unsafe fn handle_provider_login")
+        .nth(1)
+        .unwrap()
+        .split("unsafe fn append_provider_login_transcript")
+        .next()
+        .unwrap();
+
+    assert!(initializer.contains("selected_model_for_statuses"));
+    assert!(initializer.contains("CB_SETCURSEL"));
+    assert!(
+        !initializer.contains("set_pipeline_status"),
+        "app launch should not hide Ready/Recovered next-action status with provider status"
+    );
+    assert!(
+        provider_login_handler.contains("set_pipeline_status"),
+        "Provider Login clicks should still report provider status"
+    );
+}
+
+#[test]
 fn send_design_creates_a_local_preview_workspace_for_non_experts() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
@@ -501,9 +533,13 @@ fn app_launch_surfaces_recovered_preview_workspace_to_non_experts() {
     assert!(ui_model.contains("app_launch_shows_recovered_workspace_status"));
     assert!(ui_model.contains("recovered_preview_workspace_left_status"));
     assert!(ui_model.contains("recovered_preview_workspace_body"));
+    assert!(ui_model.contains("recovered_preview_pipeline_status"));
     assert!(main.contains("let recovered_workspace = recover_last_preview_workspace();"));
     assert!(main.contains("recovered_preview_workspace_left_status"));
     assert!(main.contains("recovered_preview_workspace_body"));
+    assert!(main.contains("recovered_preview_pipeline_status"));
+    assert!(main.contains("let initial_pipeline_status = if recovered_workspace.is_some()"));
+    assert!(main.contains("&initial_pipeline_status"));
     assert!(main.contains("last_workspace_dir: recovered_workspace"));
 }
 
@@ -552,6 +588,9 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`jlcpcb-bom-preview.csv`"));
     assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
     assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
+    assert!(guide.contains("Computer Use verified the recovered preview launch status"));
+    assert!(guide.contains("`Recovered preview: type a follow-up, Open PCB, or Review checklist.`"));
+    assert!(guide.contains("not hidden by automatic provider detection"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
     assert!(guide.contains("`Used built-in example.`"));
@@ -577,4 +616,20 @@ fn docs_explain_open_buttons_wait_for_a_saved_preview() {
     assert!(guide.contains("Confirm `Open PCB` and `Review checklist` are disabled"));
     assert!(guide.contains("before the first preview"));
     assert!(guide.contains("Confirm `Open PCB` and `Review checklist` become enabled"));
+}
+
+#[test]
+fn docs_explain_recovered_preview_keeps_immediate_chat_visible() {
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for text in [root_readme, guide, package_readme] {
+        assert!(
+            text.contains("Recovered preview: type a follow-up, Open PCB, or Review checklist.")
+        );
+        assert!(text.contains("short bottom status"));
+        assert!(!text.contains("Recovered preview: C:\\"));
+    }
 }

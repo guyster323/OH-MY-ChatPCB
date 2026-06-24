@@ -162,9 +162,12 @@ Expected result:
     before you send another prompt.
 32. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Review checklist` and `Open PCB`.
-33. Confirm Windows opens the same previous preview evidence folder with the
+33. Confirm the short bottom status says
+    `Recovered preview: type a follow-up, Open PCB, or Review checklist.`
+    instead of a long local path.
+34. Confirm Windows opens the same previous preview evidence folder with the
     first-run summary selected.
-34. Confirm the preview evidence folder exists:
+35. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
@@ -209,6 +212,12 @@ Latest run after installing the current preview package was checked on
   including the Schematic / PCB Layout / Validation / Manufacturing Preview
   tabs, `Chat prompt` label, focused `Chat prompt` edit control, and the
   Provider Login / Review checklist / Open PCB controls.
+- Computer Use verified the recovered preview launch status. The bottom status
+  showed
+  `Recovered preview: type a follow-up, Open PCB, or Review checklist.`, not
+  the long preview folder path, and it was not hidden by automatic provider detection.
+- Computer Use then clicked `Provider Login` and verified that provider status
+  still appears after the explicit click, with focus returned to `Chat prompt`.
 - Computer Use typed
   `USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package`, pressed
   Enter, and verified the installed app reached

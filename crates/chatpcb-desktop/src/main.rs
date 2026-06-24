@@ -709,6 +709,11 @@ mod win32_app {
                 )
             })
             .unwrap_or_else(chatpcb_desktop::ui_model::initial_transcript);
+        let initial_pipeline_status = if recovered_workspace.is_some() {
+            chatpcb_desktop::ui_model::recovered_preview_pipeline_status().to_string()
+        } else {
+            chatpcb_desktop::ui_model::initial_pipeline_status().to_string()
+        };
 
         let design_preview = child(
             parent,
@@ -816,7 +821,7 @@ mod win32_app {
             parent,
             instance,
             "STATIC",
-            chatpcb_desktop::ui_model::initial_pipeline_status(),
+            &initial_pipeline_status,
             WS_BORDER,
             0,
         );
@@ -924,15 +929,10 @@ mod win32_app {
             })
             .collect::<Vec<_>>();
 
-        let selected_provider = chatpcb_desktop::ui_model::selected_provider_model(&statuses);
         let selected_model = chatpcb_desktop::ui_model::selected_model_for_statuses(&statuses);
         if let Some(model_index) = selected_provider_model_index(selected_model) {
             SendMessageW(controls.model_choice, CB_SETCURSEL, model_index, 0);
         }
-
-        let pipeline_status =
-            chatpcb_desktop::ui_model::provider_login_pipeline_status(selected_provider);
-        set_pipeline_status(controls, &pipeline_status);
     }
 
     unsafe fn subclass_prompt_input(parent: HWND, prompt: HWND) {

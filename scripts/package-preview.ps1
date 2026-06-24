@@ -95,6 +95,7 @@ try {
         "- Open PCB button launches the generated KiCad PCB preview",
         "- Open PCB status distinguishes KiCad editor from file fallback",
         "- Review checklist recovers previous preview workspace after relaunch",
+        "- Recovered preview status keeps follow-up chat visible",
         "- Relaunch shows previous preview workspace status before another send",
         "- Relaunch mentions previous preview workspace in chat",
         "- KiCad fork CMake drop-in target",

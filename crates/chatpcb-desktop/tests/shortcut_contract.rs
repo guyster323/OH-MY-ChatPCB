@@ -453,6 +453,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Open PCB button"));
     assert!(script.contains("Open PCB status distinguishes KiCad editor from file fallback"));
     assert!(script.contains("Review checklist recovers previous preview workspace"));
+    assert!(script.contains("Recovered preview status keeps follow-up chat visible"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
     assert!(script.contains("Relaunch mentions previous preview workspace in chat"));
     assert!(script.contains("KiCad fork CMake drop-in target"));

@@ -192,6 +192,10 @@ pub fn open_evidence_pipeline_status() -> &'static str {
     "Opened BEGINNER-NEXT-STEPS.txt for checklist review."
 }
 
+pub fn recovered_preview_pipeline_status() -> &'static str {
+    "Recovered preview: type a follow-up, Open PCB, or Review checklist."
+}
+
 pub fn example_board_prompt() -> &'static str {
     "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
 }
