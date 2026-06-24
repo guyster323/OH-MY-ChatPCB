@@ -50,6 +50,10 @@ fn installers_stop_with_clear_message_when_preview_app_is_running() {
         assert!(script.contains("Assert-ChatPCBPreviewNotRunning"));
         assert!(script.contains("Get-Process -Name \"ChatPCB KiCad Preview\""));
         assert!(script.contains("Close ChatPCB KiCad Preview, then run this installer again."));
+        assert!(script.contains(
+            "Write-Host \"Close ChatPCB KiCad Preview, then run this installer again.\""
+        ));
+        assert!(script.contains("exit 1"));
 
         let guard_index = script.find("Assert-ChatPCBPreviewNotRunning").unwrap();
         let copy_index = script.find("Copy-Item -Force").unwrap();

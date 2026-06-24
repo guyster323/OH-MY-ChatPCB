@@ -45,7 +45,8 @@ if (-not (Test-Path $firstReadme)) {
 function Assert-ChatPCBPreviewNotRunning {
     $runningPreview = Get-Process -Name "ChatPCB KiCad Preview" -ErrorAction SilentlyContinue
     if ($runningPreview) {
-        throw "Close ChatPCB KiCad Preview, then run this installer again."
+        Write-Host "Close ChatPCB KiCad Preview, then run this installer again."
+        exit 1
     }
 }
 
