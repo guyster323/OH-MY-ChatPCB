@@ -37,6 +37,8 @@ fn native_preview_has_use_example_button_that_fills_the_prompt() {
     assert!(main.contains("handle_use_example"));
     assert!(main.contains("SetDlgItemTextW(hwnd, ID_PROMPT as i32"));
     assert!(main.contains("example_board_prompt"));
+    assert!(main.contains("let initial_prompt = chatpcb_desktop::ui_model::example_board_prompt()"));
+    assert!(!main.contains("\"USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package\""));
     assert!(ui_model.contains("use_example_fills_prompt"));
 }
 

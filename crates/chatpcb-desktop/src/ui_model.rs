@@ -201,7 +201,7 @@ pub fn recovered_preview_pipeline_status() -> &'static str {
 }
 
 pub fn example_board_prompt() -> &'static str {
-    "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package"
+    "USB-C ESP32-S3 온습도 센서 보드, I2C 센서, JLCPCB 조립"
 }
 
 pub fn initial_transcript() -> String {

@@ -494,10 +494,8 @@ fn first_run_evidence_summary_contract() -> std::io::Result<EvidenceSummaryContr
         fs::remove_dir_all(&root)?;
     }
 
-    let workspace = create_preview_workspace(
-        "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package",
-        &root,
-    )?;
+    let workspace =
+        create_preview_workspace(chatpcb_desktop::ui_model::example_board_prompt(), &root)?;
     let summary = fs::read_to_string(&workspace.first_run_summary_file)?;
     fs::remove_dir_all(&root)?;
 
@@ -769,11 +767,12 @@ mod win32_app {
             0,
             ID_PROMPT_LABEL,
         );
+        let initial_prompt = chatpcb_desktop::ui_model::example_board_prompt();
         let prompt = child(
             parent,
             instance,
             "EDIT",
-            "USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package",
+            initial_prompt,
             WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
             ID_PROMPT,
         );

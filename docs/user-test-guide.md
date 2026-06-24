@@ -234,18 +234,16 @@ Latest run after installing the current preview package was checked on
 - Computer Use rechecked the installed package after the recovered-status copy
   change and confirmed the same short Korean follow-up cue was visible in the
   bottom status with `Chat prompt` focused.
+- Computer Use verified the selected launch prompt now starts with
+  `USB-C ESP32-S3 온습도 센서 보드, I2C 센서, JLCPCB` in the native prompt input,
+  keeping the manufacturing keywords while making the example Korean-first.
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `Chat prompt`.
 - Computer Use verified the Provider Login status now says
   `Provider detected: claude:auto; preview still local.` and that the next
   `Send design` response says `Preview engine: built-in local generator` plus
   `No provider CLI is invoked`.
-- Computer Use typed
-  `USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package`, pressed
-  Enter, and verified the installed app reached
-  `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
-  with the prompt refocused.
-- Computer Use typed `ESP32-S3 온습도 센서 보드`, pressed Enter, and verified the
+- Computer Use typed `ESP32-S3 조도 센서 보드`, pressed Enter, and verified the
   installed app again reached
   `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
   with focus returned to `Chat prompt`.

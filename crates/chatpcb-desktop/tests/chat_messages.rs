@@ -1,8 +1,8 @@
 use chatpcb_desktop::ui_model::{
     append_chat_transcript, design_pipeline_status, erc_drc_validation_transcript,
-    example_loaded_pipeline_status, initial_left_workspace_status, initial_pipeline_status,
-    initial_transcript, kicad_cli_check_transcript, left_tab_body, left_tab_status,
-    model_selector_items, open_evidence_pipeline_status, open_pcb_pipeline_status,
+    example_board_prompt, example_loaded_pipeline_status, initial_left_workspace_status,
+    initial_pipeline_status, initial_transcript, kicad_cli_check_transcript, left_tab_body,
+    left_tab_status, model_selector_items, open_evidence_pipeline_status, open_pcb_pipeline_status,
     preview_workspace_body, preview_workspace_body_with_kicad_check,
     preview_workspace_body_with_validation_reports, preview_workspace_left_status,
     preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
@@ -55,6 +55,19 @@ fn initial_pipeline_status_gives_a_korean_first_action_without_extra_text() {
 }
 
 #[test]
+fn example_board_prompt_is_korean_first_but_keeps_manufacturing_terms() {
+    let prompt = example_board_prompt();
+
+    assert!(prompt.contains("온습도 센서 보드"));
+    assert!(prompt.contains("ESP32-S3"));
+    assert!(prompt.contains("USB-C"));
+    assert!(prompt.contains("I2C"));
+    assert!(prompt.contains("JLCPCB"));
+    assert!(prompt.len() <= 90);
+    assert!(!prompt.contains("sensor board with I2C sensor"));
+}
+
+#[test]
 fn send_design_transcript_uses_the_user_prompt() {
     let transcript =
         send_design_transcript("Battery powered ESP32-S3 board with OLED and JLCPCB assembly");
@@ -84,9 +97,7 @@ fn send_design_transcript_separates_provider_selection_from_preview_engine() {
 fn send_design_transcript_explains_empty_prompt_builtin_example() {
     let transcript = send_design_transcript("  ");
 
-    assert!(
-        transcript.contains("User: USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package")
-    );
+    assert!(transcript.contains(&format!("User: {}", example_board_prompt())));
     assert!(transcript.contains("No prompt was typed"));
     assert!(transcript.contains("built-in ESP32-S3 example"));
     assert!(transcript.contains("edit the prompt"));
