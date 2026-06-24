@@ -17,45 +17,46 @@ $firstReadmeKo = Join-Path $packageRoot "README-FIRST-KO.txt"
 $installReadyTemplate = Join-Path $packageRoot "INSTALL-READY.txt"
 
 if (-not (Test-Path $desktopExe)) {
-    throw "Missing ChatPCB KiCad Preview.exe in the package folder."
+    throw "패키지 폴더에서 ChatPCB KiCad Preview.exe를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $coreExe)) {
-    throw "Missing chatpcb-core.exe in the package folder."
+    throw "패키지 폴더에서 chatpcb-core.exe를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $uninstallScript)) {
-    throw "Missing uninstall-preview.ps1 in the package folder."
+    throw "패키지 폴더에서 uninstall-preview.ps1을 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $uninstallCommand)) {
-    throw "Missing Uninstall ChatPCB KiCad Preview.cmd in the package folder."
+    throw "패키지 폴더에서 Uninstall ChatPCB KiCad Preview.cmd를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $selfTestCommand)) {
-    throw "Missing Run ChatPCB Self Test.cmd in the package folder."
+    throw "패키지 폴더에서 Run ChatPCB Self Test.cmd를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $firstChatSmokeCommand)) {
-    throw "Missing Run First Chat Smoke Test.cmd in the package folder."
+    throw "패키지 폴더에서 Run First Chat Smoke Test.cmd를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $firstReadme)) {
-    throw "Missing README-FIRST.txt in the package folder."
+    throw "패키지 폴더에서 README-FIRST.txt를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $firstReadmeKo)) {
-    throw "Missing README-FIRST-KO.txt in the package folder."
+    throw "패키지 폴더에서 README-FIRST-KO.txt를 찾을 수 없습니다."
 }
 
 if (-not (Test-Path $installReadyTemplate)) {
-    throw "Missing INSTALL-READY.txt in the package folder."
+    throw "패키지 폴더에서 INSTALL-READY.txt를 찾을 수 없습니다."
 }
 
 function Assert-ChatPCBPreviewNotRunning {
     $runningPreview = Get-Process -Name "ChatPCB KiCad Preview" -ErrorAction SilentlyContinue
     if ($runningPreview) {
-        Write-Host "Close ChatPCB KiCad Preview, then run this installer again."
+        Write-Host "ChatPCB KiCad Preview가 실행 중입니다."
+        Write-Host "앱을 닫고 설치 파일을 다시 실행하세요."
         exit 1
     }
 }
@@ -76,19 +77,19 @@ Copy-Item -Force -Path $installReadyTemplate -Destination "$InstallRoot\INSTALL-
 $installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
 $selfTestSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --self-test-summary
 if ($LASTEXITCODE -ne 0) {
-    throw "Installed ChatPCB KiCad Preview self-test failed with exit code $LASTEXITCODE."
+    throw "설치된 ChatPCB KiCad Preview 자체 검증 실패. 종료 코드: $LASTEXITCODE"
 }
 if (-not ($selfTestSummary -match "ChatPCB KiCad Preview Self Test")) {
-    throw "Installed ChatPCB KiCad Preview self-test did not return the expected summary header."
+    throw "설치된 ChatPCB KiCad Preview 자체 검증에서 예상한 summary header가 나오지 않았습니다."
 }
 $selfTestSummary | Set-Content -Path $installSelfTestPath -Encoding ASCII
 $installFirstChatSmokePath = Join-Path $InstallRoot "INSTALL-FIRST-CHAT-SMOKE.txt"
 $firstChatSmokeSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --first-chat-smoke
 if ($LASTEXITCODE -ne 0) {
-    throw "Installed ChatPCB KiCad Preview first chat smoke test failed with exit code $LASTEXITCODE."
+    throw "설치된 ChatPCB KiCad Preview 첫 채팅 smoke test 실패. 종료 코드: $LASTEXITCODE"
 }
 if (-not ($firstChatSmokeSummary -match "ChatPCB First Chat Smoke Test")) {
-    throw "Installed ChatPCB KiCad Preview first chat smoke test did not return the expected summary header."
+    throw "설치된 ChatPCB KiCad Preview 첫 채팅 smoke test에서 예상한 summary header가 나오지 않았습니다."
 }
 $firstChatSmokeSummary | Set-Content -Path $installFirstChatSmokePath -Encoding ASCII
 $installReadyPath = Join-Path $InstallRoot "INSTALL-READY.txt"
@@ -100,7 +101,7 @@ $shortcutPath = Join-Path $desktopPath "ChatPCB KiCad Preview.lnk"
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = "$InstallRoot\ChatPCB KiCad Preview.exe"
 $shortcut.WorkingDirectory = $InstallRoot
-$shortcut.Description = "Native ChatPCB KiCad preview app"
+$shortcut.Description = "ChatPCB KiCad 네이티브 미리보기 앱"
 $shortcut.Save()
 
 $programsPath = $shell.SpecialFolders.Item('Programs')
@@ -110,58 +111,58 @@ $startShortcutPath = Join-Path $startMenuPath "ChatPCB KiCad Preview.lnk"
 $startShortcut = $shell.CreateShortcut($startShortcutPath)
 $startShortcut.TargetPath = "$InstallRoot\ChatPCB KiCad Preview.exe"
 $startShortcut.WorkingDirectory = $InstallRoot
-$startShortcut.Description = "Native ChatPCB KiCad preview app"
+$startShortcut.Description = "ChatPCB KiCad 네이티브 미리보기 앱"
 $startShortcut.Save()
 $uninstallShortcutPath = Join-Path $startMenuPath "Uninstall ChatPCB KiCad Preview.lnk"
 $uninstallShortcut = $shell.CreateShortcut($uninstallShortcutPath)
 $uninstallShortcut.TargetPath = "$InstallRoot\Uninstall ChatPCB KiCad Preview.cmd"
 $uninstallShortcut.WorkingDirectory = $InstallRoot
-$uninstallShortcut.Description = "Remove ChatPCB KiCad Preview"
+$uninstallShortcut.Description = "ChatPCB KiCad Preview 제거"
 $uninstallShortcut.Save()
 $selfTestShortcutPath = Join-Path $startMenuPath "Run ChatPCB Self Test.lnk"
 $selfTestShortcut = $shell.CreateShortcut($selfTestShortcutPath)
 $selfTestShortcut.TargetPath = "$InstallRoot\Run ChatPCB Self Test.cmd"
 $selfTestShortcut.WorkingDirectory = $InstallRoot
-$selfTestShortcut.Description = "Verify the ChatPCB KiCad Preview installation"
+$selfTestShortcut.Description = "설치 상태를 검증합니다"
 $selfTestShortcut.Save()
 $firstChatSmokeShortcutPath = Join-Path $startMenuPath "Run First Chat Smoke Test.lnk"
 $firstChatSmokeShortcut = $shell.CreateShortcut($firstChatSmokeShortcutPath)
 $firstChatSmokeShortcut.TargetPath = "$InstallRoot\Run First Chat Smoke Test.cmd"
 $firstChatSmokeShortcut.WorkingDirectory = $InstallRoot
-$firstChatSmokeShortcut.Description = "Verify the first ChatPCB chat-to-preview path"
+$firstChatSmokeShortcut.Description = "첫 채팅부터 미리보기 생성까지 검증합니다"
 $firstChatSmokeShortcut.Save()
 $startHereShortcutPath = Join-Path $startMenuPath "Start Here.lnk"
 $startHereShortcut = $shell.CreateShortcut($startHereShortcutPath)
 $startHereShortcut.TargetPath = "$InstallRoot\INSTALL-READY.txt"
 $startHereShortcut.WorkingDirectory = $InstallRoot
-$startHereShortcut.Description = "Open the ChatPCB KiCad install-ready start note"
+$startHereShortcut.Description = "설치 직후 시작 안내를 엽니다"
 $startHereShortcut.Save()
 $firstGuideShortcutPath = Join-Path $startMenuPath "First Chat Guide.lnk"
 $firstGuideShortcut = $shell.CreateShortcut($firstGuideShortcutPath)
 $firstGuideShortcut.TargetPath = "$InstallRoot\README-FIRST.txt"
 $firstGuideShortcut.WorkingDirectory = $InstallRoot
-$firstGuideShortcut.Description = "Open the ChatPCB KiCad first chat guide"
+$firstGuideShortcut.Description = "첫 채팅 안내를 엽니다"
 $firstGuideShortcut.Save()
 $firstGuideKoShortcutPath = Join-Path $startMenuPath "First Chat Guide Korean.lnk"
 $firstGuideKoShortcut = $shell.CreateShortcut($firstGuideKoShortcutPath)
 $firstGuideKoShortcut.TargetPath = "$InstallRoot\README-FIRST-KO.txt"
 $firstGuideKoShortcut.WorkingDirectory = $InstallRoot
-$firstGuideKoShortcut.Description = "Open the Korean ChatPCB KiCad first chat guide"
+$firstGuideKoShortcut.Description = "한국어 첫 채팅 안내를 엽니다"
 $firstGuideKoShortcut.Save()
 
-Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
-Write-Host "Desktop shortcut: $shortcutPath"
-Write-Host "Start menu shortcut: $startShortcutPath"
-Write-Host "Self-test shortcut: $selfTestShortcutPath"
-Write-Host "First chat smoke test shortcut: $firstChatSmokeShortcutPath"
-Write-Host "Start here shortcut: $startHereShortcutPath"
-Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
-Write-Host "Korean first chat guide shortcut: $firstGuideKoShortcutPath"
-Write-Host "Install self-test: $installSelfTestPath"
-Write-Host "First chat smoke test: $installFirstChatSmokePath"
-Write-Host "Install ready summary: $installReadyPath"
-Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
-Write-Host "Korean first chat guide: $InstallRoot\README-FIRST-KO.txt"
+Write-Host "설치 완료: $InstallRoot"
+Write-Host "바탕화면 바로가기: $shortcutPath"
+Write-Host "시작 메뉴 바로가기: $startShortcutPath"
+Write-Host "자체 검증 바로가기: $selfTestShortcutPath"
+Write-Host "첫 채팅 smoke test 바로가기: $firstChatSmokeShortcutPath"
+Write-Host "시작 안내 바로가기: $startHereShortcutPath"
+Write-Host "첫 채팅 안내 바로가기: $firstGuideShortcutPath"
+Write-Host "한국어 첫 채팅 안내 바로가기: $firstGuideKoShortcutPath"
+Write-Host "자체 검증 결과: $installSelfTestPath"
+Write-Host "첫 채팅 smoke test 결과: $installFirstChatSmokePath"
+Write-Host "시작 안내: $installReadyPath"
+Write-Host "첫 채팅 안내: $InstallRoot\README-FIRST.txt"
+Write-Host "한국어 첫 채팅 안내: $InstallRoot\README-FIRST-KO.txt"
 
 if ($Launch) {
     Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot

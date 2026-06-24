@@ -100,7 +100,7 @@ try {
     Assert-Contains $installer "First Chat Guide Korean.lnk" "Packaged installer must create the Korean First Chat Guide Start Menu shortcut."
     Assert-Contains $installer "README-FIRST.txt" "Packaged installer must copy README-FIRST.txt beside the installed app."
     Assert-Contains $installer "README-FIRST-KO.txt" "Packaged installer must copy README-FIRST-KO.txt beside the installed app."
-    Assert-Contains $installer "Open the Korean ChatPCB KiCad first chat guide" "Packaged installer must label the Korean first chat guide shortcut."
+    Assert-Contains $installer "한국어 첫 채팅 안내를 엽니다" "Packaged installer must label the Korean first chat guide shortcut."
     Assert-Contains $installer "INSTALL-READY.txt" "Packaged installer must copy the install-ready summary."
 
     if ($CheckRemoteHead) {

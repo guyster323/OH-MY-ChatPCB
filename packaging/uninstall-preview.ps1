@@ -27,4 +27,4 @@ if (Test-Path $InstallRoot) {
     Remove-Item -Recurse -Force $InstallRoot
 }
 
-Write-Host "Removed ChatPCB KiCad Preview from: $InstallRoot"
+Write-Host "제거 완료: $InstallRoot"

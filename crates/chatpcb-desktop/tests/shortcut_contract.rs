@@ -49,10 +49,8 @@ fn installers_stop_with_clear_message_when_preview_app_is_running() {
     for script in [source_installer, package_installer] {
         assert!(script.contains("Assert-ChatPCBPreviewNotRunning"));
         assert!(script.contains("Get-Process -Name \"ChatPCB KiCad Preview\""));
-        assert!(script.contains("Close ChatPCB KiCad Preview, then run this installer again."));
-        assert!(script.contains(
-            "Write-Host \"Close ChatPCB KiCad Preview, then run this installer again.\""
-        ));
+        assert!(script.contains("ChatPCB KiCad Preview가 실행 중입니다."));
+        assert!(script.contains("Write-Host \"앱을 닫고 설치 파일을 다시 실행하세요.\""));
         assert!(script.contains("exit 1"));
 
         let guard_index = script.find("Assert-ChatPCBPreviewNotRunning").unwrap();
@@ -114,6 +112,51 @@ fn double_click_command_files_are_korean_first_for_non_experts() {
 }
 
 #[test]
+fn install_and_uninstall_scripts_report_progress_in_korean_first() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let uninstall =
+        fs::read_to_string(workspace_root().join("packaging/uninstall-preview.ps1")).unwrap();
+    let uninstall_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Uninstall ChatPCB KiCad Preview.cmd"))
+            .unwrap();
+
+    for script in [&source_installer, &package_installer] {
+        assert!(script.contains("ChatPCB KiCad Preview가 실행 중입니다."));
+        assert!(script.contains("앱을 닫고 설치 파일을 다시 실행하세요."));
+        assert!(script.contains("설치 완료:"));
+        assert!(script.contains("바탕화면 바로가기:"));
+        assert!(script.contains("시작 메뉴 바로가기:"));
+        assert!(script.contains("자체 검증 결과:"));
+        assert!(script.contains("첫 채팅 smoke test 결과:"));
+        assert!(script.contains("시작 안내:"));
+        assert!(script.contains("첫 채팅 안내:"));
+        assert!(script.contains("한국어 첫 채팅 안내:"));
+        assert!(script.contains("ChatPCB KiCad 네이티브 미리보기 앱"));
+        assert!(script.contains("ChatPCB KiCad Preview 제거"));
+        assert!(script.contains("설치 상태를 검증합니다"));
+        assert!(script.contains("첫 채팅부터 미리보기 생성까지 검증합니다"));
+        assert!(!script.contains("Installed ChatPCB KiCad Preview to:"));
+        assert!(!script.contains("Close ChatPCB KiCad Preview, then run this installer again."));
+        assert!(!script.contains("Desktop shortcut:"));
+        assert!(!script.contains("Start menu shortcut:"));
+        assert!(!script.contains("Self-test shortcut:"));
+        assert!(!script.contains("First chat smoke test shortcut:"));
+    }
+
+    assert!(uninstall.contains("제거 완료:"));
+    assert!(!uninstall.contains("Removed ChatPCB KiCad Preview from:"));
+
+    assert!(uninstall_cmd.contains("chcp 65001 >nul"));
+    assert!(uninstall_cmd.contains("ChatPCB KiCad Preview 제거 실패"));
+    assert!(uninstall_cmd.contains("제거가 끝났습니다."));
+    assert!(!uninstall_cmd.contains("uninstall failed."));
+    assert!(!uninstall_cmd.contains("was removed."));
+}
+
+#[test]
 fn packaged_installer_adds_start_menu_self_test_shortcut() {
     let installer =
         fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
@@ -124,7 +167,7 @@ fn packaged_installer_adds_start_menu_self_test_shortcut() {
 
     assert!(installer.contains("Run ChatPCB Self Test.cmd"));
     assert!(installer.contains("Run ChatPCB Self Test.lnk"));
-    assert!(installer.contains("Verify the ChatPCB KiCad Preview installation"));
+    assert!(installer.contains("설치 상태를 검증합니다"));
     assert!(package_script.contains("Run ChatPCB Self Test.cmd"));
     assert!(package_script.contains("Self-test shortcut for installed package verification"));
     assert!(self_test_cmd.contains("--self-test-summary"));
@@ -150,11 +193,11 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     for script in [source_installer, package_installer] {
         assert!(script.contains("Run First Chat Smoke Test.cmd"));
         assert!(script.contains("Run First Chat Smoke Test.lnk"));
-        assert!(script.contains("Verify the first ChatPCB chat-to-preview path"));
+        assert!(script.contains("첫 채팅부터 미리보기 생성까지 검증합니다"));
         assert!(script.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
         assert!(script.contains("--first-chat-smoke"));
-        assert!(script.contains("First chat smoke test shortcut:"));
-        assert!(script.contains("First chat smoke test:"));
+        assert!(script.contains("첫 채팅 smoke test 바로가기:"));
+        assert!(script.contains("첫 채팅 smoke test 결과:"));
     }
 
     assert!(package_script.contains("Run First Chat Smoke Test.cmd"));
@@ -210,8 +253,8 @@ fn source_installer_adds_start_menu_self_test_shortcut() {
 
     assert!(installer.contains("Run ChatPCB Self Test.cmd"));
     assert!(installer.contains("Run ChatPCB Self Test.lnk"));
-    assert!(installer.contains("Verify the ChatPCB KiCad Preview installation"));
-    assert!(installer.contains("Self-test shortcut:"));
+    assert!(installer.contains("설치 상태를 검증합니다"));
+    assert!(installer.contains("자체 검증 바로가기:"));
 }
 
 #[test]
@@ -228,7 +271,7 @@ fn installers_write_install_self_test_summary_for_first_run_confidence() {
         assert!(script.contains("--self-test-summary"));
         assert!(script.contains("ChatPCB KiCad Preview Self Test"));
         assert!(script.contains("Set-Content"));
-        assert!(script.contains("Install self-test:"));
+        assert!(script.contains("자체 검증 결과:"));
     }
 
     assert!(root_readme.contains("INSTALL-SELF-TEST.txt"));
@@ -265,7 +308,7 @@ fn installers_write_install_ready_summary_for_non_experts() {
         assert!(!script.contains("Click Open evidence after the preview is saved."));
         assert!(script.contains("INSTALL-SELF-TEST.txt"));
         assert!(script.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
-        assert!(script.contains("Install ready summary:"));
+        assert!(script.contains("시작 안내:"));
     }
 
     assert!(install_ready_template.contains("ChatPCB KiCad Preview 설치 완료"));
@@ -305,8 +348,8 @@ fn installers_add_start_here_shortcut_to_install_ready_summary() {
     for script in [source_installer, package_installer] {
         assert!(script.contains("Start Here.lnk"));
         assert!(script.contains("INSTALL-READY.txt"));
-        assert!(script.contains("Open the ChatPCB KiCad install-ready start note"));
-        assert!(script.contains("Start here shortcut:"));
+        assert!(script.contains("설치 직후 시작 안내를 엽니다"));
+        assert!(script.contains("시작 안내 바로가기:"));
     }
 
     assert!(package_script.contains("Start Here Start Menu shortcut"));
@@ -326,7 +369,7 @@ fn installers_copy_first_chat_readme_next_to_installed_app() {
 
     for script in [source_installer, package_installer] {
         assert!(script.contains("README-FIRST.txt"));
-        assert!(script.contains("First chat guide:"));
+        assert!(script.contains("첫 채팅 안내:"));
     }
 
     assert!(root_readme.contains("README-FIRST.txt"));
@@ -352,8 +395,8 @@ fn installers_add_start_menu_first_chat_guide_shortcut() {
     for script in [source_installer, package_installer] {
         assert!(script.contains("First Chat Guide.lnk"));
         assert!(script.contains("README-FIRST.txt"));
-        assert!(script.contains("Open the ChatPCB KiCad first chat guide"));
-        assert!(script.contains("First chat guide shortcut:"));
+        assert!(script.contains("첫 채팅 안내를 엽니다"));
+        assert!(script.contains("첫 채팅 안내 바로가기:"));
     }
 
     assert!(package_script.contains("First Chat Guide Start Menu shortcut"));
@@ -378,8 +421,8 @@ fn installers_add_korean_first_chat_guide_for_non_expert_users() {
     for script in [source_installer, package_installer] {
         assert!(script.contains("README-FIRST-KO.txt"));
         assert!(script.contains("First Chat Guide Korean.lnk"));
-        assert!(script.contains("Open the Korean ChatPCB KiCad first chat guide"));
-        assert!(script.contains("Korean first chat guide:"));
+        assert!(script.contains("한국어 첫 채팅 안내를 엽니다"));
+        assert!(script.contains("한국어 첫 채팅 안내:"));
     }
 
     assert!(package_script.contains("README-FIRST-KO.txt"));
