@@ -236,7 +236,7 @@ left project pane marks that previous preview workspace before another send. The
 chat transcript also
 mentions that recovered workspace, so a returning user can continue from the
 right pane without guessing what happened. The short bottom status says
-`Recovered preview: type a follow-up, Open PCB, or Review checklist.` instead
+`Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.` instead
 of filling the status line with a long local path. See `docs/user-test-guide.md`
 for the user-facing check.
 

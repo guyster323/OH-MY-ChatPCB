@@ -344,9 +344,9 @@ fn recovered_preview_pipeline_status_keeps_relaunch_next_action_visible() {
 
     assert_eq!(
         status,
-        "Recovered preview: type a follow-up, Open PCB, or Review checklist."
+        "Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."
     );
-    assert!(status.contains("type a follow-up"));
+    assert!(status.contains("이어서 입력 후 Enter"));
     assert!(status.contains("Open PCB"));
     assert!(status.contains("Review checklist"));
     assert!(status.len() <= 80);

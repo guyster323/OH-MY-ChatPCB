@@ -599,7 +599,7 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
     assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
     assert!(guide.contains("Computer Use verified the recovered preview launch status"));
-    assert!(guide.contains("`Recovered preview: type a follow-up, Open PCB, or Review checklist.`"));
+    assert!(guide.contains("`Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`"));
     assert!(guide.contains("not hidden by automatic provider detection"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
@@ -636,9 +636,7 @@ fn docs_explain_recovered_preview_keeps_immediate_chat_visible() {
         fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
     for text in [root_readme, guide, package_readme] {
-        assert!(
-            text.contains("Recovered preview: type a follow-up, Open PCB, or Review checklist.")
-        );
+        assert!(text.contains("Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."));
         assert!(text.contains("short bottom status"));
         assert!(!text.contains("Recovered preview: C:\\"));
     }

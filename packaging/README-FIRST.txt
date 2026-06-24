@@ -78,7 +78,7 @@ First chat
 31. Close and reopen the app, then click Review checklist before sending again.
 32. Confirm the left project status says "Previous preview workspace found".
 33. Confirm the chat transcript also says "Previous preview workspace found".
-34. Confirm the short bottom status says "Recovered preview: type a follow-up, Open PCB, or Review checklist."
+34. Confirm the short bottom status says "Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."
 35. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
 36. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview

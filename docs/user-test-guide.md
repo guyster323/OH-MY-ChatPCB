@@ -173,7 +173,7 @@ Expected result:
 33. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Review checklist` and `Open PCB`.
 34. Confirm the short bottom status says
-    `Recovered preview: type a follow-up, Open PCB, or Review checklist.`
+    `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`
     instead of a long local path.
 35. Confirm Windows opens the same previous preview evidence folder with the
     first-run summary selected.
@@ -229,8 +229,11 @@ Latest run after installing the current preview package was checked on
   Provider Login / Review checklist / Open PCB controls.
 - Computer Use verified the recovered preview launch status. The bottom status
   showed
-  `Recovered preview: type a follow-up, Open PCB, or Review checklist.`, not
+  `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`, not
   the long preview folder path, and it was not hidden by automatic provider detection.
+- Computer Use rechecked the installed package after the recovered-status copy
+  change and confirmed the same short Korean follow-up cue was visible in the
+  bottom status with `Chat prompt` focused.
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `Chat prompt`.
 - Computer Use verified the Provider Login status now says
