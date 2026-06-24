@@ -280,7 +280,7 @@ fn print_first_chat_smoke() {
     println!("PASS ERC/DRC validation summary written");
     println!("PASS first-run summary points back to follow-up chat");
     println!("PASS first-run summary blocks JLCPCB upload");
-    println!("Prompt: {prompt}");
+    println!("Prompt: built-in ESP32-S3 example prompt accepted");
     println!("Workspace: {}", workspace.project_dir);
     println!("Next steps: {}", workspace.beginner_next_steps_file);
     println!("KiCad check: {}", kicad_check.report_file.to_string_lossy());

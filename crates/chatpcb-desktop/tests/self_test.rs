@@ -281,6 +281,8 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(summary.contains("PASS ERC/DRC validation summary written"));
     assert!(summary.contains("PASS first-run summary points back to follow-up chat"));
     assert!(summary.contains("PASS first-run summary blocks JLCPCB upload"));
+    assert!(summary.contains("Prompt: built-in ESP32-S3 example prompt accepted"));
+    assert!(!summary.contains("Prompt: USB-C ESP32-S3"));
     assert!(summary.contains("Boundary: prototype-review, not order-ready"));
     assert!(!summary.trim_start().starts_with('{'));
 
