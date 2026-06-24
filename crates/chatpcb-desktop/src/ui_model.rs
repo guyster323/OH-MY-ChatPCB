@@ -355,14 +355,12 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
     }
 }
 
-pub fn preview_workspace_body(project_dir: &str, _release_report_file: &str) -> String {
+pub fn preview_workspace_body(_project_dir: &str, _release_report_file: &str) -> String {
     format!(
         "미리보기 저장 완료\r\n\
-         프로젝트 폴더:\r\n\
-         {project_dir}\r\n\r\n\
          다음 행동\r\n\
          - PCB 열기로 KiCad 10에서 50mm x 50mm Edge.Cuts 외곽선을 확인하세요.\r\n\
-         - 검토 목록으로 자세한 파일 목록과 beginner next steps를 확인하세요.\r\n\
+         - 검토 목록으로 저장 위치, 파일 목록, beginner next steps를 확인하세요.\r\n\
          - 채팅 입력칸에 바꿀 점을 적고 Enter로 후속 입력을 보내세요.\r\n\r\n\
          상태: prototype-review, order-ready 아님."
     )
@@ -371,15 +369,14 @@ pub fn preview_workspace_body(project_dir: &str, _release_report_file: &str) -> 
 pub fn preview_workspace_body_with_kicad_check(
     project_dir: &str,
     release_report_file: &str,
-    check_report_file: &str,
+    _check_report_file: &str,
     check_summary: &str,
 ) -> String {
     format!(
         "{}\r\n\r\n\
          KiCad CLI 확인:\r\n\
          {check_summary}\r\n\
-         보고서:\r\n\
-         {check_report_file}",
+         자세한 보고서는 검토 목록에서 확인하세요.",
         preview_workspace_body(project_dir, release_report_file)
     )
 }
@@ -389,21 +386,16 @@ pub fn preview_workspace_body_with_validation_reports(
     release_report_file: &str,
     check_report_file: &str,
     check_summary: &str,
-    erc_report_file: &str,
-    drc_report_file: &str,
-    validation_summary_file: &str,
+    _erc_report_file: &str,
+    _drc_report_file: &str,
+    _validation_summary_file: &str,
     validation_summary: &str,
 ) -> String {
     format!(
         "{}\r\n\r\n\
          KiCad ERC/DRC 검증:\r\n\
          {validation_summary}\r\n\
-         ERC 보고서:\r\n\
-         {erc_report_file}\r\n\
-         DRC 보고서:\r\n\
-         {drc_report_file}\r\n\
-         요약 파일:\r\n\
-         {validation_summary_file}",
+         자세한 ERC/DRC 보고서는 검토 목록에서 확인하세요.",
         preview_workspace_body_with_kicad_check(
             project_dir,
             release_report_file,
@@ -440,13 +432,11 @@ pub fn recovered_preview_workspace_left_status(project_dir: &str) -> String {
     format!("이전 미리보기 발견: {project_dir} | prototype-review, order-ready 아님.")
 }
 
-pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
+pub fn recovered_preview_workspace_body(_project_dir: &str) -> String {
     format!(
         "이전 미리보기 발견\r\n\
-         프로젝트 폴더:\r\n\
-         {project_dir}\r\n\r\n\
          이어가기\r\n\
-         - 검토 목록으로 저장 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
+         - 검토 목록으로 저장 위치와 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
          - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
          - 채팅 입력칸에 바꿀 점을 적고 Enter로 후속 입력을 보내세요.\r\n\r\n\
          상태: prototype-review, order-ready 아님."

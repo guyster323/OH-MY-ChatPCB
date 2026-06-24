@@ -605,10 +605,12 @@ fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
     );
 
     assert!(body.contains("KiCad CLI 확인"));
-    assert!(body.contains("kicad-pcb-check.txt"));
     assert!(body.contains("preview PCB를 열 수 있습니다"));
+    assert!(body.contains("자세한 보고서는 검토 목록"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("order-ready 아님"));
+    assert!(!body.contains("kicad-pcb-check.txt"));
+    assert!(!body.contains("C:\\Users"));
     assert!(!body.contains("KiCad accepted the preview PCB"));
     assert!(!body.contains("Gate remains"));
 }
@@ -645,14 +647,16 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
     );
 
     assert!(body.contains("KiCad ERC/DRC 검증"));
-    assert!(body.contains("erc-report.json"));
-    assert!(body.contains("drc-report.json"));
-    assert!(body.contains("kicad-validation-summary.txt"));
+    assert!(body.contains("자세한 ERC/DRC 보고서는 검토 목록"));
     assert!(body.contains("ERC: 오류 0개, 경고 0개"));
     assert!(body.contains("DRC: 오류 0개, 경고 0개"));
     assert!(body.contains("미연결 0개"));
     assert!(body.contains("prototype-review"));
     assert!(body.contains("order-ready 아님"));
+    assert!(!body.contains("erc-report.json"));
+    assert!(!body.contains("drc-report.json"));
+    assert!(!body.contains("kicad-validation-summary.txt"));
+    assert!(!body.contains("C:\\Users"));
     assert!(!body.contains("ERC: 0 errors"));
     assert!(!body.contains("DRC: 0 errors"));
     assert!(!body.contains("Gate remains"));
@@ -712,11 +716,12 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(status.contains("prototype-review"));
     assert!(status.contains("order-ready 아님"));
     assert!(body.contains("이전 미리보기 발견"));
-    assert!(body.contains("검토 목록으로 저장 파일을 확인"));
+    assert!(body.contains("검토 목록으로 저장 위치와 파일을 확인"));
     assert!(body.contains("채팅 입력칸"));
     assert!(body.contains("PCB 열기"));
     assert!(body.contains("order-ready 아님"));
     assert!(visible_lines <= 8);
+    assert!(!body.contains("C:\\Users"));
     assert!(!body.contains("예상 파일:"));
     assert!(!body.contains("release-evidence-preview.md"));
     assert!(!body.contains("FIRST-RUN-SUMMARY.txt"));

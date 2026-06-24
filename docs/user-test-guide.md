@@ -140,12 +140,13 @@ Expected result:
 20. Confirm the left project status and large left preview body now show
     `미리보기 저장 완료` and `order-ready 아님` instead of only the initial
     회로도 미리보기.
-21. Confirm the chat transcript and large left preview body mention the
-    `KiCad CLI check` and `kicad-pcb-check.txt`.
-22. Confirm the chat transcript and large left preview body mention
-    `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
-    `kicad-validation-summary.txt`.
-23. Confirm the chat transcript or large left preview body mentions
+21. Confirm the chat transcript mentions `KiCad CLI check` and
+    `kicad-pcb-check.txt`, while the large left preview body keeps KiCad details
+    behind `검토 목록`.
+22. Confirm the chat transcript mentions `KiCad ERC/DRC reports`,
+    `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`,
+    while the large left preview body keeps ERC/DRC details behind `검토 목록`.
+23. Confirm the chat transcript or `검토 목록` evidence mentions
     `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
     `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
 24. Confirm the bottom pipeline status stays short and says
@@ -285,6 +286,9 @@ Latest run after installing the current preview package was checked on
   it shows `미리보기 저장 완료`, `다음 행동`, `PCB 열기`, `검토 목록`, and
   `채팅 입력칸에 바꿀 점을 적고 Enter`, while the detailed file list stays behind
   `검토 목록`.
+- Computer Use verified the large left preview body keeps KiCad/ERC/DRC details behind `검토 목록`:
+  the visible body shows the validation summary and next action, without the
+  report path list that used to dominate the preview.
 - Computer Use also verified the empty prompt fallback. It selected the prompt,
   cleared it, pressed Enter, and the bottom pipeline status showed
   `내장 예시 사용.` before the validation status.

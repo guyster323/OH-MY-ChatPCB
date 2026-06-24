@@ -711,6 +711,9 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains(
         "Computer Use verified the fresh first-chat view keeps the native left preview concise"
     ));
+    assert!(
+        guide.contains("large left preview body keeps KiCad/ERC/DRC details behind `검토 목록`")
+    );
     assert!(guide.contains("`다음 행동`"));
     assert!(guide.contains("`채팅 입력칸에 바꿀 점을 적고 Enter`"));
     assert!(!guide.contains("Computer Use verified the fresh first-chat view lists"));
