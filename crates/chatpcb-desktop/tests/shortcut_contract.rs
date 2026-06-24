@@ -496,17 +496,20 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("KiCad ERC and DRC JSON reports on Send design"));
     assert!(script.contains("JLCPCB BOM/CPL preview blockers"));
     assert!(script.contains("Beginner next steps file for first-run users"));
-    assert!(script.contains("Actionable validation status"));
+    assert!(script.contains("Actionable validation status points to PCB 열기 and 검토 목록"));
     assert!(script.contains("Left workspace status update"));
     assert!(script.contains("Left tab status updates"));
     assert!(script.contains("Left design preview body"));
-    assert!(script.contains("Open PCB/checklist waits until a preview workspace exists"));
+    assert!(script.contains("PCB 열기/검토 목록 waits until a preview workspace exists"));
     assert!(script.contains("Installer writes INSTALL-SELF-TEST.txt"));
-    assert!(script.contains("Review checklist button"));
-    assert!(script.contains("Review checklist selects BEGINNER-NEXT-STEPS.txt"));
-    assert!(script.contains("Open PCB button"));
-    assert!(script.contains("Open PCB status distinguishes KiCad editor from file fallback"));
-    assert!(script.contains("Review checklist recovers previous preview workspace"));
+    assert!(script.contains("검토 목록 button"));
+    assert!(script.contains("검토 목록 selects BEGINNER-NEXT-STEPS.txt"));
+    assert!(script.contains("PCB 열기 button"));
+    assert!(script.contains("PCB 열기 status distinguishes KiCad editor from file fallback"));
+    assert!(script.contains("검토 목록 recovers previous preview workspace"));
+    assert!(
+        !script.contains("Actionable validation status points to Open PCB and Review checklist")
+    );
     assert!(script.contains("Recovered preview status keeps follow-up chat visible"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
     assert!(script.contains("Relaunch mentions previous preview workspace in chat"));
