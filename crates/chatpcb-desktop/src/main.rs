@@ -76,18 +76,13 @@ fn print_self_test() {
             read_only: true,
         },
         chat_actions: chat_actions_contract(),
-        left_tabs: vec![
-            "Schematic",
-            "PCB Layout",
-            "Validation",
-            "Manufacturing Preview",
-        ],
+        left_tabs: vec!["회로도", "PCB 레이아웃", "검증", "제조 미리보기"],
         right_panel: vec![
             "Provider Login",
             "Model selector",
             "Chat transcript",
-            "Chat prompt label",
-            "Chat input",
+            "채팅 입력 라벨",
+            "채팅 입력칸",
             "예시 사용",
             "설계 생성",
             "PCB 열기",
@@ -140,7 +135,7 @@ fn print_self_test_summary() {
     assert!(
         chat_actions.app_launch_has_korean_first_chat_cue
             && chatpcb_desktop::ui_model::initial_transcript()
-                .contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.")
+                .contains("바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.")
             && chatpcb_desktop::ui_model::initial_pipeline_status()
                 .contains("만들 보드 입력 후 Enter"),
         "first screen must show a Korean first-chat cue without opening external docs"
@@ -425,7 +420,7 @@ fn run_first_chat_smoke_erc_drc_reports(project_dir: &PathBuf) -> SmokeValidatio
         "ChatPCB3 KiCad ERC/DRC validation\r\n\
          Summary: {}\r\n\
          \r\n\
-         Schematic:\r\n\
+         회로도:\r\n\
          {}\r\n\
          \r\n\
          PCB:\r\n\
@@ -671,7 +666,7 @@ mod win32_app {
             parent,
             instance,
             "STATIC",
-            "Current Project: ESP32-S3 USB-C Sensor Board",
+            "현재 프로젝트: ESP32-S3 USB-C 센서 보드",
             WS_BORDER,
             0,
         );
@@ -683,10 +678,10 @@ mod win32_app {
             WS_CLIPSIBLINGS | WS_TABSTOP,
             0,
         );
-        add_tab(tabs, 0, "Schematic");
-        add_tab(tabs, 1, "PCB Layout");
-        add_tab(tabs, 2, "Validation");
-        add_tab(tabs, 3, "Manufacturing Preview");
+        add_tab(tabs, 0, "회로도");
+        add_tab(tabs, 1, "PCB 레이아웃");
+        add_tab(tabs, 2, "검증");
+        add_tab(tabs, 3, "제조 미리보기");
 
         let recovered_workspace = recover_last_preview_workspace();
         let initial_design_preview = recovered_workspace
@@ -759,14 +754,7 @@ mod win32_app {
                 | ES_READONLY as u32,
             ID_CHAT_TRANSCRIPT,
         );
-        let prompt_label = child(
-            parent,
-            instance,
-            "STATIC",
-            "Chat prompt",
-            0,
-            ID_PROMPT_LABEL,
-        );
+        let prompt_label = child(parent, instance, "STATIC", "채팅 입력", 0, ID_PROMPT_LABEL);
         let initial_prompt = chatpcb_desktop::ui_model::example_board_prompt();
         let prompt = child(
             parent,
@@ -1433,7 +1421,7 @@ mod win32_app {
             "ChatPCB3 KiCad ERC/DRC validation\r\n\
              Summary: {}\r\n\
              \r\n\
-             Schematic:\r\n\
+             회로도:\r\n\
              {}\r\n\
              \r\n\
              PCB:\r\n\

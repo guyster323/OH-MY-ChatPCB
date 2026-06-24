@@ -34,7 +34,7 @@ Expected result:
 - `INSTALL-FIRST-CHAT-SMOKE.txt` is written into the same folder with the
   installed executable's chat-to-preview smoke summary.
 - `INSTALL-READY.txt` is copied into the same folder with
-  `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.` and the
+  `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.` and the
   `prototype-review` boundary.
 - `README-FIRST.txt` is copied beside the installed app for the first chat
   steps.
@@ -72,24 +72,24 @@ Expected result:
 1. Open `ChatPCB KiCad Preview` from the desktop shortcut.
 2. Confirm the window title is `ChatPCB KiCad Preview`.
 3. Confirm the first chat transcript says
-   `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.` and the bottom status says
+   `바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.` and the bottom status says
    `준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시.`
 4. Without clicking inside the app, type a short board request and press Enter.
    Confirm the text becomes a chat turn and the preview workspace is saved.
 5. Reopen the app for the rest of the first-run checks if needed.
 6. Confirm the left side is larger than the right side.
 7. Confirm the left side shows these tabs:
-   - Schematic
-   - PCB Layout
-   - Validation
-   - Manufacturing Preview
+   - 회로도
+   - PCB 레이아웃
+   - 검증
+   - 제조 미리보기
 8. Click each left tab and confirm the left project status and the large left
    preview body change for the schematic, PCB layout, validation, and
    manufacturing preview views.
 9. Confirm the right side shows:
    - Chat transcript
-   - Chat prompt label
-   - prompt input
+   - 채팅 입력 라벨
+   - 채팅 입력칸
    - 예시 사용
    - 설계 생성
    - PCB 열기
@@ -139,7 +139,7 @@ Expected result:
     request and confirm it appears in the prompt input.
 20. Confirm the left project status and large left preview body now show
     `미리보기 저장 완료` and `order-ready 아님` instead of only the initial
-    Schematic preview.
+    회로도 미리보기.
 21. Confirm the chat transcript and large left preview body mention the
     `KiCad CLI check` and `kicad-pcb-check.txt`.
 22. Confirm the chat transcript and large left preview body mention
@@ -216,17 +216,17 @@ Latest run after installing the current preview package was checked on
   `ChatPCB KiCad Preview`.
 - Computer Use captured a screenshot of the native 70/30 workspace. The capture
   showed the left current-project preview pane, the right chat pane, the
-  `Chat prompt` label, the prompt input, `예시 사용`, `설계 생성`,
+  `채팅 입력` 라벨, the prompt input, `예시 사용`, `설계 생성`,
   `PCB 열기`, `Provider Login`, `검토 목록`, the model selector, and the
   bottom pipeline status.
 - Computer Use verified the first transcript now shows
-  `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.` and the bottom status uses
+  `바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.` and the bottom status uses
   the short first-action cue
   `준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시.` when no recovered
   action has replaced it.
 - Computer Use also captured an accessibility text tree for the same window,
-  including the Schematic / PCB Layout / Validation / Manufacturing Preview
-  tabs, `Chat prompt` label, focused `Chat prompt` edit control, and the
+  including the 회로도 / PCB 레이아웃 / 검증 / 제조 미리보기
+  tabs, `채팅 입력` 라벨, focused `채팅 입력` edit control, and the
   Provider Login / 검토 목록 / PCB 열기 controls.
 - Computer Use verified the recovered preview launch status. The bottom status
   showed
@@ -234,19 +234,19 @@ Latest run after installing the current preview package was checked on
   the long preview folder path, and it was not hidden by automatic provider detection.
 - Computer Use rechecked the installed package after the recovered-status copy
   change and confirmed the same short Korean follow-up cue was visible in the
-  bottom status with `Chat prompt` focused.
+  bottom status with `채팅 입력칸` focused.
 - Computer Use verified the selected launch prompt now starts with
   `USB-C ESP32-S3 온습도 센서 보드, I2C 센서, JLCPCB` in the native prompt input,
   keeping the manufacturing keywords while making the example Korean-first.
 - Computer Use then clicked `Provider Login` and verified that provider status
-  still appears after the explicit click, with focus returned to `Chat prompt`.
+  still appears after the explicit click, with focus returned to `채팅 입력칸`.
 - Computer Use verified the Provider Login status now says
   `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.` and that the
   Provider Login transcript explains `Provider/model 선택은 준비 상태 확인용`,
   `built-in local generator`, and `provider CLI는 호출하지 않습니다`.
 - Computer Use reinstalled the current package after the first-screen/provider copy localization
   and verified the recovered launch transcript starts with `ChatPCB KiCad Preview`,
-  `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.`, and
+  `바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.`, and
   `Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`.
 - Computer Use clicked `Provider Login` in that installed app and verified the
   bottom status still says
@@ -257,9 +257,9 @@ Latest run after installing the current preview package was checked on
 - Computer Use reinstalled the package after the Korean-first INSTALL-READY template change.
   The installed `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-READY.txt`
   now starts with `ChatPCB KiCad Preview 설치 완료` and includes
-  `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.` with the
+  `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.` with the
   `prototype-review, not order-ready` boundary.
-- Computer Use relaunched the installed app and verified `Chat prompt` was focused,
+- Computer Use relaunched the installed app and verified `채팅 입력칸` was focused,
   the recovered status still said
   `이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.`, and the native
   70/30 workspace still exposed `예시 사용`, `설계 생성`, `PCB 열기`,
@@ -271,7 +271,7 @@ Latest run after installing the current preview package was checked on
 - Computer Use typed `ESP32-S3 조도 센서 보드`, pressed Enter, and verified the
   installed app again reached
   `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
-  with focus returned to `Chat prompt`.
+  with focus returned to `채팅 입력칸`.
 - Computer Use reinstalled the current package, typed
   `ESP32-S3 가속도 센서 보드`, pressed Enter, and verified the latest visible
   chat result now ends with the Korean next-action summary:
@@ -280,7 +280,7 @@ Latest run after installing the current preview package was checked on
 - Computer Use reinstalled the current package again, typed
   `ESP32-S3 자이로 센서 보드`, pressed Enter, and verified the bottom status now
   says `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
-  with focus returned to `Chat prompt`.
+  with focus returned to `채팅 입력칸`.
 - Computer Use verified the fresh first-chat view lists
   `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
   `manufacturing-readiness-preview.txt` in the native left preview pane.
@@ -297,25 +297,25 @@ Latest run after installing the current preview package was checked on
   This is the current proof of no old `Assistant: What happened` heading.
 - Computer Use also typed `ESP32-S3 light sensor board`, waited briefly, pressed
   Enter, and verified the installed app cleared the prompt, returned focus to
-  `Chat prompt`, and kept the bottom status at
+  `채팅 입력칸`, and kept the bottom status at
   `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
 - Computer Use reinstalled the current package after the saved/recovered copy localization
   and verified the recovered launch now shows `이전 미리보기 발견` and
   `order-ready 아님`, with no old `Previous preview workspace found` heading.
 - Computer Use then sent `ESP32-S3 proximity sensor board` and verified the
   saved preview state shows `미리보기 저장 완료`, keeps `order-ready 아님`,
-  clears the prompt, returns focus to `Chat prompt`, and has no old
+  clears the prompt, returns focus to `채팅 입력칸`, and has no old
   `Preview workspace saved` heading.
   This is the current proof of no old `Preview workspace saved` heading.
 - Computer Use reinstalled and relaunched the package after the status-copy localization.
-  The installed app opened with `Chat prompt` focused, exposed `예시 사용`,
+  The installed app opened with `채팅 입력칸` focused, exposed `예시 사용`,
   `설계 생성`, `PCB 열기`, `Provider Login`, and `검토 목록`, and showed
   `이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.` for the recovered
   preview state.
 - Computer Use then typed `ESP32-S3 압력 센서 보드`, pressed Enter, and verified
   the bottom status reached
   `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
-  with focus returned to `Chat prompt`; the accessibility text had no old `Open PCB/checklist`, `Open PCB/Review checklist`, `Recovered:`, or `Ready:` status text.
+  with focus returned to `채팅 입력칸`; the accessibility text had no old `Open PCB/checklist`, `Open PCB/Review checklist`, `Recovered:`, or `Ready:` status text.
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.

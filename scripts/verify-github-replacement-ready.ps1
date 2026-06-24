@@ -88,7 +88,7 @@ try {
 
     $firstReadmeKo = Get-Content -Raw -Path $firstReadmeKoPath
     Assert-Contains $firstReadmeKo "ChatPCB KiCad Preview 빠른 시작" "README-FIRST-KO.txt must provide a Korean quick start title."
-    Assert-Contains $firstReadmeKo "Chat prompt" "README-FIRST-KO.txt must tell a first-run user where to type."
+    Assert-Contains $firstReadmeKo "채팅 입력칸" "README-FIRST-KO.txt must tell a first-run user where to type."
     Assert-Contains $firstReadmeKo "prototype-review" "README-FIRST-KO.txt must preserve the preview boundary."
     Assert-Contains $firstReadmeKo "Provider/model" "README-FIRST-KO.txt must explain selected providers are readiness-only."
     Assert-Contains $firstReadmeKo "built-in local generator" "README-FIRST-KO.txt must explain preview generation stays local."

@@ -234,7 +234,7 @@ fn installers_write_install_ready_summary_for_non_experts() {
 
     assert!(install_ready_template.contains("ChatPCB KiCad Preview 설치 완료"));
     assert!(install_ready_template.contains("바로 시작:"));
-    assert!(install_ready_template.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(install_ready_template.contains("만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."));
     assert!(install_ready_template.contains("검토 목록"));
     assert!(install_ready_template.contains("Boundary: prototype-review, not order-ready."));
     assert!(!install_ready_template.contains("Type a board idea in Chat prompt"));
@@ -244,9 +244,9 @@ fn installers_write_install_ready_summary_for_non_experts() {
     assert!(root_readme.contains("INSTALL-READY.txt"));
     assert!(guide.contains("INSTALL-READY.txt"));
     assert!(package_readme.contains("INSTALL-READY.txt"));
-    assert!(root_readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
-    assert!(guide.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
-    assert!(package_readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(root_readme.contains("만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."));
+    assert!(guide.contains("만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."));
+    assert!(package_readme.contains("만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."));
     assert!(!root_readme.contains("Type a board idea in Chat prompt, then press Enter."));
     assert!(!guide.contains("Type a board idea in Chat prompt, then press Enter."));
     assert!(!package_readme.contains("Type a board idea in Chat prompt, then press Enter."));
@@ -348,7 +348,7 @@ fn installers_add_korean_first_chat_guide_for_non_expert_users() {
     assert!(root_readme.contains("README-FIRST-KO.txt"));
     assert!(guide.contains("README-FIRST-KO.txt"));
     assert!(korean_guide.contains("ChatPCB KiCad Preview 빠른 시작"));
-    assert!(korean_guide.contains("Chat prompt"));
+    assert!(korean_guide.contains("채팅 입력칸"));
     assert!(korean_guide.contains("prototype-review"));
     assert!(korean_guide.contains("preview 생성은 built-in local generator"));
     assert!(korean_guide.contains("provider CLI는 호출하지 않습니다"));

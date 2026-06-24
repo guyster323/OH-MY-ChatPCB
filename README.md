@@ -16,11 +16,11 @@ For a non-expert first run from GitHub:
 2. Unzip it. Double-click `Install ChatPCB KiCad Preview.cmd`.
    If ChatPCB KiCad Preview is already open, close it before running the installer again.
 3. Open `ChatPCB KiCad Preview`.
-4. 만들 보드를 `Chat prompt`에 적고 Enter를 누릅니다.
+4. 만들 보드를 `채팅 입력칸`에 적고 Enter를 누릅니다.
 5. 저장되면 `검토 목록`을 눌러 확인합니다.
 
 The first chat transcript also shows
-`바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.`, and the bottom status says
+`바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.`, and the bottom status says
 `준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시.`
 
 Boundary: `prototype-review`, not order-ready. Do not upload this preview to JLCPCB.
@@ -47,8 +47,8 @@ Implemented in this first vertical slice:
   `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
 - The left project status updates after `Send design`, so the design side and
   chat side both reflect the saved preview workspace.
-- Clicking the left Schematic, PCB Layout, Validation, and Manufacturing
-  Preview tabs updates the project status with that view's current preview
+- Clicking the left `회로도`, `PCB 레이아웃`, `검증`, and `제조 미리보기`
+  tabs updates the project status with that view's current preview
   state.
 - The left design pane shows a native read-only preview body for each tab, so a
   first-run user sees schematic, layout, validation, and manufacturing context
@@ -87,7 +87,7 @@ Implemented in this first vertical slice:
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
   - left 70 percent design pane
   - right 30 percent chat pane
-  - Schematic, PCB Layout, Validation, and Manufacturing Preview tabs
+  - `회로도`, `PCB 레이아웃`, `검증`, and `제조 미리보기` tabs
   - Provider Login button and model selector
   - no `wxWebView`
 - KiCad fork drop-in source now includes a `chatpcb_native_workspace` CMake drop-in target
@@ -147,7 +147,7 @@ shortcut, adds a `First Chat Guide Korean` Start Menu shortcut for
 adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
 `INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, copies
-`INSTALL-READY.txt` with `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.`,
+`INSTALL-READY.txt` with `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.`,
 copies `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
 and starts the app.
 For this preview, Provider/model 선택은 준비 상태 확인용입니다. preview 생성은
@@ -284,7 +284,7 @@ preview workspace includes `BEGINNER-NEXT-STEPS.txt`,
 `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
 `manufacturing-readiness-preview.txt`.
 The installed folder also includes `INSTALL-READY.txt`, a Korean-first one-screen
-start summary that says `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.` and points
+start summary that says `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.` and points
 back to the install self-test and first-chat smoke files.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`

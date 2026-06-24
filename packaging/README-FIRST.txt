@@ -15,7 +15,7 @@ Install
 7. A Start Menu shortcut named "First Chat Guide" will be created.
 8. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
 9. INSTALL-FIRST-CHAT-SMOKE.txt will be written beside the installed app with the chat-to-preview smoke result.
-10. INSTALL-READY.txt will be copied beside the installed app with "만들 보드를 Chat prompt에 적고 Enter를 누릅니다."
+10. INSTALL-READY.txt will be copied beside the installed app with "만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."
 11. The app starts after installation.
 
 Self-test

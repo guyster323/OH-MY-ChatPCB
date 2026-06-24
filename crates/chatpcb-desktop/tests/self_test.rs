@@ -145,10 +145,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert_eq!(
         contract["left_tabs"].as_array().unwrap(),
         &vec![
-            Value::String("Schematic".to_string()),
-            Value::String("PCB Layout".to_string()),
-            Value::String("Validation".to_string()),
-            Value::String("Manufacturing Preview".to_string())
+            Value::String("회로도".to_string()),
+            Value::String("PCB 레이아웃".to_string()),
+            Value::String("검증".to_string()),
+            Value::String("제조 미리보기".to_string())
         ]
     );
     assert!(contract["right_panel"]
@@ -162,11 +162,11 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert!(contract["right_panel"]
         .as_array()
         .unwrap()
-        .contains(&Value::String("Chat prompt label".to_string())));
+        .contains(&Value::String("채팅 입력 라벨".to_string())));
     assert!(contract["right_panel"]
         .as_array()
         .unwrap()
-        .contains(&Value::String("Chat input".to_string())));
+        .contains(&Value::String("채팅 입력칸".to_string())));
     assert!(contract["right_panel"]
         .as_array()
         .unwrap()

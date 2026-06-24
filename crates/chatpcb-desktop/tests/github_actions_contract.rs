@@ -73,6 +73,8 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("No provider CLI is invoked for preview generation"));
     assert!(script.contains("Assert-Contains $firstReadme \"Provider/model\""));
     assert!(script.contains("Assert-Contains $firstReadme \"provider CLI\""));
+    assert!(script.contains("Assert-Contains $firstReadmeKo \"채팅 입력칸\""));
+    assert!(!script.contains("Assert-Contains $firstReadmeKo \"Chat prompt\""));
     assert!(script.contains("Assert-Contains $firstReadmeKo \"Provider/model\""));
     assert!(script.contains("Assert-Contains $firstReadmeKo \"provider CLI\""));
     assert!(!script.contains("provider CLI는 호출하지 않습니다"));

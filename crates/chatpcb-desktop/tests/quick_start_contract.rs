@@ -19,8 +19,8 @@ fn root_readme_puts_non_expert_install_and_chat_path_first() {
     assert!(readme.contains("Download `ChatPCB-KiCad-Preview-windows-x64.zip`"));
     assert!(readme.contains("Double-click `Install ChatPCB KiCad Preview.cmd`"));
     assert!(readme.contains("Open `ChatPCB KiCad Preview`"));
-    assert!(readme.contains("만들 보드를 `Chat prompt`에 적고 Enter를 누릅니다."));
-    assert!(readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(readme.contains("만들 보드를 `채팅 입력칸`에 적고 Enter를 누릅니다."));
+    assert!(readme.contains("만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."));
     assert!(!readme.contains("Type a board idea in `Chat prompt`, then press Enter."));
     assert!(!readme.contains("Type a board idea in Chat prompt, then press Enter."));
     assert!(readme.contains("저장되면 `검토 목록`을 눌러 확인합니다."));
@@ -271,7 +271,8 @@ fn prompt_input_has_accessible_label_and_empty_cue() {
     assert!(ui_model.contains("prompt_input_has_empty_cue"));
     assert!(main.contains("ID_PROMPT_LABEL"));
     assert!(main.contains("prompt_label"));
-    assert!(main.contains("\"Chat prompt\""));
+    assert!(main.contains("\"채팅 입력\""));
+    assert!(!main.contains("\"Chat prompt\""));
     assert!(main.contains("EM_SETCUEBANNER"));
     assert!(main.contains("만들 보드를 입력하고 Enter"));
     assert!(!main.contains("Type a board request"));
@@ -284,9 +285,31 @@ fn user_test_guide_checks_the_korean_first_screen_cue() {
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
     let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
 
-    assert!(guide.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
+    assert!(guide.contains("바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter."));
     assert!(guide.contains("준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시."));
-    assert!(readme.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
+    assert!(readme.contains("바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter."));
+}
+
+#[test]
+fn native_workspace_labels_are_korean_first_for_first_run_users() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let self_test =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/tests/self_test.rs"))
+            .unwrap();
+
+    assert!(main.contains("\"현재 프로젝트: ESP32-S3 USB-C 센서 보드\""));
+    assert!(main.contains("add_tab(tabs, 0, \"회로도\")"));
+    assert!(main.contains("add_tab(tabs, 1, \"PCB 레이아웃\")"));
+    assert!(main.contains("add_tab(tabs, 2, \"검증\")"));
+    assert!(main.contains("add_tab(tabs, 3, \"제조 미리보기\")"));
+    assert!(self_test.contains("Value::String(\"회로도\".to_string())"));
+    assert!(self_test.contains("Value::String(\"채팅 입력 라벨\".to_string())"));
+
+    assert!(!main.contains("\"Current Project: ESP32-S3 USB-C Sensor Board\""));
+    assert!(!main.contains("add_tab(tabs, 0, \"Schematic\")"));
+    assert!(!main.contains("add_tab(tabs, 2, \"Validation\")"));
+    assert!(!main.contains("add_tab(tabs, 3, \"Manufacturing Preview\")"));
 }
 
 #[test]
@@ -711,9 +734,9 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains(
         "Computer Use reinstalled the package after the Korean-first INSTALL-READY template change"
     ));
-    assert!(guide.contains("`만들 보드를 Chat prompt에 적고 Enter를 누릅니다.`"));
+    assert!(guide.contains("`만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.`"));
     assert!(guide.contains(
-        "Computer Use relaunched the installed app and verified `Chat prompt` was focused"
+        "Computer Use relaunched the installed app and verified `채팅 입력칸` was focused"
     ));
     assert!(guide.contains("`예시 사용`, `설계 생성`, `PCB 열기`, `Provider Login`, `검토 목록`"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));

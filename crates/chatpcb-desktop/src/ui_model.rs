@@ -92,36 +92,38 @@ pub fn chat_actions_contract() -> ChatActionsContract {
 }
 
 pub fn initial_left_workspace_status() -> &'static str {
-    "Schematic: 만들 보드를 입력한 뒤 Enter. chatpcb3-esp32s3.kicad_sch 미리보기를 생성합니다."
+    "회로도: 만들 보드를 입력한 뒤 Enter. chatpcb3-esp32s3.kicad_sch 미리보기를 생성합니다."
 }
 
 pub fn left_tab_status(index: usize) -> &'static str {
     match index {
         0 => initial_left_workspace_status(),
-        1 => "PCB Layout: chatpcb3-esp32s3.kicad_pcb 미리보기. 배치/배선은 아직 생성 전입니다.",
-        2 => "Validation: ERC/DRC 아직 실행 전. 설계 생성은 prototype-review 증거만 만듭니다.",
-        3 => "Manufacturing Preview: Gerber/BOM/CPL 아직 생성 전. JLCPCB 업로드 패키지는 계속 blocked입니다.",
+        1 => "PCB 레이아웃: chatpcb3-esp32s3.kicad_pcb 미리보기. 배치/배선은 아직 생성 전입니다.",
+        2 => "검증: ERC/DRC 아직 실행 전. 설계 생성은 prototype-review 증거만 만듭니다.",
+        3 => {
+            "제조 미리보기: Gerber/BOM/CPL 아직 생성 전. JLCPCB 업로드 패키지는 계속 blocked입니다."
+        }
         _ => initial_left_workspace_status(),
     }
 }
 
 pub fn left_tab_body(index: usize) -> &'static str {
     match index {
-        0 => "Schematic Preview\r\n\
-              - 오른쪽 Chat prompt에 만들 보드를 적고 Enter.\r\n\
+        0 => "회로도 미리보기\r\n\
+              - 오른쪽 채팅 입력칸에 만들 보드를 적고 Enter.\r\n\
               - Target: ESP32-S3 USB-C sensor board.\r\n\
               - Nets: USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, I2C_SDA.\r\n\
               - Gate: prototype-review, order-ready 아님.",
-        1 => "PCB Layout Preview\r\n\
+        1 => "PCB 레이아웃 미리보기\r\n\
               - 50mm x 50mm Edge.Cuts 보드 외곽선을 preview로 생성합니다.\r\n\
               - Component placement와 Freerouting route data는 아직 생성 전입니다.\r\n\
               - Planned flow: component placement -> DSN export -> Freerouting -> SES import.\r\n\
               - 제조 출력은 DRC 통과 후에만 신뢰할 수 있습니다.",
-        2 => "Validation Preview\r\n\
+        2 => "검증 미리보기\r\n\
               - ERC는 아직 실행 전입니다.\r\n\
               - DRC는 아직 실행 전입니다.\r\n\
               - KiCad report와 artifact가 생길 때까지 release gate는 prototype-review입니다.",
-        3 => "Manufacturing Preview\r\n\
+        3 => "제조 미리보기\r\n\
               - Gerber/Drill 파일은 아직 생성 전입니다.\r\n\
               - BOM/CPL preview 파일은 설계 생성 후 확인용으로 생성되지만 업로드 가능 상태가 아님.\r\n\
               - schematic, layout, ERC, DRC, Gerber, drill, placement-reviewed CPL 증거 전까지 JLCPCB upload는 blocked입니다.\r\n\
@@ -208,7 +210,7 @@ pub fn example_board_prompt() -> &'static str {
 
 pub fn initial_transcript() -> String {
     "ChatPCB KiCad Preview\r\n\
-     바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.\r\n\
+     바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.\r\n\
      Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.\r\n"
         .to_string()
 }
@@ -280,16 +282,16 @@ pub fn preview_workspace_left_status(project_dir: &str) -> String {
 pub fn saved_preview_tab_status(index: usize, project_dir: &str) -> String {
     match index {
         0 => format!(
-            "Schematic: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_sch를 prototype-review로 확인하세요."
+            "회로도: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_sch를 prototype-review로 확인하세요."
         ),
         1 => format!(
-            "PCB Layout: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_pcb 50mm x 50mm outline 확인."
+            "PCB 레이아웃: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_pcb 50mm x 50mm outline 확인."
         ),
         2 => format!(
-            "Validation: 저장된 미리보기 {project_dir}. KiCad ERC/DRC report를 확인하세요; gate는 prototype-review."
+            "검증: 저장된 미리보기 {project_dir}. KiCad ERC/DRC report를 확인하세요; gate는 prototype-review."
         ),
         3 => format!(
-            "Manufacturing Preview: 저장된 미리보기 {project_dir}. Gerber/BOM/CPL은 아직 order-ready 아님."
+            "제조 미리보기: 저장된 미리보기 {project_dir}. Gerber/BOM/CPL은 아직 order-ready 아님."
         ),
         _ => saved_preview_tab_status(0, project_dir),
     }
@@ -299,7 +301,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
     match index {
         0 => format!(
             "미리보기 저장 완료\r\n\
-             Schematic\r\n\
+             회로도\r\n\
              프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
              열 파일:\r\n\
@@ -310,7 +312,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              Gate: prototype-review, order-ready 아님."
         ),
         1 => format!(
-            "PCB Layout\r\n\
+            "PCB 레이아웃\r\n\
              프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
              PCB 열기:\r\n\
@@ -322,7 +324,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              Gate: prototype-review, order-ready 아님."
         ),
         2 => format!(
-            "KiCad ERC/DRC reports\r\n\
+            "KiCad ERC/DRC 검증\r\n\
              프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
              확인할 report:\r\n\
@@ -334,7 +336,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              Gate: prototype-review, order-ready 아님."
         ),
         3 => format!(
-            "Manufacturing Preview\r\n\
+            "제조 미리보기\r\n\
              프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
              JLCPCB 업로드는 아직 막힌 상태입니다. 먼저 이 preview 파일을 확인하세요:\r\n\
