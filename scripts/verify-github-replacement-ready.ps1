@@ -80,15 +80,17 @@ try {
     Assert-Contains $firstReadme "First chat" "README-FIRST.txt must explain the first chat path."
     Assert-Contains $firstReadme "INSTALL-READY.txt" "README-FIRST.txt must mention the install-ready summary."
     Assert-Contains $firstReadme "Boundary: prototype-review, not order-ready" "README-FIRST.txt must preserve the preview boundary."
-    Assert-Contains $firstReadme "provider/model selection is readiness-only" "README-FIRST.txt must explain selected providers are readiness-only."
+    Assert-Contains $firstReadme "Provider/model" "README-FIRST.txt must explain selected providers are readiness-only."
     Assert-Contains $firstReadme "built-in local generator" "README-FIRST.txt must explain preview generation stays local."
-    Assert-Contains $firstReadme "No provider CLI is invoked" "README-FIRST.txt must explain provider CLIs are not invoked for preview generation."
+    Assert-Contains $firstReadme "provider CLI" "README-FIRST.txt must explain provider CLIs are not invoked for preview generation."
 
     $firstReadmeKo = Get-Content -Raw -Path $firstReadmeKoPath
     Assert-Contains $firstReadmeKo "ChatPCB KiCad Preview 빠른 시작" "README-FIRST-KO.txt must provide a Korean quick start title."
     Assert-Contains $firstReadmeKo "Chat prompt" "README-FIRST-KO.txt must tell a first-run user where to type."
     Assert-Contains $firstReadmeKo "prototype-review" "README-FIRST-KO.txt must preserve the preview boundary."
-    Assert-Contains $firstReadmeKo "No provider CLI is invoked" "README-FIRST-KO.txt must explain provider CLIs are not invoked for preview generation."
+    Assert-Contains $firstReadmeKo "Provider/model" "README-FIRST-KO.txt must explain selected providers are readiness-only."
+    Assert-Contains $firstReadmeKo "built-in local generator" "README-FIRST-KO.txt must explain preview generation stays local."
+    Assert-Contains $firstReadmeKo "provider CLI" "README-FIRST-KO.txt must explain provider CLIs are not invoked for preview generation."
 
     $installer = Get-Content -Raw -Path $installerPath
     Assert-Contains $installer "Start Here.lnk" "Packaged installer must create the Start Here Start Menu shortcut."

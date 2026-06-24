@@ -69,7 +69,15 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("Korean first-screen chat cue"));
     assert!(script.contains("Preview generation uses the built-in local generator"));
     assert!(script.contains("No provider CLI is invoked for preview generation"));
-    assert!(script.contains("provider/model selection is readiness-only"));
+    assert!(script.contains("Assert-Contains $firstReadme \"Provider/model\""));
+    assert!(script.contains("Assert-Contains $firstReadme \"provider CLI\""));
+    assert!(script.contains("Assert-Contains $firstReadmeKo \"Provider/model\""));
+    assert!(script.contains("Assert-Contains $firstReadmeKo \"provider CLI\""));
+    assert!(!script.contains("provider CLI는 호출하지 않습니다"));
+    assert!(!script
+        .contains("Assert-Contains $firstReadme \"provider/model selection is readiness-only\""));
+    assert!(!script.contains("Assert-Contains $firstReadme \"No provider CLI is invoked\""));
+    assert!(!script.contains("Assert-Contains $firstReadmeKo \"No provider CLI is invoked\""));
     assert!(script.contains("ChatPCB KiCad Preview 빠른 시작"));
     assert!(script.contains("CheckRemoteHead"));
     assert!(script.contains("git ls-remote origin refs/heads/main"));
