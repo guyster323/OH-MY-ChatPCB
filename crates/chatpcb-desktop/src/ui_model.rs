@@ -169,8 +169,8 @@ pub fn design_pipeline_status() -> &'static str {
 }
 
 pub fn validation_pipeline_status(validation_summary: &str) -> String {
-    if validation_summary.contains("ERC: 0 errors, 0 warnings")
-        && validation_summary.contains("DRC: 0 errors, 0 warnings, 0 unconnected")
+    if validation_summary.contains("ERC: 오류 0개, 경고 0개")
+        && validation_summary.contains("DRC: 오류 0개, 경고 0개, 미연결 0개")
     {
         return "검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.".to_string();
     }
@@ -390,9 +390,9 @@ pub fn preview_workspace_body_with_kicad_check(
 ) -> String {
     format!(
         "{}\r\n\r\n\
-         KiCad CLI check:\r\n\
+         KiCad CLI 확인:\r\n\
          {check_summary}\r\n\
-         Report:\r\n\
+         보고서:\r\n\
          {check_report_file}",
         preview_workspace_body(project_dir, release_report_file)
     )
@@ -410,13 +410,13 @@ pub fn preview_workspace_body_with_validation_reports(
 ) -> String {
     format!(
         "{}\r\n\r\n\
-         KiCad ERC/DRC reports:\r\n\
+         KiCad ERC/DRC 검증:\r\n\
          {validation_summary}\r\n\
-         ERC report:\r\n\
+         ERC 보고서:\r\n\
          {erc_report_file}\r\n\
-         DRC report:\r\n\
+         DRC 보고서:\r\n\
          {drc_report_file}\r\n\
-         Summary:\r\n\
+         요약 파일:\r\n\
          {validation_summary_file}",
         preview_workspace_body_with_kicad_check(
             project_dir,
@@ -429,9 +429,9 @@ pub fn preview_workspace_body_with_validation_reports(
 
 pub fn kicad_cli_check_transcript(check_report_file: &str, check_summary: &str) -> String {
     format!(
-        "KiCad CLI check\r\n\
+        "KiCad CLI 확인\r\n\
          - {check_summary}\r\n\
-         - Report: {check_report_file}\r\n"
+         - 보고서: {check_report_file}\r\n"
     )
 }
 
@@ -442,11 +442,11 @@ pub fn erc_drc_validation_transcript(
     validation_summary: &str,
 ) -> String {
     format!(
-        "KiCad ERC/DRC reports\r\n\
+        "KiCad ERC/DRC 검증\r\n\
          - {validation_summary}\r\n\
-         - ERC report: {erc_report_file}\r\n\
-         - DRC report: {drc_report_file}\r\n\
-         - Summary: {validation_summary_file}\r\n"
+         - ERC 보고서: {erc_report_file}\r\n\
+         - DRC 보고서: {drc_report_file}\r\n\
+         - 요약 파일: {validation_summary_file}\r\n"
     )
 }
 

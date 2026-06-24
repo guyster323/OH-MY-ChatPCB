@@ -383,7 +383,7 @@ fn run_first_chat_smoke_erc_drc_reports(project_dir: &PathBuf) -> SmokeValidatio
 
     let mut command_log = String::new();
     let summary = if !schematic_file.exists() || !pcb_file.exists() {
-        "KiCad ERC/DRC were not run because the preview schematic or PCB file is missing. Gate remains prototype-review."
+        "KiCad ERC/DRC 미실행: preview schematic 또는 PCB 파일이 없습니다. gate는 prototype-review입니다."
             .to_string()
     } else if let Some(kicad_cli) = preferred_kicad_cli_path() {
         let erc_output = Command::new(&kicad_cli)
@@ -412,12 +412,12 @@ fn run_first_chat_smoke_erc_drc_reports(project_dir: &PathBuf) -> SmokeValidatio
                 chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc)
             }
             _ => {
-                "KiCad ERC/DRC reports were requested, but the JSON reports could not be parsed. Gate remains prototype-review; inspect kicad-validation-summary.txt before continuing."
+                "KiCad ERC/DRC 검증: JSON report를 읽지 못했습니다. kicad-validation-summary.txt를 확인하세요. gate는 prototype-review입니다."
                     .to_string()
             }
         }
     } else {
-        "KiCad ERC/DRC were not run because kicad-cli.exe was not found. Gate remains prototype-review; install KiCad 10 to create local ERC/DRC reports."
+        "KiCad ERC/DRC 미실행: kicad-cli.exe 없음. KiCad 10 설치 후 로컬 ERC/DRC report를 생성하세요. gate는 prototype-review입니다."
             .to_string()
     };
 
@@ -1391,7 +1391,7 @@ mod win32_app {
 
         let mut command_log = String::new();
         let summary = if !schematic_file.exists() || !pcb_file.exists() {
-            "KiCad ERC/DRC were not run because the preview schematic or PCB file is missing. Gate remains prototype-review."
+            "KiCad ERC/DRC 미실행: preview schematic 또는 PCB 파일이 없습니다. gate는 prototype-review입니다."
                 .to_string()
         } else if let Some(kicad_cli) = preferred_kicad_cli_path() {
             let erc_output = super::Command::new(&kicad_cli)
@@ -1420,12 +1420,12 @@ mod win32_app {
                     chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc)
                 }
                 _ => {
-                    "KiCad ERC/DRC reports were requested, but the JSON reports could not be parsed. Gate remains prototype-review; inspect kicad-validation-summary.txt before continuing."
+                    "KiCad ERC/DRC 검증: JSON report를 읽지 못했습니다. kicad-validation-summary.txt를 확인하세요. gate는 prototype-review입니다."
                         .to_string()
                 }
             }
         } else {
-            "KiCad ERC/DRC were not run because kicad-cli.exe was not found. Gate remains prototype-review; install KiCad 10 to create local ERC/DRC reports."
+            "KiCad ERC/DRC 미실행: kicad-cli.exe 없음. KiCad 10 설치 후 로컬 ERC/DRC report를 생성하세요. gate는 prototype-review입니다."
                 .to_string()
         };
 

@@ -122,25 +122,13 @@ fn item_description(value: serde_json::Value) -> Option<String> {
 
 pub fn summarize_erc_drc_reports(erc: &KicadReport, drc: &KicadReport) -> String {
     format!(
-        "ERC: {} {}, {} {}. DRC: {} {}, {} {}, {} unconnected. Gate remains prototype-review until schematic, layout, DRC, Gerber, BOM, and CPL evidence are reviewed.",
+        "ERC: 오류 {}개, 경고 {}개. DRC: 오류 {}개, 경고 {}개, 미연결 {}개. schematic/layout/DRC/Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
         erc.error_count,
-        plural(erc.error_count, "error", "errors"),
         erc.warning_count,
-        plural(erc.warning_count, "warning", "warnings"),
         drc.error_count,
-        plural(drc.error_count, "error", "errors"),
         drc.warning_count,
-        plural(drc.warning_count, "warning", "warnings"),
         drc.unconnected_count
     )
-}
-
-fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
-    if count == 1 {
-        one
-    } else {
-        many
-    }
 }
 
 pub fn summarize_kicad_cli_check(
@@ -156,13 +144,13 @@ pub fn summarize_kicad_cli_check(
 
     let summary = match status {
         KicadCliCheckStatus::Accepted => {
-            "KiCad accepted the preview PCB. Gate remains prototype-review until schematic, DRC, Gerber, BOM, and CPL evidence exist."
+            "KiCad 확인: preview PCB를 열 수 있습니다. schematic/DRC/Gerber/BOM/CPL 증거 전까지 gate는 prototype-review입니다."
         }
         KicadCliCheckStatus::Rejected => {
-            "KiCad rejected the preview PCB. Gate remains prototype-review; inspect kicad-pcb-check.txt before continuing."
+            "KiCad 확인 실패: preview PCB를 열 수 없습니다. kicad-pcb-check.txt를 확인하세요. gate는 prototype-review입니다."
         }
         KicadCliCheckStatus::ToolMissing => {
-            "KiCad CLI was not found. Gate remains prototype-review; install KiCad 10 to run the local compatibility check."
+            "KiCad CLI 없음: KiCad 10 설치 후 로컬 호환성 확인을 실행하세요. gate는 prototype-review입니다."
         }
     };
 

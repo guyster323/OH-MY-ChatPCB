@@ -269,10 +269,15 @@ fn validation_summarizes_erc_drc_counts_without_order_ready_claims() {
 
     let summary = chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc);
 
-    assert!(summary.contains("ERC: 0 errors, 0 warnings"));
-    assert!(summary.contains("DRC: 0 errors, 1 warning"));
-    assert!(summary.contains("0 unconnected"));
+    assert!(summary.contains("ERC: 오류 0개, 경고 0개"));
+    assert!(summary.contains("DRC: 오류 0개, 경고 1개"));
+    assert!(summary.contains("미연결 0개"));
     assert!(summary.contains("prototype-review"));
+    assert!(summary.contains("Gerber/BOM/CPL"));
+    assert!(!summary.contains("Gate remains"));
+    assert!(!summary.contains("0 errors"));
+    assert!(!summary.contains("1 warning"));
+    assert!(!summary.contains("unconnected"));
     assert!(!summary.to_ascii_lowercase().contains("order-ready"));
 }
 
@@ -285,8 +290,13 @@ fn validation_summarizes_kicad_cli_acceptance_without_order_ready_claims() {
     );
 
     assert_eq!(report.status, KicadCliCheckStatus::Accepted);
-    assert!(report.summary.contains("KiCad accepted the preview PCB"));
+    assert!(report
+        .summary
+        .contains("KiCad 확인: preview PCB를 열 수 있습니다"));
     assert!(report.summary.contains("prototype-review"));
+    assert!(report.summary.contains("Gerber/BOM/CPL"));
+    assert!(!report.summary.contains("KiCad accepted the preview PCB"));
+    assert!(!report.summary.contains("Gate remains"));
     assert!(report.stdout.contains("성공적으로 저장"));
     assert!(!report.summary.to_ascii_lowercase().contains("order-ready"));
 }
@@ -296,7 +306,10 @@ fn validation_summarizes_missing_kicad_cli_as_a_local_tool_gap() {
     let report = summarize_kicad_cli_check(None, "", "kicad-cli.exe was not found");
 
     assert_eq!(report.status, KicadCliCheckStatus::ToolMissing);
-    assert!(report.summary.contains("KiCad CLI was not found"));
+    assert!(report.summary.contains("KiCad CLI 없음"));
+    assert!(report.summary.contains("KiCad 10 설치 후"));
     assert!(report.summary.contains("prototype-review"));
+    assert!(!report.summary.contains("KiCad CLI was not found"));
+    assert!(!report.summary.contains("Gate remains"));
     assert!(!report.summary.to_ascii_lowercase().contains("order-ready"));
 }

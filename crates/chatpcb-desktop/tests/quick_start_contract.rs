@@ -407,6 +407,29 @@ fn send_design_runs_erc_drc_reports_after_writing_preview() {
 }
 
 #[test]
+fn kicad_validation_fallback_copy_is_korean_first_for_non_experts() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+
+    assert!(main.contains("KiCad ERC/DRC 미실행"));
+    assert!(main.contains("kicad-cli.exe 없음"));
+    assert!(main.contains("JSON report를 읽지 못했습니다"));
+    assert!(ui_model.contains("KiCad CLI 확인"));
+    assert!(ui_model.contains("KiCad ERC/DRC 검증"));
+
+    assert!(!main.contains("KiCad ERC/DRC were not run because"));
+    assert!(!main.contains(
+        "KiCad ERC/DRC reports were requested, but the JSON reports could not be parsed"
+    ));
+    assert!(!main.contains("Gate remains prototype-review; install KiCad 10"));
+    assert!(!ui_model.contains("KiCad CLI check:"));
+    assert!(!ui_model.contains("KiCad ERC/DRC reports:"));
+}
+
+#[test]
 fn send_design_appends_korean_result_summary_after_validation_reports() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
