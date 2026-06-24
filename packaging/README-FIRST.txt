@@ -68,7 +68,7 @@ First chat
 21. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
 22. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
 23. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
-24. Confirm the bottom status says "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
+24. Confirm the bottom status says "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review." when local ERC/DRC reports are clear.
 25. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
 26. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
 27. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.

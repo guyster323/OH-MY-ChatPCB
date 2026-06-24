@@ -215,7 +215,7 @@ upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
 folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
 those local reports are clear, the bottom pipeline status says
-`Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
+`검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
 The JLCPCB preview blocker report is saved as
 `manufacturing-readiness-preview.txt` and says not to upload this preview to
 JLCPCB.

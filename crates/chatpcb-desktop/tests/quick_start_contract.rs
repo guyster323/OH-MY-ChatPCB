@@ -635,7 +635,7 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("not hidden by automatic provider detection"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
-    assert!(guide.contains("`Used built-in example.`"));
+    assert!(guide.contains("`내장 예시 사용.`"));
     assert!(!guide.contains("captured the chat log showing"));
     assert!(!guide.contains("empty prompt fallback was not proven through Computer Use"));
     assert!(!guide.contains("No fresh Computer Use proof was captured for the empty prompt"));

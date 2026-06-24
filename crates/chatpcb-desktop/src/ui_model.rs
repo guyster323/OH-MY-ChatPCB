@@ -172,16 +172,18 @@ pub fn validation_pipeline_status(validation_summary: &str) -> String {
     if validation_summary.contains("ERC: 0 errors, 0 warnings")
         && validation_summary.contains("DRC: 0 errors, 0 warnings, 0 unconnected")
     {
-        return "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review."
-            .to_string();
+        return "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.".to_string();
     }
 
-    "Review validation: open checklist, inspect ERC/DRC reports. Still prototype-review."
-        .to_string()
+    "검증 확인 필요: checklist에서 ERC/DRC 확인. 아직 prototype-review.".to_string()
 }
 
 pub fn visible_empty_prompt_pipeline_status(status: &str) -> String {
-    format!("Used built-in example. {status}")
+    if status.contains("검증 완료") {
+        return "내장 예시 사용. 검증 완료: Open PCB/checklist. 아직 prototype-review.".to_string();
+    }
+
+    format!("내장 예시 사용. {status}")
 }
 
 pub fn open_pcb_pipeline_status(opened_with_kicad: bool) -> &'static str {

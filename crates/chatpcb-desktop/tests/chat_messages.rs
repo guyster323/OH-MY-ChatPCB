@@ -107,12 +107,13 @@ fn send_design_transcript_explains_empty_prompt_builtin_example() {
 #[test]
 fn empty_prompt_pipeline_status_keeps_builtin_example_visible_after_validation() {
     let status = visible_empty_prompt_pipeline_status(
-        "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.",
+        "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.",
     );
 
-    assert!(status.starts_with("Used built-in example."));
-    assert!(status.contains("Validated: Open PCB/checklist"));
-    assert!(status.contains("Still prototype-review"));
+    assert!(status.starts_with("내장 예시 사용."));
+    assert!(status.contains("검증 완료"));
+    assert!(status.contains("Open PCB/checklist"));
+    assert!(status.contains("아직 prototype-review"));
     assert!(status.len() <= 100);
 }
 
@@ -312,11 +313,11 @@ fn validation_pipeline_status_keeps_next_actions_visible_for_non_experts() {
 
     assert_eq!(
         status,
-        "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review."
+        "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review."
     );
     assert!(status.contains("Open PCB"));
     assert!(status.contains("checklist"));
-    assert!(status.contains("type a follow-up"));
+    assert!(status.contains("후속 입력"));
     assert!(status.contains("prototype-review"));
     assert!(
         status.len() <= 90,

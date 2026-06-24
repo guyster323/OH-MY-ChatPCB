@@ -148,7 +148,7 @@ Expected result:
     `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
     `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
 24. Confirm the bottom pipeline status stays short and says
-    `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
+    `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
     when local ERC/DRC reports are clear.
 25. Click `Open PCB`.
 26. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
@@ -245,19 +245,26 @@ Latest run after installing the current preview package was checked on
   `No provider CLI is invoked`.
 - Computer Use typed `ESP32-S3 조도 센서 보드`, pressed Enter, and verified the
   installed app again reached
-  `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
+  `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
   with focus returned to `Chat prompt`.
 - Computer Use reinstalled the current package, typed
   `ESP32-S3 가속도 센서 보드`, pressed Enter, and verified the latest visible
   chat result now ends with the Korean next-action summary:
   `결과: 미리보기 저장 완료`, `Open PCB 또는 Review checklist로 확인하세요.`,
   and `아직 JLCPCB 주문 금지: prototype-review 상태입니다.`
+- Computer Use reinstalled the current package again, typed
+  `ESP32-S3 자이로 센서 보드`, pressed Enter, and verified the bottom status now
+  says `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
+  with focus returned to `Chat prompt`.
 - Computer Use verified the fresh first-chat view lists
   `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
   `manufacturing-readiness-preview.txt` in the native left preview pane.
 - Computer Use also verified the empty prompt fallback. It selected the prompt,
   cleared it, pressed Enter, and the bottom pipeline status showed
-  `Used built-in example.` before the validation status.
+  `내장 예시 사용.` before the validation status.
+- Computer Use rechecked the empty prompt fallback after the Korean status
+  update and verified the full bottom status:
+  `내장 예시 사용. 검증 완료: Open PCB/checklist. 아직 prototype-review.`
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.

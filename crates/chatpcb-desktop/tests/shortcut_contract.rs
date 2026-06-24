@@ -397,8 +397,7 @@ fn package_script_creates_zip_with_first_run_files() {
 fn package_first_readme_matches_current_validation_status_copy() {
     let readme = fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
-    assert!(readme
-        .contains("Validated: Open PCB/checklist, or type a follow-up. Still prototype-review."));
+    assert!(readme.contains("검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review."));
     assert!(readme.contains("The example text is selected, so typing replaces it."));
     assert!(readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
