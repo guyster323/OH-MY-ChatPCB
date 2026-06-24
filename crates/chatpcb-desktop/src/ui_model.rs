@@ -255,17 +255,17 @@ pub fn append_chat_transcript(existing: &str, next_turn: &str) -> String {
     combined
 }
 
-pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file: &str) -> String {
+pub fn preview_workspace_saved_transcript(
+    _project_dir: &str,
+    _release_report_file: &str,
+) -> String {
     format!(
         "미리보기 저장 완료\r\n\
-         - 프로젝트 폴더: {project_dir}\r\n\
-         - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
-         - 다음 단계: BEGINNER-NEXT-STEPS.txt와 PCB 열기/검토 목록 확인 후 chat에서 후속 입력.\r\n\
-         - JLCPCB 확인 파일: manufacturing-readiness-preview.txt, jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv.\r\n\
-         - PCB preview: 50mm x 50mm Edge.Cuts 외곽선만 있음. 배치/배선은 아직 없음.\r\n\
-         - PCB 열기로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\
-         - Release evidence: {release_report_file}\r\n\
-         Status: prototype-review, order-ready 아님.\r\n"
+         - 검토 목록에서 저장 위치와 생성 파일을 확인하세요.\r\n\
+         - PCB preview: 50mm x 50mm Edge.Cuts 외곽선. 배치/배선은 아직 없음.\r\n\
+         - PCB 열기로 KiCad 10에서 보드 외곽선을 확인하세요.\r\n\
+         - 바꿀 점을 채팅 입력칸에 적고 Enter로 후속 입력을 보내세요.\r\n\
+         상태: prototype-review, order-ready 아님.\r\n"
     )
 }
 
@@ -399,26 +399,24 @@ pub fn preview_workspace_body_with_validation_reports(
     )
 }
 
-pub fn kicad_cli_check_transcript(check_report_file: &str, check_summary: &str) -> String {
+pub fn kicad_cli_check_transcript(_check_report_file: &str, check_summary: &str) -> String {
     format!(
         "KiCad CLI 확인\r\n\
          - {check_summary}\r\n\
-         - 보고서: {check_report_file}\r\n"
+         - 자세한 보고서는 검토 목록에서 확인하세요.\r\n"
     )
 }
 
 pub fn erc_drc_validation_transcript(
-    erc_report_file: &str,
-    drc_report_file: &str,
-    validation_summary_file: &str,
+    _erc_report_file: &str,
+    _drc_report_file: &str,
+    _validation_summary_file: &str,
     validation_summary: &str,
 ) -> String {
     format!(
         "KiCad ERC/DRC 검증\r\n\
          - {validation_summary}\r\n\
-         - ERC 보고서: {erc_report_file}\r\n\
-         - DRC 보고서: {drc_report_file}\r\n\
-         - 요약 파일: {validation_summary_file}\r\n"
+         - 자세한 ERC/DRC 보고서는 검토 목록에서 확인하세요.\r\n"
     )
 }
 
@@ -438,13 +436,13 @@ pub fn recovered_preview_workspace_body(_project_dir: &str) -> String {
     )
 }
 
-pub fn recovered_preview_workspace_transcript(project_dir: &str) -> String {
+pub fn recovered_preview_workspace_transcript(_project_dir: &str) -> String {
     format!(
         "이전 미리보기 발견\r\n\
-         - 프로젝트 폴더: {project_dir}\r\n\
-         - 검토 목록으로 저장 파일을 확인하세요.\r\n\
+         - 검토 목록으로 저장 위치와 파일을 확인하세요.\r\n\
          - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
-         Status: prototype-review, order-ready 아님.\r\n"
+         - 채팅 입력칸에 바꿀 점을 적고 Enter로 이어가세요.\r\n\
+         상태: prototype-review, order-ready 아님.\r\n"
     )
 }
 

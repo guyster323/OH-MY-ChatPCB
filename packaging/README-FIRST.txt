@@ -63,9 +63,9 @@ First chat
 16. Confirm the chat transcript says "미리보기 저장 완료".
 17. Confirm the saved preview bottom status says "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님." instead of a long local path.
 18. Confirm the large left preview body shows the next action and keeps detailed files behind 검토 목록.
-19. Confirm the chat transcript mentions "KiCad CLI check".
+19. Confirm the chat transcript says detailed KiCad CLI reports are behind 검토 목록, without showing kicad-pcb-check.txt or a local path.
 20. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
-21. Confirm the chat transcript mentions "KiCad ERC/DRC reports".
+21. Confirm the chat transcript says detailed ERC/DRC reports are behind 검토 목록, without showing erc-report.json, drc-report.json, kicad-validation-summary.txt, or a local path.
 22. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
 23. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
 24. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.

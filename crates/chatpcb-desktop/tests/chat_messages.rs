@@ -401,22 +401,28 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
     );
+    let visible_lines = transcript
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
 
     assert!(transcript.contains("미리보기 저장 완료"));
-    assert!(transcript.contains("chatpcb3-esp32s3-preview"));
-    assert!(transcript.contains("release-evidence-preview.md"));
-    assert!(transcript.contains("KiCad preview scaffold"));
+    assert!(transcript.contains("검토 목록"));
     assert!(transcript.contains("50mm x 50mm Edge.Cuts"));
     assert!(transcript.contains("PCB 열기"));
-    assert!(transcript.contains("검토 목록"));
     assert!(transcript.contains("KiCad 10"));
-    assert!(transcript.contains("chatpcb3-esp32s3.kicad_pro"));
-    assert!(transcript.contains("chatpcb3-esp32s3.kicad_sch"));
-    assert!(transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
-    assert!(transcript.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(transcript.contains("후속 입력"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("order-ready 아님"));
+    assert!(visible_lines <= 7);
+    assert!(!transcript.contains("C:\\Users"));
+    assert!(!transcript.contains("chatpcb3-esp32s3-preview"));
+    assert!(!transcript.contains("release-evidence-preview.md"));
+    assert!(!transcript.contains("KiCad preview scaffold"));
+    assert!(!transcript.contains("chatpcb3-esp32s3.kicad_pro"));
+    assert!(!transcript.contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(!transcript.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(!transcript.contains("BEGINNER-NEXT-STEPS.txt"));
     assert!(!transcript.contains("Preview workspace saved"));
     assert!(!transcript.contains("Ask a follow-up"));
 }
@@ -629,8 +635,10 @@ fn kicad_cli_check_transcript_points_to_local_report_without_order_ready_claims(
 
     assert!(transcript.contains("KiCad CLI 확인"));
     assert!(transcript.contains("preview PCB를 열 수 있습니다"));
-    assert!(transcript.contains("kicad-pcb-check.txt"));
+    assert!(transcript.contains("자세한 보고서는 검토 목록"));
     assert!(transcript.contains("prototype-review"));
+    assert!(!transcript.contains("C:\\Users"));
+    assert!(!transcript.contains("kicad-pcb-check.txt"));
     assert!(!transcript.contains("KiCad accepted the preview PCB"));
     assert!(!transcript.contains("Gate remains"));
     assert!(!transcript
@@ -677,12 +685,14 @@ fn erc_drc_validation_transcript_points_to_saved_reports_without_order_ready_cla
     );
 
     assert!(transcript.contains("KiCad ERC/DRC 검증"));
-    assert!(transcript.contains("erc-report.json"));
-    assert!(transcript.contains("drc-report.json"));
-    assert!(transcript.contains("kicad-validation-summary.txt"));
+    assert!(transcript.contains("자세한 ERC/DRC 보고서는 검토 목록"));
     assert!(transcript.contains("ERC: 오류 0개, 경고 0개"));
     assert!(transcript.contains("미연결 0개"));
     assert!(transcript.contains("prototype-review"));
+    assert!(!transcript.contains("C:\\Users"));
+    assert!(!transcript.contains("erc-report.json"));
+    assert!(!transcript.contains("drc-report.json"));
+    assert!(!transcript.contains("kicad-validation-summary.txt"));
     assert!(!transcript.contains("ERC: 0 errors"));
     assert!(!transcript.contains("Gate remains"));
     assert!(!transcript
@@ -749,9 +759,12 @@ fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
     assert!(transcript.contains("이전 미리보기 발견"));
     assert!(transcript.contains("검토 목록"));
     assert!(transcript.contains("PCB 열기"));
-    assert!(transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("order-ready 아님"));
+    assert!(!transcript.contains("C:\\Users"));
+    assert!(!transcript.contains("chatpcb3-esp32s3-preview"));
+    assert!(!transcript.contains("프로젝트 폴더:"));
+    assert!(!transcript.contains("Status:"));
     assert!(!transcript.contains("Previous preview workspace found"));
     assert!(!transcript
         .to_ascii_lowercase()

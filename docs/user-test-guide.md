@@ -142,13 +142,12 @@ Expected result:
     instead of a long local path, and confirm the large left preview body now
     shows `미리보기 저장 완료` and `order-ready 아님` instead of only the
     initial 회로도 미리보기.
-21. Confirm the chat transcript mentions `KiCad CLI check` and
-    `kicad-pcb-check.txt`, while the large left preview body keeps KiCad details
-    behind `검토 목록`.
-22. Confirm the chat transcript mentions `KiCad ERC/DRC reports`,
-    `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`,
-    while the large left preview body keeps ERC/DRC details behind `검토 목록`.
-23. Confirm the chat transcript or `검토 목록` evidence mentions
+21. Confirm the chat transcript says the detailed KiCad CLI report is behind
+    `검토 목록`, without showing `kicad-pcb-check.txt` or a local path.
+22. Confirm the chat transcript says detailed ERC/DRC reports are behind
+    `검토 목록`, without showing `erc-report.json`, `drc-report.json`,
+    `kicad-validation-summary.txt`, or a local path.
+23. Confirm `검토 목록` evidence mentions
     `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
     `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
 24. Confirm the bottom pipeline status stays short and says
@@ -235,6 +234,9 @@ Latest run after installing the current preview package was checked on
   showed
   `이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.`, not
   the long preview folder path, and it was not hidden by automatic provider detection.
+- Computer Use verified the recovered chat transcript stays path-free: it still
+  says `이전 미리보기 발견`, `검토 목록`, `PCB 열기`, and `order-ready 아님`,
+  without showing the recovered preview folder path.
 - Computer Use rechecked the installed package after the recovered-status copy
   change and confirmed the same short Korean follow-up cue was visible in the
   bottom status with `채팅 입력칸` focused.
@@ -297,6 +299,10 @@ Latest run after installing the current preview package was checked on
   `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`;
   after switching to `검증`, it showed
   `검증: 저장된 미리보기. 검토 목록에서 KiCad ERC/DRC report 확인; prototype-review.`
+- Computer Use verified the first-chat transcript stays path-free:
+  the visible result keeps `KiCad CLI 확인`, `KiCad ERC/DRC 검증`, and
+  `검토 목록` guidance, while local paths and individual report filenames stay
+  out of the chat transcript.
 - Computer Use also verified the empty prompt fallback. It selected the prompt,
   cleared it, pressed Enter, and the bottom pipeline status showed
   `내장 예시 사용.` before the validation status.
