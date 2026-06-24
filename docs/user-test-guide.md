@@ -111,8 +111,8 @@ Expected result:
    CLI install/login hint and says to click `Provider Login` again after local
    CLI login.
    If a provider is available, the model selector should move to that provider.
-   Confirm the transcript says provider/model selection is readiness-only:
-   preview generation uses the built-in local generator. No provider CLI is invoked
+   Confirm the transcript says Provider/model 선택은 준비 상태 확인용:
+   preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다
    for this preview slice.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
@@ -242,9 +242,19 @@ Latest run after installing the current preview package was checked on
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `Chat prompt`.
 - Computer Use verified the Provider Login status now says
-  `Provider detected: claude:auto; preview still local.` and that the next
-  `Send design` response says `Preview engine: built-in local generator` plus
-  `No provider CLI is invoked`.
+  `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.` and that the
+  Provider Login transcript explains `Provider/model 선택은 준비 상태 확인용`,
+  `built-in local generator`, and `provider CLI는 호출하지 않습니다`.
+- Computer Use reinstalled the current package after the first-screen/provider copy localization
+  and verified the recovered launch transcript starts with `ChatPCB KiCad Preview`,
+  `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.`, and
+  `Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`.
+- Computer Use clicked `Provider Login` in that installed app and verified the
+  bottom status still says
+  `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`. The Provider
+  Login transcript included `Provider/model 선택은 준비 상태 확인용`,
+  `built-in local generator`, and `provider CLI는 호출하지 않습니다`, while the
+  accessibility text did not include old English provider copy.
 - Computer Use typed `ESP32-S3 조도 센서 보드`, pressed Enter, and verified the
   installed app again reached
   `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`

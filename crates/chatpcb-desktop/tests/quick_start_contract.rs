@@ -114,8 +114,10 @@ fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
 
     assert!(ui_model.contains("provider_login_keeps_builtin_preview_unblocked"));
     assert!(ui_model.contains("login_hint"));
-    assert!(ui_model.contains("No local provider found; built-in preview still works."));
-    assert!(ui_model.contains("You can still press Send design"));
+    assert!(ui_model.contains("로컬 provider 없음; built-in-preview는 계속 사용 가능합니다."));
+    assert!(!ui_model.contains("No local provider found; built-in preview still works."));
+    assert!(ui_model.contains("그래도 Send design으로 ESP32-S3 preview를 만들 수 있습니다."));
+    assert!(!ui_model.contains("You can still press Send design"));
     assert!(ui_model.contains("selected_model_for_statuses"));
     assert!(main.contains("provider_login_pipeline_status(selected_provider)"));
     assert!(main.contains("handle_provider_login"));
@@ -252,7 +254,8 @@ fn prompt_input_has_accessible_label_and_empty_cue() {
     assert!(main.contains("prompt_label"));
     assert!(main.contains("\"Chat prompt\""));
     assert!(main.contains("EM_SETCUEBANNER"));
-    assert!(main.contains("Type a board request"));
+    assert!(main.contains("만들 보드를 입력하고 Enter"));
+    assert!(!main.contains("Type a board request"));
     let compact_main = main.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(compact_main.contains("MoveWindow( controls.prompt_label"));
 }
@@ -641,6 +644,14 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`order-ready 아님`"));
     assert!(guide.contains("no old `Previous preview workspace found` heading"));
     assert!(guide.contains("no old `Preview workspace saved` heading"));
+    assert!(guide.contains(
+        "Computer Use reinstalled the current package after the first-screen/provider copy localization"
+    ));
+    assert!(guide.contains(
+        "`Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`"
+    ));
+    assert!(guide.contains("`Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`"));
+    assert!(guide.contains("accessibility text did not include old English provider copy"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
     assert!(guide.contains("`내장 예시 사용.`"));

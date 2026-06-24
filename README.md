@@ -150,8 +150,8 @@ adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-READY.txt` with `Type a board idea in Chat prompt, then press Enter.`,
 copies `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
 and starts the app.
-For this preview, provider/model selection is readiness-only. Preview generation
-uses the built-in local generator. No provider CLI is invoked.
+For this preview, Provider/model 선택은 준비 상태 확인용입니다. preview 생성은
+built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 
@@ -181,8 +181,9 @@ hint for each missing provider and tells the user to click `Provider Login`
 again after completing local CLI login. The model selector also picks the first
 available local provider on launch, so a first-run user sees a realistic model
 choice before pressing anything when a CLI is available. That provider/model
-selection is readiness-only for this slice; `Send design` still uses the
-built-in local generator. No provider CLI is invoked. `Use
+selection is readiness-only for this slice; Provider/model 선택은 준비 상태 확인용이고
+`Send design`의 preview 생성은 built-in local generator를 사용하며 provider CLI는
+호출하지 않습니다. `Use
 example` refills the starter prompt after a send. Both `Provider Login` and `Use
 example` return focus to the prompt, so the next typed request or Enter key works
 without another click. On launch, the starter prompt is already selected, so

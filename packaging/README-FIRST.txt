@@ -51,7 +51,7 @@ First chat
 4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
 5. If a provider is missing, confirm the chat transcript shows a local CLI install/login hint and says to click Provider Login again after local CLI login.
 6. If no local provider is ready yet, continue anyway; the built-in preview still works.
-7. Confirm provider/model selection is readiness-only: preview generation uses the built-in local generator. No provider CLI is invoked.
+7. Confirm Provider/model 선택은 준비 상태 확인용: preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.
 8. Type immediately after Provider Login; focus returns to the prompt box.
 9. Click Use example if the prompt box is empty.
 10. The example text is selected, so typing replaces it.

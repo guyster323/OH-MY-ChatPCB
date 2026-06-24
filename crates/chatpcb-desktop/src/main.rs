@@ -912,7 +912,7 @@ mod win32_app {
     }
 
     unsafe fn set_prompt_empty_cue(prompt: HWND) {
-        let cue = wide("Type a board request, then press Enter");
+        let cue = wide("만들 보드를 입력하고 Enter");
         SendMessageW(prompt, EM_SETCUEBANNER, 0, cue.as_ptr() as isize);
     }
 

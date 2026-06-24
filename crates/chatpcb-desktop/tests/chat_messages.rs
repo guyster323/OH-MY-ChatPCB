@@ -21,17 +21,21 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
         .filter(|line| !line.trim().is_empty())
         .count();
 
-    assert!(transcript.contains("Welcome to ChatPCB KiCad Preview"));
+    assert!(transcript.contains("ChatPCB KiCad Preview"));
     assert!(transcript.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("built-in-preview"));
-    assert!(transcript.contains("optional"));
+    assert!(transcript.contains("선택 사항"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("JLCPCB"));
+    assert!(transcript.contains("order-ready 파일은 아닙니다"));
     assert!(
         non_empty_lines <= 3,
         "first-run chat should stay concise, got {non_empty_lines} lines: {transcript}"
     );
+    assert!(!transcript.contains("Welcome to ChatPCB KiCad Preview"));
+    assert!(!transcript.contains("Provider Login is optional"));
+    assert!(!transcript.contains("creates prototype-review evidence"));
     assert!(!transcript.contains("works before"));
     assert!(!transcript.contains("Saved evidence"));
     assert!(!transcript.contains("Click Open PCB"));
@@ -140,10 +144,16 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
     ]);
 
     assert!(transcript.contains("Provider Login"));
+    assert!(transcript.contains("로컬 CLI provider 상태"));
     assert!(transcript.contains("Codex: available"));
     assert!(transcript.contains("Claude Code: not found"));
-    assert!(transcript.contains("Pick an available provider"));
-    assert!(transcript.contains("not stored"));
+    assert!(transcript.contains("사용 가능한 provider를 모델 선택에서 고르세요"));
+    assert!(transcript.contains("provider CLI는 호출하지 않습니다"));
+    assert!(transcript.contains("저장하지 않습니다"));
+    assert!(!transcript.contains("Local CLI provider status"));
+    assert!(!transcript.contains("Pick an available provider"));
+    assert!(!transcript.contains("No provider CLI is invoked"));
+    assert!(!transcript.contains("Provider credentials are not stored"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));
@@ -177,16 +187,19 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
         },
     ]);
 
-    assert!(transcript.contains("No local provider is ready yet"));
-    assert!(transcript.contains("You can still press Send design"));
-    assert!(transcript.contains("Use built-in-preview now"));
-    assert!(transcript.contains("CLI login later"));
+    assert!(transcript.contains("아직 준비된 로컬 provider가 없습니다"));
+    assert!(transcript.contains("그래도 Send design으로 ESP32-S3 preview를 만들 수 있습니다"));
+    assert!(transcript.contains("built-in-preview로 계속 진행"));
+    assert!(transcript.contains("CLI login은 나중에"));
     assert!(transcript.contains("Install Codex CLI"));
     assert!(transcript.contains("Install Claude Code"));
     assert!(transcript.contains("Install Gemini CLI"));
-    assert!(transcript.contains("click Provider Login again"));
+    assert!(transcript.contains("Provider Login을 다시 누르세요"));
     assert!(!transcript.contains("Selected model:"));
     assert!(!transcript.contains("Pick an available provider"));
+    assert!(!transcript.contains("No local provider is ready yet"));
+    assert!(!transcript.contains("You can still press Send design"));
+    assert!(!transcript.contains("Use built-in-preview now"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));
@@ -224,7 +237,7 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
 
     let transcript = provider_login_transcript(&statuses);
     assert!(transcript.contains("Selected model: claude:auto"));
-    assert!(transcript.contains("readiness only"));
+    assert!(transcript.contains("준비 상태 확인용"));
     assert!(transcript.contains("built-in local generator"));
 }
 
@@ -295,11 +308,11 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
     );
     assert_eq!(
         provider_login_pipeline_status(Some("claude:auto")),
-        "Provider detected: claude:auto; preview still local."
+        "Provider 감지: claude:auto; preview 생성은 아직 로컬입니다."
     );
     assert_eq!(
         provider_login_pipeline_status(None),
-        "No local provider found; built-in preview still works."
+        "로컬 provider 없음; built-in-preview는 계속 사용 가능합니다."
     );
     assert_eq!(
         design_pipeline_status(),

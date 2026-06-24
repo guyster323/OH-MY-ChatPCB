@@ -336,7 +336,10 @@ fn installers_add_korean_first_chat_guide_for_non_expert_users() {
     assert!(korean_guide.contains("ChatPCB KiCad Preview 빠른 시작"));
     assert!(korean_guide.contains("Chat prompt"));
     assert!(korean_guide.contains("prototype-review"));
-    assert!(korean_guide.contains("No provider CLI is invoked"));
+    assert!(korean_guide.contains("preview 생성은 built-in local generator"));
+    assert!(korean_guide.contains("provider CLI는 호출하지 않습니다"));
+    assert!(!korean_guide.contains("Preview generation uses the built-in local generator"));
+    assert!(!korean_guide.contains("No provider CLI is invoked"));
 }
 
 #[test]
@@ -505,9 +508,12 @@ fn first_run_docs_explain_provider_selection_is_not_invoked_for_preview() {
         fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
     for document in [readme, guide, package_readme] {
-        assert!(document.contains("provider/model selection is readiness-only"));
+        assert!(document.contains("Provider/model 선택은 준비 상태 확인용"));
         assert!(document.contains("built-in local generator"));
-        assert!(document.contains("No provider CLI is invoked"));
+        assert!(document.contains("provider CLI는 호출하지 않습니다"));
+        assert!(!document.contains(
+            "preview generation uses the built-in local generator. No provider CLI is invoked"
+        ));
     }
 }
 

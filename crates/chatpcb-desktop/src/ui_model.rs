@@ -140,8 +140,8 @@ pub fn example_loaded_pipeline_status() -> &'static str {
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     match selected_model {
-        Some(model) => format!("Provider detected: {model}; preview still local."),
-        None => "No local provider found; built-in preview still works.".to_string(),
+        Some(model) => format!("Provider 감지: {model}; preview 생성은 아직 로컬입니다."),
+        None => "로컬 provider 없음; built-in-preview는 계속 사용 가능합니다.".to_string(),
     }
 }
 
@@ -207,9 +207,9 @@ pub fn example_board_prompt() -> &'static str {
 }
 
 pub fn initial_transcript() -> String {
-    "Welcome to ChatPCB KiCad Preview\r\n\
+    "ChatPCB KiCad Preview\r\n\
      바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.\r\n\
-     Provider Login is optional; built-in-preview creates prototype-review evidence, not JLCPCB order-ready files.\r\n"
+     Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.\r\n"
         .to_string()
 }
 
@@ -503,7 +503,7 @@ pub fn preview_workspace_failed_transcript(error: &str) -> String {
 
 pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
     let mut transcript = String::from("Provider Login\r\n");
-    transcript.push_str("Local CLI provider status:\r\n");
+    transcript.push_str("로컬 CLI provider 상태:\r\n");
 
     for status in statuses {
         if status.available {
@@ -521,25 +521,23 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
     if let Some(model) = selected_provider_model(statuses) {
         transcript.push_str(&format!("Selected model: {model}\r\n"));
         transcript.push_str(
-            "Provider/model selection is readiness only; preview generation still uses the built-in local generator. No provider CLI is invoked for this preview slice.\r\n",
+            "Provider/model 선택은 준비 상태 확인용입니다; preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.\r\n",
         );
         transcript.push_str(
-            "Pick an available provider in the model selector, then type a board idea and press Enter or click Send design.\r\n",
+            "사용 가능한 provider를 모델 선택에서 고르세요. 그런 다음 만들 보드를 입력하고 Enter 또는 Send design을 누르세요.\r\n",
         );
     } else {
-        transcript.push_str("No local provider is ready yet.\r\n");
+        transcript.push_str("아직 준비된 로컬 provider가 없습니다.\r\n");
+        transcript.push_str("그래도 Send design으로 ESP32-S3 preview를 만들 수 있습니다.\r\n");
         transcript.push_str(
-            "You can still press Send design to create the built-in ESP32-S3 preview.\r\n",
+            "CLI login은 나중에 해도 됩니다; provider-backed design은 local CLI login을 마친 뒤 Provider Login을 다시 누르세요.\r\n",
         );
         transcript.push_str(
-            "Provider-backed design will require CLI login later; complete a local CLI login, then click Provider Login again.\r\n",
-        );
-        transcript.push_str(
-            "Use built-in-preview now, then type a board idea and press Enter or click Send design.\r\n",
+            "지금은 built-in-preview로 계속 진행하고, 만들 보드를 입력한 뒤 Enter 또는 Send design을 누르세요.\r\n",
         );
     }
 
-    transcript.push_str("Provider credentials are not stored in ChatPCB3.\r\n");
+    transcript.push_str("Provider credentials는 ChatPCB3에 저장하지 않습니다.\r\n");
     transcript
 }
 
