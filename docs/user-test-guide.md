@@ -37,9 +37,9 @@ Expected result:
   `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.` and the
   `prototype-review` boundary.
 - `README-FIRST.txt` is copied beside the installed app for the first chat
-  steps.
-- `README-FIRST-KO.txt` is copied beside the installed app for the Korean first
-  chat steps.
+  steps. `README-FIRST.txt` is now Korean-first.
+- `README-FIRST-KO.txt` is copied beside the installed app as the Korean first
+  chat quick-start duplicate.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.
@@ -359,6 +359,12 @@ Latest run after installing the current preview package was checked on
   with no raw `built-in-preview` or `claude:auto` model id visible.
   Clicking `Provider Login` kept the bottom status at
   `Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`.
+- Computer Use relaunched the installed app after the Korean-first default guide update.
+  The native app still opened with `채팅 입력칸`, `Provider Login`, and the model selector visible.
+  Notepad approval timed out, so the guide content was verified from the installed file:
+  the installed `README-FIRST.txt` starts with `ChatPCB KiCad Preview 빠른 시작` and includes
+  `첫 채팅 (First chat)`, `Provider 선택은 로그인 상태 확인용`, and
+  `Boundary: prototype-review, not order-ready`.
 - Computer Use then typed `ESP32-S3 압력 센서 보드`, pressed Enter, and verified
   the bottom status reached
   `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`

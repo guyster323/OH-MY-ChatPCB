@@ -814,6 +814,15 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`Claude Code 자동` fits in the collapsed model selector"));
     assert!(guide.contains("`내장 미리보기`, `Codex 자동`, `Claude Code 자동`, and `Gemini 자동`"));
     assert!(guide.contains("no raw `built-in-preview` or `claude:auto` model id"));
+    assert!(guide.contains(
+        "Computer Use relaunched the installed app after the Korean-first default guide update"
+    ));
+    assert!(guide.contains(
+        "the installed `README-FIRST.txt` starts with `ChatPCB KiCad Preview 빠른 시작`"
+    ));
+    assert!(guide.contains(
+        "Notepad approval timed out, so the guide content was verified from the installed file"
+    ));
 }
 
 #[test]

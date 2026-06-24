@@ -24,8 +24,8 @@ The first chat transcript also shows
 `준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시.`
 
 Boundary: `prototype-review`, not order-ready. Do not upload this preview to JLCPCB.
-Korean first-run users can open `README-FIRST-KO.txt` from the unzipped package
-or installed app folder for the same first-chat path.
+`README-FIRST.txt` is Korean-first in the unzipped package and installed app
+folder. `README-FIRST-KO.txt` remains as the Korean quick-start duplicate.
 
 ## Current Status
 
@@ -144,13 +144,13 @@ If ChatPCB KiCad Preview is already open, close it before running the installer 
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
 shortcut plus Start Menu shortcuts, adds a `First Chat Guide` Start Menu
-shortcut, adds a `First Chat Guide Korean` Start Menu shortcut for
-`README-FIRST-KO.txt`, adds a `Start Here` shortcut to the install-ready note,
+shortcut for the Korean-first `README-FIRST.txt`, adds a `First Chat Guide Korean`
+Start Menu shortcut for `README-FIRST-KO.txt`, adds a `Start Here` shortcut to the install-ready note,
 adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
 `INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, copies
 `INSTALL-READY.txt` with `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.`,
-copies `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
+copies Korean-first `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
 and starts the app.
 For this preview, Provider 선택은 로그인 상태 확인용입니다. 미리보기 생성은
 앱 안의 기본 생성기를 사용하며 Codex, Claude Code, Gemini 로컬 도구를 대신

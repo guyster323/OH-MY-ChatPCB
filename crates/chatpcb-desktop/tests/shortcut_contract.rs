@@ -297,7 +297,9 @@ fn installers_copy_first_chat_readme_next_to_installed_app() {
 
     assert!(root_readme.contains("README-FIRST.txt"));
     assert!(root_readme.contains("installed app"));
+    assert!(root_readme.contains("`README-FIRST.txt` is Korean-first"));
     assert!(guide.contains("`README-FIRST.txt` is copied beside the installed app"));
+    assert!(guide.contains("`README-FIRST.txt` is now Korean-first"));
 }
 
 #[test]
@@ -349,6 +351,9 @@ fn installers_add_korean_first_chat_guide_for_non_expert_users() {
     assert!(package_script.contains("README-FIRST-KO.txt"));
     assert!(package_script.contains("Korean first chat guide for non-expert users"));
     assert!(root_readme.contains("README-FIRST-KO.txt"));
+    assert!(
+        root_readme.contains("`README-FIRST-KO.txt` remains as the Korean quick-start duplicate")
+    );
     assert!(guide.contains("README-FIRST-KO.txt"));
     assert!(korean_guide.contains("ChatPCB KiCad Preview 빠른 시작"));
     assert!(korean_guide.contains("채팅 입력칸"));
@@ -422,13 +427,20 @@ fn package_script_creates_zip_with_first_run_files() {
 fn package_first_readme_matches_current_validation_status_copy() {
     let readme = fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
+    assert!(readme.starts_with("ChatPCB KiCad Preview 빠른 시작"));
+    assert!(readme.contains("첫 채팅 (First chat)"));
+    assert!(readme.contains("설치"));
+    assert!(readme.contains("압축을 푼 폴더에서"));
+    assert!(readme.contains("만들 보드를 채팅 입력칸에 적고 Enter"));
+    assert!(!readme.contains("This is a native Windows preview of the ChatPCB KiCad app."));
+    assert!(!readme.contains("Type a PCB request immediately after the app opens."));
     assert!(readme.contains("검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review."));
     assert!(readme.contains("미리보기 저장 완료"));
     assert!(readme.contains("이전 미리보기 발견"));
     assert!(readme.contains("order-ready 아님"));
     assert!(!readme.contains("Confirm the chat transcript says \"Preview workspace saved\""));
     assert!(!readme.contains("Previous preview workspace found"));
-    assert!(readme.contains("The example text is selected, so typing replaces it."));
+    assert!(readme.contains("예시 문구가 선택되어 있으므로 바로 타이핑하면 덮어씁니다."));
     assert!(readme.contains("INSTALL-SELF-TEST.txt"));
     assert!(readme.contains("PASS app launch focuses the prompt for immediate first chat"));
     assert!(readme.contains("PASS prompt input has a visible label and empty cue"));
