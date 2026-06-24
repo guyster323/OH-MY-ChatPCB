@@ -129,7 +129,7 @@ try {
     Write-Host "한국어 첫 채팅 안내: $InstallRoot\README-FIRST-KO.txt"
 
     if ($Launch) {
-        Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot
+        Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot -ArgumentList "--fresh-start"
     }
 }
 finally {

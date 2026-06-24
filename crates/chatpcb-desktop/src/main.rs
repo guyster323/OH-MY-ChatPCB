@@ -683,7 +683,11 @@ mod win32_app {
         add_tab(tabs, 2, "검증");
         add_tab(tabs, 3, "제조 미리보기");
 
-        let recovered_workspace = recover_last_preview_workspace();
+        let recovered_workspace = if fresh_start_requested() {
+            None
+        } else {
+            recover_last_preview_workspace()
+        };
         let initial_design_preview = recovered_workspace
             .as_ref()
             .map(|path| {
@@ -1634,6 +1638,10 @@ mod win32_app {
         } else {
             None
         }
+    }
+
+    fn fresh_start_requested() -> bool {
+        std::env::args().any(|arg| arg == "--fresh-start")
     }
 
     unsafe fn handle_use_example(hwnd: HWND) {

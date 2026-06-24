@@ -666,13 +666,47 @@ fn app_launch_surfaces_recovered_preview_workspace_to_non_experts() {
     assert!(ui_model.contains("recovered_preview_workspace_left_status"));
     assert!(ui_model.contains("recovered_preview_workspace_body"));
     assert!(ui_model.contains("recovered_preview_pipeline_status"));
-    assert!(main.contains("let recovered_workspace = recover_last_preview_workspace();"));
+    assert!(main.contains("let recovered_workspace = if fresh_start_requested()"));
+    assert!(main.contains("recover_last_preview_workspace()"));
     assert!(main.contains("recovered_preview_workspace_left_status"));
     assert!(main.contains("recovered_preview_workspace_body"));
     assert!(main.contains("recovered_preview_pipeline_status"));
     assert!(main.contains("let initial_pipeline_status = if recovered_workspace.is_some()"));
     assert!(main.contains("&initial_pipeline_status"));
     assert!(main.contains("last_workspace_dir: recovered_workspace"));
+}
+
+#[test]
+fn installer_launch_starts_clean_without_disabling_normal_recovery() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    assert!(main.contains("fn fresh_start_requested() -> bool"));
+    assert!(main.contains("arg == \"--fresh-start\""));
+    assert!(main.contains("let recovered_workspace = if fresh_start_requested()"));
+    assert!(main.contains("recover_last_preview_workspace()"));
+
+    for installer in [source_installer, package_installer] {
+        assert!(installer
+            .contains("Start-Process -FilePath \"$InstallRoot\\ChatPCB KiCad Preview.exe\""));
+        assert!(installer.contains("-ArgumentList \"--fresh-start\""));
+        assert!(installer
+            .contains("$startShortcut.TargetPath = \"$InstallRoot\\ChatPCB KiCad Preview.exe\""));
+        assert!(!installer.contains("$startShortcut.Arguments = \"--fresh-start\""));
+    }
+
+    for document in [root_readme, guide, package_readme] {
+        assert!(document.contains("설치 직후 자동 실행은 깨끗한 첫 채팅 화면으로 열립니다."));
+        assert!(document.contains("기존 미리보기 파일은 삭제하지 않습니다."));
+    }
 }
 
 #[test]

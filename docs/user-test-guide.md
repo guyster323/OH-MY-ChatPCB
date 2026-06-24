@@ -11,6 +11,8 @@ For a packaged first run:
 1. Unzip `ChatPCB-KiCad-Preview-windows-x64.zip`.
 2. Double-click `Install ChatPCB KiCad Preview.cmd`.
    ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요.
+   설치 직후 자동 실행은 깨끗한 첫 채팅 화면으로 열립니다.
+   기존 미리보기 파일은 삭제하지 않습니다.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 

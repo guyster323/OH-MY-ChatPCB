@@ -7,6 +7,8 @@ ChatPCB KiCad Preview 빠른 시작
 ----
 1. 압축을 푼 폴더에서 "Install ChatPCB KiCad Preview.cmd"를 더블클릭합니다.
    ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요.
+   설치 직후 자동 실행은 깨끗한 첫 채팅 화면으로 열립니다.
+   기존 미리보기 파일은 삭제하지 않습니다.
 2. 설치가 끝나면 ChatPCB KiCad Preview가 자동으로 열립니다.
 3. 바탕화면과 시작 메뉴의 "ChatPCB KiCad Preview" 폴더에 바로가기가 만들어집니다.
 4. 시작 메뉴에는 "Start Here", "First Chat Guide", "First Chat Guide Korean",

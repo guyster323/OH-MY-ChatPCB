@@ -15,6 +15,8 @@ For a non-expert first run from GitHub:
    workflow artifact.
 2. Unzip it. Double-click `Install ChatPCB KiCad Preview.cmd`.
    ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요.
+   설치 직후 자동 실행은 깨끗한 첫 채팅 화면으로 열립니다.
+   기존 미리보기 파일은 삭제하지 않습니다.
 3. Open `ChatPCB KiCad Preview`.
 4. 만들 보드를 `채팅 입력칸`에 적고 Enter를 누릅니다.
 5. 저장되면 `검토 목록`을 눌러 확인합니다.
