@@ -113,7 +113,7 @@ pub fn left_tab_body(index: usize) -> &'static str {
               - 오른쪽 채팅 입력칸에 만들 보드를 적고 Enter.\r\n\
               - Target: ESP32-S3 USB-C sensor board.\r\n\
               - Nets: USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, I2C_SDA.\r\n\
-              - Gate: prototype-review, order-ready 아님.",
+              - 상태: prototype-review, order-ready 아님.",
         1 => "PCB 레이아웃 미리보기\r\n\
               - 50mm x 50mm Edge.Cuts 보드 외곽선을 preview로 생성합니다.\r\n\
               - Component placement와 Freerouting route data는 아직 생성 전입니다.\r\n\
@@ -122,7 +122,7 @@ pub fn left_tab_body(index: usize) -> &'static str {
         2 => "검증 미리보기\r\n\
               - ERC는 아직 실행 전입니다.\r\n\
               - DRC는 아직 실행 전입니다.\r\n\
-              - KiCad report와 artifact가 생길 때까지 release gate는 prototype-review입니다.",
+              - 검토 목록에서 KiCad report와 artifact를 확인할 때까지 prototype-review입니다.",
         3 => "제조 미리보기\r\n\
               - Gerber/Drill 파일은 아직 생성 전입니다.\r\n\
               - BOM/CPL preview 파일은 설계 생성 후 확인용으로 생성되지만 업로드 가능 상태가 아님.\r\n\
@@ -303,7 +303,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              Expected nets:\r\n\
              - USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, and I2C_SDA.\r\n\
              - 제조 출력을 믿기 전 KiCad에서 symbol과 연결을 확인하세요.\r\n\r\n\
-             Gate: prototype-review, order-ready 아님."
+             상태: prototype-review, order-ready 아님."
         ),
         1 => format!(
             "PCB 레이아웃\r\n\
@@ -315,7 +315,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              - 50mm x 50mm Edge.Cuts outline.\r\n\
              - 배치와 배선은 아직 preview 단계입니다.\r\n\
              - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
-             Gate: prototype-review, order-ready 아님."
+             상태: prototype-review, order-ready 아님."
         ),
         2 => format!(
             "KiCad ERC/DRC 검증\r\n\
@@ -327,7 +327,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              - {project_dir}\\drc-report.json\r\n\
              - {project_dir}\\kicad-validation-summary.txt\r\n\r\n\
              제조 출력을 믿기 전 validation을 검토해야 합니다.\r\n\
-             Gate: prototype-review, order-ready 아님."
+             상태: prototype-review, order-ready 아님."
         ),
         3 => format!(
             "제조 미리보기\r\n\
@@ -343,7 +343,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              - Placement-reviewed CPL/position file\r\n\
              - Release evidence report\r\n\r\n\
              실제 주문 전에는 앱이 멈추고 사용자 확인을 받아야 합니다.\r\n\
-             Gate: prototype-review, order-ready 아님."
+             상태: prototype-review, order-ready 아님."
         ),
         _ => saved_preview_tab_body(0, project_dir),
     }

@@ -108,6 +108,15 @@ fn json_rpc_autoroute_returns_freerouting_dsn_ses_contract() {
     assert_eq!(response["result"]["input_dsn"], "chatpcb3-esp32s3.dsn");
     assert_eq!(response["result"]["output_ses"], "chatpcb3-esp32s3.ses");
     assert_eq!(response["result"]["drc_required_after_import"], true);
+    let notes = response["result"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|note| note.as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(notes.contains("검토 목록"));
+    assert!(!notes.contains("release gate"));
 }
 
 #[test]

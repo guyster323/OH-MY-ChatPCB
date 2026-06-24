@@ -337,7 +337,7 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
 #[test]
 fn validation_pipeline_status_keeps_next_actions_visible_for_non_experts() {
     let status = validation_pipeline_status(
-        "ERC: 오류 0개, 경고 0개. DRC: 오류 0개, 경고 0개, 미연결 0개. schematic/layout/DRC/Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
+        "ERC: 오류 0개, 경고 0개. DRC: 오류 0개, 경고 0개, 미연결 0개. 검토 목록에서 회로, PCB, 제조 파일을 확인하세요. 아직 주문 준비 상태가 아닙니다; 상태는 prototype-review입니다.",
     );
 
     assert_eq!(
@@ -503,6 +503,7 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(schematic_lines <= 5);
     assert!(!schematic.contains("Native KiCad schematic embedding"));
     assert!(!schematic.contains("Schematic Preview"));
+    assert!(!schematic.contains("Gate:"));
 
     let pcb = left_tab_body(1);
     assert!(pcb.contains("PCB 레이아웃"));
@@ -510,12 +511,14 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(pcb.contains("Edge.Cuts"));
     assert!(pcb.contains("placement"));
     assert!(pcb.contains("Freerouting"));
+    assert!(!pcb.contains("Gate:"));
 
     let validation = left_tab_body(2);
     assert!(validation.contains("검증 미리보기"));
     assert!(validation.contains("ERC"));
     assert!(validation.contains("DRC"));
     assert!(!validation.contains("Validation Preview"));
+    assert!(!validation.contains("release gate"));
 
     let manufacturing = left_tab_body(3);
     assert!(manufacturing.contains("제조 미리보기"));
@@ -526,6 +529,7 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(manufacturing.contains("BOM/CPL preview 파일은 설계 생성 후 확인용으로 생성"));
     assert!(manufacturing.contains("업로드 가능 상태가 아님"));
     assert!(!manufacturing.contains("Gerber, Drill, BOM, and CPL files are not generated yet"));
+    assert!(!manufacturing.contains("Gate:"));
 
     assert_eq!(left_tab_body(99), left_tab_body(0));
 }
@@ -546,6 +550,7 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(schematic.contains("미리보기 저장 완료"));
     assert!(schematic.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(schematic.contains(project_dir));
+    assert!(!schematic.contains("Gate:"));
 
     let pcb = saved_preview_tab_body(1, project_dir);
     assert!(pcb.contains("PCB 레이아웃"));
@@ -553,6 +558,7 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(pcb.contains("50mm x 50mm Edge.Cuts"));
     assert!(pcb.contains("PCB 열기"));
     assert!(pcb.contains("배치와 배선은 아직 preview 단계"));
+    assert!(!pcb.contains("Gate:"));
 
     let validation = saved_preview_tab_body(2, project_dir);
     assert!(validation.contains("KiCad ERC/DRC 검증"));
@@ -561,6 +567,7 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(validation.contains("drc-report.json"));
     assert!(validation.contains("kicad-validation-summary.txt"));
     assert!(validation.contains("prototype-review"));
+    assert!(!validation.contains("Gate:"));
 
     let manufacturing = saved_preview_tab_body(3, project_dir);
     assert!(manufacturing.contains("제조 미리보기"));
@@ -571,6 +578,7 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(manufacturing.contains("manufacturing-readiness-preview.txt"));
     assert!(manufacturing.contains("prototype-review"));
     assert!(manufacturing.contains("order-ready 아님"));
+    assert!(!manufacturing.contains("Gate:"));
 
     assert_eq!(
         saved_preview_tab_body(99, project_dir),
@@ -612,7 +620,7 @@ fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
-        "KiCad 확인: preview PCB를 열 수 있습니다. Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
+        "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
     );
 
     assert!(body.contains("KiCad CLI 확인"));
@@ -630,7 +638,7 @@ fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
 fn kicad_cli_check_transcript_points_to_local_report_without_order_ready_claims() {
     let transcript = kicad_cli_check_transcript(
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
-        "KiCad 확인: preview PCB를 열 수 있습니다. Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
+        "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
     );
 
     assert!(transcript.contains("KiCad CLI 확인"));
@@ -652,11 +660,11 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
-        "KiCad 확인: preview PCB를 열 수 있습니다. Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
+        "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
-        "ERC: 오류 0개, 경고 0개. DRC: 오류 0개, 경고 0개, 미연결 0개. schematic/layout/DRC/Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
+        "ERC: 오류 0개, 경고 0개. DRC: 오류 0개, 경고 0개, 미연결 0개. 검토 목록에서 회로, PCB, 제조 파일을 확인하세요. 아직 주문 준비 상태가 아닙니다; 상태는 prototype-review입니다.",
     );
 
     assert!(body.contains("KiCad ERC/DRC 검증"));
@@ -681,7 +689,7 @@ fn erc_drc_validation_transcript_points_to_saved_reports_without_order_ready_cla
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
-        "ERC: 오류 0개, 경고 0개. DRC: 오류 0개, 경고 0개, 미연결 0개. schematic/layout/DRC/Gerber/BOM/CPL 검토 전까지 gate는 prototype-review입니다.",
+        "ERC: 오류 0개, 경고 0개. DRC: 오류 0개, 경고 0개, 미연결 0개. 검토 목록에서 회로, PCB, 제조 파일을 확인하세요. 아직 주문 준비 상태가 아닙니다; 상태는 prototype-review입니다.",
     );
 
     assert!(transcript.contains("KiCad ERC/DRC 검증"));

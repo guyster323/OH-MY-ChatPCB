@@ -273,7 +273,11 @@ fn validation_summarizes_erc_drc_counts_without_order_ready_claims() {
     assert!(summary.contains("DRC: 오류 0개, 경고 1개"));
     assert!(summary.contains("미연결 0개"));
     assert!(summary.contains("prototype-review"));
-    assert!(summary.contains("Gerber/BOM/CPL"));
+    assert!(summary.contains("검토 목록"));
+    assert!(summary.contains("주문 준비 상태가 아닙니다"));
+    assert!(!summary.contains("schematic/layout"));
+    assert!(!summary.contains("Gerber/BOM/CPL"));
+    assert!(!summary.contains("gate"));
     assert!(!summary.contains("Gate remains"));
     assert!(!summary.contains("0 errors"));
     assert!(!summary.contains("1 warning"));
@@ -294,7 +298,11 @@ fn validation_summarizes_kicad_cli_acceptance_without_order_ready_claims() {
         .summary
         .contains("KiCad 확인: preview PCB를 열 수 있습니다"));
     assert!(report.summary.contains("prototype-review"));
-    assert!(report.summary.contains("Gerber/BOM/CPL"));
+    assert!(report.summary.contains("검토 목록"));
+    assert!(report.summary.contains("주문 전 검토"));
+    assert!(!report.summary.contains("schematic/DRC"));
+    assert!(!report.summary.contains("Gerber/BOM/CPL"));
+    assert!(!report.summary.contains("gate"));
     assert!(!report.summary.contains("KiCad accepted the preview PCB"));
     assert!(!report.summary.contains("Gate remains"));
     assert!(report.stdout.contains("성공적으로 저장"));
@@ -306,9 +314,10 @@ fn validation_summarizes_missing_kicad_cli_as_a_local_tool_gap() {
     let report = summarize_kicad_cli_check(None, "", "kicad-cli.exe was not found");
 
     assert_eq!(report.status, KicadCliCheckStatus::ToolMissing);
-    assert!(report.summary.contains("KiCad CLI 없음"));
-    assert!(report.summary.contains("KiCad 10 설치 후"));
+    assert!(report.summary.contains("KiCad 10 실행 파일"));
+    assert!(report.summary.contains("설치"));
     assert!(report.summary.contains("prototype-review"));
+    assert!(!report.summary.contains("gate"));
     assert!(!report.summary.contains("KiCad CLI was not found"));
     assert!(!report.summary.contains("Gate remains"));
     assert!(!report.summary.to_ascii_lowercase().contains("order-ready"));

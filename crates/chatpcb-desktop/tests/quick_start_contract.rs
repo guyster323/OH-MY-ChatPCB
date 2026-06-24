@@ -383,7 +383,8 @@ fn preview_workspace_failure_copy_is_korean_first_in_the_native_window() {
 
     assert!(main.contains("미리보기 저장 실패"));
     assert!(main.contains("chat에서 오류를 확인하세요."));
-    assert!(main.contains("Gate: preview only."));
+    assert!(main.contains("상태: preview only"));
+    assert!(!main.contains("Gate: preview only."));
     assert!(!main.contains("Preview workspace could not be saved. Check chat for the error."));
     assert!(!main.contains(
         "Preview workspace was not saved.\\r\\nCheck the chat transcript for the error."
@@ -438,8 +439,9 @@ fn kicad_validation_fallback_copy_is_korean_first_for_non_experts() {
             .unwrap();
 
     assert!(main.contains("KiCad ERC/DRC 미실행"));
-    assert!(main.contains("kicad-cli.exe 없음"));
+    assert!(main.contains("KiCad 10 실행 파일을 찾지 못했습니다"));
     assert!(main.contains("JSON report를 읽지 못했습니다"));
+    assert!(main.contains("검토 목록의 KiCad 검증 요약"));
     assert!(ui_model.contains("KiCad CLI 확인"));
     assert!(ui_model.contains("KiCad ERC/DRC 검증"));
 
@@ -448,6 +450,9 @@ fn kicad_validation_fallback_copy_is_korean_first_for_non_experts() {
         "KiCad ERC/DRC reports were requested, but the JSON reports could not be parsed"
     ));
     assert!(!main.contains("Gate remains prototype-review; install KiCad 10"));
+    assert!(!main.contains("gate는 prototype-review"));
+    assert!(!main.contains("preview schematic"));
+    assert!(!main.contains("kicad-cli.exe 없음"));
     assert!(!ui_model.contains("KiCad CLI check:"));
     assert!(!ui_model.contains("KiCad ERC/DRC reports:"));
 }

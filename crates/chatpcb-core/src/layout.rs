@@ -19,7 +19,7 @@ pub fn freerouting_contract() -> AutorouteContract {
         drc_required_after_import: true,
         notes: vec![
             "Export KiCad PCB placement to Specctra DSN before routing.".to_string(),
-            "Import SES back into KiCad and run DRC before release gate evaluation.".to_string(),
+            "Import SES back into KiCad, run DRC, and review the result in 검토 목록.".to_string(),
         ],
     }
 }
