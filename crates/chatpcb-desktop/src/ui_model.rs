@@ -242,7 +242,7 @@ pub fn send_design_transcript(prompt: &str) -> String {
          - ESP32-S3 기본 보드 사양을 만들었습니다.\r\n\
          - JLCPCB 검토용 제작 자료 틀을 준비했습니다.\r\n\
          - 회로도, PCB, 자동 배선, KiCad 검증, 제조 검토 흐름을 준비했습니다.\r\n\
-         미리보기 생성: 내장 생성기를 사용했습니다. provider/model 선택은 준비 상태 확인용입니다. 이 미리보기에서는 provider CLI를 호출하지 않습니다.\r\n\
+         미리보기 생성: 앱 안의 기본 생성기를 사용했습니다. Provider 선택은 로그인 상태 확인용입니다. 이 미리보기에서는 Codex, Claude Code, Gemini 로컬 도구를 대신 실행하지 않습니다.\r\n\
          다음 행동\r\n\
          - PCB 열기 또는 검토 목록으로 저장된 미리보기를 확인하세요.\r\n\
          - 주문 준비 파일은 실제 KiCad fork 통합과 제조 증거 검토가 필요합니다.\r\n\
@@ -441,7 +441,7 @@ pub fn preview_workspace_failed_transcript(error: &str) -> String {
 
 pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
     let mut transcript = String::from("Provider Login\r\n");
-    transcript.push_str("로컬 CLI provider 상태:\r\n");
+    transcript.push_str("로컬 도구 로그인 상태:\r\n");
 
     for status in statuses {
         if status.available {
@@ -459,16 +459,16 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
     if let Some(model) = selected_provider_model(statuses) {
         transcript.push_str(&format!("선택된 모델: {model}\r\n"));
         transcript.push_str(
-            "Provider/model 선택은 준비 상태 확인용입니다; preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.\r\n",
+            "Provider Login은 로그인 상태 확인용입니다. 미리보기는 앱 안의 기본 생성기로 만들며 Codex, Claude Code, Gemini 로컬 도구를 대신 실행하지 않습니다.\r\n",
         );
         transcript.push_str(
-            "사용 가능한 provider를 모델 선택에서 고르세요. 그런 다음 만들 보드를 입력하고 Enter 또는 설계 생성을 누르세요.\r\n",
+            "사용 가능한 로컬 도구를 모델 선택에서 고르세요. 그런 다음 만들 보드를 입력하고 Enter 또는 설계 생성을 누르세요.\r\n",
         );
     } else {
         transcript.push_str("아직 준비된 로컬 provider가 없습니다.\r\n");
         transcript.push_str("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다.\r\n");
         transcript.push_str(
-            "CLI login은 나중에 해도 됩니다; provider-backed design은 local CLI login을 마친 뒤 Provider Login을 다시 누르세요.\r\n",
+            "로컬 도구 로그인은 나중에 해도 됩니다. 로그인을 마친 뒤 Provider Login을 다시 누르세요.\r\n",
         );
         transcript.push_str(
             "지금은 내장 미리보기로 계속 진행하고, 만들 보드를 입력한 뒤 Enter 또는 설계 생성을 누르세요.\r\n",

@@ -140,67 +140,66 @@ pub fn create_preview_workspace(
 
 fn first_run_summary(prompt: &str) -> String {
     format!(
-        "ChatPCB3 First Run Summary\r\n\
-         ==========================\r\n\
+        "ChatPCB3 처음 확인할 내용\r\n\
+         =========================\r\n\
          \r\n\
-         Start here after your first Send design click.\r\n\
+         첫 요청:\r\n\
+         {prompt}\r\n\
          \r\n\
-         What was created:\r\n\
-         - A native ChatPCB3 preview workspace for: {prompt}\r\n\
-         - A KiCad project shell with schematic and PCB preview files.\r\n\
-         - A 50mm x 50mm PCB outline for visual inspection.\r\n\
-         - JLCPCB BOM/CPL preview files for review, not upload.\r\n\
+         무엇이 만들어졌나요:\r\n\
+         - ChatPCB3 미리보기 작업공간이 저장됐습니다.\r\n\
+         - KiCad에서 열 수 있는 회로/PCB 미리보기 파일과 50mm x 50mm 보드 외곽선이 있습니다.\r\n\
+         - JLCPCB 검토용 BOM/CPL 미리보기 파일이 있지만 업로드용은 아닙니다.\r\n\
          \r\n\
-         What to click next in the app:\r\n\
-         - BEGINNER-NEXT-STEPS.txt: read the short checklist if you are not sure what happened.\r\n\
-         - Open PCB: inspect the generated board outline in KiCad.\r\n\
-         - Review checklist: return to this folder and review saved reports.\r\n\
-         - Or return to the focused prompt, type a follow-up, and press Enter.\r\n\
+         다음에 누를 것:\r\n\
+         - PCB 열기: KiCad에서 보드 외곽선을 확인합니다.\r\n\
+         - 검토 목록: 처음 확인할 내용과 저장된 검토 파일을 봅니다.\r\n\
+         - 채팅 입력칸: 바꿀 점을 적고 Enter로 후속 입력을 보냅니다.\r\n\
          \r\n\
-         Current gate:\r\n\
+         현재 단계:\r\n\
          - prototype-review\r\n\
-         - not order-ready\r\n\
+         - 주문 준비 전\r\n\
          \r\n\
-         Why it is not order-ready yet:\r\n\
-         - Component placement and routing are not generated yet.\r\n\
-         - Gerber and drill files are not generated yet.\r\n\
-         - BOM/CPL preview files are not placement-reviewed upload files yet.\r\n\
-         - A human must review real manufacturing evidence before ordering.\r\n\
-         - Do not upload this preview to JLCPCB.\r\n",
+         아직 주문 준비 전인 이유:\r\n\
+         - 부품 배치와 배선이 아직 생성되지 않았습니다.\r\n\
+         - Gerber/Drill 파일이 아직 없습니다.\r\n\
+         - BOM/CPL은 사람 검토 전 미리보기입니다.\r\n\
+         - 실제 주문 전에는 제조 증거를 사람이 검토해야 합니다.\r\n\
+         - 이 미리보기는 JLCPCB에 업로드하지 마세요.\r\n",
         prompt = prompt.trim()
     )
 }
 
 fn beginner_next_steps(prompt: &str) -> String {
     format!(
-        "ChatPCB3 Beginner Next Steps\r\n\
-         ============================\r\n\
+        "ChatPCB3 첫 검토 목록\r\n\
+         =====================\r\n\
          \r\n\
-         Your first request:\r\n\
+         첫 요청:\r\n\
          {prompt}\r\n\
          \r\n\
-         First thing to do:\r\n\
-         1. Click Open PCB in ChatPCB KiCad Preview.\r\n\
-         2. Confirm KiCad opens the 50mm x 50mm board outline.\r\n\
-         3. Click Review checklist and keep this folder open while you review.\r\n\
+         먼저 할 일:\r\n\
+         1. ChatPCB KiCad Preview에서 PCB 열기를 누릅니다.\r\n\
+         2. KiCad에서 50mm x 50mm 보드 외곽선이 보이는지 확인합니다.\r\n\
+         3. 검토 목록을 열고 이 폴더를 유지하면서 아래 파일들을 확인합니다.\r\n\
          \r\n\
-         What the files mean:\r\n\
-         - chatpcb3-esp32s3.kicad_sch is the schematic preview scaffold.\r\n\
-         - chatpcb3-esp32s3.kicad_pcb is the PCB outline preview.\r\n\
-         - kicad-validation-summary.txt is the local ERC/DRC summary when KiCad CLI is available.\r\n\
-         - jlcpcb-bom-preview.csv is a BOM preview with LCSC/JLCPCB part evidence.\r\n\
-         - jlcpcb-cpl-preview.csv is a CPL preview with placeholder UNPLACED coordinates.\r\n\
-         - manufacturing-readiness-preview.txt explains why upload is blocked.\r\n\
-         - FIRST-RUN-SUMMARY.txt explains the prototype-review boundary.\r\n\
+         파일을 이렇게 보면 됩니다:\r\n\
+         - chatpcb3-esp32s3.kicad_sch: 회로도 미리보기 틀입니다.\r\n\
+         - chatpcb3-esp32s3.kicad_pcb: PCB 보드 외곽선 미리보기입니다.\r\n\
+         - kicad-validation-summary.txt: KiCad CLI가 있으면 저장되는 ERC/DRC 요약입니다.\r\n\
+         - jlcpcb-bom-preview.csv: LCSC/JLCPCB 부품 근거가 들어간 BOM 미리보기입니다.\r\n\
+         - jlcpcb-cpl-preview.csv: 좌표가 아직 UNPLACED인 CPL 미리보기입니다.\r\n\
+         - manufacturing-readiness-preview.txt: 왜 업로드가 막혀 있는지 설명합니다.\r\n\
+         - FIRST-RUN-SUMMARY.txt: prototype-review 경계를 짧게 정리합니다.\r\n\
          \r\n\
-         Ask a follow-up in chat:\r\n\
-         - Ask for the missing sensor, connector, board size, or power change next.\r\n\
-         - Keep using chat until the app can generate real placement, routing, and manufacturing files.\r\n\
+         후속 채팅으로 이어가기:\r\n\
+         - 센서, 커넥터, 보드 크기, 전원 조건을 바꾸고 싶으면 채팅 입력칸에 적습니다.\r\n\
+         - 실제 배치, 배선, 제조 파일 생성이 가능해질 때까지 채팅으로 검토를 이어갑니다.\r\n\
          \r\n\
-         Do not order yet:\r\n\
-         - Gerber files are not generated yet.\r\n\
-         - BOM preview and CPL preview files are for review only, not JLCPCB upload.\r\n\
-         - Human review is still required before JLCPCB upload.\r\n",
+         아직 주문하지 마세요:\r\n\
+         - Gerber 파일이 아직 생성되지 않았습니다.\r\n\
+         - BOM 미리보기와 CPL 미리보기는 검토용이며 JLCPCB 업로드용이 아닙니다.\r\n\
+         - JLCPCB 업로드 전에는 사람이 제조 자료를 다시 확인해야 합니다.\r\n",
         prompt = prompt.trim()
     )
 }

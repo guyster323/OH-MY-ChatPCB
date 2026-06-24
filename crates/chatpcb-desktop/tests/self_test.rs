@@ -307,12 +307,20 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(validation_summary.contains("ChatPCB3 KiCad ERC/DRC validation"));
     assert!(validation_summary.contains("Boundary:"));
     let first_run_summary = fs::read_to_string(workspace.join("FIRST-RUN-SUMMARY.txt")).unwrap();
-    assert!(first_run_summary.contains("type a follow-up"));
-    assert!(first_run_summary.contains("Do not upload this preview to JLCPCB"));
+    assert!(first_run_summary.contains("후속 입력"));
+    assert!(first_run_summary.contains("JLCPCB에 업로드하지 마세요"));
+    assert!(!first_run_summary.contains("type a follow-up"));
+    assert!(!first_run_summary.contains("Do not upload this preview to JLCPCB"));
     let next_steps = fs::read_to_string(workspace.join("BEGINNER-NEXT-STEPS.txt")).unwrap();
-    assert!(next_steps.contains("First thing to do"));
-    assert!(next_steps.contains("Ask a follow-up in chat"));
-    assert!(next_steps.contains("Do not order yet"));
+    assert!(next_steps.contains("ChatPCB3 첫 검토 목록"));
+    assert!(next_steps.contains("먼저 할 일"));
+    assert!(next_steps.contains("PCB 열기"));
+    assert!(next_steps.contains("후속 채팅"));
+    assert!(next_steps.contains("아직 주문하지 마세요"));
+    assert!(!next_steps.contains("First thing to do"));
+    assert!(!next_steps.contains("Open PCB"));
+    assert!(!next_steps.contains("Ask a follow-up in chat"));
+    assert!(!next_steps.contains("Do not order yet"));
     let manufacturing_readiness =
         fs::read_to_string(workspace.join("manufacturing-readiness-preview.txt")).unwrap();
     assert!(manufacturing_readiness.contains("Do not upload this preview to JLCPCB"));

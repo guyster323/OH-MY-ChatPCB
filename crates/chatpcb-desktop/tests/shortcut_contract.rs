@@ -238,7 +238,8 @@ fn installers_write_install_ready_summary_for_non_experts() {
     assert!(install_ready_template.contains("바로 시작:"));
     assert!(install_ready_template.contains("만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다."));
     assert!(install_ready_template.contains("검토 목록"));
-    assert!(install_ready_template.contains("Boundary: prototype-review, not order-ready."));
+    assert!(install_ready_template.contains("현재 단계: prototype-review, 주문 준비 전."));
+    assert!(!install_ready_template.contains("Boundary: prototype-review, not order-ready."));
     assert!(!install_ready_template.contains("Type a board idea in Chat prompt"));
 
     assert!(package_script.contains("packaging\\INSTALL-READY.txt"));
@@ -352,8 +353,13 @@ fn installers_add_korean_first_chat_guide_for_non_expert_users() {
     assert!(korean_guide.contains("ChatPCB KiCad Preview 빠른 시작"));
     assert!(korean_guide.contains("채팅 입력칸"));
     assert!(korean_guide.contains("prototype-review"));
-    assert!(korean_guide.contains("preview 생성은 built-in local generator"));
-    assert!(korean_guide.contains("provider CLI는 호출하지 않습니다"));
+    assert!(korean_guide.contains("Provider Login은 선택 사항입니다"));
+    assert!(korean_guide.contains("앱 안의 기본 생성기로 미리보기를 만듭니다"));
+    assert!(korean_guide.contains("Codex, Claude Code, Gemini 로컬 도구를 대신 실행하지 않습니다"));
+    assert!(!korean_guide.contains("Provider/model"));
+    assert!(!korean_guide.contains("preview 생성"));
+    assert!(!korean_guide.contains("built-in local generator"));
+    assert!(!korean_guide.contains("provider CLI"));
     assert!(!korean_guide.contains("Preview generation uses the built-in local generator"));
     assert!(!korean_guide.contains("No provider CLI is invoked"));
 }
@@ -545,9 +551,12 @@ fn first_run_docs_explain_provider_selection_is_not_invoked_for_preview() {
         fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
     for document in [readme, guide, package_readme] {
-        assert!(document.contains("Provider/model 선택은 준비 상태 확인용"));
-        assert!(document.contains("built-in local generator"));
-        assert!(document.contains("provider CLI는 호출하지 않습니다"));
+        assert!(document.contains("Provider 선택은 로그인 상태 확인용"));
+        assert!(document.contains("앱 안의 기본 생성기"));
+        assert!(document.contains("로컬 도구를 대신 실행하지 않습니다"));
+        assert!(!document.contains("Provider/model 선택은 준비 상태 확인용"));
+        assert!(!document.contains("built-in local generator"));
+        assert!(!document.contains("provider CLI는 호출하지 않습니다"));
         assert!(!document.contains(
             "preview generation uses the built-in local generator. No provider CLI is invoked"
         ));

@@ -111,8 +111,9 @@ Expected result:
    CLI install/login hint and says to click `Provider Login` again after local
    CLI login.
    If a provider is available, the model selector should move to that provider.
-   Confirm the transcript says Provider/model 선택은 준비 상태 확인용:
-   preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다
+   Confirm the transcript says Provider 선택은 로그인 상태 확인용:
+   미리보기 생성은 앱 안의 기본 생성기를 사용하며 Codex, Claude Code, Gemini
+   로컬 도구를 대신 실행하지 않습니다
    for this preview slice.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
@@ -167,8 +168,8 @@ Expected result:
     Confirm it says to click PCB 열기, click 검토 목록, ask a follow-up in
     chat, and not order yet.
 30. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and
-    confirm the summary says to return to the focused prompt, type a follow-up,
-    and not upload this preview to JLCPCB.
+    confirm the summary says to use the prompt for 후속 입력 and says
+    `JLCPCB에 업로드하지 마세요`.
 31. Close and reopen `ChatPCB KiCad Preview`, then click `검토 목록` before
     sending another prompt.
 32. Confirm the left project status says `이전 미리보기 발견`
@@ -246,9 +247,9 @@ Latest run after installing the current preview package was checked on
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `채팅 입력칸`.
 - Computer Use verified the Provider Login status now says
-  `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.` and that the
-  Provider Login transcript explains `Provider/model 선택은 준비 상태 확인용`,
-  `built-in local generator`, and `provider CLI는 호출하지 않습니다`.
+  `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`. The current
+  provider-copy contract says `Provider 선택은 로그인 상태 확인용`,
+  `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`.
 - Computer Use reinstalled the current package after the first-screen/provider copy localization
   and verified the recovered launch transcript starts with `ChatPCB KiCad Preview`,
   `바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.`, and
@@ -256,14 +257,27 @@ Latest run after installing the current preview package was checked on
 - Computer Use clicked `Provider Login` in that installed app and verified the
   bottom status still says
   `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`. The Provider
-  Login transcript included `Provider/model 선택은 준비 상태 확인용`,
-  `built-in local generator`, and `provider CLI는 호출하지 않습니다`, while the
+  Login transcript now uses `Provider 선택은 로그인 상태 확인용`,
+  `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`, while the
   accessibility text did not include old English provider copy.
 - Computer Use reinstalled the package after the Korean-first INSTALL-READY template change.
   The installed `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-READY.txt`
   now starts with `ChatPCB KiCad Preview 설치 완료` and includes
   `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.` with the
-  `prototype-review, not order-ready` boundary.
+  `현재 단계: prototype-review, 주문 준비 전.` boundary.
+- Computer Use reinstalled the package after the Korean saved-review checklist
+  and provider-copy update. It clicked `Provider Login` in the installed app
+  and verified the visible transcript says `Provider Login은 로그인 상태 확인용입니다`,
+  `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`, with no old
+  English generator/provider-CLI wording or old Provider/model readiness phrase
+  visible.
+- Computer Use then clicked `설계 생성` in the installed app and verified the
+  saved-preview state reached
+  `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.` with
+  no old provider-copy phrases in the visible text.
+- The generated installed preview files now start with `ChatPCB3 첫 검토 목록`
+  and `ChatPCB3 처음 확인할 내용`, and include `후속 채팅`,
+  `아직 주문하지 마세요`, and `JLCPCB에 업로드하지 마세요`.
 - Computer Use relaunched the installed app and verified `채팅 입력칸` was focused,
   the recovered status still said
   `이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.`, and the native

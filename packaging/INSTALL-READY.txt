@@ -10,5 +10,5 @@ ChatPCB KiCad Preview 설치 완료
 - INSTALL-SELF-TEST.txt
 - INSTALL-FIRST-CHAT-SMOKE.txt
 
-Boundary: prototype-review, not order-ready.
+현재 단계: prototype-review, 주문 준비 전.
 JLCPCB 업로드/주문용 파일이 아닙니다.

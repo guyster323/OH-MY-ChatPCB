@@ -235,17 +235,17 @@ fn print_first_chat_smoke() {
         "first chat smoke test must write KiCad preview scaffold files"
     );
     assert!(
-        first_run_summary.contains("type a follow-up"),
+        first_run_summary.contains("후속 입력"),
         "first chat smoke test summary must point users back to follow-up chat"
     );
     assert!(
-        first_run_summary.contains("Do not upload this preview to JLCPCB"),
+        first_run_summary.contains("JLCPCB에 업로드하지 마세요"),
         "first chat smoke test summary must block JLCPCB upload"
     );
     assert!(
-        beginner_next_steps.contains("First thing to do")
-            && beginner_next_steps.contains("Ask a follow-up in chat")
-            && beginner_next_steps.contains("Do not order yet"),
+        beginner_next_steps.contains("먼저 할 일")
+            && beginner_next_steps.contains("후속 채팅")
+            && beginner_next_steps.contains("아직 주문하지 마세요"),
         "first chat smoke test must write beginner next-step guidance"
     );
     assert!(
@@ -495,8 +495,8 @@ fn first_run_evidence_summary_contract() -> std::io::Result<EvidenceSummaryContr
     fs::remove_dir_all(&root)?;
 
     Ok(EvidenceSummaryContract {
-        points_back_to_follow_up_chat: summary.contains("type a follow-up"),
-        blocks_jlcpcb_upload: summary.contains("Do not upload this preview to JLCPCB"),
+        points_back_to_follow_up_chat: summary.contains("후속 입력"),
+        blocks_jlcpcb_upload: summary.contains("JLCPCB에 업로드하지 마세요"),
     })
 }
 

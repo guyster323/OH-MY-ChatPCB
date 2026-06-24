@@ -71,12 +71,16 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("Korean first-screen chat cue"));
     assert!(script.contains("Preview generation uses the built-in local generator"));
     assert!(script.contains("No provider CLI is invoked for preview generation"));
-    assert!(script.contains("Assert-Contains $firstReadme \"Provider/model\""));
-    assert!(script.contains("Assert-Contains $firstReadme \"provider CLI\""));
+    assert!(script.contains("Assert-Contains $firstReadme \"Provider 선택은 로그인 상태 확인용\""));
+    assert!(script.contains("Assert-Contains $firstReadme \"앱 안의 기본 생성기\""));
+    assert!(script.contains("Assert-Contains $firstReadme \"로컬 도구를 대신 실행하지 않습니다\""));
     assert!(script.contains("Assert-Contains $firstReadmeKo \"채팅 입력칸\""));
     assert!(!script.contains("Assert-Contains $firstReadmeKo \"Chat prompt\""));
-    assert!(script.contains("Assert-Contains $firstReadmeKo \"Provider/model\""));
-    assert!(script.contains("Assert-Contains $firstReadmeKo \"provider CLI\""));
+    assert!(script.contains("Assert-Contains $firstReadmeKo \"Provider Login은 선택 사항입니다\""));
+    assert!(script.contains("Assert-Contains $firstReadmeKo \"앱 안의 기본 생성기\""));
+    assert!(
+        script.contains("Assert-Contains $firstReadmeKo \"로컬 도구를 대신 실행하지 않습니다\"")
+    );
     assert!(!script.contains("provider CLI는 호출하지 않습니다"));
     assert!(!script
         .contains("Assert-Contains $firstReadme \"provider/model selection is readiness-only\""));

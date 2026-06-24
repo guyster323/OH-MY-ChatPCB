@@ -97,11 +97,13 @@ fn send_design_transcript_uses_the_user_prompt() {
 fn send_design_transcript_separates_provider_selection_from_preview_engine() {
     let transcript = send_design_transcript("ESP32-S3 board after selecting claude:auto");
 
-    assert!(transcript.contains("미리보기 생성: 내장 생성기를 사용했습니다"));
-    assert!(transcript.contains("provider/model 선택은 준비 상태 확인용"));
-    assert!(transcript.contains("이 미리보기에서는 provider CLI를 호출하지 않습니다"));
+    assert!(transcript.contains("미리보기 생성: 앱 안의 기본 생성기를 사용했습니다"));
+    assert!(transcript.contains("Provider 선택은 로그인 상태 확인용"));
+    assert!(transcript.contains("로컬 도구를 대신 실행하지 않습니다"));
     assert!(!transcript.contains("built-in local generator"));
     assert!(!transcript.contains("Preview engine:"));
+    assert!(!transcript.contains("provider/model"));
+    assert!(!transcript.contains("provider CLI"));
     assert!(!transcript.contains("provider/model selection is readiness only"));
     assert!(!transcript.contains("No provider CLI is invoked"));
 }
@@ -151,13 +153,15 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
     ]);
 
     assert!(transcript.contains("Provider Login"));
-    assert!(transcript.contains("로컬 CLI provider 상태"));
+    assert!(transcript.contains("로컬 도구 로그인 상태"));
     assert!(transcript.contains("Codex: 사용 가능"));
     assert!(transcript.contains("Claude Code: 찾을 수 없음"));
     assert!(transcript.contains("Claude Code를 설치하고 로컬 로그인을 완료"));
-    assert!(transcript.contains("사용 가능한 provider를 모델 선택에서 고르세요"));
-    assert!(transcript.contains("provider CLI는 호출하지 않습니다"));
+    assert!(transcript.contains("사용 가능한 로컬 도구를 모델 선택에서 고르세요"));
+    assert!(transcript.contains("로컬 도구를 대신 실행하지 않습니다"));
     assert!(transcript.contains("Provider 인증 정보는 ChatPCB3에 저장하지 않습니다."));
+    assert!(!transcript.contains("로컬 CLI provider 상태"));
+    assert!(!transcript.contains("provider CLI는 호출하지 않습니다"));
     assert!(!transcript.contains("Codex: available"));
     assert!(!transcript.contains("Claude Code: not found"));
     assert!(!transcript.contains("Install Claude Code"));
@@ -203,7 +207,7 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
     assert!(transcript.contains("아직 준비된 로컬 provider가 없습니다"));
     assert!(transcript.contains("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다"));
     assert!(transcript.contains("내장 미리보기로 계속 진행"));
-    assert!(transcript.contains("CLI login은 나중에"));
+    assert!(transcript.contains("로컬 도구 로그인은 나중에"));
     assert!(transcript.contains("Codex CLI를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("Claude Code를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("Gemini CLI를 설치하고 로컬 로그인을 완료"));
@@ -218,6 +222,8 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
     assert!(!transcript.contains("You can still press Send design"));
     assert!(!transcript.contains("Use built-in-preview now"));
     assert!(!transcript.contains("built-in-preview"));
+    assert!(!transcript.contains("CLI login은 나중에"));
+    assert!(!transcript.contains("local CLI login"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));
@@ -255,8 +261,12 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
 
     let transcript = provider_login_transcript(&statuses);
     assert!(transcript.contains("선택된 모델: claude:auto"));
-    assert!(transcript.contains("준비 상태 확인용"));
-    assert!(transcript.contains("built-in local generator"));
+    assert!(transcript.contains("로그인 상태 확인용"));
+    assert!(transcript.contains("앱 안의 기본 생성기"));
+    assert!(transcript.contains("로컬 도구를 대신 실행하지 않습니다"));
+    assert!(!transcript.contains("built-in local generator"));
+    assert!(!transcript.contains("Provider/model"));
+    assert!(!transcript.contains("provider CLI"));
     assert!(!transcript.contains("Selected model:"));
 }
 

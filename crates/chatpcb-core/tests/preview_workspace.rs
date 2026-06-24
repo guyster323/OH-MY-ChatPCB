@@ -40,13 +40,18 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
     assert!(report.contains("KiCad fork integration is still required"));
 
     let first_run_summary = fs::read_to_string(&workspace.first_run_summary_file).unwrap();
-    assert!(first_run_summary.contains("Start here"));
-    assert!(first_run_summary.contains("Open PCB"));
-    assert!(first_run_summary.contains("Review checklist"));
-    assert!(first_run_summary.contains("type a follow-up"));
-    assert!(first_run_summary.contains("Do not upload this preview to JLCPCB"));
+    assert!(first_run_summary.contains("처음 확인할 내용"));
+    assert!(first_run_summary.contains("PCB 열기"));
+    assert!(first_run_summary.contains("검토 목록"));
+    assert!(first_run_summary.contains("후속 입력"));
+    assert!(first_run_summary.contains("JLCPCB에 업로드하지 마세요"));
     assert!(first_run_summary.contains("prototype-review"));
-    assert!(first_run_summary.contains("not order-ready"));
+    assert!(first_run_summary.contains("주문 준비 전"));
+    assert!(!first_run_summary.contains("Start here"));
+    assert!(!first_run_summary.contains("Open PCB"));
+    assert!(!first_run_summary.contains("Review checklist"));
+    assert!(!first_run_summary.contains("type a follow-up"));
+    assert!(!first_run_summary.contains("Do not upload this preview to JLCPCB"));
     assert!(workspace.files.contains(&workspace.first_run_summary_file));
 
     let bom_preview_file = project_dir.join("jlcpcb-bom-preview.csv");
@@ -88,14 +93,20 @@ fn creates_preview_workspace_evidence_without_claiming_order_ready() {
         .files
         .contains(&beginner_next_steps_file.to_string_lossy().to_string()));
     let beginner_next_steps = fs::read_to_string(beginner_next_steps_file).unwrap();
-    assert!(beginner_next_steps.contains("First thing to do"));
-    assert!(beginner_next_steps.contains("Open PCB"));
-    assert!(beginner_next_steps.contains("Review checklist"));
-    assert!(beginner_next_steps.contains("Ask a follow-up in chat"));
-    assert!(beginner_next_steps.contains("Do not order yet"));
+    assert!(beginner_next_steps.contains("ChatPCB3 첫 검토 목록"));
+    assert!(beginner_next_steps.contains("먼저 할 일"));
+    assert!(beginner_next_steps.contains("PCB 열기"));
+    assert!(beginner_next_steps.contains("검토 목록"));
+    assert!(beginner_next_steps.contains("후속 채팅"));
+    assert!(beginner_next_steps.contains("아직 주문하지 마세요"));
     assert!(beginner_next_steps.contains("Gerber"));
-    assert!(beginner_next_steps.contains("BOM preview"));
-    assert!(beginner_next_steps.contains("CPL preview"));
+    assert!(beginner_next_steps.contains("BOM 미리보기"));
+    assert!(beginner_next_steps.contains("CPL 미리보기"));
+    assert!(!beginner_next_steps.contains("First thing to do"));
+    assert!(!beginner_next_steps.contains("Open PCB"));
+    assert!(!beginner_next_steps.contains("Review checklist"));
+    assert!(!beginner_next_steps.contains("Ask a follow-up in chat"));
+    assert!(!beginner_next_steps.contains("Do not order yet"));
 
     let prompt = fs::read_to_string(&workspace.prompt_file).unwrap();
     assert!(prompt.contains("USB-C ESP32-S3"));
