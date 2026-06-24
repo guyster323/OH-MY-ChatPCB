@@ -1254,6 +1254,8 @@ mod win32_app {
                         &validation.summary,
                     ),
                 );
+                turn_transcript
+                    .push_str(chatpcb_desktop::ui_model::preview_result_summary_transcript());
                 let left_status = chatpcb_desktop::ui_model::preview_workspace_left_status(
                     &workspace.project_dir,
                 );

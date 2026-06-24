@@ -265,6 +265,12 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
     )
 }
 
+pub fn preview_result_summary_transcript() -> &'static str {
+    "결과: 미리보기 저장 완료\r\n\
+     - Open PCB 또는 Review checklist로 확인하세요.\r\n\
+     - 아직 JLCPCB 주문 금지: prototype-review 상태입니다.\r\n"
+}
+
 pub fn preview_workspace_left_status(project_dir: &str) -> String {
     format!("Preview workspace saved: {project_dir} | prototype-review, not order-ready.")
 }

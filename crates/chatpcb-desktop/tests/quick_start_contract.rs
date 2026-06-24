@@ -371,6 +371,36 @@ fn send_design_runs_erc_drc_reports_after_writing_preview() {
 }
 
 #[test]
+fn send_design_appends_korean_result_summary_after_validation_reports() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let ui_model =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/ui_model.rs"))
+            .unwrap();
+    let send_design_handler = main
+        .split("unsafe fn handle_send_design")
+        .nth(1)
+        .unwrap()
+        .split("fn run_kicad_pcb_check")
+        .next()
+        .unwrap();
+
+    let validation_index = send_design_handler
+        .find("erc_drc_validation_transcript")
+        .unwrap();
+    let summary_index = send_design_handler
+        .find("preview_result_summary_transcript")
+        .unwrap();
+    assert!(
+        validation_index < summary_index,
+        "Korean result summary should be appended after validation so it remains visible at the latest chat position"
+    );
+    assert!(ui_model.contains("preview_result_summary_transcript"));
+    assert!(ui_model.contains("결과: 미리보기 저장 완료"));
+    assert!(ui_model.contains("JLCPCB 주문 금지"));
+}
+
+#[test]
 fn send_design_updates_the_left_workspace_status() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

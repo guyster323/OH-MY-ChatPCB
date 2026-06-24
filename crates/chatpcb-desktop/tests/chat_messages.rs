@@ -3,14 +3,14 @@ use chatpcb_desktop::ui_model::{
     example_board_prompt, example_loaded_pipeline_status, initial_left_workspace_status,
     initial_pipeline_status, initial_transcript, kicad_cli_check_transcript, left_tab_body,
     left_tab_status, model_selector_items, open_evidence_pipeline_status, open_pcb_pipeline_status,
-    preview_workspace_body, preview_workspace_body_with_kicad_check,
-    preview_workspace_body_with_validation_reports, preview_workspace_left_status,
-    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
-    recovered_preview_pipeline_status, recovered_preview_workspace_body,
-    recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
-    saved_preview_tab_body, saved_preview_tab_status, selected_model_for_statuses,
-    selected_provider_model, send_design_transcript, validation_pipeline_status,
-    visible_empty_prompt_pipeline_status, ProviderUiStatus,
+    preview_result_summary_transcript, preview_workspace_body,
+    preview_workspace_body_with_kicad_check, preview_workspace_body_with_validation_reports,
+    preview_workspace_left_status, preview_workspace_saved_transcript,
+    provider_login_pipeline_status, provider_login_transcript, recovered_preview_pipeline_status,
+    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
+    recovered_preview_workspace_transcript, saved_preview_tab_body, saved_preview_tab_status,
+    selected_model_for_statuses, selected_provider_model, send_design_transcript,
+    validation_pipeline_status, visible_empty_prompt_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -613,6 +613,24 @@ fn erc_drc_validation_transcript_points_to_saved_reports_without_order_ready_cla
     assert!(!transcript
         .to_ascii_lowercase()
         .contains("order-ready evidence"));
+}
+
+#[test]
+fn preview_result_summary_transcript_gives_korean_next_action_for_latest_chat_view() {
+    let transcript = preview_result_summary_transcript();
+
+    assert!(transcript.contains("결과: 미리보기 저장 완료"));
+    assert!(transcript.contains("Open PCB"));
+    assert!(transcript.contains("Review checklist"));
+    assert!(transcript.contains("JLCPCB 주문 금지"));
+    assert!(transcript.contains("prototype-review"));
+    assert!(
+        transcript
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            <= 3
+    );
 }
 
 #[test]
