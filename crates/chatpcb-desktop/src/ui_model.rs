@@ -234,11 +234,11 @@ pub fn send_design_transcript(prompt: &str) -> String {
          - ESP32-S3 기본 보드 사양을 만들었습니다.\r\n\
          - JLCPCB 검토용 package contract를 선택했습니다.\r\n\
          - schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package 흐름을 준비했습니다.\r\n\
-         Preview engine: built-in local generator; provider/model selection is readiness only. No provider CLI is invoked for this preview slice.\r\n\
+         미리보기 엔진: built-in local generator; provider/model 선택은 준비 상태 확인용입니다. 이 미리보기에서는 provider CLI를 호출하지 않습니다.\r\n\
          다음 행동\r\n\
          - PCB 열기 또는 검토 목록으로 저장된 preview를 확인하세요.\r\n\
          - order-ready 파일은 실제 KiCad fork 통합과 제조 증거 검토가 필요합니다.\r\n\
-         Status: preview only, not order-ready yet.\r\n"
+         상태: preview only, 아직 order-ready 아님.\r\n"
     )
 }
 
@@ -495,9 +495,9 @@ pub fn recovered_preview_workspace_transcript(project_dir: &str) -> String {
 
 pub fn preview_workspace_failed_transcript(error: &str) -> String {
     format!(
-        "Preview workspace was not saved\r\n\
-         - Reason: {error}\r\n\
-         Status: keep this design at preview only.\r\n"
+        "미리보기 저장 실패\r\n\
+         - 이유: {error}\r\n\
+         상태: preview only로 유지합니다.\r\n"
     )
 }
 
@@ -507,19 +507,19 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
 
     for status in statuses {
         if status.available {
-            let version = status.version.as_deref().unwrap_or("available");
+            let version = status.version.as_deref().unwrap_or("사용 가능");
             transcript.push_str(&format!(
-                " - {}: available ({version})\r\n",
+                " - {}: 사용 가능 ({version})\r\n",
                 status.display_name
             ));
         } else {
-            transcript.push_str(&format!(" - {}: not found\r\n", status.display_name));
-            transcript.push_str(&format!("   {}\r\n", status.login_hint));
+            transcript.push_str(&format!(" - {}: 찾을 수 없음\r\n", status.display_name));
+            transcript.push_str(&format!("   {}\r\n", localized_login_hint(status)));
         }
     }
 
     if let Some(model) = selected_provider_model(statuses) {
-        transcript.push_str(&format!("Selected model: {model}\r\n"));
+        transcript.push_str(&format!("선택된 모델: {model}\r\n"));
         transcript.push_str(
             "Provider/model 선택은 준비 상태 확인용입니다; preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.\r\n",
         );
@@ -537,8 +537,21 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
         );
     }
 
-    transcript.push_str("Provider credentials는 ChatPCB3에 저장하지 않습니다.\r\n");
+    transcript.push_str("Provider 인증 정보는 ChatPCB3에 저장하지 않습니다.\r\n");
     transcript
+}
+
+fn localized_login_hint(status: &ProviderUiStatus) -> String {
+    let name = status.display_name.to_ascii_lowercase();
+    if name.contains("codex") {
+        "Codex CLI를 설치하고 로컬 로그인을 완료한 뒤 이 provider를 사용하세요.".to_string()
+    } else if name.contains("claude") {
+        "Claude Code를 설치하고 로컬 로그인을 완료한 뒤 이 provider를 사용하세요.".to_string()
+    } else if name.contains("gemini") {
+        "Gemini CLI를 설치하고 로컬 로그인을 완료한 뒤 이 provider를 사용하세요.".to_string()
+    } else {
+        status.login_hint.clone()
+    }
 }
 
 pub fn selected_provider_model(statuses: &[ProviderUiStatus]) -> Option<&'static str> {

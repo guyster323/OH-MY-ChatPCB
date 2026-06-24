@@ -1285,11 +1285,11 @@ mod win32_app {
                 );
                 set_left_workspace_status(
                     controls,
-                    "Preview workspace could not be saved. Check chat for the error.",
+                    "미리보기 저장 실패. chat에서 오류를 확인하세요.",
                 );
                 set_design_preview(
                     controls,
-                    "Preview workspace was not saved.\r\nCheck the chat transcript for the error.\r\nGate: preview only.",
+                    "미리보기 저장 실패.\r\nchat에서 오류를 확인하세요.\r\nGate: preview only.",
                 );
                 set_workspace_action_buttons_enabled(
                     controls,

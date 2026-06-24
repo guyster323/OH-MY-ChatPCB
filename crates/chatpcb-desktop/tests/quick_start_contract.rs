@@ -354,6 +354,20 @@ fn send_design_creates_a_local_preview_workspace_for_non_experts() {
 }
 
 #[test]
+fn preview_workspace_failure_copy_is_korean_first_in_the_native_window() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+
+    assert!(main.contains("미리보기 저장 실패"));
+    assert!(main.contains("chat에서 오류를 확인하세요."));
+    assert!(main.contains("Gate: preview only."));
+    assert!(!main.contains("Preview workspace could not be saved. Check chat for the error."));
+    assert!(!main.contains(
+        "Preview workspace was not saved.\\r\\nCheck the chat transcript for the error."
+    ));
+}
+
+#[test]
 fn send_design_runs_kicad_cli_check_after_writing_preview() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

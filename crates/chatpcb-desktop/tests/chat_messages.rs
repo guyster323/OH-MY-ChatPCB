@@ -5,12 +5,13 @@ use chatpcb_desktop::ui_model::{
     left_tab_status, model_selector_items, open_evidence_pipeline_status, open_pcb_pipeline_status,
     preview_result_summary_transcript, preview_workspace_body,
     preview_workspace_body_with_kicad_check, preview_workspace_body_with_validation_reports,
-    preview_workspace_left_status, preview_workspace_saved_transcript,
-    provider_login_pipeline_status, provider_login_transcript, recovered_preview_pipeline_status,
-    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
-    recovered_preview_workspace_transcript, saved_preview_tab_body, saved_preview_tab_status,
-    selected_model_for_statuses, selected_provider_model, send_design_transcript,
-    validation_pipeline_status, visible_empty_prompt_pipeline_status, ProviderUiStatus,
+    preview_workspace_failed_transcript, preview_workspace_left_status,
+    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
+    recovered_preview_pipeline_status, recovered_preview_workspace_body,
+    recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
+    saved_preview_tab_body, saved_preview_tab_status, selected_model_for_statuses,
+    selected_provider_model, send_design_transcript, validation_pipeline_status,
+    visible_empty_prompt_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -82,18 +83,23 @@ fn send_design_transcript_uses_the_user_prompt() {
     assert!(transcript.contains("Freerouting autoroute"));
     assert!(transcript.contains("실제 KiCad fork 통합"));
     assert!(transcript.contains("다음 행동"));
+    assert!(transcript.contains("상태: preview only, 아직 order-ready 아님."));
     assert!(transcript.contains("order-ready"));
     assert!(!transcript.contains("Assistant: What happened"));
     assert!(!transcript.contains("Full KiCad fork integration"));
+    assert!(!transcript.contains("Status: preview only, not order-ready yet."));
 }
 
 #[test]
 fn send_design_transcript_separates_provider_selection_from_preview_engine() {
     let transcript = send_design_transcript("ESP32-S3 board after selecting claude:auto");
 
-    assert!(transcript.contains("Preview engine: built-in local generator"));
-    assert!(transcript.contains("provider/model selection is readiness only"));
-    assert!(transcript.contains("No provider CLI is invoked"));
+    assert!(transcript.contains("미리보기 엔진: built-in local generator"));
+    assert!(transcript.contains("provider/model 선택은 준비 상태 확인용"));
+    assert!(transcript.contains("이 미리보기에서는 provider CLI를 호출하지 않습니다"));
+    assert!(!transcript.contains("Preview engine:"));
+    assert!(!transcript.contains("provider/model selection is readiness only"));
+    assert!(!transcript.contains("No provider CLI is invoked"));
 }
 
 #[test]
@@ -142,15 +148,21 @@ fn provider_login_transcript_reports_local_cli_status_without_secrets() {
 
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("로컬 CLI provider 상태"));
-    assert!(transcript.contains("Codex: available"));
-    assert!(transcript.contains("Claude Code: not found"));
+    assert!(transcript.contains("Codex: 사용 가능"));
+    assert!(transcript.contains("Claude Code: 찾을 수 없음"));
+    assert!(transcript.contains("Claude Code를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("사용 가능한 provider를 모델 선택에서 고르세요"));
     assert!(transcript.contains("provider CLI는 호출하지 않습니다"));
-    assert!(transcript.contains("저장하지 않습니다"));
+    assert!(transcript.contains("Provider 인증 정보는 ChatPCB3에 저장하지 않습니다."));
+    assert!(!transcript.contains("Codex: available"));
+    assert!(!transcript.contains("Claude Code: not found"));
+    assert!(!transcript.contains("Install Claude Code"));
+    assert!(!transcript.contains("complete local login before invoking this provider"));
     assert!(!transcript.contains("Local CLI provider status"));
     assert!(!transcript.contains("Pick an available provider"));
     assert!(!transcript.contains("No provider CLI is invoked"));
     assert!(!transcript.contains("Provider credentials are not stored"));
+    assert!(!transcript.contains("Provider credentials는"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));
@@ -188,11 +200,15 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
     assert!(transcript.contains("그래도 설계 생성으로 ESP32-S3 preview를 만들 수 있습니다"));
     assert!(transcript.contains("built-in-preview로 계속 진행"));
     assert!(transcript.contains("CLI login은 나중에"));
-    assert!(transcript.contains("Install Codex CLI"));
-    assert!(transcript.contains("Install Claude Code"));
-    assert!(transcript.contains("Install Gemini CLI"));
+    assert!(transcript.contains("Codex CLI를 설치하고 로컬 로그인을 완료"));
+    assert!(transcript.contains("Claude Code를 설치하고 로컬 로그인을 완료"));
+    assert!(transcript.contains("Gemini CLI를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("Provider Login을 다시 누르세요"));
     assert!(!transcript.contains("Selected model:"));
+    assert!(!transcript.contains("Install Codex CLI"));
+    assert!(!transcript.contains("Install Claude Code"));
+    assert!(!transcript.contains("Install Gemini CLI"));
+    assert!(!transcript.contains("complete local login before invoking this provider"));
     assert!(!transcript.contains("Pick an available provider"));
     assert!(!transcript.contains("No local provider is ready yet"));
     assert!(!transcript.contains("You can still press Send design"));
@@ -233,9 +249,10 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
     assert_eq!(selected_provider_model(&statuses), Some("claude:auto"));
 
     let transcript = provider_login_transcript(&statuses);
-    assert!(transcript.contains("Selected model: claude:auto"));
+    assert!(transcript.contains("선택된 모델: claude:auto"));
     assert!(transcript.contains("준비 상태 확인용"));
     assert!(transcript.contains("built-in local generator"));
+    assert!(!transcript.contains("Selected model:"));
 }
 
 #[test]
@@ -280,7 +297,7 @@ fn chat_transcript_appends_new_turns_without_erasing_context() {
     let combined = append_chat_transcript(&existing, &next_turn);
 
     assert!(combined.contains("Provider Login"));
-    assert!(combined.contains("Claude Code: available"));
+    assert!(combined.contains("Claude Code: 사용 가능"));
     assert!(combined.contains("User: ESP32-S3 board with USB-C and IMU"));
     assert!(combined.contains("Assistant: 결과 요약"));
     assert!(combined.find("Provider Login").unwrap() < combined.find("User: ESP32-S3").unwrap());
@@ -402,6 +419,18 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
     assert!(transcript.contains("order-ready 아님"));
     assert!(!transcript.contains("Preview workspace saved"));
     assert!(!transcript.contains("Ask a follow-up"));
+}
+
+#[test]
+fn preview_workspace_failure_transcript_is_korean_first() {
+    let transcript = preview_workspace_failed_transcript("disk full");
+
+    assert!(transcript.contains("미리보기 저장 실패"));
+    assert!(transcript.contains("- 이유: disk full"));
+    assert!(transcript.contains("상태: preview only로 유지합니다."));
+    assert!(!transcript.contains("Preview workspace was not saved"));
+    assert!(!transcript.contains("Reason:"));
+    assert!(!transcript.contains("Status: keep this design at preview only."));
 }
 
 #[test]
