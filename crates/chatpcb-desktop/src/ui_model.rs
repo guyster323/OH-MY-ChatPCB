@@ -293,58 +293,38 @@ pub fn saved_preview_tab_status(index: usize, _project_dir: &str) -> String {
 
 pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
     match index {
-        0 => format!(
-            "미리보기 저장 완료\r\n\
+        0 => ("미리보기 저장 완료\r\n\
              회로도\r\n\
-             프로젝트 폴더:\r\n\
-             {project_dir}\r\n\r\n\
-             열 파일:\r\n\
-             {project_dir}\\chatpcb3-esp32s3.kicad_sch\r\n\r\n\
-             Expected nets:\r\n\
+             - 검토 목록에서 저장 위치와 회로 파일을 확인하세요.\r\n\
+             - Expected nets:\r\n\
              - USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, and I2C_SDA.\r\n\
              - 제조 출력을 믿기 전 KiCad에서 symbol과 연결을 확인하세요.\r\n\r\n\
-             상태: prototype-review, order-ready 아님."
-        ),
-        1 => format!(
-            "PCB 레이아웃\r\n\
-             프로젝트 폴더:\r\n\
-             {project_dir}\r\n\r\n\
-             PCB 열기:\r\n\
-             {project_dir}\\chatpcb3-esp32s3.kicad_pcb\r\n\r\n\
+             상태: prototype-review, order-ready 아님.")
+            .to_string(),
+        1 => ("PCB 레이아웃\r\n\
              현재 preview:\r\n\
              - 50mm x 50mm Edge.Cuts outline.\r\n\
              - 배치와 배선은 아직 preview 단계입니다.\r\n\
              - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
-             상태: prototype-review, order-ready 아님."
-        ),
-        2 => format!(
-            "KiCad ERC/DRC 검증\r\n\
-             프로젝트 폴더:\r\n\
-             {project_dir}\r\n\r\n\
-             확인할 report:\r\n\
-             - {project_dir}\\kicad-pcb-check.txt\r\n\
-             - {project_dir}\\erc-report.json\r\n\
-             - {project_dir}\\drc-report.json\r\n\
-             - {project_dir}\\kicad-validation-summary.txt\r\n\r\n\
+             상태: prototype-review, order-ready 아님.")
+            .to_string(),
+        2 => ("KiCad ERC/DRC 검증\r\n\
+             - 검토 목록에서 KiCad 확인, ERC/DRC 요약, 자세한 보고서를 확인하세요.\r\n\
+             - PCB 열기로 저장된 board outline을 직접 열어볼 수 있습니다.\r\n\
              제조 출력을 믿기 전 validation을 검토해야 합니다.\r\n\
-             상태: prototype-review, order-ready 아님."
-        ),
-        3 => format!(
-            "제조 미리보기\r\n\
-             프로젝트 폴더:\r\n\
-             {project_dir}\r\n\r\n\
-             JLCPCB 업로드는 아직 막힌 상태입니다. 먼저 이 preview 파일을 확인하세요:\r\n\
-             - {project_dir}\\jlcpcb-bom-preview.csv\r\n\
-             - {project_dir}\\jlcpcb-cpl-preview.csv\r\n\
-             - {project_dir}\\manufacturing-readiness-preview.txt\r\n\r\n\
+             상태: prototype-review, order-ready 아님.")
+            .to_string(),
+        3 => ("제조 미리보기\r\n\
+             JLCPCB 업로드는 아직 막힌 상태입니다.\r\n\
+             - 검토 목록에서 BOM/CPL preview와 제조 준비 메모를 확인하세요.\r\n\
              업로드 전 아직 필요한 것:\r\n\
              - Gerber zip\r\n\
              - Drill files\r\n\
              - Placement-reviewed CPL/position file\r\n\
              - Release evidence report\r\n\r\n\
              실제 주문 전에는 앱이 멈추고 사용자 확인을 받아야 합니다.\r\n\
-             상태: prototype-review, order-ready 아님."
-        ),
+             상태: prototype-review, order-ready 아님.")
+            .to_string(),
         _ => saved_preview_tab_body(0, project_dir),
     }
 }

@@ -548,36 +548,46 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
 
     let schematic = saved_preview_tab_body(0, project_dir);
     assert!(schematic.contains("미리보기 저장 완료"));
-    assert!(schematic.contains("chatpcb3-esp32s3.kicad_sch"));
-    assert!(schematic.contains(project_dir));
+    assert!(schematic.contains("검토 목록"));
+    assert!(!schematic.contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(!schematic.contains(project_dir));
+    assert!(!schematic.contains("C:\\Users"));
     assert!(!schematic.contains("Gate:"));
 
     let pcb = saved_preview_tab_body(1, project_dir);
     assert!(pcb.contains("PCB 레이아웃"));
-    assert!(pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(pcb.contains("50mm x 50mm Edge.Cuts"));
     assert!(pcb.contains("PCB 열기"));
     assert!(pcb.contains("배치와 배선은 아직 preview 단계"));
+    assert!(!pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(!pcb.contains(project_dir));
+    assert!(!pcb.contains("C:\\Users"));
     assert!(!pcb.contains("Gate:"));
 
     let validation = saved_preview_tab_body(2, project_dir);
     assert!(validation.contains("KiCad ERC/DRC 검증"));
-    assert!(validation.contains("kicad-pcb-check.txt"));
-    assert!(validation.contains("erc-report.json"));
-    assert!(validation.contains("drc-report.json"));
-    assert!(validation.contains("kicad-validation-summary.txt"));
+    assert!(validation.contains("검토 목록"));
     assert!(validation.contains("prototype-review"));
+    assert!(!validation.contains("kicad-pcb-check.txt"));
+    assert!(!validation.contains("erc-report.json"));
+    assert!(!validation.contains("drc-report.json"));
+    assert!(!validation.contains("kicad-validation-summary.txt"));
+    assert!(!validation.contains(project_dir));
+    assert!(!validation.contains("C:\\Users"));
     assert!(!validation.contains("Gate:"));
 
     let manufacturing = saved_preview_tab_body(3, project_dir);
     assert!(manufacturing.contains("제조 미리보기"));
     assert!(manufacturing.contains("JLCPCB 업로드는 아직 막힌 상태"));
     assert!(manufacturing.contains("Gerber"));
-    assert!(manufacturing.contains("jlcpcb-bom-preview.csv"));
-    assert!(manufacturing.contains("jlcpcb-cpl-preview.csv"));
-    assert!(manufacturing.contains("manufacturing-readiness-preview.txt"));
+    assert!(manufacturing.contains("검토 목록"));
     assert!(manufacturing.contains("prototype-review"));
     assert!(manufacturing.contains("order-ready 아님"));
+    assert!(!manufacturing.contains("jlcpcb-bom-preview.csv"));
+    assert!(!manufacturing.contains("jlcpcb-cpl-preview.csv"));
+    assert!(!manufacturing.contains("manufacturing-readiness-preview.txt"));
+    assert!(!manufacturing.contains(project_dir));
+    assert!(!manufacturing.contains("C:\\Users"));
     assert!(!manufacturing.contains("Gate:"));
 
     assert_eq!(
