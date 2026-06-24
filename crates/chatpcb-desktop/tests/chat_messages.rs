@@ -204,7 +204,7 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
         },
     ]);
 
-    assert!(transcript.contains("아직 준비된 로컬 provider가 없습니다"));
+    assert!(transcript.contains("아직 준비된 로컬 도구가 없습니다"));
     assert!(transcript.contains("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다"));
     assert!(transcript.contains("내장 미리보기로 계속 진행"));
     assert!(transcript.contains("로컬 도구 로그인은 나중에"));
@@ -212,6 +212,8 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
     assert!(transcript.contains("Claude Code를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("Gemini CLI를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("Provider Login을 다시 누르세요"));
+    assert!(!transcript.contains("아직 준비된 로컬 provider가 없습니다"));
+    assert!(!transcript.contains("이 provider를 사용하세요"));
     assert!(!transcript.contains("Selected model:"));
     assert!(!transcript.contains("Install Codex CLI"));
     assert!(!transcript.contains("Install Claude Code"));
@@ -337,11 +339,11 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
     );
     assert_eq!(
         provider_login_pipeline_status(Some("claude:auto")),
-        "Provider 감지: claude:auto; 미리보기 생성은 아직 로컬입니다."
+        "Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다."
     );
     assert_eq!(
         provider_login_pipeline_status(None),
-        "로컬 provider 없음; 내장 미리보기는 계속 사용 가능합니다."
+        "로컬 도구 없음; 내장 미리보기는 계속 사용 가능합니다."
     );
     assert_eq!(
         design_pipeline_status(),
@@ -594,12 +596,13 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(pcb.contains("PCB 레이아웃"));
     assert!(pcb.contains("50mm x 50mm 보드 외곽선"));
     assert!(pcb.contains("PCB 열기"));
-    assert!(pcb.contains("배치와 배선은 아직 preview 단계"));
+    assert!(pcb.contains("배치와 배선은 아직 미리보기 단계"));
     assert!(pcb.contains("보드 외곽선"));
     assert!(!pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(!pcb.contains(project_dir));
     assert!(!pcb.contains("C:\\Users"));
     assert!(!pcb.contains("board outline"));
+    assert!(!pcb.contains("preview 단계"));
     assert!(!pcb.contains("Gate:"));
 
     let validation = saved_preview_tab_body(2, project_dir);

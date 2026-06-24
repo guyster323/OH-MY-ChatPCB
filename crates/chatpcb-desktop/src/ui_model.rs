@@ -148,8 +148,8 @@ pub fn example_loaded_pipeline_status() -> &'static str {
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     match selected_model {
-        Some(model) => format!("Provider 감지: {model}; 미리보기 생성은 아직 로컬입니다."),
-        None => "로컬 provider 없음; 내장 미리보기는 계속 사용 가능합니다.".to_string(),
+        Some(model) => format!("Provider 감지: {model}; 미리보기 생성은 앱 안에서만 진행됩니다."),
+        None => "로컬 도구 없음; 내장 미리보기는 계속 사용 가능합니다.".to_string(),
     }
 }
 
@@ -309,7 +309,7 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
         1 => ("PCB 레이아웃\r\n\
              현재 미리보기:\r\n\
              - 50mm x 50mm 보드 외곽선.\r\n\
-             - 배치와 배선은 아직 preview 단계입니다.\r\n\
+             - 배치와 배선은 아직 미리보기 단계입니다.\r\n\
              - PCB 열기로 KiCad 10에서 저장된 보드 외곽선을 확인하세요.\r\n\r\n\
              상태: prototype-review, 주문 준비 전.")
             .to_string(),
@@ -465,7 +465,7 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
             "사용 가능한 로컬 도구를 모델 선택에서 고르세요. 그런 다음 만들 보드를 입력하고 Enter 또는 설계 생성을 누르세요.\r\n",
         );
     } else {
-        transcript.push_str("아직 준비된 로컬 provider가 없습니다.\r\n");
+        transcript.push_str("아직 준비된 로컬 도구가 없습니다.\r\n");
         transcript.push_str("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다.\r\n");
         transcript.push_str(
             "로컬 도구 로그인은 나중에 해도 됩니다. 로그인을 마친 뒤 Provider Login을 다시 누르세요.\r\n",
@@ -482,11 +482,11 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
 fn localized_login_hint(status: &ProviderUiStatus) -> String {
     let name = status.display_name.to_ascii_lowercase();
     if name.contains("codex") {
-        "Codex CLI를 설치하고 로컬 로그인을 완료한 뒤 이 provider를 사용하세요.".to_string()
+        "Codex CLI를 설치하고 로컬 로그인을 완료한 뒤 이 도구를 사용하세요.".to_string()
     } else if name.contains("claude") {
-        "Claude Code를 설치하고 로컬 로그인을 완료한 뒤 이 provider를 사용하세요.".to_string()
+        "Claude Code를 설치하고 로컬 로그인을 완료한 뒤 이 도구를 사용하세요.".to_string()
     } else if name.contains("gemini") {
-        "Gemini CLI를 설치하고 로컬 로그인을 완료한 뒤 이 provider를 사용하세요.".to_string()
+        "Gemini CLI를 설치하고 로컬 로그인을 완료한 뒤 이 도구를 사용하세요.".to_string()
     } else {
         status.login_hint.clone()
     }

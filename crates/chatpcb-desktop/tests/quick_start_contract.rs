@@ -133,7 +133,8 @@ fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
 
     assert!(ui_model.contains("provider_login_keeps_builtin_preview_unblocked"));
     assert!(ui_model.contains("login_hint"));
-    assert!(ui_model.contains("로컬 provider 없음; 내장 미리보기는 계속 사용 가능합니다."));
+    assert!(ui_model.contains("로컬 도구 없음; 내장 미리보기는 계속 사용 가능합니다."));
+    assert!(!ui_model.contains("로컬 provider 없음"));
     assert!(!ui_model.contains("No local provider found; built-in preview still works."));
     assert!(ui_model.contains("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다."));
     assert!(!ui_model.contains("built-in-preview로 계속 진행"));
@@ -744,7 +745,8 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains(
         "`Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`"
     ));
-    assert!(guide.contains("`Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`"));
+    assert!(guide.contains("`Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`"));
+    assert!(!guide.contains("`Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`"));
     assert!(guide.contains("accessibility text did not include old English provider copy"));
     assert!(guide.contains(
         "Computer Use reinstalled the package after the Korean-first INSTALL-READY template change"

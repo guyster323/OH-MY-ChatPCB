@@ -247,7 +247,7 @@ Latest run after installing the current preview package was checked on
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `채팅 입력칸`.
 - Computer Use verified the Provider Login status now says
-  `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`. The current
+  `Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`. The current
   provider-copy contract says `Provider 선택은 로그인 상태 확인용`,
   `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`.
 - Computer Use reinstalled the current package after the first-screen/provider copy localization
@@ -256,7 +256,7 @@ Latest run after installing the current preview package was checked on
   `Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`.
 - Computer Use clicked `Provider Login` in that installed app and verified the
   bottom status still says
-  `Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`. The Provider
+  `Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`. The Provider
   Login transcript now uses `Provider 선택은 로그인 상태 확인용`,
   `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`, while the
   accessibility text did not include old English provider copy.
@@ -275,6 +275,13 @@ Latest run after installing the current preview package was checked on
   saved-preview state reached
   `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.` with
   no old provider-copy phrases in the visible text.
+- Computer Use reinstalled the current package after the provider status-copy
+  localization, launched the installed app, clicked `Provider Login`, and
+  verified the bottom status now says
+  `Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`.
+  The accessibility text did not contain old `preview 생성은 아직 로컬`,
+  `로컬 provider 없음`, `아직 준비된 로컬 provider`, or
+  `이 provider를 사용하세요` wording.
 - The generated installed preview files now start with `ChatPCB3 첫 검토 목록`
   and `ChatPCB3 처음 확인할 내용`, and include `후속 채팅`,
   `아직 주문하지 마세요`, and `JLCPCB에 업로드하지 마세요`.
