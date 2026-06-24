@@ -42,6 +42,9 @@ try {
     $builtAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz")
     $packageFiles = Get-ChildItem -File -Path $stagingRoot | Sort-Object Name
 
+    $pcbOpenLabel = "PCB " + [string][char]0xC5F4 + [string][char]0xAE30
+    $checklistLabel = [string][char]0xAC80 + [string][char]0xD1A0 + " " + [string][char]0xBAA9 + [string][char]0xB85D
+
     $evidence = @(
         "ChatPCB KiCad Preview release evidence",
         "=======================================",
@@ -91,16 +94,16 @@ try {
         "- KiCad ERC and DRC JSON reports on Send design",
         "- JLCPCB BOM/CPL preview blockers for non-upload review",
         "- Beginner next steps file for first-run users",
-        "- Actionable validation status points to PCB 열기 and 검토 목록",
+        "- Actionable validation status points to $pcbOpenLabel and $checklistLabel",
         "- Left workspace status update after Send design",
         "- Left tab status updates for schematic/layout/validation/manufacturing preview",
         "- Left design preview body for schematic/layout/validation/manufacturing preview",
-        "- PCB 열기/검토 목록 waits until a preview workspace exists",
-        "- 검토 목록 button for the saved preview workspace",
-        "- 검토 목록 selects BEGINNER-NEXT-STEPS.txt for non-expert review",
-        "- PCB 열기 button launches the generated KiCad PCB preview",
-        "- PCB 열기 status distinguishes KiCad editor from file fallback",
-        "- 검토 목록 recovers previous preview workspace after relaunch",
+        "- $pcbOpenLabel/$checklistLabel waits until a preview workspace exists",
+        "- $checklistLabel button for the saved preview workspace",
+        "- $checklistLabel selects BEGINNER-NEXT-STEPS.txt for non-expert review",
+        "- $pcbOpenLabel button launches the generated KiCad PCB preview",
+        "- $pcbOpenLabel status distinguishes KiCad editor from file fallback",
+        "- $checklistLabel recovers previous preview workspace after relaunch",
         "- Recovered preview status keeps follow-up chat visible",
         "- Relaunch shows previous preview workspace status before another send",
         "- Relaunch mentions previous preview workspace in chat",

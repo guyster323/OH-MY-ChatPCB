@@ -496,17 +496,29 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("KiCad ERC and DRC JSON reports on Send design"));
     assert!(script.contains("JLCPCB BOM/CPL preview blockers"));
     assert!(script.contains("Beginner next steps file for first-run users"));
-    assert!(script.contains("Actionable validation status points to PCB 열기 and 검토 목록"));
+    assert!(
+        script.contains("$pcbOpenLabel = \"PCB \" + [string][char]0xC5F4 + [string][char]0xAE30")
+    );
+    assert!(script.contains("$checklistLabel = [string][char]0xAC80 + [string][char]0xD1A0 + \" \" + [string][char]0xBAA9 + [string][char]0xB85D"));
+    assert!(script.contains(
+        "\"- Actionable validation status points to $pcbOpenLabel and $checklistLabel\""
+    ));
     assert!(script.contains("Left workspace status update"));
     assert!(script.contains("Left tab status updates"));
     assert!(script.contains("Left design preview body"));
-    assert!(script.contains("PCB 열기/검토 목록 waits until a preview workspace exists"));
+    assert!(script
+        .contains("\"- $pcbOpenLabel/$checklistLabel waits until a preview workspace exists\""));
     assert!(script.contains("Installer writes INSTALL-SELF-TEST.txt"));
-    assert!(script.contains("검토 목록 button"));
-    assert!(script.contains("검토 목록 selects BEGINNER-NEXT-STEPS.txt"));
-    assert!(script.contains("PCB 열기 button"));
-    assert!(script.contains("PCB 열기 status distinguishes KiCad editor from file fallback"));
-    assert!(script.contains("검토 목록 recovers previous preview workspace"));
+    assert!(script.contains("\"- $checklistLabel button for the saved preview workspace\""));
+    assert!(script
+        .contains("\"- $checklistLabel selects BEGINNER-NEXT-STEPS.txt for non-expert review\""));
+    assert!(script.contains("\"- $pcbOpenLabel button launches the generated KiCad PCB preview\""));
+    assert!(
+        script.contains("\"- $pcbOpenLabel status distinguishes KiCad editor from file fallback\"")
+    );
+    assert!(
+        script.contains("\"- $checklistLabel recovers previous preview workspace after relaunch\"")
+    );
     assert!(
         !script.contains("Actionable validation status points to Open PCB and Review checklist")
     );
