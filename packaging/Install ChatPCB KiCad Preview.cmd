@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal
 
 cd /d "%~dp0"
@@ -7,14 +8,14 @@ set EXITCODE=%ERRORLEVEL%
 
 if not "%EXITCODE%"=="0" (
   echo.
-  echo ChatPCB KiCad Preview installation failed.
-  echo If ChatPCB KiCad Preview is open, close it and run this installer again.
-  echo Make sure this file is still next to ChatPCB KiCad Preview.exe and chatpcb-core.exe.
+  echo ChatPCB KiCad Preview 설치 실패.
+  echo 앱이 열려 있다면 닫고 다시 실행하세요.
+  echo 이 파일이 ChatPCB KiCad Preview.exe, chatpcb-core.exe와 같은 폴더에 있는지 확인하세요.
   echo.
   pause
   exit /b %EXITCODE%
 )
 
 echo.
-echo ChatPCB KiCad Preview is installed and starting now.
+echo 설치가 끝났습니다. 앱을 시작합니다.
 timeout /t 3 >nul

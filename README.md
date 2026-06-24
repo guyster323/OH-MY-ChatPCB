@@ -14,7 +14,7 @@ For a non-expert first run from GitHub:
 1. Download `ChatPCB-KiCad-Preview-windows-x64.zip` from the latest release or
    workflow artifact.
 2. Unzip it. Double-click `Install ChatPCB KiCad Preview.cmd`.
-   If ChatPCB KiCad Preview is already open, close it before running the installer again.
+   ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요.
 3. Open `ChatPCB KiCad Preview`.
 4. 만들 보드를 `채팅 입력칸`에 적고 Enter를 누릅니다.
 5. 저장되면 `검토 목록`을 눌러 확인합니다.
@@ -139,7 +139,7 @@ Unzip it and double-click:
 Install ChatPCB KiCad Preview.cmd
 ```
 
-If ChatPCB KiCad Preview is already open, close it before running the installer again.
+ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요.
 
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop

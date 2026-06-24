@@ -64,19 +64,53 @@ fn installers_stop_with_clear_message_when_preview_app_is_running() {
     }
 
     for script in [source_cmd, package_cmd] {
-        assert!(script
-            .contains("If ChatPCB KiCad Preview is open, close it and run this installer again."));
+        assert!(script.contains("앱이 열려 있다면 닫고 다시 실행하세요."));
     }
 
-    assert!(root_readme.contains(
-        "If ChatPCB KiCad Preview is already open, close it before running the installer again."
-    ));
-    assert!(guide.contains(
-        "If ChatPCB KiCad Preview is already open, close it before running the installer again."
-    ));
-    assert!(package_readme.contains(
-        "If ChatPCB KiCad Preview is already open, close it before running the installer again."
-    ));
+    assert!(root_readme
+        .contains("ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요."));
+    assert!(guide
+        .contains("ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요."));
+    assert!(package_readme
+        .contains("ChatPCB KiCad Preview가 이미 열려 있으면 닫고 설치 파일을 다시 실행하세요."));
+}
+
+#[test]
+fn double_click_command_files_are_korean_first_for_non_experts() {
+    let source_cmd =
+        fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
+    let package_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Install ChatPCB KiCad Preview.cmd"))
+            .unwrap();
+    let self_test_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Run ChatPCB Self Test.cmd")).unwrap();
+    let smoke_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Run First Chat Smoke Test.cmd"))
+            .unwrap();
+
+    for script in [&source_cmd, &package_cmd, &self_test_cmd, &smoke_cmd] {
+        assert!(script.contains("chcp 65001 >nul"));
+    }
+
+    for installer in [&source_cmd, &package_cmd] {
+        assert!(installer.contains("ChatPCB KiCad Preview 설치 실패"));
+        assert!(installer.contains("앱이 열려 있다면 닫고 다시 실행하세요."));
+        assert!(installer.contains("설치가 끝났습니다. 앱을 시작합니다."));
+        assert!(!installer.contains("installation failed."));
+        assert!(!installer.contains("is installed and starting now."));
+    }
+
+    assert!(self_test_cmd.contains("ChatPCB KiCad Preview 자체 검증을 실행합니다"));
+    assert!(self_test_cmd.contains("자체 검증 실패"));
+    assert!(self_test_cmd.contains("자체 검증이 끝났습니다"));
+    assert!(!self_test_cmd.contains("Self-test failed."));
+    assert!(!self_test_cmd.contains("Self-test finished."));
+
+    assert!(smoke_cmd.contains("첫 채팅 smoke test를 실행합니다"));
+    assert!(smoke_cmd.contains("첫 채팅 smoke test 실패"));
+    assert!(smoke_cmd.contains("첫 채팅 smoke test가 끝났습니다"));
+    assert!(!smoke_cmd.contains("First chat smoke test failed."));
+    assert!(!smoke_cmd.contains("First chat smoke test finished."));
 }
 
 #[test]
