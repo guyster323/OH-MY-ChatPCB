@@ -75,13 +75,15 @@ fn send_design_transcript_uses_the_user_prompt() {
     assert!(
         transcript.contains("User: Battery powered ESP32-S3 board with OLED and JLCPCB assembly")
     );
-    assert!(transcript.contains("ESP32-S3 target spec"));
-    assert!(transcript.contains("JLCPCB package contract"));
+    assert!(transcript.contains("Assistant: 결과 요약"));
+    assert!(transcript.contains("ESP32-S3 기본 보드 사양"));
+    assert!(transcript.contains("JLCPCB 검토용 package contract"));
     assert!(transcript.contains("Freerouting autoroute"));
-    assert!(transcript.contains("Full KiCad fork integration"));
-    assert!(transcript.contains("What happened"));
-    assert!(transcript.contains("Next"));
+    assert!(transcript.contains("실제 KiCad fork 통합"));
+    assert!(transcript.contains("다음 행동"));
     assert!(transcript.contains("order-ready"));
+    assert!(!transcript.contains("Assistant: What happened"));
+    assert!(!transcript.contains("Full KiCad fork integration"));
 }
 
 #[test]
@@ -98,9 +100,9 @@ fn send_design_transcript_explains_empty_prompt_builtin_example() {
     let transcript = send_design_transcript("  ");
 
     assert!(transcript.contains(&format!("User: {}", example_board_prompt())));
-    assert!(transcript.contains("No prompt was typed"));
-    assert!(transcript.contains("built-in ESP32-S3 example"));
-    assert!(transcript.contains("edit the prompt"));
+    assert!(transcript.contains("입력 안내: prompt가 비어 있어 내장 ESP32-S3 예시를 사용했습니다."));
+    assert!(transcript.contains("다음에는 prompt를 고친 뒤 Enter"));
+    assert!(!transcript.contains("No prompt was typed"));
     assert!(!transcript.contains("User:   "));
 }
 
@@ -270,7 +272,7 @@ fn chat_transcript_appends_new_turns_without_erasing_context() {
     assert!(combined.contains("Provider Login"));
     assert!(combined.contains("Claude Code: available"));
     assert!(combined.contains("User: ESP32-S3 board with USB-C and IMU"));
-    assert!(combined.contains("Assistant: What happened"));
+    assert!(combined.contains("Assistant: 결과 요약"));
     assert!(combined.find("Provider Login").unwrap() < combined.find("User: ESP32-S3").unwrap());
 }
 

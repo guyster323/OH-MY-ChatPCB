@@ -222,7 +222,7 @@ pub fn send_design_transcript(prompt: &str) -> String {
         prompt
     };
     let input_note = if prompt_was_empty {
-        "Input note: No prompt was typed, so ChatPCB used the built-in ESP32-S3 example. Next time, edit the prompt before pressing Enter.\r\n"
+        "입력 안내: prompt가 비어 있어 내장 ESP32-S3 예시를 사용했습니다. 다음에는 prompt를 고친 뒤 Enter를 누르세요.\r\n"
     } else {
         ""
     };
@@ -230,14 +230,14 @@ pub fn send_design_transcript(prompt: &str) -> String {
     format!(
         "User: {prompt}\r\n\
          {input_note}\
-         Assistant: What happened\r\n\
-         - Created the fixed ESP32-S3 target spec.\r\n\
-         - Selected the JLCPCB package contract.\r\n\
-         - Queued schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package.\r\n\
+         Assistant: 결과 요약\r\n\
+         - ESP32-S3 기본 보드 사양을 만들었습니다.\r\n\
+         - JLCPCB 검토용 package contract를 선택했습니다.\r\n\
+         - schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package 흐름을 준비했습니다.\r\n\
          Preview engine: built-in local generator; provider/model selection is readiness only. No provider CLI is invoked for this preview slice.\r\n\
-         Next\r\n\
-         - Review the generated plan here first.\r\n\
-         - Full KiCad fork integration is still required before order-ready files can be trusted.\r\n\
+         다음 행동\r\n\
+         - Open PCB 또는 Review checklist로 저장된 preview를 확인하세요.\r\n\
+         - order-ready 파일은 실제 KiCad fork 통합과 제조 증거 검토가 필요합니다.\r\n\
          Status: preview only, not order-ready yet.\r\n"
     )
 }

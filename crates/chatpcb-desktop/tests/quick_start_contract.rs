@@ -641,6 +641,12 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(!guide.contains("No fresh Computer Use proof was captured for the empty prompt"));
     assert!(guide.contains("latest Computer Use run"));
     assert!(!guide.contains("latest run's screenshot or typing proof"));
+    assert!(guide.contains(
+        "Computer Use reinstalled the current package after the first-response localization"
+    ));
+    assert!(guide.contains("`Assistant: 결과 요약`"));
+    assert!(guide.contains("`다음 행동`"));
+    assert!(guide.contains("no old `Assistant: What happened` heading"));
     assert!(guide.contains("Code and installed-package checks still passed"));
 }
 

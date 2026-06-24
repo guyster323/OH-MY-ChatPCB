@@ -265,6 +265,15 @@ Latest run after installing the current preview package was checked on
 - Computer Use rechecked the empty prompt fallback after the Korean status
   update and verified the full bottom status:
   `내장 예시 사용. 검증 완료: Open PCB/checklist. 아직 prototype-review.`
+- Computer Use reinstalled the current package after the first-response localization
+  and verified that the visible chat turn now uses `Assistant: 결과 요약`,
+  `ESP32-S3 기본 보드 사양`, and `다음 행동`, with no old
+  `Assistant: What happened` heading or `Full KiCad fork integration` sentence.
+  This is the current proof of no old `Assistant: What happened` heading.
+- Computer Use also typed `ESP32-S3 light sensor board`, waited briefly, pressed
+  Enter, and verified the installed app cleared the prompt, returned focus to
+  `Chat prompt`, and kept the bottom status at
+  `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.
