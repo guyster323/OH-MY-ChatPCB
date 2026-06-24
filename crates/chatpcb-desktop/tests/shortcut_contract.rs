@@ -217,25 +217,39 @@ fn installers_write_install_ready_summary_for_non_experts() {
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
     let package_readme =
         fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+    let install_ready_template =
+        fs::read_to_string(workspace_root().join("packaging/INSTALL-READY.txt")).unwrap();
 
     for script in [source_installer, package_installer] {
         assert!(script.contains("INSTALL-READY.txt"));
-        assert!(script.contains("Type a board idea in Chat prompt, then press Enter."));
-        assert!(script.contains("Click Review checklist after the preview is saved."));
+        assert!(script.contains("Copy-Item"));
+        assert!(script.contains("INSTALL-READY.txt"));
+        assert!(!script.contains("Type a board idea in Chat prompt, then press Enter."));
+        assert!(!script.contains("Click Review checklist after the preview is saved."));
         assert!(!script.contains("Click Open evidence after the preview is saved."));
         assert!(script.contains("INSTALL-SELF-TEST.txt"));
         assert!(script.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
-        assert!(script.contains("Boundary: prototype-review, not order-ready."));
         assert!(script.contains("Install ready summary:"));
     }
 
-    assert!(package_script.contains("Installer writes INSTALL-READY.txt"));
+    assert!(install_ready_template.contains("ChatPCB KiCad Preview 설치 완료"));
+    assert!(install_ready_template.contains("바로 시작:"));
+    assert!(install_ready_template.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(install_ready_template.contains("Review checklist"));
+    assert!(install_ready_template.contains("Boundary: prototype-review, not order-ready."));
+    assert!(!install_ready_template.contains("Type a board idea in Chat prompt"));
+
+    assert!(package_script.contains("packaging\\INSTALL-READY.txt"));
+    assert!(package_script.contains("Installer copies Korean-first INSTALL-READY.txt"));
     assert!(root_readme.contains("INSTALL-READY.txt"));
     assert!(guide.contains("INSTALL-READY.txt"));
     assert!(package_readme.contains("INSTALL-READY.txt"));
-    assert!(root_readme.contains("Type a board idea in Chat prompt, then press Enter."));
-    assert!(guide.contains("Type a board idea in Chat prompt, then press Enter."));
-    assert!(package_readme.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(root_readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(guide.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(package_readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(!root_readme.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(!guide.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(!package_readme.contains("Type a board idea in Chat prompt, then press Enter."));
 }
 
 #[test]

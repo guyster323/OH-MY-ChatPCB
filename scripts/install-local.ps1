@@ -35,6 +35,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\Run First Chat Smoke Test.cmd" -Destination "$InstallRoot\Run First Chat Smoke Test.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$InstallRoot\README-FIRST.txt"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST-KO.txt" -Destination "$InstallRoot\README-FIRST-KO.txt"
+    Copy-Item -Force -Path "$repoRoot\packaging\INSTALL-READY.txt" -Destination "$InstallRoot\INSTALL-READY.txt"
 
     $installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
     $selfTestSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --self-test-summary
@@ -55,21 +56,6 @@ try {
     }
     $firstChatSmokeSummary | Set-Content -Path $installFirstChatSmokePath -Encoding ASCII
     $installReadyPath = Join-Path $InstallRoot "INSTALL-READY.txt"
-    $installReady = @(
-        "ChatPCB KiCad Preview is installed.",
-        "",
-        "Start here:",
-        "1. Open ChatPCB KiCad Preview.",
-        "2. Type a board idea in Chat prompt, then press Enter.",
-        "3. Click Review checklist after the preview is saved.",
-        "",
-        "Verification written during install:",
-        "- INSTALL-SELF-TEST.txt",
-        "- INSTALL-FIRST-CHAT-SMOKE.txt",
-        "",
-        "Boundary: prototype-review, not order-ready."
-    )
-    $installReady | Set-Content -Path $installReadyPath -Encoding ASCII
 
     $shell = New-Object -ComObject WScript.Shell
     $desktopPath = $shell.SpecialFolders.Item('Desktop')

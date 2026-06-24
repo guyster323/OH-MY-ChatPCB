@@ -33,8 +33,8 @@ Expected result:
   `PASS Open PCB/checklist wait for a saved preview`.
 - `INSTALL-FIRST-CHAT-SMOKE.txt` is written into the same folder with the
   installed executable's chat-to-preview smoke summary.
-- `INSTALL-READY.txt` is written into the same folder with
-  `Type a board idea in Chat prompt, then press Enter.` and the
+- `INSTALL-READY.txt` is copied into the same folder with
+  `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.` and the
   `prototype-review` boundary.
 - `README-FIRST.txt` is copied beside the installed app for the first chat
   steps.
@@ -255,6 +255,16 @@ Latest run after installing the current preview package was checked on
   Login transcript included `Provider/model 선택은 준비 상태 확인용`,
   `built-in local generator`, and `provider CLI는 호출하지 않습니다`, while the
   accessibility text did not include old English provider copy.
+- Computer Use reinstalled the package after the Korean-first INSTALL-READY template change.
+  The installed `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview\INSTALL-READY.txt`
+  now starts with `ChatPCB KiCad Preview 설치 완료` and includes
+  `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.` with the
+  `prototype-review, not order-ready` boundary.
+- Computer Use relaunched the installed app and verified `Chat prompt` was focused,
+  the recovered status still said
+  `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`, and the native
+  70/30 workspace still exposed `Send design`, `Open PCB`, `Provider Login`,
+  `Review checklist`, and the model selector.
 - Computer Use typed `ESP32-S3 조도 센서 보드`, pressed Enter, and verified the
   installed app again reached
   `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`

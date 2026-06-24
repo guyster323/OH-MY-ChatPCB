@@ -15,7 +15,7 @@ Install
 7. A Start Menu shortcut named "First Chat Guide" will be created.
 8. INSTALL-SELF-TEST.txt will be written beside the installed app with a short PASS summary.
 9. INSTALL-FIRST-CHAT-SMOKE.txt will be written beside the installed app with the chat-to-preview smoke result.
-10. INSTALL-READY.txt will be written beside the installed app with "Type a board idea in Chat prompt, then press Enter."
+10. INSTALL-READY.txt will be copied beside the installed app with "만들 보드를 Chat prompt에 적고 Enter를 누릅니다."
 11. The app starts after installation.
 
 Self-test
@@ -91,7 +91,7 @@ order-ready KiCad PCB files.
 
 Evidence files
 --------------
-- INSTALL-READY.txt says where to start after install and keeps the Boundary: prototype-review, not order-ready.
+- INSTALL-READY.txt says where to start after install in Korean-first copy and keeps the Boundary: prototype-review, not order-ready.
 - RELEASE-EVIDENCE.txt records the source commit and package contents.
 - SHA256SUMS.txt records hashes for the packaged files.
 - INSTALL-SELF-TEST.txt in the installed app folder records the installed executable PASS summary.

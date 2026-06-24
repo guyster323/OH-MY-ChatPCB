@@ -16,7 +16,7 @@ For a non-expert first run from GitHub:
 2. Unzip it. Double-click `Install ChatPCB KiCad Preview.cmd`.
    If ChatPCB KiCad Preview is already open, close it before running the installer again.
 3. Open `ChatPCB KiCad Preview`.
-4. Type a board idea in `Chat prompt`, then press Enter.
+4. 만들 보드를 `Chat prompt`에 적고 Enter를 누릅니다.
 5. Click `Review checklist` after the preview is saved.
 
 The first chat transcript also shows
@@ -146,8 +146,8 @@ shortcut, adds a `First Chat Guide Korean` Start Menu shortcut for
 `README-FIRST-KO.txt`, adds a `Start Here` shortcut to the install-ready note,
 adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
-`INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, writes
-`INSTALL-READY.txt` with `Type a board idea in Chat prompt, then press Enter.`,
+`INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, copies
+`INSTALL-READY.txt` with `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.`,
 copies `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
 and starts the app.
 For this preview, Provider/model 선택은 준비 상태 확인용입니다. preview 생성은
@@ -284,9 +284,9 @@ evidence and a next-action checklist before opening the full app. The saved
 preview workspace includes `BEGINNER-NEXT-STEPS.txt`,
 `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
 `manufacturing-readiness-preview.txt`.
-The installed folder also includes `INSTALL-READY.txt`, a one-screen start
-summary that says `Type a board idea in Chat prompt, then press Enter.` and
-points back to the install self-test and first-chat smoke files.
+The installed folder also includes `INSTALL-READY.txt`, a Korean-first one-screen
+start summary that says `만들 보드를 Chat prompt에 적고 Enter를 누릅니다.` and points
+back to the install self-test and first-chat smoke files.
 
 After this repository is pushed to GitHub, the `Build ChatPCB KiCad Preview`
 workflow also uploads the same zip as an Actions artifact named

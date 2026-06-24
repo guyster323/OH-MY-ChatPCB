@@ -13,6 +13,7 @@ $releaseEvidencePath = Join-Path $packageRoot "RELEASE-EVIDENCE.txt"
 $sha256Path = Join-Path $packageRoot "SHA256SUMS.txt"
 $firstReadmePath = Join-Path $packageRoot "README-FIRST.txt"
 $firstReadmeKoPath = Join-Path $packageRoot "README-FIRST-KO.txt"
+$installReadyPath = Join-Path $packageRoot "INSTALL-READY.txt"
 $installerPath = Join-Path $packageRoot "install-from-package.ps1"
 
 function Assert-Contains {
@@ -50,7 +51,7 @@ try {
         throw "Working tree must be clean before replacement readiness check."
     }
 
-    foreach ($path in @($zipPath, $packageRoot, $releaseEvidencePath, $sha256Path, $firstReadmePath, $firstReadmeKoPath, $installerPath)) {
+    foreach ($path in @($zipPath, $packageRoot, $releaseEvidencePath, $sha256Path, $firstReadmePath, $firstReadmeKoPath, $installReadyPath, $installerPath)) {
         if (-not (Test-Path $path)) {
             throw "Missing required preview package artifact: $path"
         }
@@ -74,6 +75,7 @@ try {
     Assert-Contains $sha256 "chatpcb-core.exe" "SHA256SUMS.txt must include the Rust core executable."
     Assert-Contains $sha256 "README-FIRST.txt" "SHA256SUMS.txt must include the first chat guide."
     Assert-Contains $sha256 "README-FIRST-KO.txt" "SHA256SUMS.txt must include the Korean first chat guide."
+    Assert-Contains $sha256 "INSTALL-READY.txt" "SHA256SUMS.txt must include the install-ready start note."
     Assert-Contains $sha256 "install-from-package.ps1" "SHA256SUMS.txt must include the packaged installer."
 
     $firstReadme = Get-Content -Raw -Path $firstReadmePath
@@ -99,8 +101,7 @@ try {
     Assert-Contains $installer "README-FIRST.txt" "Packaged installer must copy README-FIRST.txt beside the installed app."
     Assert-Contains $installer "README-FIRST-KO.txt" "Packaged installer must copy README-FIRST-KO.txt beside the installed app."
     Assert-Contains $installer "Open the Korean ChatPCB KiCad first chat guide" "Packaged installer must label the Korean first chat guide shortcut."
-    Assert-Contains $installer "INSTALL-READY.txt" "Packaged installer must write the install-ready summary."
-    Assert-Contains $installer "Type a board idea in Chat prompt, then press Enter." "Install-ready summary must tell a first-run user how to start."
+    Assert-Contains $installer "INSTALL-READY.txt" "Packaged installer must copy the install-ready summary."
 
     if ($CheckRemoteHead) {
         $remoteHead = (git ls-remote origin refs/heads/main).Trim()

@@ -1,0 +1,14 @@
+ChatPCB KiCad Preview 설치 완료
+================================
+
+바로 시작:
+1. ChatPCB KiCad Preview를 엽니다.
+2. 만들 보드를 Chat prompt에 적고 Enter를 누릅니다.
+3. 저장되면 Review checklist로 확인합니다.
+
+설치 중 작성된 검증:
+- INSTALL-SELF-TEST.txt
+- INSTALL-FIRST-CHAT-SMOKE.txt
+
+Boundary: prototype-review, not order-ready.
+JLCPCB 업로드/주문용 파일이 아닙니다.

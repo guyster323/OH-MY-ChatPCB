@@ -19,7 +19,10 @@ fn root_readme_puts_non_expert_install_and_chat_path_first() {
     assert!(readme.contains("Download `ChatPCB-KiCad-Preview-windows-x64.zip`"));
     assert!(readme.contains("Double-click `Install ChatPCB KiCad Preview.cmd`"));
     assert!(readme.contains("Open `ChatPCB KiCad Preview`"));
-    assert!(readme.contains("Type a board idea in `Chat prompt`, then press Enter."));
+    assert!(readme.contains("만들 보드를 `Chat prompt`에 적고 Enter를 누릅니다."));
+    assert!(readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
+    assert!(!readme.contains("Type a board idea in `Chat prompt`, then press Enter."));
+    assert!(!readme.contains("Type a board idea in Chat prompt, then press Enter."));
     assert!(readme.contains("Click `Review checklist` after the preview is saved."));
     assert!(readme.contains("Boundary: `prototype-review`, not order-ready."));
     assert!(readme.contains("Do not upload this preview to JLCPCB."));
@@ -652,6 +655,13 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     ));
     assert!(guide.contains("`Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`"));
     assert!(guide.contains("accessibility text did not include old English provider copy"));
+    assert!(guide.contains(
+        "Computer Use reinstalled the package after the Korean-first INSTALL-READY template change"
+    ));
+    assert!(guide.contains("`만들 보드를 Chat prompt에 적고 Enter를 누릅니다.`"));
+    assert!(guide.contains(
+        "Computer Use relaunched the installed app and verified `Chat prompt` was focused"
+    ));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
     assert!(guide.contains("`내장 예시 사용.`"));

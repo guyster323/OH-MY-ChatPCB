@@ -34,6 +34,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$stagingRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$stagingRoot\README-FIRST.txt"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST-KO.txt" -Destination "$stagingRoot\README-FIRST-KO.txt"
+    Copy-Item -Force -Path "$repoRoot\packaging\INSTALL-READY.txt" -Destination "$stagingRoot\INSTALL-READY.txt"
 
     $commit = (git rev-parse --short HEAD).Trim()
     $branch = (git branch --show-current).Trim()
@@ -74,7 +75,7 @@ try {
         "- Installer writes INSTALL-SELF-TEST.txt after copying executables",
         "- First chat smoke test shortcut for non-expert verification",
         "- Installer writes INSTALL-FIRST-CHAT-SMOKE.txt after copying executables",
-        "- Installer writes INSTALL-READY.txt with immediate first-chat instructions",
+        "- Installer copies Korean-first INSTALL-READY.txt with immediate first-chat instructions",
         "- Start Here Start Menu shortcut",
         "- First Chat Guide Start Menu shortcut",
         "- Korean first chat guide for non-expert users",
