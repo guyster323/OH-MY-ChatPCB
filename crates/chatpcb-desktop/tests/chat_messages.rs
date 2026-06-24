@@ -22,7 +22,7 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
         .count();
 
     assert!(transcript.contains("Welcome to ChatPCB KiCad Preview"));
-    assert!(transcript.contains("Type a board idea in Chat prompt, then press Enter."));
+    assert!(transcript.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
     assert!(transcript.contains("Provider Login"));
     assert!(transcript.contains("built-in-preview"));
     assert!(transcript.contains("optional"));
@@ -38,6 +38,20 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
     assert!(!transcript.contains("Click Use example"));
     assert!(!transcript.contains("KiCad 10 when installed"));
     assert!(!transcript.contains("no provider is ready"));
+}
+
+#[test]
+fn initial_pipeline_status_gives_a_korean_first_action_without_extra_text() {
+    let status = initial_pipeline_status();
+
+    assert_eq!(
+        status,
+        "Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example."
+    );
+    assert!(status.contains("Enter"));
+    assert!(status.contains("ESP32-S3"));
+    assert!(!status.contains("Click"));
+    assert!(!status.contains("Provider Login"));
 }
 
 #[test]
@@ -259,7 +273,7 @@ fn chat_transcript_append_avoids_empty_history_padding() {
 fn pipeline_status_text_tracks_the_first_run_actions() {
     assert_eq!(
         initial_pipeline_status(),
-        "Ready: type a board idea, then press Enter."
+        "Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example."
     );
     assert_eq!(
         example_loaded_pipeline_status(),

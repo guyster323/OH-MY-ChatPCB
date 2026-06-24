@@ -66,6 +66,7 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("Git commit: $head"));
     assert!(script.contains("Working tree: clean"));
     assert!(script.contains("Provider model selector is readiness-only for preview generation"));
+    assert!(script.contains("Korean first-screen chat cue"));
     assert!(script.contains("Preview generation uses the built-in local generator"));
     assert!(script.contains("No provider CLI is invoked for preview generation"));
     assert!(script.contains("provider/model selection is readiness-only"));

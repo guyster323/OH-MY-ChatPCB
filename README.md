@@ -19,6 +19,10 @@ For a non-expert first run from GitHub:
 4. Type a board idea in `Chat prompt`, then press Enter.
 5. Click `Review checklist` after the preview is saved.
 
+The first chat transcript also shows
+`바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.`, and the bottom status says
+`Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example.`
+
 Boundary: `prototype-review`, not order-ready. Do not upload this preview to JLCPCB.
 Korean first-run users can open `README-FIRST-KO.txt` from the unzipped package
 or installed app folder for the same first-chat path.

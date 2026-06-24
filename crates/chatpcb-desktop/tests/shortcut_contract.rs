@@ -452,6 +452,7 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("git status --porcelain"));
     assert!(script.contains("Working tree"));
     assert!(script.contains("App launch focuses prompt input"));
+    assert!(script.contains("Korean first-screen chat cue"));
     assert!(script.contains("App launch selects available provider model"));
     assert!(script.contains("Prompt input has visible label and empty cue"));
     assert!(script.contains("Chat transcript append flow"));

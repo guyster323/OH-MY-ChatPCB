@@ -32,6 +32,7 @@ pub struct ChatActionsContract {
     pub chat_transcript_scrolls_to_latest: bool,
     pub prompt_enter_sends_design: bool,
     pub app_launch_focuses_prompt_input: bool,
+    pub app_launch_has_korean_first_chat_cue: bool,
     pub app_launch_selects_available_provider_model: bool,
     pub provider_login_appends_chat_transcript: bool,
     pub provider_login_returns_focus_to_prompt: bool,
@@ -80,6 +81,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         chat_transcript_scrolls_to_latest: true,
         prompt_enter_sends_design: true,
         app_launch_focuses_prompt_input: true,
+        app_launch_has_korean_first_chat_cue: true,
         app_launch_selects_available_provider_model: true,
         provider_login_appends_chat_transcript: true,
         provider_login_returns_focus_to_prompt: true,
@@ -129,7 +131,7 @@ pub fn left_tab_body(index: usize) -> &'static str {
 }
 
 pub fn initial_pipeline_status() -> &'static str {
-    "Ready: type a board idea, then press Enter."
+    "Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example."
 }
 
 pub fn example_loaded_pipeline_status() -> &'static str {
@@ -204,7 +206,7 @@ pub fn example_board_prompt() -> &'static str {
 
 pub fn initial_transcript() -> String {
     "Welcome to ChatPCB KiCad Preview\r\n\
-     Type a board idea in Chat prompt, then press Enter.\r\n\
+     바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.\r\n\
      Provider Login is optional; built-in-preview creates prototype-review evidence, not JLCPCB order-ready files.\r\n"
         .to_string()
 }

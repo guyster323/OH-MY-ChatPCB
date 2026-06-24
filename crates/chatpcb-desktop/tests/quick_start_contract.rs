@@ -256,6 +256,16 @@ fn prompt_input_has_accessible_label_and_empty_cue() {
 }
 
 #[test]
+fn user_test_guide_checks_the_korean_first_screen_cue() {
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+
+    assert!(guide.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
+    assert!(guide.contains("Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example."));
+    assert!(readme.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
+}
+
+#[test]
 fn app_launch_selects_available_provider_model_for_first_chat() {
     let main =
         fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();

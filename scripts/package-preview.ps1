@@ -58,6 +58,7 @@ try {
         "- Native Windows preview shell",
         "- Provider Login local CLI status detection",
         "- App launch focuses prompt input for immediate first chat",
+        "- Korean first-screen chat cue",
         "- App launch selects available provider model",
         "- Prompt input has visible label and empty cue",
         "- Prompt input and Send design transcript flow",

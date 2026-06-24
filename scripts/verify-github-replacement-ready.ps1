@@ -63,6 +63,7 @@ try {
     Assert-Contains $releaseEvidence "Start Here Start Menu shortcut" "Release evidence must include the start-here shortcut."
     Assert-Contains $releaseEvidence "First Chat Guide Start Menu shortcut" "Release evidence must include the first chat guide shortcut."
     Assert-Contains $releaseEvidence "Korean first chat guide for non-expert users" "Release evidence must include the Korean first chat guide."
+    Assert-Contains $releaseEvidence "Korean first-screen chat cue" "Release evidence must include the Korean first-screen chat cue."
     Assert-Contains $releaseEvidence "Provider model selector is readiness-only for preview generation" "Release evidence must say provider selection is readiness-only."
     Assert-Contains $releaseEvidence "Preview generation uses the built-in local generator" "Release evidence must say preview generation is local."
     Assert-Contains $releaseEvidence "No provider CLI is invoked for preview generation" "Release evidence must say provider CLIs are not invoked for preview generation."

@@ -138,6 +138,15 @@ fn print_self_test_summary() {
     );
     println!("PASS app launch focuses the prompt for immediate first chat");
     assert!(
+        chat_actions.app_launch_has_korean_first_chat_cue
+            && chatpcb_desktop::ui_model::initial_transcript()
+                .contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.")
+            && chatpcb_desktop::ui_model::initial_pipeline_status()
+                .contains("만들 보드 입력 후 Enter"),
+        "first screen must show a Korean first-chat cue without opening external docs"
+    );
+    println!("PASS first screen shows a Korean first-chat cue");
+    assert!(
         chat_actions.prompt_input_has_visible_label && chat_actions.prompt_input_has_empty_cue,
         "prompt input must have a visible label and empty cue for first-run users"
     );

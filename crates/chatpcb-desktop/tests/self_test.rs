@@ -113,6 +113,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["app_launch_has_korean_first_chat_cue"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["app_launch_selects_available_provider_model"],
         true
     );
@@ -215,6 +219,7 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
         summary.contains("PASS provider/model selection is readiness-only for preview generation")
     );
     assert!(summary.contains("PASS app launch focuses the prompt for immediate first chat"));
+    assert!(summary.contains("PASS first screen shows a Korean first-chat cue"));
     assert!(summary.contains("PASS prompt input has a visible label and empty cue"));
     assert!(summary.contains("PASS pressing Enter sends the first design"));
     assert!(summary.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));

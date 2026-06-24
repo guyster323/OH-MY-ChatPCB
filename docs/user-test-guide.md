@@ -71,19 +71,22 @@ Expected result:
 
 1. Open `ChatPCB KiCad Preview` from the desktop shortcut.
 2. Confirm the window title is `ChatPCB KiCad Preview`.
-3. Without clicking inside the app, type a short board request and press Enter.
+3. Confirm the first chat transcript says
+   `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.` and the bottom status says
+   `Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example.`
+4. Without clicking inside the app, type a short board request and press Enter.
    Confirm the text becomes a chat turn and the preview workspace is saved.
-4. Reopen the app for the rest of the first-run checks if needed.
-5. Confirm the left side is larger than the right side.
-6. Confirm the left side shows these tabs:
+5. Reopen the app for the rest of the first-run checks if needed.
+6. Confirm the left side is larger than the right side.
+7. Confirm the left side shows these tabs:
    - Schematic
    - PCB Layout
    - Validation
    - Manufacturing Preview
-7. Click each left tab and confirm the left project status and the large left
+8. Click each left tab and confirm the left project status and the large left
    preview body change for the schematic, PCB layout, validation, and
    manufacturing preview views.
-8. Confirm the right side shows:
+9. Confirm the right side shows:
    - Chat transcript
    - Chat prompt label
    - prompt input
@@ -97,11 +100,11 @@ Expected result:
    Confirm `Open PCB` and `Review checklist` are disabled before the first preview
    is saved. Confirm `Open PCB` and `Review checklist` become enabled after
    `Send design` saves a preview or after a previous preview is recovered.
-9. Confirm the model selector says `built-in-preview` when no local provider is
+10. Confirm the model selector says `built-in-preview` when no local provider is
    ready, or has already picked an available local provider if Codex, Claude
    Code, or Gemini CLI is installed.
-10. Click `Provider Login`.
-11. Confirm the chat transcript reports local CLI provider status for Codex,
+11. Click `Provider Login`.
+12. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI without erasing earlier chat turns. It should not
    ask for an API key.
    If a provider is missing, confirm the transcript shows that provider's local
@@ -113,14 +116,14 @@ Expected result:
    for this preview slice.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
-12. Click `Use example` if the prompt input is empty.
-13. Type, edit, or keep a board prompt in the prompt input. After clicking
+13. Click `Use example` if the prompt input is empty.
+14. Type, edit, or keep a board prompt in the prompt input. After clicking
     `Use example`, pressing Enter should work without clicking back into the
     prompt box.
-14. Press Enter in the prompt input, or click `Send design`.
+15. Press Enter in the prompt input, or click `Send design`.
     If the prompt is empty, confirm the chat transcript says no prompt was
     typed and that the built-in ESP32-S3 example was used.
-15. Confirm the chat transcript still includes the earlier Provider Login
+16. Confirm the chat transcript still includes the earlier Provider Login
     status and also appends your prompt plus a preview pipeline:
    - ESP32-S3 target spec
    - JLCPCB package contract
@@ -129,52 +132,52 @@ Expected result:
    - Freerouting autoroute
    - DRC
    - manufacturing package
-16. Confirm the chat transcript says `Preview workspace saved`.
-17. Confirm the chat transcript is positioned at the latest response after the
+17. Confirm the chat transcript says `Preview workspace saved`.
+18. Confirm the chat transcript is positioned at the latest response after the
     send, so the new design result is visible without manually scrolling down.
-18. Without clicking back inside the prompt box, type another short follow-up
+19. Without clicking back inside the prompt box, type another short follow-up
     request and confirm it appears in the prompt input.
-19. Confirm the left project status and large left preview body now show
+20. Confirm the left project status and large left preview body now show
     `Preview workspace saved` instead of only the initial Schematic preview.
-20. Confirm the chat transcript and large left preview body mention the
+21. Confirm the chat transcript and large left preview body mention the
     `KiCad CLI check` and `kicad-pcb-check.txt`.
-21. Confirm the chat transcript and large left preview body mention
+22. Confirm the chat transcript and large left preview body mention
     `KiCad ERC/DRC reports`, `erc-report.json`, `drc-report.json`, and
     `kicad-validation-summary.txt`.
-22. Confirm the chat transcript or large left preview body mentions
+23. Confirm the chat transcript or large left preview body mentions
     `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
     `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
-23. Confirm the bottom pipeline status stays short and says
+24. Confirm the bottom pipeline status stays short and says
     `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
     when local ERC/DRC reports are clear.
-24. Click `Open PCB`.
-25. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
+25. Click `Open PCB`.
+26. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
     Editor.` or `Opened preview PCB file. Install KiCad 10 if PCB Editor did
     not open.`
-26. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
+27. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
     and the board preview contains a 50mm x 50mm `Edge.Cuts` outline.
-27. Click `Review checklist`.
-28. Confirm Review checklist opens the preview evidence folder with
+28. Click `Review checklist`.
+29. Confirm Review checklist opens the preview evidence folder with
     `BEGINNER-NEXT-STEPS.txt` selected.
     Confirm the bottom status says
     `Opened BEGINNER-NEXT-STEPS.txt for checklist review.`
     Confirm it says to click Open PCB, click Review checklist, ask a follow-up in
     chat, and not order yet.
-29. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and
+30. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and
     confirm the summary says to return to the focused prompt, type a follow-up,
     and not upload this preview to JLCPCB.
-30. Close and reopen `ChatPCB KiCad Preview`, then click `Review checklist` before
+31. Close and reopen `ChatPCB KiCad Preview`, then click `Review checklist` before
     sending another prompt.
-31. Confirm the left project status says `Previous preview workspace found`
+32. Confirm the left project status says `Previous preview workspace found`
     before you send another prompt.
-32. Confirm the chat transcript also says `Previous preview workspace found`
+33. Confirm the chat transcript also says `Previous preview workspace found`
     and points you to `Review checklist` and `Open PCB`.
-33. Confirm the short bottom status says
+34. Confirm the short bottom status says
     `Recovered preview: type a follow-up, Open PCB, or Review checklist.`
     instead of a long local path.
-34. Confirm Windows opens the same previous preview evidence folder with the
+35. Confirm Windows opens the same previous preview evidence folder with the
     first-run summary selected.
-35. Confirm the preview evidence folder exists:
+36. Confirm the preview evidence folder exists:
 
 ```text
 %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
@@ -215,6 +218,11 @@ Latest run after installing the current preview package was checked on
   `Chat prompt` label, the prompt input, `Use example`, `Send design`,
   `Open PCB`, `Provider Login`, `Review checklist`, the model selector, and the
   bottom pipeline status.
+- Computer Use verified the first transcript now shows
+  `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.` and the bottom status uses
+  the short first-action cue
+  `Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example.` when no recovered
+  action has replaced it.
 - Computer Use also captured an accessibility text tree for the same window,
   including the Schematic / PCB Layout / Validation / Manufacturing Preview
   tabs, `Chat prompt` label, focused `Chat prompt` edit control, and the
@@ -234,6 +242,10 @@ Latest run after installing the current preview package was checked on
   Enter, and verified the installed app reached
   `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
   with the prompt refocused.
+- Computer Use typed `ESP32-S3 온습도 센서 보드`, pressed Enter, and verified the
+  installed app again reached
+  `Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.`
+  with focus returned to `Chat prompt`.
 - Computer Use verified the fresh first-chat view lists
   `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
   `manufacturing-readiness-preview.txt` in the native left preview pane.
