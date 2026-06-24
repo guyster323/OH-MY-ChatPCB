@@ -52,6 +52,7 @@ Expected result:
   `PASS pressing Enter sends the first design` and
   `PASS empty prompt visibly uses the built-in ESP32-S3 example` and
   `PASS Send design returns focus for follow-up chat` and
+  `PASS provider/model selection is readiness-only for preview generation` and
   `PASS Use example selects prompt text for immediate overwrite` and
   `Boundary: prototype-review, not order-ready`.
 - Running `Run First Chat Smoke Test` prints `ChatPCB First Chat Smoke Test`,
@@ -104,6 +105,9 @@ Expected result:
    CLI install/login hint and says to click `Provider Login` again after local
    CLI login.
    If a provider is available, the model selector should move to that provider.
+   Confirm the transcript says provider/model selection is readiness-only:
+   preview generation uses the built-in local generator. No provider CLI is invoked
+   for this preview slice.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
 12. Click `Use example` if the prompt input is empty.
@@ -218,6 +222,10 @@ Latest run after installing the current preview package was checked on
   the long preview folder path, and it was not hidden by automatic provider detection.
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `Chat prompt`.
+- Computer Use verified the Provider Login status now says
+  `Provider detected: claude:auto; preview still local.` and that the next
+  `Send design` response says `Preview engine: built-in local generator` plus
+  `No provider CLI is invoked`.
 - Computer Use typed
   `USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package`, pressed
   Enter, and verified the installed app reached

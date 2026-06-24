@@ -58,6 +58,15 @@ fn send_design_transcript_uses_the_user_prompt() {
 }
 
 #[test]
+fn send_design_transcript_separates_provider_selection_from_preview_engine() {
+    let transcript = send_design_transcript("ESP32-S3 board after selecting claude:auto");
+
+    assert!(transcript.contains("Preview engine: built-in local generator"));
+    assert!(transcript.contains("provider/model selection is readiness only"));
+    assert!(transcript.contains("No provider CLI is invoked"));
+}
+
+#[test]
 fn send_design_transcript_explains_empty_prompt_builtin_example() {
     let transcript = send_design_transcript("  ");
 
@@ -187,6 +196,8 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
 
     let transcript = provider_login_transcript(&statuses);
     assert!(transcript.contains("Selected model: claude:auto"));
+    assert!(transcript.contains("readiness only"));
+    assert!(transcript.contains("built-in local generator"));
 }
 
 #[test]
@@ -256,7 +267,7 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
     );
     assert_eq!(
         provider_login_pipeline_status(Some("claude:auto")),
-        "Provider ready: claude:auto selected."
+        "Provider detected: claude:auto; preview still local."
     );
     assert_eq!(
         provider_login_pipeline_status(None),

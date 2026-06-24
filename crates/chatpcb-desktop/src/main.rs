@@ -128,6 +128,11 @@ fn print_self_test_summary() {
     );
     println!("PASS model selector falls back to built-in preview");
     assert!(
+        chat_actions.provider_model_selection_is_readiness_only_for_preview,
+        "Provider/model selection must be readiness-only until live provider invocation exists"
+    );
+    println!("PASS provider/model selection is readiness-only for preview generation");
+    assert!(
         chat_actions.app_launch_focuses_prompt_input,
         "app launch must focus the prompt so first-run users can type immediately"
     );

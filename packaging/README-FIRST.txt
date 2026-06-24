@@ -29,6 +29,7 @@ installed executable prints a short PASS summary. It should include
 "PASS pressing Enter sends the first design" and
 "PASS empty prompt visibly uses the built-in ESP32-S3 example" and
 "PASS Send design returns focus for follow-up chat" and
+"PASS provider/model selection is readiness-only for preview generation" and
 "PASS first-run evidence blocks JLCPCB upload" and
 "Boundary: prototype-review, not order-ready".
 
@@ -50,35 +51,36 @@ First chat
 4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
 5. If a provider is missing, confirm the chat transcript shows a local CLI install/login hint and says to click Provider Login again after local CLI login.
 6. If no local provider is ready yet, continue anyway; the built-in preview still works.
-7. Type immediately after Provider Login; focus returns to the prompt box.
-8. Click Use example if the prompt box is empty.
-9. The example text is selected, so typing replaces it.
-10. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
-11. Press Enter in the prompt box, or click Send design.
-12. If the prompt was empty, confirm the chat transcript says no prompt was typed and that the built-in ESP32-S3 example was used.
-13. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
-14. Confirm the transcript is positioned at the latest response.
-15. Confirm the chat transcript says "Preview workspace saved".
-16. Confirm the large left preview body also shows the saved KiCad scaffold files.
-17. Confirm the chat transcript and left preview body mention "KiCad CLI check".
-18. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
-19. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
-20. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
-21. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
-22. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
-23. Confirm the bottom status says "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
-24. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
-25. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
-26. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-27. Click Review checklist to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
-28. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
-29. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
-30. Close and reopen the app, then click Review checklist before sending again.
-31. Confirm the left project status says "Previous preview workspace found".
-32. Confirm the chat transcript also says "Previous preview workspace found".
-33. Confirm the short bottom status says "Recovered preview: type a follow-up, Open PCB, or Review checklist."
-34. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
-35. The folder path is:
+7. Confirm provider/model selection is readiness-only: preview generation uses the built-in local generator. No provider CLI is invoked.
+8. Type immediately after Provider Login; focus returns to the prompt box.
+9. Click Use example if the prompt box is empty.
+10. The example text is selected, so typing replaces it.
+11. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
+12. Press Enter in the prompt box, or click Send design.
+13. If the prompt was empty, confirm the chat transcript says no prompt was typed and that the built-in ESP32-S3 example was used.
+14. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
+15. Confirm the transcript is positioned at the latest response.
+16. Confirm the chat transcript says "Preview workspace saved".
+17. Confirm the large left preview body also shows the saved KiCad scaffold files.
+18. Confirm the chat transcript and left preview body mention "KiCad CLI check".
+19. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
+20. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
+21. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
+22. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
+23. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
+24. Confirm the bottom status says "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review." when local ERC/DRC reports are clear.
+25. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
+26. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
+27. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+28. Click Review checklist to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
+29. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
+30. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
+31. Close and reopen the app, then click Review checklist before sending again.
+32. Confirm the left project status says "Previous preview workspace found".
+33. Confirm the chat transcript also says "Previous preview workspace found".
+34. Confirm the short bottom status says "Recovered preview: type a follow-up, Open PCB, or Review checklist."
+35. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
+36. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

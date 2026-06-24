@@ -11,6 +11,7 @@ pub struct ChatActionsContract {
     pub use_example_focuses_prompt_input: bool,
     pub use_example_selects_prompt_for_overwrite: bool,
     pub provider_login_selects_available_model: bool,
+    pub provider_model_selection_is_readiness_only_for_preview: bool,
     pub provider_login_keeps_builtin_preview_unblocked: bool,
     pub pipeline_status_updates_after_actions: bool,
     pub send_design_writes_preview_workspace: bool,
@@ -58,6 +59,7 @@ pub fn chat_actions_contract() -> ChatActionsContract {
         use_example_focuses_prompt_input: true,
         use_example_selects_prompt_for_overwrite: true,
         provider_login_selects_available_model: true,
+        provider_model_selection_is_readiness_only_for_preview: true,
         provider_login_keeps_builtin_preview_unblocked: true,
         pipeline_status_updates_after_actions: true,
         send_design_writes_preview_workspace: true,
@@ -136,7 +138,7 @@ pub fn example_loaded_pipeline_status() -> &'static str {
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     match selected_model {
-        Some(model) => format!("Provider ready: {model} selected."),
+        Some(model) => format!("Provider detected: {model}; preview still local."),
         None => "No local provider found; built-in preview still works.".to_string(),
     }
 }
@@ -228,6 +230,7 @@ pub fn send_design_transcript(prompt: &str) -> String {
          - Created the fixed ESP32-S3 target spec.\r\n\
          - Selected the JLCPCB package contract.\r\n\
          - Queued schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package.\r\n\
+         Preview engine: built-in local generator; provider/model selection is readiness only. No provider CLI is invoked for this preview slice.\r\n\
          Next\r\n\
          - Review the generated plan here first.\r\n\
          - Full KiCad fork integration is still required before order-ready files can be trusted.\r\n\
@@ -507,6 +510,9 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
 
     if let Some(model) = selected_provider_model(statuses) {
         transcript.push_str(&format!("Selected model: {model}\r\n"));
+        transcript.push_str(
+            "Provider/model selection is readiness only; preview generation still uses the built-in local generator. No provider CLI is invoked for this preview slice.\r\n",
+        );
         transcript.push_str(
             "Pick an available provider in the model selector, then type a board idea and press Enter or click Send design.\r\n",
         );

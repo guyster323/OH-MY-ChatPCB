@@ -142,6 +142,8 @@ shortcut, adds a `Start Here` shortcut to the install-ready note, adds a
 `INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, writes
 `INSTALL-READY.txt` with `Type a board idea in Chat prompt, then press Enter.`,
 copies `README-FIRST.txt` beside the installed app, and starts the app.
+For this preview, provider/model selection is readiness-only. Preview generation
+uses the built-in local generator. No provider CLI is invoked.
 
 For a source-tree first run on a machine with Rust installed, double-click:
 
@@ -170,7 +172,9 @@ blocked before pressing `Send design`. It also shows the local CLI install/login
 hint for each missing provider and tells the user to click `Provider Login`
 again after completing local CLI login. The model selector also picks the first
 available local provider on launch, so a first-run user sees a realistic model
-choice before pressing anything when a CLI is available. `Use
+choice before pressing anything when a CLI is available. That provider/model
+selection is readiness-only for this slice; `Send design` still uses the
+built-in local generator. No provider CLI is invoked. `Use
 example` refills the starter prompt after a send. Both `Provider Login` and `Use
 example` return focus to the prompt, so the next typed request or Enter key works
 without another click. On launch, the starter prompt is already selected, so
@@ -252,6 +256,7 @@ PASS prompt input has a visible label and empty cue
 PASS pressing Enter sends the first design
 PASS empty prompt visibly uses the built-in ESP32-S3 example
 PASS Send design returns focus for follow-up chat
+PASS provider/model selection is readiness-only for preview generation
 PASS Use example selects prompt text for immediate overwrite
 ```
 

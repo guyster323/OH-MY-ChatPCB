@@ -66,6 +66,8 @@ try {
         "- Provider Login appends without erasing chat",
         "- Provider Login keeps built-in preview unblocked when no CLI is ready",
         "- Provider Login shows local CLI login hints",
+        "- Provider model selector is readiness-only for preview generation",
+        "- Preview generation uses the built-in local generator",
         "- Self-test shortcut for installed package verification",
         "- Installer writes INSTALL-SELF-TEST.txt after copying executables",
         "- First chat smoke test shortcut for non-expert verification",
@@ -105,6 +107,7 @@ try {
         "Current boundary:",
         "- Preview only; not order-ready KiCad output yet",
         "- No completed schematic, PCB autoroute, Gerber, drill, or placement-reviewed BOM/CPL generation yet",
+        "- No provider CLI is invoked for preview generation",
         "- No provider credentials are stored by ChatPCB3"
     )
     Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding ASCII

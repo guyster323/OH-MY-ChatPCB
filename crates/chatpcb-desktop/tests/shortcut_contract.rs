@@ -429,6 +429,8 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Provider Login appends without erasing chat"));
     assert!(script.contains("Provider Login keeps built-in preview unblocked when no CLI is ready"));
     assert!(script.contains("Provider Login shows local CLI login hints"));
+    assert!(script.contains("Provider model selector is readiness-only for preview generation"));
+    assert!(script.contains("Preview generation uses the built-in local generator"));
     assert!(script.contains("Provider Login returns focus to prompt"));
     assert!(script.contains("Use example returns focus to prompt"));
     assert!(script.contains("Use example selects prompt text for immediate overwrite"));
@@ -458,6 +460,20 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("Relaunch mentions previous preview workspace in chat"));
     assert!(script.contains("KiCad fork CMake drop-in target"));
     assert!(script.contains("KiCad fork stdio chatpcb-core bridge skeleton"));
+}
+
+#[test]
+fn first_run_docs_explain_provider_selection_is_not_invoked_for_preview() {
+    let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for document in [readme, guide, package_readme] {
+        assert!(document.contains("provider/model selection is readiness-only"));
+        assert!(document.contains("built-in local generator"));
+        assert!(document.contains("No provider CLI is invoked"));
+    }
 }
 
 #[test]

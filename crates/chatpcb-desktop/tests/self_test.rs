@@ -40,6 +40,10 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         true
     );
     assert_eq!(
+        contract["chat_actions"]["provider_model_selection_is_readiness_only_for_preview"],
+        true
+    );
+    assert_eq!(
         contract["chat_actions"]["pipeline_status_updates_after_actions"],
         true
     );
@@ -207,6 +211,9 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS native Windows app"));
     assert!(summary.contains("PASS Provider Login shows local CLI login hints"));
     assert!(summary.contains("PASS model selector falls back to built-in preview"));
+    assert!(
+        summary.contains("PASS provider/model selection is readiness-only for preview generation")
+    );
     assert!(summary.contains("PASS app launch focuses the prompt for immediate first chat"));
     assert!(summary.contains("PASS prompt input has a visible label and empty cue"));
     assert!(summary.contains("PASS pressing Enter sends the first design"));
