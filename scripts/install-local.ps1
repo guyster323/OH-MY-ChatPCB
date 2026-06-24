@@ -6,8 +6,18 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+function Assert-ChatPCBPreviewNotRunning {
+    $runningPreview = Get-Process -Name "ChatPCB KiCad Preview" -ErrorAction SilentlyContinue
+    if ($runningPreview) {
+        throw "Close ChatPCB KiCad Preview, then run this installer again."
+    }
+}
+
 Push-Location $repoRoot
 try {
+    Assert-ChatPCBPreviewNotRunning
+
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
         throw "Rust Cargo was not found. Install Rust first, or use the packaged ChatPCB KiCad Preview zip."
     }

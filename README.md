@@ -14,6 +14,7 @@ For a non-expert first run from GitHub:
 1. Download `ChatPCB-KiCad-Preview-windows-x64.zip` from the latest release or
    workflow artifact.
 2. Unzip it. Double-click `Install ChatPCB KiCad Preview.cmd`.
+   If ChatPCB KiCad Preview is already open, close it before running the installer again.
 3. Open `ChatPCB KiCad Preview`.
 4. Type a board idea in `Chat prompt`, then press Enter.
 5. Click `Review checklist` after the preview is saved.
@@ -129,6 +130,8 @@ Unzip it and double-click:
 ```text
 Install ChatPCB KiCad Preview.cmd
 ```
+
+If ChatPCB KiCad Preview is already open, close it before running the installer again.
 
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop

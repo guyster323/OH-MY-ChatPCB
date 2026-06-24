@@ -6,6 +6,7 @@ This is a native Windows preview of the ChatPCB KiCad app.
 Install
 -------
 1. Double-click "Install ChatPCB KiCad Preview.cmd".
+   If ChatPCB KiCad Preview is already open, close it before running the installer again.
 2. A desktop shortcut named "ChatPCB KiCad Preview" will be created.
 3. A Start Menu folder named "ChatPCB KiCad Preview" will be created.
 4. A Start Menu shortcut named "Run ChatPCB Self Test" will be created.

@@ -42,6 +42,15 @@ if (-not (Test-Path $firstReadme)) {
     throw "Missing README-FIRST.txt in the package folder."
 }
 
+function Assert-ChatPCBPreviewNotRunning {
+    $runningPreview = Get-Process -Name "ChatPCB KiCad Preview" -ErrorAction SilentlyContinue
+    if ($runningPreview) {
+        throw "Close ChatPCB KiCad Preview, then run this installer again."
+    }
+}
+
+Assert-ChatPCBPreviewNotRunning
+
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 Copy-Item -Force -Path $desktopExe -Destination "$InstallRoot\ChatPCB KiCad Preview.exe"
 Copy-Item -Force -Path $coreExe -Destination "$InstallRoot\chatpcb-core.exe"
