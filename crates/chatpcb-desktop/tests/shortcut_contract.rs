@@ -510,6 +510,12 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(
         !script.contains("Actionable validation status points to Open PCB and Review checklist")
     );
+    assert!(
+        script.contains("Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding UTF8")
+    );
+    assert!(
+        !script.contains("Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding ASCII")
+    );
     assert!(script.contains("Recovered preview status keeps follow-up chat visible"));
     assert!(script.contains("Relaunch shows previous preview workspace status"));
     assert!(script.contains("Relaunch mentions previous preview workspace in chat"));

@@ -114,7 +114,7 @@ try {
         "- No provider CLI is invoked for preview generation",
         "- No provider credentials are stored by ChatPCB3"
     )
-    Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding ASCII
+    Set-Content -Path $releaseEvidencePath -Value $evidence -Encoding UTF8
 
     Get-ChildItem -File -Path $stagingRoot |
         Sort-Object Name |
