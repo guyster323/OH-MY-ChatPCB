@@ -83,7 +83,7 @@ Implemented in this first vertical slice:
   a follow-up chat can be typed immediately.
 - On app launch, the starter prompt is focused and selected so a first-run user
   can type immediately, then press Enter.
-- On app launch, the model selector shows `built-in-preview` when no local CLI
+- On app launch, the model selector shows `내장 미리보기` when no local CLI
   provider is ready, then selects the first available provider model when one is
   found.
 - KiCad fork source skeleton for a native `wxSplitterWindow` workspace with:
@@ -177,7 +177,7 @@ preview is recovered. The left tabs also show a native preview body, not an
 empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. If no local provider
-is ready yet, the model selector stays on `built-in-preview` and Provider Login
+is ready yet, the model selector stays on `내장 미리보기` and Provider Login
 says the built-in preview can still be created, so a first-run user is not
 blocked before pressing `설계 생성`. It also shows the local CLI install/login
 hint for each missing provider and tells the user to click `Provider Login`
@@ -259,7 +259,7 @@ for the app, `Start Here`, `First Chat Guide`, self-test, and
 first-run user can verify the installed executable contract with a short PASS
 summary. That summary also
 verifies the first-run evidence points back to follow-up chat, blocks JLCPCB
-upload for this preview, keeps the model selector on `built-in-preview` when no
+upload for this preview, keeps the model selector on `내장 미리보기` when no
 provider is ready, and prints these first-chat PASS lines:
 
 ```text

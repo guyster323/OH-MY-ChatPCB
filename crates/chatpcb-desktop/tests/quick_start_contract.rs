@@ -700,10 +700,32 @@ fn model_selector_is_collapsed_dropdown_for_first_run_clarity() {
 
     assert!(main.contains("CBS_DROPDOWNLIST"));
     assert!(main.contains("WS_TABSTOP | CBS_DROPDOWNLIST"));
-    assert!(main.contains("model_selector_items()"));
+    assert!(main.contains("model_selector_display_items()"));
     assert!(main.contains("selected_model_for_statuses"));
+    assert!(ui_model.contains("model_selector_display_items"));
+    assert!(ui_model.contains("\"내장 미리보기\""));
+    assert!(ui_model.contains("\"Claude Code 자동\""));
     assert!(ui_model.contains("\"built-in-preview\""));
     assert!(ui_model.contains("selected_model_for_statuses"));
+}
+
+#[test]
+fn bottom_model_selector_leaves_room_for_friendly_provider_names() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+    let bottom_row = main
+        .split("let provider_width =")
+        .nth(1)
+        .unwrap()
+        .split("MoveWindow( controls.pipeline_status")
+        .next()
+        .unwrap();
+
+    assert!(bottom_row.contains("112;"));
+    assert!(bottom_row.contains("let evidence_width = 88;"));
+    assert!(bottom_row.contains("right_width - (model_x - right_x)"));
+    assert!(!bottom_row.contains("let evidence_width = 140;"));
+    assert!(!bottom_row.contains("let provider_width = 122;"));
 }
 
 #[test]
@@ -743,9 +765,16 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
         "Computer Use reinstalled the current package after the first-screen/provider copy localization"
     ));
     assert!(guide.contains(
-        "`Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`"
+        "`Provider Login은 선택 사항입니다. 내장 미리보기로 prototype-review 증거를 만들며 JLCPCB 주문 준비 파일은 아닙니다.`"
     ));
-    assert!(guide.contains("`Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`"));
+    assert!(guide
+        .contains("`Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`"));
+    assert!(guide.contains("`내장 미리보기`"));
+    assert!(guide.contains("`Claude Code 자동`"));
+    assert!(!guide.contains("Confirm the model selector says `built-in-preview`"));
+    assert!(
+        !guide.contains("`Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`")
+    );
     assert!(!guide.contains("`Provider 감지: claude:auto; preview 생성은 아직 로컬입니다.`"));
     assert!(guide.contains("accessibility text did not include old English provider copy"));
     assert!(guide.contains(
@@ -779,6 +808,12 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
         guide.contains("`검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`")
     );
     assert!(guide.contains("no old `Open PCB/checklist`, `Open PCB/Review checklist`, `Recovered:`, or `Ready:` status text"));
+    assert!(guide.contains(
+        "Computer Use reinstalled and relaunched the package after the friendly model selector update"
+    ));
+    assert!(guide.contains("`Claude Code 자동` fits in the collapsed model selector"));
+    assert!(guide.contains("`내장 미리보기`, `Codex 자동`, `Claude Code 자동`, and `Gemini 자동`"));
+    assert!(guide.contains("no raw `built-in-preview` or `claude:auto` model id"));
 }
 
 #[test]

@@ -2,16 +2,16 @@ use chatpcb_desktop::ui_model::{
     append_chat_transcript, design_pipeline_status, erc_drc_validation_transcript,
     example_board_prompt, example_loaded_pipeline_status, initial_left_workspace_status,
     initial_pipeline_status, initial_transcript, kicad_cli_check_transcript, left_tab_body,
-    left_tab_status, model_selector_items, open_evidence_pipeline_status, open_pcb_pipeline_status,
-    preview_result_summary_transcript, preview_workspace_body,
-    preview_workspace_body_with_kicad_check, preview_workspace_body_with_validation_reports,
-    preview_workspace_failed_transcript, preview_workspace_left_status,
-    preview_workspace_saved_transcript, provider_login_pipeline_status, provider_login_transcript,
-    recovered_preview_pipeline_status, recovered_preview_workspace_body,
-    recovered_preview_workspace_left_status, recovered_preview_workspace_transcript,
-    saved_preview_tab_body, saved_preview_tab_status, selected_model_for_statuses,
-    selected_provider_model, send_design_transcript, validation_pipeline_status,
-    visible_empty_prompt_pipeline_status, ProviderUiStatus,
+    left_tab_status, model_selector_display_items, model_selector_items,
+    open_evidence_pipeline_status, open_pcb_pipeline_status, preview_result_summary_transcript,
+    preview_workspace_body, preview_workspace_body_with_kicad_check,
+    preview_workspace_body_with_validation_reports, preview_workspace_failed_transcript,
+    preview_workspace_left_status, preview_workspace_saved_transcript,
+    provider_login_pipeline_status, provider_login_transcript, recovered_preview_pipeline_status,
+    recovered_preview_workspace_body, recovered_preview_workspace_left_status,
+    recovered_preview_workspace_transcript, saved_preview_tab_body, saved_preview_tab_status,
+    selected_model_for_statuses, selected_provider_model, send_design_transcript,
+    validation_pipeline_status, visible_empty_prompt_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -262,7 +262,8 @@ fn provider_login_selects_the_first_available_model_for_non_experts() {
     assert_eq!(selected_provider_model(&statuses), Some("claude:auto"));
 
     let transcript = provider_login_transcript(&statuses);
-    assert!(transcript.contains("선택된 모델: claude:auto"));
+    assert!(transcript.contains("선택된 모델: Claude Code 자동"));
+    assert!(!transcript.contains("선택된 모델: claude:auto"));
     assert!(transcript.contains("로그인 상태 확인용"));
     assert!(transcript.contains("앱 안의 기본 생성기"));
     assert!(transcript.contains("로컬 도구를 대신 실행하지 않습니다"));
@@ -293,9 +294,16 @@ fn model_selector_uses_builtin_preview_when_no_provider_is_ready() {
     ];
 
     let items = model_selector_items();
+    let display_items = model_selector_display_items();
 
     assert_eq!(items[0], "built-in-preview");
     assert!(items.contains(&"codex:auto"));
+    assert_eq!(display_items[0], "내장 미리보기");
+    assert!(display_items.contains(&"Codex 자동"));
+    assert!(display_items.contains(&"Claude Code 자동"));
+    assert!(display_items.contains(&"Gemini 자동"));
+    assert!(!display_items.contains(&"built-in-preview"));
+    assert!(!display_items.contains(&"claude:auto"));
     assert_eq!(selected_provider_model(&statuses), None);
     assert_eq!(selected_model_for_statuses(&statuses), "built-in-preview");
 }
@@ -339,7 +347,7 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
     );
     assert_eq!(
         provider_login_pipeline_status(Some("claude:auto")),
-        "Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다."
+        "Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다."
     );
     assert_eq!(
         provider_login_pipeline_status(None),

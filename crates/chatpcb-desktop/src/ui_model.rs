@@ -148,7 +148,10 @@ pub fn example_loaded_pipeline_status() -> &'static str {
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     match selected_model {
-        Some(model) => format!("Provider 감지: {model}; 미리보기 생성은 앱 안에서만 진행됩니다."),
+        Some(model) => format!(
+            "Provider 감지: {}; 미리보기 생성은 앱 안에서만 진행됩니다.",
+            provider_model_display_name(model)
+        ),
         None => "로컬 도구 없음; 내장 미리보기는 계속 사용 가능합니다.".to_string(),
     }
 }
@@ -160,6 +163,25 @@ pub fn model_selector_items() -> [&'static str; 4] {
         "claude:auto",
         "gemini:auto",
     ]
+}
+
+pub fn model_selector_display_items() -> [&'static str; 4] {
+    [
+        "내장 미리보기",
+        "Codex 자동",
+        "Claude Code 자동",
+        "Gemini 자동",
+    ]
+}
+
+pub fn provider_model_display_name(model: &str) -> &str {
+    match model {
+        "built-in-preview" => "내장 미리보기",
+        "codex:auto" => "Codex 자동",
+        "claude:auto" => "Claude Code 자동",
+        "gemini:auto" => "Gemini 자동",
+        _ => model,
+    }
 }
 
 pub fn model_selector_index(model: &str) -> Option<usize> {
@@ -457,7 +479,10 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
     }
 
     if let Some(model) = selected_provider_model(statuses) {
-        transcript.push_str(&format!("선택된 모델: {model}\r\n"));
+        transcript.push_str(&format!(
+            "선택된 모델: {}\r\n",
+            provider_model_display_name(model)
+        ));
         transcript.push_str(
             "Provider Login은 로그인 상태 확인용입니다. 미리보기는 앱 안의 기본 생성기로 만들며 Codex, Claude Code, Gemini 로컬 도구를 대신 실행하지 않습니다.\r\n",
         );

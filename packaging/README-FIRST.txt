@@ -47,7 +47,7 @@ First chat
 ----------
 1. Type a PCB request immediately after the app opens. The starter prompt is already selected.
 2. Press Enter to send it.
-3. Confirm the model selector says built-in-preview when no local provider is ready, or has already picked an available local provider if one is found.
+3. Confirm the model selector says "내장 미리보기" when no local provider is ready, or has already picked an available display name such as "Codex 자동", "Claude Code 자동", or "Gemini 자동" if one is found.
 4. Click Provider Login to check local Codex, Claude Code, and Gemini CLI status without erasing chat.
 5. If a provider is missing, confirm the chat transcript shows a local CLI install/login hint and says to click Provider Login again after local CLI login.
 6. If no local provider is ready yet, continue anyway; the built-in preview still works.

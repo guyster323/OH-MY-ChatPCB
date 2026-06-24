@@ -103,7 +103,7 @@ fn print_self_test_summary() {
     let package = build_jlcpcb_package(&spec);
     let route = freerouting_contract();
     let chat_actions = chat_actions_contract();
-    let model_items = chatpcb_desktop::ui_model::model_selector_items();
+    let model_items = chatpcb_desktop::ui_model::model_selector_display_items();
     let fallback_model = chatpcb_desktop::ui_model::selected_model_for_statuses(&[]);
     let evidence = first_run_evidence_summary_contract()
         .expect("first-run evidence summary contract must be readable");
@@ -114,8 +114,8 @@ fn print_self_test_summary() {
     println!("PASS Provider Login shows local CLI login hints");
     assert_eq!(
         model_items.first().copied(),
-        Some("built-in-preview"),
-        "model selector must show built-in preview before provider-backed models"
+        Some("내장 미리보기"),
+        "model selector must show built-in preview display text before provider-backed models"
     );
     assert_eq!(
         fallback_model, "built-in-preview",
@@ -814,7 +814,7 @@ mod win32_app {
             WS_TABSTOP | CBS_DROPDOWNLIST as u32,
             0,
         );
-        for model in chatpcb_desktop::ui_model::model_selector_items() {
+        for model in chatpcb_desktop::ui_model::model_selector_display_items() {
             add_combo_item(model_choice, model);
         }
         SendMessageW(model_choice, CB_SETCURSEL, 0, 0);
@@ -1165,8 +1165,8 @@ mod win32_app {
             30,
             1,
         );
-        let provider_width = 122;
-        let evidence_width = 140;
+        let provider_width = 112;
+        let evidence_width = 88;
         MoveWindow(
             controls.provider_button,
             right_x,

@@ -100,9 +100,10 @@ Expected result:
    Confirm `PCB 열기` and `검토 목록` are disabled before the first preview is
    saved. Confirm `PCB 열기` and `검토 목록` become enabled after `설계 생성` saves
    a preview or after a previous preview is recovered.
-10. Confirm the model selector says `built-in-preview` when no local provider is
-   ready, or has already picked an available local provider if Codex, Claude
-   Code, or Gemini CLI is installed.
+10. Confirm the model selector says `내장 미리보기` when no local provider is
+   ready, or has already picked an available local provider such as
+   `Codex 자동`, `Claude Code 자동`, or `Gemini 자동` if Codex, Claude Code, or
+   Gemini CLI is installed.
 11. Click `Provider Login`.
 12. Confirm the chat transcript reports local CLI provider status for Codex,
    Claude Code, and Gemini CLI without erasing earlier chat turns. It should not
@@ -247,16 +248,16 @@ Latest run after installing the current preview package was checked on
 - Computer Use then clicked `Provider Login` and verified that provider status
   still appears after the explicit click, with focus returned to `채팅 입력칸`.
 - Computer Use verified the Provider Login status now says
-  `Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`. The current
+  `Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`. The current
   provider-copy contract says `Provider 선택은 로그인 상태 확인용`,
   `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`.
 - Computer Use reinstalled the current package after the first-screen/provider copy localization
   and verified the recovered launch transcript starts with `ChatPCB KiCad Preview`,
   `바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.`, and
-  `Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.`.
+  `Provider Login은 선택 사항입니다. 내장 미리보기로 prototype-review 증거를 만들며 JLCPCB 주문 준비 파일은 아닙니다.`.
 - Computer Use clicked `Provider Login` in that installed app and verified the
   bottom status still says
-  `Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`. The Provider
+  `Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`. The Provider
   Login transcript now uses `Provider 선택은 로그인 상태 확인용`,
   `앱 안의 기본 생성기`, and `로컬 도구를 대신 실행하지 않습니다`, while the
   accessibility text did not include old English provider copy.
@@ -278,7 +279,7 @@ Latest run after installing the current preview package was checked on
 - Computer Use reinstalled the current package after the provider status-copy
   localization, launched the installed app, clicked `Provider Login`, and
   verified the bottom status now says
-  `Provider 감지: claude:auto; 미리보기 생성은 앱 안에서만 진행됩니다.`.
+  `Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`.
   The accessibility text did not contain old `preview 생성은 아직 로컬`,
   `로컬 provider 없음`, `아직 준비된 로컬 provider`, or
   `이 provider를 사용하세요` wording.
@@ -352,6 +353,12 @@ Latest run after installing the current preview package was checked on
   `설계 생성`, `PCB 열기`, `Provider Login`, and `검토 목록`, and showed
   `이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.` for the recovered
   preview state.
+- Computer Use reinstalled and relaunched the package after the friendly model selector update.
+  `Claude Code 자동` fits in the collapsed model selector without clipping.
+  Opening the dropdown showed `내장 미리보기`, `Codex 자동`, `Claude Code 자동`, and `Gemini 자동`,
+  with no raw `built-in-preview` or `claude:auto` model id visible.
+  Clicking `Provider Login` kept the bottom status at
+  `Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`.
 - Computer Use then typed `ESP32-S3 압력 센서 보드`, pressed Enter, and verified
   the bottom status reached
   `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
