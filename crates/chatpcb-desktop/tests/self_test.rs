@@ -170,16 +170,32 @@ fn desktop_self_test_describes_non_web_native_workspace() {
     assert!(contract["right_panel"]
         .as_array()
         .unwrap()
-        .contains(&Value::String("Use example".to_string())));
+        .contains(&Value::String("예시 사용".to_string())));
     assert!(contract["right_panel"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("설계 생성".to_string())));
+    assert!(contract["right_panel"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("검토 목록".to_string())));
+    assert!(contract["right_panel"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("PCB 열기".to_string())));
+    assert!(!contract["right_panel"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("Use example".to_string())));
+    assert!(!contract["right_panel"]
         .as_array()
         .unwrap()
         .contains(&Value::String("Send design".to_string())));
-    assert!(contract["right_panel"]
+    assert!(!contract["right_panel"]
         .as_array()
         .unwrap()
         .contains(&Value::String("Review checklist".to_string())));
-    assert!(contract["right_panel"]
+    assert!(!contract["right_panel"]
         .as_array()
         .unwrap()
         .contains(&Value::String("Open PCB".to_string())));

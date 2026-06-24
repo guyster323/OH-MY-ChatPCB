@@ -53,10 +53,10 @@ First chat
 6. If no local provider is ready yet, continue anyway; the built-in preview still works.
 7. Confirm Provider/model 선택은 준비 상태 확인용: preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.
 8. Type immediately after Provider Login; focus returns to the prompt box.
-9. Click Use example if the prompt box is empty.
+9. Click 예시 사용 if the prompt box is empty.
 10. The example text is selected, so typing replaces it.
-11. Type or edit a PCB request in the prompt box, or press Enter immediately after Use example.
-12. Press Enter in the prompt box, or click Send design.
+11. Type or edit a PCB request in the prompt box, or press Enter immediately after 예시 사용.
+12. Press Enter in the prompt box, or click 설계 생성.
 13. If the prompt was empty, confirm the chat transcript says no prompt was typed and that the built-in ESP32-S3 example was used.
 14. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
 15. Confirm the transcript is positioned at the latest response.
@@ -69,13 +69,13 @@ First chat
 22. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
 23. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
 24. Confirm the bottom status says "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review." when local ERC/DRC reports are clear.
-25. Click Open PCB to inspect chatpcb3-esp32s3.kicad_pcb.
+25. Click PCB 열기 to inspect chatpcb3-esp32s3.kicad_pcb.
 26. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
 27. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-28. Click Review checklist to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
+28. Click 검토 목록 to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
 29. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
 30. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
-31. Close and reopen the app, then click Review checklist before sending again.
+31. Close and reopen the app, then click 검토 목록 before sending again.
 32. Confirm the left project status says "이전 미리보기 발견".
 33. Confirm the chat transcript also says "이전 미리보기 발견" and keeps the boundary visible as "order-ready 아님".
 34. Confirm the short bottom status says "Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."

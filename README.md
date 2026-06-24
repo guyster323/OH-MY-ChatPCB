@@ -17,7 +17,7 @@ For a non-expert first run from GitHub:
    If ChatPCB KiCad Preview is already open, close it before running the installer again.
 3. Open `ChatPCB KiCad Preview`.
 4. 만들 보드를 `Chat prompt`에 적고 Enter를 누릅니다.
-5. Click `Review checklist` after the preview is saved.
+5. 저장되면 `검토 목록`을 눌러 확인합니다.
 
 The first chat transcript also shows
 `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.`, and the bottom status says
@@ -167,28 +167,27 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-local.ps1 -Launch
 
 Then open `ChatPCB KiCad Preview` from the desktop shortcut. The preview is a
 native Windows app with the target 70/30 workspace, Provider Login button, model
-selector, prompt input, `Use example`, `Send design`, `Open PCB`, and pipeline status.
-`Open PCB` and `Review checklist` stay disabled until a preview workspace exists,
-then become enabled after `Send design` saves the preview or after a previous
+selector, prompt input, `예시 사용`, `설계 생성`, `PCB 열기`, and pipeline status.
+`PCB 열기` and `검토 목록` stay disabled until a preview workspace exists,
+then become enabled after `설계 생성` saves the preview or after a previous
 preview is recovered. The left tabs also show a native preview body, not an
 empty placeholder. `Provider
 Login` reports local CLI availability without storing provider credentials, and
 it appends that status without erasing earlier chat turns. If no local provider
 is ready yet, the model selector stays on `built-in-preview` and Provider Login
 says the built-in preview can still be created, so a first-run user is not
-blocked before pressing `Send design`. It also shows the local CLI install/login
+blocked before pressing `설계 생성`. It also shows the local CLI install/login
 hint for each missing provider and tells the user to click `Provider Login`
 again after completing local CLI login. The model selector also picks the first
 available local provider on launch, so a first-run user sees a realistic model
 choice before pressing anything when a CLI is available. That provider/model
 selection is readiness-only for this slice; Provider/model 선택은 준비 상태 확인용이고
-`Send design`의 preview 생성은 built-in local generator를 사용하며 provider CLI는
-호출하지 않습니다. `Use
-example` refills the starter prompt after a send. Both `Provider Login` and `Use
-example` return focus to the prompt, so the next typed request or Enter key works
+`설계 생성`의 preview 생성은 built-in local generator를 사용하며 provider CLI는
+호출하지 않습니다. `예시 사용` refills the starter prompt after a send. Both
+`Provider Login` and `예시 사용` return focus to the prompt, so the next typed request or Enter key works
 without another click. On launch, the starter prompt is already selected, so
 typing replaces it immediately. Pressing Enter in the prompt input or clicking
-`Send design` appends the prompt and assistant response to the existing chat
+`설계 생성` appends the prompt and assistant response to the existing chat
 transcript, so Provider Login context and earlier messages stay visible. The
 transcript also moves to the latest response after updates, clears the prompt,
 and returns focus to the prompt so a follow-up chat can be typed immediately.
@@ -204,14 +203,14 @@ That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
 prototype-review release evidence report. The first-run summary points a
 non-expert back to the focused prompt for follow-up chat and says not to upload
 the preview to JLCPCB. The beginner next-steps file spells out the first
-clicks: Open PCB, Review checklist, then ask a follow-up in chat while Gerber,
+clicks: PCB 열기, 검토 목록, then ask a follow-up in chat while Gerber,
 drill, and placement-reviewed JLCPCB files remain blocked. The BOM/CPL preview
 files are for review only. It also contains the generated KiCad preview
 scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
 project status and preview body also change to the saved workspace state. When
-KiCad 10 is installed locally, `Send design` also runs `kicad-cli.exe pcb
+KiCad 10 is installed locally, `설계 생성` also runs `kicad-cli.exe pcb
 upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
 folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
@@ -221,10 +220,10 @@ The JLCPCB preview blocker report is saved as
 `manufacturing-readiness-preview.txt` and says not to upload this preview to
 JLCPCB.
 It is still not an order-ready KiCad board. Click
-`Open PCB` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
+`PCB 열기` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
 see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,
 the app opens the PCB file through Windows and says to install KiCad 10 if PCB
-Editor did not open. Click `Review checklist` in the app to open that
+Editor did not open. Click `검토 목록` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
 exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
 same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
@@ -232,7 +231,7 @@ boundary and `release-evidence-preview.md` for saved evidence. The bottom status
 says `Opened BEGINNER-NEXT-STEPS.txt for checklist review.` so a first-run user
 knows which file was selected.
 After closing and reopening the app,
-`Review checklist` recovers the same preview folder if it already exists, and the
+`검토 목록` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The
 chat transcript also
 mentions that recovered workspace, so a returning user can continue from the

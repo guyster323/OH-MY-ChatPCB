@@ -90,16 +90,16 @@ Expected result:
    - Chat transcript
    - Chat prompt label
    - prompt input
-   - Use example
-   - Send design
-   - Open PCB
-   - Review checklist
+   - 예시 사용
+   - 설계 생성
+   - PCB 열기
+   - 검토 목록
    - Provider Login
    - model selector
    - pipeline status
-   Confirm `Open PCB` and `Review checklist` are disabled before the first preview
-   is saved. Confirm `Open PCB` and `Review checklist` become enabled after
-   `Send design` saves a preview or after a previous preview is recovered.
+   Confirm `PCB 열기` and `검토 목록` are disabled before the first preview is
+   saved. Confirm `PCB 열기` and `검토 목록` become enabled after `설계 생성` saves
+   a preview or after a previous preview is recovered.
 10. Confirm the model selector says `built-in-preview` when no local provider is
    ready, or has already picked an available local provider if Codex, Claude
    Code, or Gemini CLI is installed.
@@ -116,11 +116,11 @@ Expected result:
    for this preview slice.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
-13. Click `Use example` if the prompt input is empty.
+13. Click `예시 사용` if the prompt input is empty.
 14. Type, edit, or keep a board prompt in the prompt input. After clicking
-    `Use example`, pressing Enter should work without clicking back into the
+    `예시 사용`, pressing Enter should work without clicking back into the
     prompt box.
-15. Press Enter in the prompt input, or click `Send design`.
+15. Press Enter in the prompt input, or click `설계 생성`.
     If the prompt is empty, confirm the chat transcript says no prompt was
     typed and that the built-in ESP32-S3 example was used.
 16. Confirm the chat transcript still includes the earlier Provider Login
@@ -151,29 +151,28 @@ Expected result:
 24. Confirm the bottom pipeline status stays short and says
     `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
     when local ERC/DRC reports are clear.
-25. Click `Open PCB`.
+25. Click `PCB 열기`.
 26. Confirm the bottom status says either `Opened preview PCB in KiCad PCB
     Editor.` or `Opened preview PCB file. Install KiCad 10 if PCB Editor did
     not open.`
 27. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
     and the board preview contains a 50mm x 50mm `Edge.Cuts` outline.
-28. Click `Review checklist`.
-29. Confirm Review checklist opens the preview evidence folder with
+28. Click `검토 목록`.
+29. Confirm `검토 목록` opens the preview evidence folder with
     `BEGINNER-NEXT-STEPS.txt` selected.
     Confirm the bottom status says
     `Opened BEGINNER-NEXT-STEPS.txt for checklist review.`
-    Confirm it says to click Open PCB, click Review checklist, ask a follow-up in
+    Confirm it says to click PCB 열기, click 검토 목록, ask a follow-up in
     chat, and not order yet.
 30. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and
     confirm the summary says to return to the focused prompt, type a follow-up,
     and not upload this preview to JLCPCB.
-31. Close and reopen `ChatPCB KiCad Preview`, then click `Review checklist` before
+31. Close and reopen `ChatPCB KiCad Preview`, then click `검토 목록` before
     sending another prompt.
 32. Confirm the left project status says `이전 미리보기 발견`
     before you send another prompt.
 33. Confirm the chat transcript also says `이전 미리보기 발견`, keeps
-    `order-ready 아님` visible, and points you to `Review checklist` and
-    `Open PCB`.
+    `order-ready 아님` visible, and points you to `검토 목록` and `PCB 열기`.
 34. Confirm the short bottom status says
     `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`
     instead of a long local path.
@@ -217,8 +216,8 @@ Latest run after installing the current preview package was checked on
   `ChatPCB KiCad Preview`.
 - Computer Use captured a screenshot of the native 70/30 workspace. The capture
   showed the left current-project preview pane, the right chat pane, the
-  `Chat prompt` label, the prompt input, `Use example`, `Send design`,
-  `Open PCB`, `Provider Login`, `Review checklist`, the model selector, and the
+  `Chat prompt` label, the prompt input, `예시 사용`, `설계 생성`,
+  `PCB 열기`, `Provider Login`, `검토 목록`, the model selector, and the
   bottom pipeline status.
 - Computer Use verified the first transcript now shows
   `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.` and the bottom status uses
@@ -228,7 +227,7 @@ Latest run after installing the current preview package was checked on
 - Computer Use also captured an accessibility text tree for the same window,
   including the Schematic / PCB Layout / Validation / Manufacturing Preview
   tabs, `Chat prompt` label, focused `Chat prompt` edit control, and the
-  Provider Login / Review checklist / Open PCB controls.
+  Provider Login / 검토 목록 / PCB 열기 controls.
 - Computer Use verified the recovered preview launch status. The bottom status
   showed
   `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`, not
@@ -263,8 +262,12 @@ Latest run after installing the current preview package was checked on
 - Computer Use relaunched the installed app and verified `Chat prompt` was focused,
   the recovered status still said
   `Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`, and the native
-  70/30 workspace still exposed `Send design`, `Open PCB`, `Provider Login`,
-  `Review checklist`, and the model selector.
+  70/30 workspace still exposed `예시 사용`, `설계 생성`, `PCB 열기`,
+  `Provider Login`, `검토 목록`, and the model selector.
+- Computer Use reinstalled the package after the primary action button localization
+  and verified the native buttons show `예시 사용`, `설계 생성`, `PCB 열기`, `Provider Login`, `검토 목록`.
+  The old `Open PCB` and `Review checklist` strings were still present only in
+  the recovered status text, not as button labels.
 - Computer Use typed `ESP32-S3 조도 센서 보드`, pressed Enter, and verified the
   installed app again reached
   `검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`

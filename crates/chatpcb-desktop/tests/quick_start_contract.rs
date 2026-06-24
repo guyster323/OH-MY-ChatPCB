@@ -23,7 +23,7 @@ fn root_readme_puts_non_expert_install_and_chat_path_first() {
     assert!(readme.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
     assert!(!readme.contains("Type a board idea in `Chat prompt`, then press Enter."));
     assert!(!readme.contains("Type a board idea in Chat prompt, then press Enter."));
-    assert!(readme.contains("Click `Review checklist` after the preview is saved."));
+    assert!(readme.contains("저장되면 `검토 목록`을 눌러 확인합니다."));
     assert!(readme.contains("Boundary: `prototype-review`, not order-ready."));
     assert!(readme.contains("Do not upload this preview to JLCPCB."));
 }
@@ -43,6 +43,22 @@ fn native_preview_has_use_example_button_that_fills_the_prompt() {
     assert!(main.contains("let initial_prompt = chatpcb_desktop::ui_model::example_board_prompt()"));
     assert!(!main.contains("\"USB-C ESP32-S3 sensor board with I2C sensor and JLCPCB package\""));
     assert!(ui_model.contains("use_example_fills_prompt"));
+}
+
+#[test]
+fn primary_action_buttons_are_korean_first_for_non_experts() {
+    let main =
+        fs::read_to_string(workspace_root().join("crates/chatpcb-desktop/src/main.rs")).unwrap();
+
+    assert!(main.contains("\"예시 사용\""));
+    assert!(main.contains("\"설계 생성\""));
+    assert!(main.contains("\"PCB 열기\""));
+    assert!(main.contains("\"검토 목록\""));
+    assert!(main.contains("\"Provider Login\""));
+    assert!(!main.contains("\"Use example\""));
+    assert!(!main.contains("\"Send design\""));
+    assert!(!main.contains("\"Open PCB\""));
+    assert!(!main.contains("\"Review checklist\""));
 }
 
 #[test]
@@ -662,6 +678,7 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains(
         "Computer Use relaunched the installed app and verified `Chat prompt` was focused"
     ));
+    assert!(guide.contains("`예시 사용`, `설계 생성`, `PCB 열기`, `Provider Login`, `검토 목록`"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
     assert!(guide.contains("bottom pipeline status showed"));
     assert!(guide.contains("`내장 예시 사용.`"));
@@ -684,15 +701,14 @@ fn docs_explain_open_buttons_wait_for_a_saved_preview() {
     let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
 
-    assert!(root_readme.contains(
-        "Open PCB` and `Review checklist` stay disabled until a preview workspace exists"
-    ));
-    assert!(root_readme.contains("then become enabled after `Send design` saves the preview"));
+    assert!(root_readme
+        .contains("`PCB 열기` and `검토 목록` stay disabled until a preview workspace exists"));
+    assert!(root_readme.contains("then become enabled after `설계 생성` saves the preview"));
     assert!(root_readme.contains("previous"));
     assert!(root_readme.contains("preview is recovered"));
-    assert!(guide.contains("Confirm `Open PCB` and `Review checklist` are disabled"));
+    assert!(guide.contains("Confirm `PCB 열기` and `검토 목록` are disabled"));
     assert!(guide.contains("before the first preview"));
-    assert!(guide.contains("Confirm `Open PCB` and `Review checklist` become enabled"));
+    assert!(guide.contains("Confirm `PCB 열기` and `검토 목록` become enabled"));
 }
 
 #[test]

@@ -139,7 +139,7 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(guide.contains("jlcpcb-bom-preview.csv"));
     assert!(guide.contains("jlcpcb-cpl-preview.csv"));
     assert!(guide.contains("manufacturing-readiness-preview.txt"));
-    assert!(guide.contains("Review checklist opens the preview evidence folder with"));
+    assert!(guide.contains("`검토 목록` opens the preview evidence folder with"));
     assert!(guide.contains("`BEGINNER-NEXT-STEPS.txt` selected"));
     assert!(guide.contains("Opened BEGINNER-NEXT-STEPS.txt for checklist review."));
     assert!(guide.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
@@ -235,7 +235,7 @@ fn installers_write_install_ready_summary_for_non_experts() {
     assert!(install_ready_template.contains("ChatPCB KiCad Preview 설치 완료"));
     assert!(install_ready_template.contains("바로 시작:"));
     assert!(install_ready_template.contains("만들 보드를 Chat prompt에 적고 Enter를 누릅니다."));
-    assert!(install_ready_template.contains("Review checklist"));
+    assert!(install_ready_template.contains("검토 목록"));
     assert!(install_ready_template.contains("Boundary: prototype-review, not order-ready."));
     assert!(!install_ready_template.contains("Type a board idea in Chat prompt"));
 
