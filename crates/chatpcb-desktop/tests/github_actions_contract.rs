@@ -95,6 +95,28 @@ fn github_replacement_published_verifier_confirms_remote_matches_local_head() {
 }
 
 #[test]
+fn github_replacement_push_script_requires_explicit_approval_and_verifies_after_push() {
+    let script =
+        fs::read_to_string(workspace_root().join("scripts/replace-github-after-approval.ps1"))
+            .unwrap();
+
+    assert!(script.contains("guyster323/OH-MY-ChatPCB"));
+    assert!(script.contains("[switch]$ConfirmExternalReplacement"));
+    assert!(script.contains("explicit action-time approval"));
+    assert!(script.contains("if (-not $ConfirmExternalReplacement)"));
+    assert!(script.contains("git rev-parse HEAD"));
+    assert!(script.contains("verify-github-replacement-ready.ps1"));
+    assert!(script.contains("-CheckRemoteHead"));
+    assert!(script.contains("git push origin HEAD:main"));
+    assert!(script.contains("verify-github-replacement-published.ps1"));
+    assert!(script.contains("-ExpectedHead $head"));
+    assert!(script.contains("EXTERNAL_GITHUB_PUSH_PERFORMED"));
+    assert!(script.contains("Published replacement verified"));
+    assert!(!script.contains("--force"));
+    assert!(!script.contains("--mirror"));
+}
+
+#[test]
 fn github_replacement_runbook_keeps_the_external_action_explicit() {
     let runbook =
         fs::read_to_string(workspace_root().join("docs/github-replacement-runbook.md")).unwrap();
@@ -114,6 +136,8 @@ fn github_replacement_runbook_requires_post_push_verification() {
     let runbook =
         fs::read_to_string(workspace_root().join("docs/github-replacement-runbook.md")).unwrap();
 
+    assert!(runbook.contains("scripts\\replace-github-after-approval.ps1"));
+    assert!(runbook.contains("-ConfirmExternalReplacement"));
     assert!(runbook.contains("scripts\\verify-github-replacement-published.ps1"));
     assert!(runbook.contains("After the approved push"));
     assert!(runbook.contains("Remote main matches local HEAD"));

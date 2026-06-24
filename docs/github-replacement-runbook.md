@@ -30,6 +30,24 @@ The script verifies:
 The script is intentionally a dry run. It prints `NO_PUSH_PERFORMED` and does
 not replace the remote.
 
+## Approved Replacement Script
+
+Only after explicit action-time approval for replacing
+`guyster323/OH-MY-ChatPCB`, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\replace-github-after-approval.ps1 -ConfirmExternalReplacement
+```
+
+The script reruns `scripts\verify-github-replacement-ready.ps1` with
+`-CheckRemoteHead`, pushes local `HEAD` to `origin/main`, then runs
+`scripts\verify-github-replacement-published.ps1` with the exact commit it just
+pushed. It must print `EXTERNAL_GITHUB_PUSH_PERFORMED` and
+`Published replacement verified` before the external replacement is considered
+complete.
+
+Do not run this script without explicit action-time approval.
+
 ## Replacement Rule
 
 Do not push, force-push, create a release, upload assets, or otherwise modify
