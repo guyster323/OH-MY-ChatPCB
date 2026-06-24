@@ -323,6 +323,7 @@ fn send_design_runs_erc_drc_reports_after_writing_preview() {
     assert!(main.contains("summarize_erc_drc_reports"));
     assert!(main.contains("parse_kicad_report"));
     assert!(main.contains("validation_pipeline_status(&validation.summary)"));
+    assert!(main.contains("visible_empty_prompt_pipeline_status"));
 }
 
 #[test]
@@ -552,8 +553,9 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
     assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
     assert!(guide.contains("Computer Use also verified the empty prompt fallback"));
-    assert!(guide.contains("No prompt was typed"));
-    assert!(guide.contains("built-in ESP32-S3 example"));
+    assert!(guide.contains("bottom pipeline status showed"));
+    assert!(guide.contains("`Used built-in example.`"));
+    assert!(!guide.contains("captured the chat log showing"));
     assert!(!guide.contains("empty prompt fallback was not proven through Computer Use"));
     assert!(!guide.contains("No fresh Computer Use proof was captured for the empty prompt"));
     assert!(guide.contains("latest Computer Use run"));

@@ -9,7 +9,7 @@ use chatpcb_desktop::ui_model::{
     recovered_preview_workspace_body, recovered_preview_workspace_left_status,
     recovered_preview_workspace_transcript, saved_preview_tab_body, saved_preview_tab_status,
     selected_model_for_statuses, selected_provider_model, send_design_transcript,
-    validation_pipeline_status, ProviderUiStatus,
+    validation_pipeline_status, visible_empty_prompt_pipeline_status, ProviderUiStatus,
 };
 
 #[test]
@@ -67,6 +67,18 @@ fn send_design_transcript_explains_empty_prompt_builtin_example() {
     assert!(transcript.contains("built-in ESP32-S3 example"));
     assert!(transcript.contains("edit the prompt"));
     assert!(!transcript.contains("User:   "));
+}
+
+#[test]
+fn empty_prompt_pipeline_status_keeps_builtin_example_visible_after_validation() {
+    let status = visible_empty_prompt_pipeline_status(
+        "Validated: Open PCB/checklist, or type a follow-up. Still prototype-review.",
+    );
+
+    assert!(status.starts_with("Used built-in example."));
+    assert!(status.contains("Validated: Open PCB/checklist"));
+    assert!(status.contains("Still prototype-review"));
+    assert!(status.len() <= 100);
 }
 
 #[test]

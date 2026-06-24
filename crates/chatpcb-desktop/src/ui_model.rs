@@ -176,6 +176,10 @@ pub fn validation_pipeline_status(validation_summary: &str) -> String {
         .to_string()
 }
 
+pub fn visible_empty_prompt_pipeline_status(status: &str) -> String {
+    format!("Used built-in example. {status}")
+}
+
 pub fn open_pcb_pipeline_status(opened_with_kicad: bool) -> &'static str {
     if opened_with_kicad {
         "Opened preview PCB in KiCad PCB Editor."

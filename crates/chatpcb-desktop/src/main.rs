@@ -1208,7 +1208,8 @@ mod win32_app {
         }
 
         let prompt = get_control_text(hwnd, ID_PROMPT);
-        let prompt_for_workspace = if prompt.trim().is_empty() {
+        let prompt_was_empty = prompt.trim().is_empty();
+        let prompt_for_workspace = if prompt_was_empty {
             chatpcb_desktop::ui_model::example_board_prompt()
         } else {
             prompt.trim()
@@ -1286,6 +1287,11 @@ mod win32_app {
             &turn_transcript,
         );
         set_chat_transcript_text(controls, &transcript);
+        if prompt_was_empty {
+            pipeline_after_send = chatpcb_desktop::ui_model::visible_empty_prompt_pipeline_status(
+                &pipeline_after_send,
+            );
+        }
         set_pipeline_status(controls, &pipeline_after_send);
         let empty = wide("");
         SetDlgItemTextW(hwnd, ID_PROMPT as i32, empty.as_ptr());

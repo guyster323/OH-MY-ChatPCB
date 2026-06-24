@@ -218,8 +218,8 @@ Latest run after installing the current preview package was checked on
   `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
   `manufacturing-readiness-preview.txt` in the native left preview pane.
 - Computer Use also verified the empty prompt fallback. It selected the prompt,
-  cleared it, pressed Enter, and captured the chat log showing
-  `No prompt was typed` plus the `built-in ESP32-S3 example` note.
+  cleared it, pressed Enter, and the bottom pipeline status showed
+  `Used built-in example.` before the validation status.
 - Code and installed-package checks still passed: full Cargo tests, package
   self-test summary, package first-chat smoke test, installed exe self-test
   summary, installed first-chat smoke test, and GitHub replacement dry run.
