@@ -296,10 +296,11 @@ fn validation_summarizes_kicad_cli_acceptance_without_order_ready_claims() {
     assert_eq!(report.status, KicadCliCheckStatus::Accepted);
     assert!(report
         .summary
-        .contains("KiCad 확인: preview PCB를 열 수 있습니다"));
+        .contains("KiCad 확인: 미리보기 PCB를 열 수 있습니다"));
     assert!(report.summary.contains("prototype-review"));
     assert!(report.summary.contains("검토 목록"));
     assert!(report.summary.contains("주문 전 검토"));
+    assert!(!report.summary.contains("preview PCB"));
     assert!(!report.summary.contains("schematic/DRC"));
     assert!(!report.summary.contains("Gerber/BOM/CPL"));
     assert!(!report.summary.contains("gate"));

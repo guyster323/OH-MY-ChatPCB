@@ -1277,7 +1277,7 @@ mod win32_app {
                 );
                 set_design_preview(
                     controls,
-                    "미리보기 저장 실패.\r\nchat에서 오류를 확인하세요.\r\n상태: preview only.",
+                    "미리보기 저장 실패.\r\nchat에서 오류를 확인하세요.\r\n상태: 미리보기 단계.",
                 );
                 set_workspace_action_buttons_enabled(
                     controls,

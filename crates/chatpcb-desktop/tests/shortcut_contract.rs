@@ -141,7 +141,8 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(guide.contains("manufacturing-readiness-preview.txt"));
     assert!(guide.contains("`검토 목록` opens the preview evidence folder with"));
     assert!(guide.contains("`BEGINNER-NEXT-STEPS.txt` selected"));
-    assert!(guide.contains("검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다."));
+    assert!(guide.contains("검토 목록을 열었습니다."));
+    assert!(!guide.contains("검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다."));
     assert!(guide.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
     assert!(package_readme.contains("Run First Chat Smoke Test"));
     assert!(package_readme.contains("INSTALL-FIRST-CHAT-SMOKE.txt"));
@@ -164,7 +165,8 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(root_readme.contains("jlcpcb-cpl-preview.csv"));
     assert!(root_readme.contains("manufacturing-readiness-preview.txt"));
     assert!(root_readme.contains("with `BEGINNER-NEXT-STEPS.txt` selected"));
-    assert!(root_readme.contains("검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다."));
+    assert!(root_readme.contains("검토 목록을 열었습니다."));
+    assert!(!root_readme.contains("검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다."));
     assert!(root_readme.contains("same folder still contains `FIRST-RUN-SUMMARY.txt`"));
 }
 

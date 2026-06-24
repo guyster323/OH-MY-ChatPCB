@@ -230,8 +230,8 @@ folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
 exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
 same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
 boundary and `release-evidence-preview.md` for saved evidence. The bottom status
-says `검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다.` so a first-run user
-knows which file was selected.
+says `검토 목록을 열었습니다.` so a first-run user gets a short confirmation
+without another file-name dump.
 After closing and reopening the app,
 `검토 목록` recovers the same preview folder if it already exists, and the
 left project pane marks that previous preview workspace before another send. The

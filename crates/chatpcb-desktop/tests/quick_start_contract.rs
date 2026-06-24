@@ -133,9 +133,10 @@ fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
 
     assert!(ui_model.contains("provider_login_keeps_builtin_preview_unblocked"));
     assert!(ui_model.contains("login_hint"));
-    assert!(ui_model.contains("로컬 provider 없음; built-in-preview는 계속 사용 가능합니다."));
+    assert!(ui_model.contains("로컬 provider 없음; 내장 미리보기는 계속 사용 가능합니다."));
     assert!(!ui_model.contains("No local provider found; built-in preview still works."));
-    assert!(ui_model.contains("그래도 설계 생성으로 ESP32-S3 preview를 만들 수 있습니다."));
+    assert!(ui_model.contains("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다."));
+    assert!(!ui_model.contains("built-in-preview로 계속 진행"));
     assert!(!ui_model.contains("You can still press Send design"));
     assert!(ui_model.contains("selected_model_for_statuses"));
     assert!(main.contains("provider_login_pipeline_status(selected_provider)"));
@@ -383,7 +384,8 @@ fn preview_workspace_failure_copy_is_korean_first_in_the_native_window() {
 
     assert!(main.contains("미리보기 저장 실패"));
     assert!(main.contains("chat에서 오류를 확인하세요."));
-    assert!(main.contains("상태: preview only"));
+    assert!(main.contains("상태: 미리보기 단계"));
+    assert!(!main.contains("상태: preview only"));
     assert!(!main.contains("Gate: preview only."));
     assert!(!main.contains("Preview workspace could not be saved. Check chat for the error."));
     assert!(!main.contains(

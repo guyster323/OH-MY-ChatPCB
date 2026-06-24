@@ -92,42 +92,48 @@ pub fn chat_actions_contract() -> ChatActionsContract {
 }
 
 pub fn initial_left_workspace_status() -> &'static str {
-    "회로도: 만들 보드를 입력한 뒤 Enter. chatpcb3-esp32s3.kicad_sch 미리보기를 생성합니다."
+    "회로도: 만들 보드를 입력한 뒤 Enter. 회로도 미리보기를 생성합니다."
 }
 
 pub fn left_tab_status(index: usize) -> &'static str {
     match index {
         0 => initial_left_workspace_status(),
-        1 => "PCB 레이아웃: chatpcb3-esp32s3.kicad_pcb 미리보기. 배치/배선은 아직 생성 전입니다.",
+        1 => "PCB 레이아웃: 보드 외곽선 미리보기. 배치/배선은 아직 생성 전입니다.",
         2 => "검증: ERC/DRC 아직 실행 전. 설계 생성은 prototype-review 증거만 만듭니다.",
-        3 => {
-            "제조 미리보기: Gerber/BOM/CPL 아직 생성 전. JLCPCB 업로드 패키지는 계속 blocked입니다."
-        }
+        3 => "제조 미리보기: Gerber/BOM/CPL 아직 생성 전. JLCPCB 주문 준비 전입니다.",
         _ => initial_left_workspace_status(),
     }
 }
 
 pub fn left_tab_body(index: usize) -> &'static str {
     match index {
-        0 => "회로도 미리보기\r\n\
+        0 => {
+            "회로도 미리보기\r\n\
               - 오른쪽 채팅 입력칸에 만들 보드를 적고 Enter.\r\n\
-              - Target: ESP32-S3 USB-C sensor board.\r\n\
-              - Nets: USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, I2C_SDA.\r\n\
-              - 상태: prototype-review, order-ready 아님.",
-        1 => "PCB 레이아웃 미리보기\r\n\
-              - 50mm x 50mm Edge.Cuts 보드 외곽선을 preview로 생성합니다.\r\n\
-              - Component placement와 Freerouting route data는 아직 생성 전입니다.\r\n\
-              - Planned flow: component placement -> DSN export -> Freerouting -> SES import.\r\n\
-              - 제조 출력은 DRC 통과 후에만 신뢰할 수 있습니다.",
-        2 => "검증 미리보기\r\n\
+              - 대상: ESP32-S3 USB-C 센서 보드.\r\n\
+              - 주요 연결: USB, 5V, 3V3, GND, I2C.\r\n\
+              - 상태: prototype-review, 주문 준비 전."
+        }
+        1 => {
+            "PCB 레이아웃 미리보기\r\n\
+              - 50mm x 50mm 보드 외곽선을 미리보기로 생성합니다.\r\n\
+              - 부품 배치와 배선은 아직 생성 전입니다.\r\n\
+              - 다음 단계: 부품 배치, 자동 배선, KiCad 검증.\r\n\
+              - 제조 출력은 DRC 통과 후에만 신뢰할 수 있습니다."
+        }
+        2 => {
+            "검증 미리보기\r\n\
               - ERC는 아직 실행 전입니다.\r\n\
               - DRC는 아직 실행 전입니다.\r\n\
-              - 검토 목록에서 KiCad report와 artifact를 확인할 때까지 prototype-review입니다.",
-        3 => "제조 미리보기\r\n\
+              - 검토 목록에서 KiCad 검토 자료를 확인할 때까지 prototype-review입니다."
+        }
+        3 => {
+            "제조 미리보기\r\n\
               - Gerber/Drill 파일은 아직 생성 전입니다.\r\n\
-              - BOM/CPL preview 파일은 설계 생성 후 확인용으로 생성되지만 업로드 가능 상태가 아님.\r\n\
-              - schematic, layout, ERC, DRC, Gerber, drill, placement-reviewed CPL 증거 전까지 JLCPCB upload는 blocked입니다.\r\n\
-              - 실제 주문 전에는 반드시 멈추고 사용자 확인을 받아야 합니다.",
+              - BOM/CPL 미리보기는 설계 생성 후 확인용으로만 만듭니다.\r\n\
+              - 검토 목록에서 회로, PCB, 제조 자료를 확인하기 전까지 주문 준비 전입니다.\r\n\
+              - 실제 주문 전에는 반드시 멈추고 사용자 확인을 받아야 합니다."
+        }
         _ => left_tab_body(0),
     }
 }
@@ -142,8 +148,8 @@ pub fn example_loaded_pipeline_status() -> &'static str {
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
     match selected_model {
-        Some(model) => format!("Provider 감지: {model}; preview 생성은 아직 로컬입니다."),
-        None => "로컬 provider 없음; built-in-preview는 계속 사용 가능합니다.".to_string(),
+        Some(model) => format!("Provider 감지: {model}; 미리보기 생성은 아직 로컬입니다."),
+        None => "로컬 provider 없음; 내장 미리보기는 계속 사용 가능합니다.".to_string(),
     }
 }
 
@@ -167,7 +173,7 @@ pub fn selected_model_for_statuses(statuses: &[ProviderUiStatus]) -> &'static st
 }
 
 pub fn design_pipeline_status() -> &'static str {
-    "미리보기 계획: schematic -> layout -> DRC -> JLCPCB."
+    "미리보기 계획: 회로도 -> PCB -> 검증 -> JLCPCB 검토."
 }
 
 pub fn validation_pipeline_status(validation_summary: &str) -> String {
@@ -190,14 +196,14 @@ pub fn visible_empty_prompt_pipeline_status(status: &str) -> String {
 
 pub fn open_pcb_pipeline_status(opened_with_kicad: bool) -> &'static str {
     if opened_with_kicad {
-        "KiCad PCB Editor에서 preview PCB를 열었습니다."
+        "KiCad PCB Editor에서 미리보기 PCB를 열었습니다."
     } else {
-        "preview PCB 파일을 열었습니다. PCB Editor가 열리지 않았다면 KiCad 10을 설치하세요."
+        "미리보기 PCB 파일을 열었습니다. PCB Editor가 열리지 않았다면 KiCad 10을 설치하세요."
     }
 }
 
 pub fn open_evidence_pipeline_status() -> &'static str {
-    "검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다."
+    "검토 목록을 열었습니다."
 }
 
 pub fn recovered_preview_pipeline_status() -> &'static str {
@@ -211,7 +217,7 @@ pub fn example_board_prompt() -> &'static str {
 pub fn initial_transcript() -> String {
     "ChatPCB KiCad Preview\r\n\
      바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter.\r\n\
-     Provider Login은 선택 사항입니다. built-in-preview로 prototype-review 증거를 만들며 JLCPCB order-ready 파일은 아닙니다.\r\n"
+     Provider Login은 선택 사항입니다. 내장 미리보기로 prototype-review 증거를 만들며 JLCPCB 주문 준비 파일은 아닙니다.\r\n"
         .to_string()
 }
 
@@ -234,13 +240,13 @@ pub fn send_design_transcript(prompt: &str) -> String {
          {input_note}\
          Assistant: 결과 요약\r\n\
          - ESP32-S3 기본 보드 사양을 만들었습니다.\r\n\
-         - JLCPCB 검토용 package contract를 선택했습니다.\r\n\
-         - schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package 흐름을 준비했습니다.\r\n\
-         미리보기 엔진: built-in local generator; provider/model 선택은 준비 상태 확인용입니다. 이 미리보기에서는 provider CLI를 호출하지 않습니다.\r\n\
+         - JLCPCB 검토용 제작 자료 틀을 준비했습니다.\r\n\
+         - 회로도, PCB, 자동 배선, KiCad 검증, 제조 검토 흐름을 준비했습니다.\r\n\
+         미리보기 생성: 내장 생성기를 사용했습니다. provider/model 선택은 준비 상태 확인용입니다. 이 미리보기에서는 provider CLI를 호출하지 않습니다.\r\n\
          다음 행동\r\n\
-         - PCB 열기 또는 검토 목록으로 저장된 preview를 확인하세요.\r\n\
-         - order-ready 파일은 실제 KiCad fork 통합과 제조 증거 검토가 필요합니다.\r\n\
-         상태: preview only, 아직 order-ready 아님.\r\n"
+         - PCB 열기 또는 검토 목록으로 저장된 미리보기를 확인하세요.\r\n\
+         - 주문 준비 파일은 실제 KiCad fork 통합과 제조 증거 검토가 필요합니다.\r\n\
+         상태: 미리보기 단계, 아직 주문 준비 전입니다.\r\n"
     )
 }
 
@@ -262,10 +268,10 @@ pub fn preview_workspace_saved_transcript(
     format!(
         "미리보기 저장 완료\r\n\
          - 검토 목록에서 저장 위치와 생성 파일을 확인하세요.\r\n\
-         - PCB preview: 50mm x 50mm Edge.Cuts 외곽선. 배치/배선은 아직 없음.\r\n\
+         - PCB: 50mm x 50mm 보드 외곽선. 배치/배선은 아직 없음.\r\n\
          - PCB 열기로 KiCad 10에서 보드 외곽선을 확인하세요.\r\n\
          - 바꿀 점을 채팅 입력칸에 적고 Enter로 후속 입력을 보내세요.\r\n\
-         상태: prototype-review, order-ready 아님.\r\n"
+         상태: prototype-review, 주문 준비 전.\r\n"
     )
 }
 
@@ -276,17 +282,17 @@ pub fn preview_result_summary_transcript() -> &'static str {
 }
 
 pub fn preview_workspace_left_status(_project_dir: &str) -> String {
-    "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님."
+    "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, 주문 준비 전."
         .to_string()
 }
 
 pub fn saved_preview_tab_status(index: usize, _project_dir: &str) -> String {
     match index {
         0 => "회로도: 저장된 미리보기. 검토 목록에서 저장 위치 확인; prototype-review.".to_string(),
-        1 => "PCB 레이아웃: 저장된 미리보기. PCB 열기로 50mm x 50mm outline 확인.".to_string(),
-        2 => "검증: 저장된 미리보기. 검토 목록에서 KiCad ERC/DRC report 확인; prototype-review."
+        1 => "PCB 레이아웃: 저장된 미리보기. PCB 열기로 50mm x 50mm 외곽선 확인.".to_string(),
+        2 => "검증: 저장된 미리보기. 검토 목록에서 KiCad ERC/DRC 결과 확인; prototype-review."
             .to_string(),
-        3 => "제조 미리보기: 저장된 미리보기. Gerber/BOM/CPL은 아직 order-ready 아님.".to_string(),
+        3 => "제조 미리보기: 저장된 미리보기. Gerber/BOM/CPL은 아직 주문 준비 전.".to_string(),
         _ => saved_preview_tab_status(0, _project_dir),
     }
 }
@@ -296,23 +302,22 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
         0 => ("미리보기 저장 완료\r\n\
              회로도\r\n\
              - 검토 목록에서 저장 위치와 회로 파일을 확인하세요.\r\n\
-             - Expected nets:\r\n\
-             - USB_D+, USB_D-, 5V, 3V3, GND, I2C_SCL, and I2C_SDA.\r\n\
+             - 주요 연결: USB, 5V, 3V3, GND, I2C.\r\n\
              - 제조 출력을 믿기 전 KiCad에서 symbol과 연결을 확인하세요.\r\n\r\n\
-             상태: prototype-review, order-ready 아님.")
+             상태: prototype-review, 주문 준비 전.")
             .to_string(),
         1 => ("PCB 레이아웃\r\n\
-             현재 preview:\r\n\
-             - 50mm x 50mm Edge.Cuts outline.\r\n\
+             현재 미리보기:\r\n\
+             - 50mm x 50mm 보드 외곽선.\r\n\
              - 배치와 배선은 아직 preview 단계입니다.\r\n\
-             - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
-             상태: prototype-review, order-ready 아님.")
+             - PCB 열기로 KiCad 10에서 저장된 보드 외곽선을 확인하세요.\r\n\r\n\
+             상태: prototype-review, 주문 준비 전.")
             .to_string(),
         2 => ("KiCad ERC/DRC 검증\r\n\
-             - 검토 목록에서 KiCad 확인, ERC/DRC 요약, 자세한 보고서를 확인하세요.\r\n\
-             - PCB 열기로 저장된 board outline을 직접 열어볼 수 있습니다.\r\n\
+             - 검토 목록에서 KiCad 확인, ERC/DRC 요약, 자세한 검토 자료를 확인하세요.\r\n\
+             - PCB 열기로 저장된 보드 외곽선을 직접 열어볼 수 있습니다.\r\n\
              제조 출력을 믿기 전 validation을 검토해야 합니다.\r\n\
-             상태: prototype-review, order-ready 아님.")
+             상태: prototype-review, 주문 준비 전.")
             .to_string(),
         3 => ("제조 미리보기\r\n\
              JLCPCB 업로드는 아직 막힌 상태입니다.\r\n\
@@ -321,9 +326,9 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
              - Gerber zip\r\n\
              - Drill files\r\n\
              - Placement-reviewed CPL/position file\r\n\
-             - Release evidence report\r\n\r\n\
+             - 최종 검토 자료\r\n\r\n\
              실제 주문 전에는 앱이 멈추고 사용자 확인을 받아야 합니다.\r\n\
-             상태: prototype-review, order-ready 아님.")
+             상태: prototype-review, 주문 준비 전.")
             .to_string(),
         _ => saved_preview_tab_body(0, project_dir),
     }
@@ -333,10 +338,10 @@ pub fn preview_workspace_body(_project_dir: &str, _release_report_file: &str) ->
     format!(
         "미리보기 저장 완료\r\n\
          다음 행동\r\n\
-         - PCB 열기로 KiCad 10에서 50mm x 50mm Edge.Cuts 외곽선을 확인하세요.\r\n\
-         - 검토 목록으로 저장 위치, 파일 목록, beginner next steps를 확인하세요.\r\n\
+         - PCB 열기로 KiCad 10에서 50mm x 50mm 보드 외곽선을 확인하세요.\r\n\
+         - 검토 목록으로 저장 위치, 파일 목록, 처음 확인할 내용을 확인하세요.\r\n\
          - 채팅 입력칸에 바꿀 점을 적고 Enter로 후속 입력을 보내세요.\r\n\r\n\
-         상태: prototype-review, order-ready 아님."
+         상태: prototype-review, 주문 준비 전."
     )
 }
 
@@ -401,7 +406,7 @@ pub fn erc_drc_validation_transcript(
 }
 
 pub fn recovered_preview_workspace_left_status(_project_dir: &str) -> String {
-    "이전 미리보기 발견 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님."
+    "이전 미리보기 발견 | 검토 목록에서 저장 위치 확인 | prototype-review, 주문 준비 전."
         .to_string()
 }
 
@@ -410,9 +415,9 @@ pub fn recovered_preview_workspace_body(_project_dir: &str) -> String {
         "이전 미리보기 발견\r\n\
          이어가기\r\n\
          - 검토 목록으로 저장 위치와 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
-         - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
+         - PCB 열기로 KiCad 10에서 저장된 보드 외곽선을 확인하세요.\r\n\
          - 채팅 입력칸에 바꿀 점을 적고 Enter로 후속 입력을 보내세요.\r\n\r\n\
-         상태: prototype-review, order-ready 아님."
+         상태: prototype-review, 주문 준비 전."
     )
 }
 
@@ -420,9 +425,9 @@ pub fn recovered_preview_workspace_transcript(_project_dir: &str) -> String {
     format!(
         "이전 미리보기 발견\r\n\
          - 검토 목록으로 저장 위치와 파일을 확인하세요.\r\n\
-         - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
+         - PCB 열기로 KiCad 10에서 저장된 보드 외곽선을 확인하세요.\r\n\
          - 채팅 입력칸에 바꿀 점을 적고 Enter로 이어가세요.\r\n\
-         상태: prototype-review, order-ready 아님.\r\n"
+         상태: prototype-review, 주문 준비 전.\r\n"
     )
 }
 
@@ -430,7 +435,7 @@ pub fn preview_workspace_failed_transcript(error: &str) -> String {
     format!(
         "미리보기 저장 실패\r\n\
          - 이유: {error}\r\n\
-         상태: preview only로 유지합니다.\r\n"
+         상태: 미리보기 단계로 유지합니다.\r\n"
     )
 }
 
@@ -461,12 +466,12 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
         );
     } else {
         transcript.push_str("아직 준비된 로컬 provider가 없습니다.\r\n");
-        transcript.push_str("그래도 설계 생성으로 ESP32-S3 preview를 만들 수 있습니다.\r\n");
+        transcript.push_str("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다.\r\n");
         transcript.push_str(
             "CLI login은 나중에 해도 됩니다; provider-backed design은 local CLI login을 마친 뒤 Provider Login을 다시 누르세요.\r\n",
         );
         transcript.push_str(
-            "지금은 built-in-preview로 계속 진행하고, 만들 보드를 입력한 뒤 Enter 또는 설계 생성을 누르세요.\r\n",
+            "지금은 내장 미리보기로 계속 진행하고, 만들 보드를 입력한 뒤 Enter 또는 설계 생성을 누르세요.\r\n",
         );
     }
 

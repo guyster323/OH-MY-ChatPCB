@@ -25,11 +25,11 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
     assert!(transcript.contains("ChatPCB KiCad Preview"));
     assert!(transcript.contains("바로 채팅: 만들 보드를 채팅 입력칸에 적고 Enter."));
     assert!(transcript.contains("Provider Login"));
-    assert!(transcript.contains("built-in-preview"));
+    assert!(transcript.contains("내장 미리보기"));
     assert!(transcript.contains("선택 사항"));
     assert!(transcript.contains("prototype-review"));
     assert!(transcript.contains("JLCPCB"));
-    assert!(transcript.contains("order-ready 파일은 아닙니다"));
+    assert!(transcript.contains("주문 준비 파일은 아닙니다"));
     assert!(
         non_empty_lines <= 3,
         "first-run chat should stay concise, got {non_empty_lines} lines: {transcript}"
@@ -43,6 +43,8 @@ fn initial_transcript_invites_a_non_expert_first_chat() {
     assert!(!transcript.contains("Click Use example"));
     assert!(!transcript.contains("KiCad 10 when installed"));
     assert!(!transcript.contains("no provider is ready"));
+    assert!(!transcript.contains("built-in-preview"));
+    assert!(!transcript.contains("order-ready"));
 }
 
 #[test]
@@ -79,12 +81,13 @@ fn send_design_transcript_uses_the_user_prompt() {
     );
     assert!(transcript.contains("Assistant: 결과 요약"));
     assert!(transcript.contains("ESP32-S3 기본 보드 사양"));
-    assert!(transcript.contains("JLCPCB 검토용 package contract"));
-    assert!(transcript.contains("Freerouting autoroute"));
+    assert!(transcript.contains("JLCPCB 검토용 제작 자료 틀"));
+    assert!(transcript.contains("자동 배선"));
     assert!(transcript.contains("실제 KiCad fork 통합"));
     assert!(transcript.contains("다음 행동"));
-    assert!(transcript.contains("상태: preview only, 아직 order-ready 아님."));
-    assert!(transcript.contains("order-ready"));
+    assert!(transcript.contains("상태: 미리보기 단계, 아직 주문 준비 전입니다."));
+    assert!(!transcript.contains("preview only"));
+    assert!(!transcript.contains("order-ready"));
     assert!(!transcript.contains("Assistant: What happened"));
     assert!(!transcript.contains("Full KiCad fork integration"));
     assert!(!transcript.contains("Status: preview only, not order-ready yet."));
@@ -94,9 +97,10 @@ fn send_design_transcript_uses_the_user_prompt() {
 fn send_design_transcript_separates_provider_selection_from_preview_engine() {
     let transcript = send_design_transcript("ESP32-S3 board after selecting claude:auto");
 
-    assert!(transcript.contains("미리보기 엔진: built-in local generator"));
+    assert!(transcript.contains("미리보기 생성: 내장 생성기를 사용했습니다"));
     assert!(transcript.contains("provider/model 선택은 준비 상태 확인용"));
     assert!(transcript.contains("이 미리보기에서는 provider CLI를 호출하지 않습니다"));
+    assert!(!transcript.contains("built-in local generator"));
     assert!(!transcript.contains("Preview engine:"));
     assert!(!transcript.contains("provider/model selection is readiness only"));
     assert!(!transcript.contains("No provider CLI is invoked"));
@@ -197,8 +201,8 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
     ]);
 
     assert!(transcript.contains("아직 준비된 로컬 provider가 없습니다"));
-    assert!(transcript.contains("그래도 설계 생성으로 ESP32-S3 preview를 만들 수 있습니다"));
-    assert!(transcript.contains("built-in-preview로 계속 진행"));
+    assert!(transcript.contains("그래도 설계 생성으로 ESP32-S3 미리보기를 만들 수 있습니다"));
+    assert!(transcript.contains("내장 미리보기로 계속 진행"));
     assert!(transcript.contains("CLI login은 나중에"));
     assert!(transcript.contains("Codex CLI를 설치하고 로컬 로그인을 완료"));
     assert!(transcript.contains("Claude Code를 설치하고 로컬 로그인을 완료"));
@@ -213,6 +217,7 @@ fn provider_login_transcript_keeps_first_run_preview_unblocked_when_no_cli_is_re
     assert!(!transcript.contains("No local provider is ready yet"));
     assert!(!transcript.contains("You can still press Send design"));
     assert!(!transcript.contains("Use built-in-preview now"));
+    assert!(!transcript.contains("built-in-preview"));
     assert!(!transcript.to_ascii_lowercase().contains("token"));
     assert!(!transcript.to_ascii_lowercase().contains("api_key"));
     assert!(!transcript.to_ascii_lowercase().contains("secret"));
@@ -322,15 +327,15 @@ fn pipeline_status_text_tracks_the_first_run_actions() {
     );
     assert_eq!(
         provider_login_pipeline_status(Some("claude:auto")),
-        "Provider 감지: claude:auto; preview 생성은 아직 로컬입니다."
+        "Provider 감지: claude:auto; 미리보기 생성은 아직 로컬입니다."
     );
     assert_eq!(
         provider_login_pipeline_status(None),
-        "로컬 provider 없음; built-in-preview는 계속 사용 가능합니다."
+        "로컬 provider 없음; 내장 미리보기는 계속 사용 가능합니다."
     );
     assert_eq!(
         design_pipeline_status(),
-        "미리보기 계획: schematic -> layout -> DRC -> JLCPCB."
+        "미리보기 계획: 회로도 -> PCB -> 검증 -> JLCPCB 검토."
     );
 }
 
@@ -361,9 +366,9 @@ fn open_pcb_pipeline_status_distinguishes_kicad_from_file_fallback() {
 
     assert_eq!(
         kicad_status,
-        "KiCad PCB Editor에서 preview PCB를 열었습니다."
+        "KiCad PCB Editor에서 미리보기 PCB를 열었습니다."
     );
-    assert!(fallback_status.contains("preview PCB 파일을 열었습니다."));
+    assert!(fallback_status.contains("미리보기 PCB 파일을 열었습니다."));
     assert!(fallback_status.contains("KiCad 10"));
     assert!(fallback_status.contains("PCB Editor가 열리지 않았다면"));
     assert_ne!(kicad_status, fallback_status);
@@ -373,10 +378,10 @@ fn open_pcb_pipeline_status_distinguishes_kicad_from_file_fallback() {
 fn open_evidence_pipeline_status_names_the_beginner_next_steps_file() {
     let status = open_evidence_pipeline_status();
 
-    assert_eq!(status, "검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다.");
-    assert!(status.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert_eq!(status, "검토 목록을 열었습니다.");
     assert!(status.contains("검토 목록"));
-    assert!(status.len() <= 70);
+    assert!(!status.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(status.len() <= 40);
 }
 
 #[test]
@@ -408,12 +413,14 @@ fn preview_workspace_transcript_points_to_saved_local_evidence() {
 
     assert!(transcript.contains("미리보기 저장 완료"));
     assert!(transcript.contains("검토 목록"));
-    assert!(transcript.contains("50mm x 50mm Edge.Cuts"));
+    assert!(transcript.contains("50mm x 50mm 보드 외곽선"));
     assert!(transcript.contains("PCB 열기"));
     assert!(transcript.contains("KiCad 10"));
     assert!(transcript.contains("후속 입력"));
     assert!(transcript.contains("prototype-review"));
-    assert!(transcript.contains("order-ready 아님"));
+    assert!(transcript.contains("주문 준비 전"));
+    assert!(!transcript.contains("order-ready"));
+    assert!(!transcript.contains("PCB preview"));
     assert!(visible_lines <= 7);
     assert!(!transcript.contains("C:\\Users"));
     assert!(!transcript.contains("chatpcb3-esp32s3-preview"));
@@ -433,7 +440,8 @@ fn preview_workspace_failure_transcript_is_korean_first() {
 
     assert!(transcript.contains("미리보기 저장 실패"));
     assert!(transcript.contains("- 이유: disk full"));
-    assert!(transcript.contains("상태: preview only로 유지합니다."));
+    assert!(transcript.contains("상태: 미리보기 단계로 유지합니다."));
+    assert!(!transcript.contains("preview only"));
     assert!(!transcript.contains("Preview workspace was not saved"));
     assert!(!transcript.contains("Reason:"));
     assert!(!transcript.contains("Status: keep this design at preview only."));
@@ -443,7 +451,8 @@ fn preview_workspace_failure_transcript_is_korean_first() {
 fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
     assert!(initial_left_workspace_status().contains("회로도"));
     assert!(initial_left_workspace_status().contains("만들 보드"));
-    assert!(initial_left_workspace_status().contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(initial_left_workspace_status().contains("미리보기"));
+    assert!(!initial_left_workspace_status().contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(!initial_left_workspace_status().contains("Native KiCad editor embedding"));
 
     let status = preview_workspace_left_status(
@@ -454,7 +463,8 @@ fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
     assert!(status.contains("검토 목록"));
     assert!(status.contains("저장 위치"));
     assert!(status.contains("prototype-review"));
-    assert!(status.contains("order-ready 아님"));
+    assert!(status.contains("주문 준비 전"));
+    assert!(!status.contains("order-ready"));
     assert!(!status.contains("C:\\Users"));
     assert!(!status.contains("ChatPCB3\\Projects"));
     assert!(!status.contains("Preview workspace saved"));
@@ -464,12 +474,14 @@ fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
 fn left_tab_status_describes_each_current_project_view() {
     let schematic = left_tab_status(0);
     assert!(schematic.contains("회로도"));
-    assert!(schematic.contains("chatpcb3-esp32s3.kicad_sch"));
+    assert!(schematic.contains("미리보기"));
+    assert!(!schematic.contains("chatpcb3-esp32s3.kicad_sch"));
     assert!(!schematic.contains("Schematic:"));
 
     let pcb = left_tab_status(1);
     assert!(pcb.contains("PCB 레이아웃"));
-    assert!(pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
+    assert!(pcb.contains("보드 외곽선"));
+    assert!(!pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(!pcb.contains("PCB Layout:"));
 
     let validation = left_tab_status(2);
@@ -482,7 +494,9 @@ fn left_tab_status_describes_each_current_project_view() {
     assert!(manufacturing.contains("제조 미리보기"));
     assert!(manufacturing.contains("Gerber/BOM/CPL"));
     assert!(manufacturing.contains("아직 생성 전"));
+    assert!(manufacturing.contains("주문 준비 전"));
     assert!(!manufacturing.contains("Manufacturing Preview:"));
+    assert!(!manufacturing.contains("blocked"));
 
     assert_eq!(left_tab_status(99), initial_left_workspace_status());
 }
@@ -497,20 +511,26 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(schematic.contains("회로도 미리보기"));
     assert!(schematic.contains("ESP32-S3"));
     assert!(schematic.contains("USB-C"));
-    assert!(schematic.contains("I2C_SCL"));
+    assert!(schematic.contains("I2C"));
     assert!(schematic.contains("오른쪽 채팅 입력칸"));
-    assert!(schematic.contains("order-ready 아님"));
+    assert!(schematic.contains("주문 준비 전"));
     assert!(schematic_lines <= 5);
     assert!(!schematic.contains("Native KiCad schematic embedding"));
     assert!(!schematic.contains("Schematic Preview"));
     assert!(!schematic.contains("Gate:"));
+    assert!(!schematic.contains("Target:"));
+    assert!(!schematic.contains("Expected nets"));
+    assert!(!schematic.contains("order-ready"));
 
     let pcb = left_tab_body(1);
     assert!(pcb.contains("PCB 레이아웃"));
     assert!(pcb.contains("50mm x 50mm"));
-    assert!(pcb.contains("Edge.Cuts"));
-    assert!(pcb.contains("placement"));
-    assert!(pcb.contains("Freerouting"));
+    assert!(pcb.contains("보드 외곽선"));
+    assert!(pcb.contains("배치"));
+    assert!(pcb.contains("배선"));
+    assert!(!pcb.contains("Component placement"));
+    assert!(!pcb.contains("Planned flow"));
+    assert!(!pcb.contains("Freerouting route data"));
     assert!(!pcb.contains("Gate:"));
 
     let validation = left_tab_body(2);
@@ -519,16 +539,20 @@ fn left_tab_body_gives_non_experts_a_visible_design_preview() {
     assert!(validation.contains("DRC"));
     assert!(!validation.contains("Validation Preview"));
     assert!(!validation.contains("release gate"));
+    assert!(!validation.contains("report"));
+    assert!(!validation.contains("artifact"));
 
     let manufacturing = left_tab_body(3);
     assert!(manufacturing.contains("제조 미리보기"));
     assert!(manufacturing.contains("Gerber"));
     assert!(manufacturing.contains("BOM"));
     assert!(manufacturing.contains("CPL"));
-    assert!(manufacturing.contains("Gerber/Drill 파일은 아직 생성 전"));
-    assert!(manufacturing.contains("BOM/CPL preview 파일은 설계 생성 후 확인용으로 생성"));
-    assert!(manufacturing.contains("업로드 가능 상태가 아님"));
+    assert!(manufacturing.contains("주문 준비 전"));
+    assert!(manufacturing.contains("검토 목록"));
     assert!(!manufacturing.contains("Gerber, Drill, BOM, and CPL files are not generated yet"));
+    assert!(!manufacturing.contains("schematic, layout"));
+    assert!(!manufacturing.contains("JLCPCB upload"));
+    assert!(!manufacturing.contains("blocked"));
     assert!(!manufacturing.contains("Gate:"));
 
     assert_eq!(left_tab_body(99), left_tab_body(0));
@@ -553,41 +577,51 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     assert!(!schematic.contains(project_dir));
     assert!(!schematic.contains("C:\\Users"));
     assert!(!schematic.contains("Gate:"));
+    assert!(!schematic.contains("Expected nets"));
+    assert!(!schematic.contains("order-ready"));
 
     let pcb = saved_preview_tab_body(1, project_dir);
     assert!(pcb.contains("PCB 레이아웃"));
-    assert!(pcb.contains("50mm x 50mm Edge.Cuts"));
+    assert!(pcb.contains("50mm x 50mm 보드 외곽선"));
     assert!(pcb.contains("PCB 열기"));
     assert!(pcb.contains("배치와 배선은 아직 preview 단계"));
+    assert!(pcb.contains("보드 외곽선"));
     assert!(!pcb.contains("chatpcb3-esp32s3.kicad_pcb"));
     assert!(!pcb.contains(project_dir));
     assert!(!pcb.contains("C:\\Users"));
+    assert!(!pcb.contains("board outline"));
     assert!(!pcb.contains("Gate:"));
 
     let validation = saved_preview_tab_body(2, project_dir);
     assert!(validation.contains("KiCad ERC/DRC 검증"));
     assert!(validation.contains("검토 목록"));
     assert!(validation.contains("prototype-review"));
+    assert!(validation.contains("자세한 검토 자료"));
     assert!(!validation.contains("kicad-pcb-check.txt"));
     assert!(!validation.contains("erc-report.json"));
     assert!(!validation.contains("drc-report.json"));
     assert!(!validation.contains("kicad-validation-summary.txt"));
     assert!(!validation.contains(project_dir));
     assert!(!validation.contains("C:\\Users"));
+    assert!(!validation.contains("report"));
+    assert!(!validation.contains("board outline"));
     assert!(!validation.contains("Gate:"));
 
     let manufacturing = saved_preview_tab_body(3, project_dir);
     assert!(manufacturing.contains("제조 미리보기"));
-    assert!(manufacturing.contains("JLCPCB 업로드는 아직 막힌 상태"));
+    assert!(manufacturing.contains("JLCPCB"));
+    assert!(manufacturing.contains("주문 준비 전"));
     assert!(manufacturing.contains("Gerber"));
     assert!(manufacturing.contains("검토 목록"));
     assert!(manufacturing.contains("prototype-review"));
-    assert!(manufacturing.contains("order-ready 아님"));
+    assert!(manufacturing.contains("주문 준비 전"));
+    assert!(!manufacturing.contains("order-ready"));
     assert!(!manufacturing.contains("jlcpcb-bom-preview.csv"));
     assert!(!manufacturing.contains("jlcpcb-cpl-preview.csv"));
     assert!(!manufacturing.contains("manufacturing-readiness-preview.txt"));
     assert!(!manufacturing.contains(project_dir));
     assert!(!manufacturing.contains("C:\\Users"));
+    assert!(!manufacturing.contains("Release evidence report"));
     assert!(!manufacturing.contains("Gate:"));
 
     assert_eq!(
@@ -606,13 +640,15 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
 
     assert!(body.contains("미리보기 저장 완료"));
     assert!(body.contains("검토 목록"));
+    assert!(body.contains("처음 확인할 내용"));
     assert!(body.contains("채팅 입력칸"));
-    assert!(body.contains("50mm x 50mm Edge.Cuts"));
+    assert!(body.contains("50mm x 50mm 보드 외곽선"));
     assert!(body.contains("PCB 열기"));
     assert!(body.contains("KiCad 10"));
     assert!(body.contains("후속 입력"));
     assert!(body.contains("prototype-review"));
-    assert!(body.contains("order-ready 아님"));
+    assert!(body.contains("주문 준비 전"));
+    assert!(!body.contains("order-ready"));
     assert!(visible_lines <= 10);
     assert!(!body.contains("생성된 파일:"));
     assert!(!body.contains("artifact-manifest.json"));
@@ -621,6 +657,7 @@ fn preview_workspace_body_points_to_saved_artifacts_without_order_ready_claims()
     assert!(!body.contains("jlcpcb-cpl-preview.csv"));
     assert!(!body.contains("manufacturing-readiness-preview.txt"));
     assert!(!body.contains("release-evidence-preview.md"));
+    assert!(!body.contains("beginner next steps"));
     assert!(!body.contains("Click Review checklist"));
 }
 
@@ -630,17 +667,19 @@ fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
-        "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
+        "KiCad 확인: 미리보기 PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
     );
 
     assert!(body.contains("KiCad CLI 확인"));
-    assert!(body.contains("preview PCB를 열 수 있습니다"));
+    assert!(body.contains("미리보기 PCB를 열 수 있습니다"));
     assert!(body.contains("자세한 보고서는 검토 목록"));
     assert!(body.contains("prototype-review"));
-    assert!(body.contains("order-ready 아님"));
+    assert!(body.contains("주문 준비 전"));
+    assert!(!body.contains("order-ready"));
     assert!(!body.contains("kicad-pcb-check.txt"));
     assert!(!body.contains("C:\\Users"));
     assert!(!body.contains("KiCad accepted the preview PCB"));
+    assert!(!body.contains("preview PCB"));
     assert!(!body.contains("Gate remains"));
 }
 
@@ -648,16 +687,17 @@ fn preview_workspace_body_surfaces_kicad_cli_check_for_non_experts() {
 fn kicad_cli_check_transcript_points_to_local_report_without_order_ready_claims() {
     let transcript = kicad_cli_check_transcript(
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
-        "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
+        "KiCad 확인: 미리보기 PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
     );
 
     assert!(transcript.contains("KiCad CLI 확인"));
-    assert!(transcript.contains("preview PCB를 열 수 있습니다"));
+    assert!(transcript.contains("미리보기 PCB를 열 수 있습니다"));
     assert!(transcript.contains("자세한 보고서는 검토 목록"));
     assert!(transcript.contains("prototype-review"));
     assert!(!transcript.contains("C:\\Users"));
     assert!(!transcript.contains("kicad-pcb-check.txt"));
     assert!(!transcript.contains("KiCad accepted the preview PCB"));
+    assert!(!transcript.contains("preview PCB"));
     assert!(!transcript.contains("Gate remains"));
     assert!(!transcript
         .to_ascii_lowercase()
@@ -670,7 +710,7 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\release-evidence-preview.md",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-pcb-check.txt",
-        "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
+        "KiCad 확인: 미리보기 PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다.",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\erc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\drc-report.json",
         "C:\\Users\\windo\\AppData\\Local\\ChatPCB3\\Projects\\chatpcb3-esp32s3-preview\\kicad-validation-summary.txt",
@@ -683,11 +723,13 @@ fn preview_workspace_body_surfaces_erc_drc_reports_for_non_experts() {
     assert!(body.contains("DRC: 오류 0개, 경고 0개"));
     assert!(body.contains("미연결 0개"));
     assert!(body.contains("prototype-review"));
-    assert!(body.contains("order-ready 아님"));
+    assert!(body.contains("주문 준비 전"));
+    assert!(!body.contains("order-ready"));
     assert!(!body.contains("erc-report.json"));
     assert!(!body.contains("drc-report.json"));
     assert!(!body.contains("kicad-validation-summary.txt"));
     assert!(!body.contains("C:\\Users"));
+    assert!(!body.contains("preview PCB"));
     assert!(!body.contains("ERC: 0 errors"));
     assert!(!body.contains("DRC: 0 errors"));
     assert!(!body.contains("Gate remains"));
@@ -748,14 +790,15 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(status.contains("검토 목록"));
     assert!(status.contains("저장 위치"));
     assert!(status.contains("prototype-review"));
-    assert!(status.contains("order-ready 아님"));
+    assert!(status.contains("주문 준비 전"));
+    assert!(!status.contains("order-ready"));
     assert!(!status.contains("C:\\Users"));
     assert!(!status.contains("chatpcb3-esp32s3-preview"));
     assert!(body.contains("이전 미리보기 발견"));
     assert!(body.contains("검토 목록으로 저장 위치와 파일을 확인"));
     assert!(body.contains("채팅 입력칸"));
     assert!(body.contains("PCB 열기"));
-    assert!(body.contains("order-ready 아님"));
+    assert!(body.contains("주문 준비 전"));
     assert!(visible_lines <= 8);
     assert!(!body.contains("C:\\Users"));
     assert!(!body.contains("예상 파일:"));
@@ -766,6 +809,8 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     assert!(!body.contains("jlcpcb-bom-preview.csv"));
     assert!(!body.contains("Previous preview workspace found"));
     assert!(!body.contains("Click Review checklist"));
+    assert!(!body.contains("board outline"));
+    assert!(!body.contains("order-ready"));
 }
 
 #[test]
@@ -778,7 +823,7 @@ fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
     assert!(transcript.contains("검토 목록"));
     assert!(transcript.contains("PCB 열기"));
     assert!(transcript.contains("prototype-review"));
-    assert!(transcript.contains("order-ready 아님"));
+    assert!(transcript.contains("주문 준비 전"));
     assert!(!transcript.contains("C:\\Users"));
     assert!(!transcript.contains("chatpcb3-esp32s3-preview"));
     assert!(!transcript.contains("프로젝트 폴더:"));
@@ -787,4 +832,6 @@ fn recovered_preview_workspace_chat_turn_orients_relaunch_users() {
     assert!(!transcript
         .to_ascii_lowercase()
         .contains("order-ready evidence"));
+    assert!(!transcript.contains("board outline"));
+    assert!(!transcript.contains("order-ready"));
 }

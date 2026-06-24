@@ -154,8 +154,8 @@ Expected result:
     `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
     when local ERC/DRC reports are clear.
 25. Click `PCB 열기`.
-26. Confirm the bottom status says either `KiCad PCB Editor에서 preview PCB를
-    열었습니다.` or `preview PCB 파일을 열었습니다. PCB Editor가 열리지
+26. Confirm the bottom status says either `KiCad PCB Editor에서 미리보기 PCB를
+    열었습니다.` or `미리보기 PCB 파일을 열었습니다. PCB Editor가 열리지
     않았다면 KiCad 10을 설치하세요.`
 27. If KiCad 10 is installed, confirm KiCad opens `chatpcb3-esp32s3.kicad_pcb`
     and the board preview contains a 50mm x 50mm `Edge.Cuts` outline.
@@ -163,7 +163,7 @@ Expected result:
 29. Confirm `검토 목록` opens the preview evidence folder with
     `BEGINNER-NEXT-STEPS.txt` selected.
     Confirm the bottom status says
-    `검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다.`
+    `검토 목록을 열었습니다.`
     Confirm it says to click PCB 열기, click 검토 목록, ask a follow-up in
     chat, and not order yet.
 30. Confirm the same folder still contains `FIRST-RUN-SUMMARY.txt`. Open it and

@@ -144,10 +144,10 @@ pub fn summarize_kicad_cli_check(
 
     let summary = match status {
         KicadCliCheckStatus::Accepted => {
-            "KiCad 확인: preview PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다."
+            "KiCad 확인: 미리보기 PCB를 열 수 있습니다. 검토 목록에서 주문 전 검토를 끝내기 전까지 prototype-review입니다."
         }
         KicadCliCheckStatus::Rejected => {
-            "KiCad 확인 실패: preview PCB를 열 수 없습니다. 검토 목록의 보고서를 확인하세요. prototype-review입니다."
+            "KiCad 확인 실패: 미리보기 PCB를 열 수 없습니다. 검토 목록의 보고서를 확인하세요. prototype-review입니다."
         }
         KicadCliCheckStatus::ToolMissing => {
             "KiCad 10 실행 파일을 찾지 못했습니다. KiCad 10 설치 후 로컬 확인을 실행하세요. 현재는 prototype-review입니다."
