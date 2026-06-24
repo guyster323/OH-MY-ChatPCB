@@ -12,6 +12,7 @@ $zipPath = Join-Path $repoRoot "dist\$packageName.zip"
 $releaseEvidencePath = Join-Path $packageRoot "RELEASE-EVIDENCE.txt"
 $sha256Path = Join-Path $packageRoot "SHA256SUMS.txt"
 $firstReadmePath = Join-Path $packageRoot "README-FIRST.txt"
+$firstReadmeKoPath = Join-Path $packageRoot "README-FIRST-KO.txt"
 $installerPath = Join-Path $packageRoot "install-from-package.ps1"
 
 function Assert-Contains {
@@ -49,7 +50,7 @@ try {
         throw "Working tree must be clean before replacement readiness check."
     }
 
-    foreach ($path in @($zipPath, $packageRoot, $releaseEvidencePath, $sha256Path, $firstReadmePath, $installerPath)) {
+    foreach ($path in @($zipPath, $packageRoot, $releaseEvidencePath, $sha256Path, $firstReadmePath, $firstReadmeKoPath, $installerPath)) {
         if (-not (Test-Path $path)) {
             throw "Missing required preview package artifact: $path"
         }
@@ -61,6 +62,7 @@ try {
     Assert-Contains $releaseEvidence "ChatPCB KiCad Preview release evidence" "RELEASE-EVIDENCE.txt is not the expected package evidence."
     Assert-Contains $releaseEvidence "Start Here Start Menu shortcut" "Release evidence must include the start-here shortcut."
     Assert-Contains $releaseEvidence "First Chat Guide Start Menu shortcut" "Release evidence must include the first chat guide shortcut."
+    Assert-Contains $releaseEvidence "Korean first chat guide for non-expert users" "Release evidence must include the Korean first chat guide."
     Assert-Contains $releaseEvidence "Provider model selector is readiness-only for preview generation" "Release evidence must say provider selection is readiness-only."
     Assert-Contains $releaseEvidence "Preview generation uses the built-in local generator" "Release evidence must say preview generation is local."
     Assert-Contains $releaseEvidence "No provider CLI is invoked for preview generation" "Release evidence must say provider CLIs are not invoked for preview generation."
@@ -70,6 +72,7 @@ try {
     Assert-Contains $sha256 "ChatPCB KiCad Preview.exe" "SHA256SUMS.txt must include the desktop executable."
     Assert-Contains $sha256 "chatpcb-core.exe" "SHA256SUMS.txt must include the Rust core executable."
     Assert-Contains $sha256 "README-FIRST.txt" "SHA256SUMS.txt must include the first chat guide."
+    Assert-Contains $sha256 "README-FIRST-KO.txt" "SHA256SUMS.txt must include the Korean first chat guide."
     Assert-Contains $sha256 "install-from-package.ps1" "SHA256SUMS.txt must include the packaged installer."
 
     $firstReadme = Get-Content -Raw -Path $firstReadmePath
@@ -80,10 +83,19 @@ try {
     Assert-Contains $firstReadme "built-in local generator" "README-FIRST.txt must explain preview generation stays local."
     Assert-Contains $firstReadme "No provider CLI is invoked" "README-FIRST.txt must explain provider CLIs are not invoked for preview generation."
 
+    $firstReadmeKo = Get-Content -Raw -Path $firstReadmeKoPath
+    Assert-Contains $firstReadmeKo "ChatPCB KiCad Preview 빠른 시작" "README-FIRST-KO.txt must provide a Korean quick start title."
+    Assert-Contains $firstReadmeKo "Chat prompt" "README-FIRST-KO.txt must tell a first-run user where to type."
+    Assert-Contains $firstReadmeKo "prototype-review" "README-FIRST-KO.txt must preserve the preview boundary."
+    Assert-Contains $firstReadmeKo "No provider CLI is invoked" "README-FIRST-KO.txt must explain provider CLIs are not invoked for preview generation."
+
     $installer = Get-Content -Raw -Path $installerPath
     Assert-Contains $installer "Start Here.lnk" "Packaged installer must create the Start Here Start Menu shortcut."
     Assert-Contains $installer "First Chat Guide.lnk" "Packaged installer must create the First Chat Guide Start Menu shortcut."
+    Assert-Contains $installer "First Chat Guide Korean.lnk" "Packaged installer must create the Korean First Chat Guide Start Menu shortcut."
     Assert-Contains $installer "README-FIRST.txt" "Packaged installer must copy README-FIRST.txt beside the installed app."
+    Assert-Contains $installer "README-FIRST-KO.txt" "Packaged installer must copy README-FIRST-KO.txt beside the installed app."
+    Assert-Contains $installer "Open the Korean ChatPCB KiCad first chat guide" "Packaged installer must label the Korean first chat guide shortcut."
     Assert-Contains $installer "INSTALL-READY.txt" "Packaged installer must write the install-ready summary."
     Assert-Contains $installer "Type a board idea in Chat prompt, then press Enter." "Install-ready summary must tell a first-run user how to start."
 

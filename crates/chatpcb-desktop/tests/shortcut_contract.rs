@@ -310,6 +310,36 @@ fn installers_add_start_menu_first_chat_guide_shortcut() {
 }
 
 #[test]
+fn installers_add_korean_first_chat_guide_for_non_expert_users() {
+    let source_installer =
+        fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
+    let package_installer =
+        fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let package_script =
+        fs::read_to_string(workspace_root().join("scripts/package-preview.ps1")).unwrap();
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let korean_guide =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST-KO.txt")).unwrap();
+
+    for script in [source_installer, package_installer] {
+        assert!(script.contains("README-FIRST-KO.txt"));
+        assert!(script.contains("First Chat Guide Korean.lnk"));
+        assert!(script.contains("Open the Korean ChatPCB KiCad first chat guide"));
+        assert!(script.contains("Korean first chat guide:"));
+    }
+
+    assert!(package_script.contains("README-FIRST-KO.txt"));
+    assert!(package_script.contains("Korean first chat guide for non-expert users"));
+    assert!(root_readme.contains("README-FIRST-KO.txt"));
+    assert!(guide.contains("README-FIRST-KO.txt"));
+    assert!(korean_guide.contains("ChatPCB KiCad Preview 빠른 시작"));
+    assert!(korean_guide.contains("Chat prompt"));
+    assert!(korean_guide.contains("prototype-review"));
+    assert!(korean_guide.contains("No provider CLI is invoked"));
+}
+
+#[test]
 fn root_double_click_installer_runs_local_install_and_launches_preview() {
     let installer =
         fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();

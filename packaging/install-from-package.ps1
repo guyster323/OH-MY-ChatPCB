@@ -13,6 +13,7 @@ $uninstallCommand = Join-Path $packageRoot "Uninstall ChatPCB KiCad Preview.cmd"
 $selfTestCommand = Join-Path $packageRoot "Run ChatPCB Self Test.cmd"
 $firstChatSmokeCommand = Join-Path $packageRoot "Run First Chat Smoke Test.cmd"
 $firstReadme = Join-Path $packageRoot "README-FIRST.txt"
+$firstReadmeKo = Join-Path $packageRoot "README-FIRST-KO.txt"
 
 if (-not (Test-Path $desktopExe)) {
     throw "Missing ChatPCB KiCad Preview.exe in the package folder."
@@ -42,6 +43,10 @@ if (-not (Test-Path $firstReadme)) {
     throw "Missing README-FIRST.txt in the package folder."
 }
 
+if (-not (Test-Path $firstReadmeKo)) {
+    throw "Missing README-FIRST-KO.txt in the package folder."
+}
+
 function Assert-ChatPCBPreviewNotRunning {
     $runningPreview = Get-Process -Name "ChatPCB KiCad Preview" -ErrorAction SilentlyContinue
     if ($runningPreview) {
@@ -60,6 +65,7 @@ Copy-Item -Force -Path $uninstallCommand -Destination "$InstallRoot\Uninstall Ch
 Copy-Item -Force -Path $selfTestCommand -Destination "$InstallRoot\Run ChatPCB Self Test.cmd"
 Copy-Item -Force -Path $firstChatSmokeCommand -Destination "$InstallRoot\Run First Chat Smoke Test.cmd"
 Copy-Item -Force -Path $firstReadme -Destination "$InstallRoot\README-FIRST.txt"
+Copy-Item -Force -Path $firstReadmeKo -Destination "$InstallRoot\README-FIRST-KO.txt"
 
 $installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
 $selfTestSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --self-test-summary
@@ -145,6 +151,12 @@ $firstGuideShortcut.TargetPath = "$InstallRoot\README-FIRST.txt"
 $firstGuideShortcut.WorkingDirectory = $InstallRoot
 $firstGuideShortcut.Description = "Open the ChatPCB KiCad first chat guide"
 $firstGuideShortcut.Save()
+$firstGuideKoShortcutPath = Join-Path $startMenuPath "First Chat Guide Korean.lnk"
+$firstGuideKoShortcut = $shell.CreateShortcut($firstGuideKoShortcutPath)
+$firstGuideKoShortcut.TargetPath = "$InstallRoot\README-FIRST-KO.txt"
+$firstGuideKoShortcut.WorkingDirectory = $InstallRoot
+$firstGuideKoShortcut.Description = "Open the Korean ChatPCB KiCad first chat guide"
+$firstGuideKoShortcut.Save()
 
 Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
 Write-Host "Desktop shortcut: $shortcutPath"
@@ -153,10 +165,12 @@ Write-Host "Self-test shortcut: $selfTestShortcutPath"
 Write-Host "First chat smoke test shortcut: $firstChatSmokeShortcutPath"
 Write-Host "Start here shortcut: $startHereShortcutPath"
 Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
+Write-Host "Korean first chat guide shortcut: $firstGuideKoShortcutPath"
 Write-Host "Install self-test: $installSelfTestPath"
 Write-Host "First chat smoke test: $installFirstChatSmokePath"
 Write-Host "Install ready summary: $installReadyPath"
 Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
+Write-Host "Korean first chat guide: $InstallRoot\README-FIRST-KO.txt"
 
 if ($Launch) {
     Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot

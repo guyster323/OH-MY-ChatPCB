@@ -20,6 +20,8 @@ For a non-expert first run from GitHub:
 5. Click `Review checklist` after the preview is saved.
 
 Boundary: `prototype-review`, not order-ready. Do not upload this preview to JLCPCB.
+Korean first-run users can open `README-FIRST-KO.txt` from the unzipped package
+or installed app folder for the same first-chat path.
 
 ## Current Status
 
@@ -136,12 +138,14 @@ If ChatPCB KiCad Preview is already open, close it before running the installer 
 The packaged installer does not require Rust or Cargo. It copies the native app
 into `%LOCALAPPDATA%\ChatPCB3\ChatPCB KiCad Preview`, creates a desktop
 shortcut plus Start Menu shortcuts, adds a `First Chat Guide` Start Menu
-shortcut, adds a `Start Here` shortcut to the install-ready note, adds a
-`Run First Chat Smoke Test` shortcut, writes
+shortcut, adds a `First Chat Guide Korean` Start Menu shortcut for
+`README-FIRST-KO.txt`, adds a `Start Here` shortcut to the install-ready note,
+adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-SELF-TEST.txt` with the installed executable's PASS summary, writes
 `INSTALL-FIRST-CHAT-SMOKE.txt` with the chat-to-preview smoke result, writes
 `INSTALL-READY.txt` with `Type a board idea in Chat prompt, then press Enter.`,
-copies `README-FIRST.txt` beside the installed app, and starts the app.
+copies `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
+and starts the app.
 For this preview, provider/model selection is readiness-only. Preview generation
 uses the built-in local generator. No provider CLI is invoked.
 
@@ -239,11 +243,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-preview.ps1
 ```
 
 The zip is written under `dist\` and intentionally ignored by git.
-It includes `README-FIRST.txt`, `RELEASE-EVIDENCE.txt`, `SHA256SUMS.txt`, and
-`Run ChatPCB Self Test.cmd` beside the two executables and installer scripts.
+It includes `README-FIRST.txt`, `README-FIRST-KO.txt`, `RELEASE-EVIDENCE.txt`,
+`SHA256SUMS.txt`, and `Run ChatPCB Self Test.cmd` beside the two executables and
+installer scripts.
 Both the packaged installer and source-tree installer add Start Menu shortcuts
 for the app, `Start Here`, `First Chat Guide`, self-test, and
-`Run First Chat Smoke Test`. A
+`First Chat Guide Korean`, and `Run First Chat Smoke Test`. A
 first-run user can verify the installed executable contract with a short PASS
 summary. That summary also
 verifies the first-run evidence points back to follow-up chat, blocks JLCPCB

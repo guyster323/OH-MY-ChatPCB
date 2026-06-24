@@ -56,6 +56,7 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("RELEASE-EVIDENCE.txt"));
     assert!(script.contains("SHA256SUMS.txt"));
     assert!(script.contains("README-FIRST.txt"));
+    assert!(script.contains("README-FIRST-KO.txt"));
     assert!(script.contains("install-from-package.ps1"));
     assert!(script.contains("INSTALL-READY.txt"));
     assert!(script.contains("Type a board idea in Chat prompt, then press Enter."));
@@ -68,6 +69,7 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("Preview generation uses the built-in local generator"));
     assert!(script.contains("No provider CLI is invoked for preview generation"));
     assert!(script.contains("provider/model selection is readiness-only"));
+    assert!(script.contains("ChatPCB KiCad Preview 빠른 시작"));
     assert!(script.contains("CheckRemoteHead"));
     assert!(script.contains("git ls-remote origin refs/heads/main"));
     assert!(script.contains("NO_PUSH_PERFORMED"));

@@ -33,6 +33,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\install-from-package.ps1" -Destination "$stagingRoot\install-from-package.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\uninstall-preview.ps1" -Destination "$stagingRoot\uninstall-preview.ps1"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$stagingRoot\README-FIRST.txt"
+    Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST-KO.txt" -Destination "$stagingRoot\README-FIRST-KO.txt"
 
     $commit = (git rev-parse --short HEAD).Trim()
     $branch = (git branch --show-current).Trim()
@@ -75,6 +76,7 @@ try {
         "- Installer writes INSTALL-READY.txt with immediate first-chat instructions",
         "- Start Here Start Menu shortcut",
         "- First Chat Guide Start Menu shortcut",
+        "- Korean first chat guide for non-expert users",
         "- Provider Login returns focus to prompt",
         "- Use example returns focus to prompt",
         "- Use example selects prompt text for immediate overwrite",

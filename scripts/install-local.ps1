@@ -34,6 +34,7 @@ try {
     Copy-Item -Force -Path "$repoRoot\packaging\Run ChatPCB Self Test.cmd" -Destination "$InstallRoot\Run ChatPCB Self Test.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\Run First Chat Smoke Test.cmd" -Destination "$InstallRoot\Run First Chat Smoke Test.cmd"
     Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST.txt" -Destination "$InstallRoot\README-FIRST.txt"
+    Copy-Item -Force -Path "$repoRoot\packaging\README-FIRST-KO.txt" -Destination "$InstallRoot\README-FIRST-KO.txt"
 
     $installSelfTestPath = Join-Path $InstallRoot "INSTALL-SELF-TEST.txt"
     $selfTestSummary = & "$InstallRoot\ChatPCB KiCad Preview.exe" --self-test-summary
@@ -119,6 +120,12 @@ try {
     $firstGuideShortcut.WorkingDirectory = $InstallRoot
     $firstGuideShortcut.Description = "Open the ChatPCB KiCad first chat guide"
     $firstGuideShortcut.Save()
+    $firstGuideKoShortcutPath = Join-Path $startMenuPath "First Chat Guide Korean.lnk"
+    $firstGuideKoShortcut = $shell.CreateShortcut($firstGuideKoShortcutPath)
+    $firstGuideKoShortcut.TargetPath = "$InstallRoot\README-FIRST-KO.txt"
+    $firstGuideKoShortcut.WorkingDirectory = $InstallRoot
+    $firstGuideKoShortcut.Description = "Open the Korean ChatPCB KiCad first chat guide"
+    $firstGuideKoShortcut.Save()
 
     Write-Host "Installed ChatPCB KiCad Preview to: $InstallRoot"
     Write-Host "Desktop shortcut: $shortcutPath"
@@ -127,10 +134,12 @@ try {
     Write-Host "First chat smoke test shortcut: $firstChatSmokeShortcutPath"
     Write-Host "Start here shortcut: $startHereShortcutPath"
     Write-Host "First chat guide shortcut: $firstGuideShortcutPath"
+    Write-Host "Korean first chat guide shortcut: $firstGuideKoShortcutPath"
     Write-Host "Install self-test: $installSelfTestPath"
     Write-Host "First chat smoke test: $installFirstChatSmokePath"
     Write-Host "Install ready summary: $installReadyPath"
     Write-Host "First chat guide: $InstallRoot\README-FIRST.txt"
+    Write-Host "Korean first chat guide: $InstallRoot\README-FIRST-KO.txt"
 
     if ($Launch) {
         Start-Process -FilePath "$InstallRoot\ChatPCB KiCad Preview.exe" -WorkingDirectory $InstallRoot

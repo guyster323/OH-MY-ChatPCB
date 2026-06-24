@@ -38,12 +38,15 @@ Expected result:
   `prototype-review` boundary.
 - `README-FIRST.txt` is copied beside the installed app for the first chat
   steps.
+- `README-FIRST-KO.txt` is copied beside the installed app for the Korean first
+  chat steps.
 - A desktop shortcut named `ChatPCB KiCad Preview` is created.
 - A Start Menu folder named `ChatPCB KiCad Preview` is created.
 - The Start Menu folder includes `Run ChatPCB Self Test`.
 - The Start Menu folder includes `Run First Chat Smoke Test`.
 - The Start Menu folder includes `Start Here`.
 - The Start Menu folder includes `First Chat Guide`.
+- The Start Menu folder includes `First Chat Guide Korean`.
 - Running `Run ChatPCB Self Test` prints a short PASS summary with
   `PASS Provider Login shows local CLI login hints` and
   `PASS model selector falls back to built-in preview` and
