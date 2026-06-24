@@ -8,6 +8,7 @@ set EXITCODE=%ERRORLEVEL%
 if not "%EXITCODE%"=="0" (
   echo.
   echo ChatPCB KiCad Preview installation failed.
+  echo If ChatPCB KiCad Preview is open, close it and run this installer again.
   echo Make sure this file is still next to ChatPCB KiCad Preview.exe and chatpcb-core.exe.
   echo.
   pause

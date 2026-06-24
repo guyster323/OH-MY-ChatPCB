@@ -36,6 +36,11 @@ fn installers_stop_with_clear_message_when_preview_app_is_running() {
         fs::read_to_string(workspace_root().join("scripts/install-local.ps1")).unwrap();
     let package_installer =
         fs::read_to_string(workspace_root().join("packaging/install-from-package.ps1")).unwrap();
+    let source_cmd =
+        fs::read_to_string(workspace_root().join("Install ChatPCB KiCad Preview.cmd")).unwrap();
+    let package_cmd =
+        fs::read_to_string(workspace_root().join("packaging/Install ChatPCB KiCad Preview.cmd"))
+            .unwrap();
     let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
     let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
     let package_readme =
@@ -52,6 +57,11 @@ fn installers_stop_with_clear_message_when_preview_app_is_running() {
             guard_index < copy_index,
             "installer should check for a running app before copying over the executable"
         );
+    }
+
+    for script in [source_cmd, package_cmd] {
+        assert!(script
+            .contains("If ChatPCB KiCad Preview is open, close it and run this installer again."));
     }
 
     assert!(root_readme.contains(
