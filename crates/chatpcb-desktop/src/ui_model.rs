@@ -275,25 +275,19 @@ pub fn preview_result_summary_transcript() -> &'static str {
      - 아직 JLCPCB 주문 금지: prototype-review 상태입니다.\r\n"
 }
 
-pub fn preview_workspace_left_status(project_dir: &str) -> String {
-    format!("미리보기 저장 완료: {project_dir} | prototype-review, order-ready 아님.")
+pub fn preview_workspace_left_status(_project_dir: &str) -> String {
+    "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님."
+        .to_string()
 }
 
-pub fn saved_preview_tab_status(index: usize, project_dir: &str) -> String {
+pub fn saved_preview_tab_status(index: usize, _project_dir: &str) -> String {
     match index {
-        0 => format!(
-            "회로도: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_sch를 prototype-review로 확인하세요."
-        ),
-        1 => format!(
-            "PCB 레이아웃: 저장된 미리보기 {project_dir}. chatpcb3-esp32s3.kicad_pcb 50mm x 50mm outline 확인."
-        ),
-        2 => format!(
-            "검증: 저장된 미리보기 {project_dir}. KiCad ERC/DRC report를 확인하세요; gate는 prototype-review."
-        ),
-        3 => format!(
-            "제조 미리보기: 저장된 미리보기 {project_dir}. Gerber/BOM/CPL은 아직 order-ready 아님."
-        ),
-        _ => saved_preview_tab_status(0, project_dir),
+        0 => "회로도: 저장된 미리보기. 검토 목록에서 저장 위치 확인; prototype-review.".to_string(),
+        1 => "PCB 레이아웃: 저장된 미리보기. PCB 열기로 50mm x 50mm outline 확인.".to_string(),
+        2 => "검증: 저장된 미리보기. 검토 목록에서 KiCad ERC/DRC report 확인; prototype-review."
+            .to_string(),
+        3 => "제조 미리보기: 저장된 미리보기. Gerber/BOM/CPL은 아직 order-ready 아님.".to_string(),
+        _ => saved_preview_tab_status(0, _project_dir),
     }
 }
 
@@ -428,8 +422,9 @@ pub fn erc_drc_validation_transcript(
     )
 }
 
-pub fn recovered_preview_workspace_left_status(project_dir: &str) -> String {
-    format!("이전 미리보기 발견: {project_dir} | prototype-review, order-ready 아님.")
+pub fn recovered_preview_workspace_left_status(_project_dir: &str) -> String {
+    "이전 미리보기 발견 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님."
+        .to_string()
 }
 
 pub fn recovered_preview_workspace_body(_project_dir: &str) -> String {

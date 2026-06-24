@@ -46,10 +46,12 @@ Implemented in this first vertical slice:
   evidence report under
   `%LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview`.
 - The left project status updates after `Send design`, so the design side and
-  chat side both reflect the saved preview workspace.
+  chat side both reflect the saved preview workspace without filling the status
+  line with a local path. The saved preview bottom status says
+  `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`.
 - Clicking the left `회로도`, `PCB 레이아웃`, `검증`, and `제조 미리보기`
-  tabs updates the project status with that view's current preview
-  state.
+  tabs updates the project status with that view's current preview state while
+  keeping saved file paths in `검토 목록` and the chat transcript.
 - The left design pane shows a native read-only preview body for each tab, so a
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.

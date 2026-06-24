@@ -137,9 +137,11 @@ Expected result:
     send, so the new design result is visible without manually scrolling down.
 19. Without clicking back inside the prompt box, type another short follow-up
     request and confirm it appears in the prompt input.
-20. Confirm the left project status and large left preview body now show
-    `미리보기 저장 완료` and `order-ready 아님` instead of only the initial
-    회로도 미리보기.
+20. Confirm the saved preview bottom status says
+    `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`
+    instead of a long local path, and confirm the large left preview body now
+    shows `미리보기 저장 완료` and `order-ready 아님` instead of only the
+    initial 회로도 미리보기.
 21. Confirm the chat transcript mentions `KiCad CLI check` and
     `kicad-pcb-check.txt`, while the large left preview body keeps KiCad details
     behind `검토 목록`.
@@ -289,6 +291,12 @@ Latest run after installing the current preview package was checked on
 - Computer Use verified the large left preview body keeps KiCad/ERC/DRC details behind `검토 목록`:
   the visible body shows the validation summary and next action, without the
   report path list that used to dominate the preview.
+- Computer Use verified the saved preview bottom status stays path-free:
+  after reinstalling the current package and sending
+  `ESP32-S3 quiet status board`, the bottom status showed
+  `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`;
+  after switching to `검증`, it showed
+  `검증: 저장된 미리보기. 검토 목록에서 KiCad ERC/DRC report 확인; prototype-review.`
 - Computer Use also verified the empty prompt fallback. It selected the prompt,
   cleared it, pressed Enter, and the bottom pipeline status showed
   `내장 예시 사용.` before the validation status.

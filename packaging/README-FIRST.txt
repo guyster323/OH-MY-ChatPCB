@@ -61,26 +61,27 @@ First chat
 14. Confirm the chat transcript keeps the Provider Login status and appends the new design response.
 15. Confirm the transcript is positioned at the latest response.
 16. Confirm the chat transcript says "미리보기 저장 완료".
-17. Confirm the large left preview body also shows the saved KiCad scaffold files.
-18. Confirm the chat transcript and left preview body mention "KiCad CLI check".
-19. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
-20. Confirm the chat transcript and left preview body mention "KiCad ERC/DRC reports".
-21. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
-22. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
-23. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
-24. Confirm the bottom status says "검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review." when local ERC/DRC reports are clear.
-25. Click PCB 열기 to inspect chatpcb3-esp32s3.kicad_pcb.
-26. Confirm the bottom status says either "KiCad PCB Editor에서 preview PCB를 열었습니다." or "preview PCB 파일을 열었습니다. PCB Editor가 열리지 않았다면 KiCad 10을 설치하세요."
-27. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
-28. Click 검토 목록 to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
-29. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
-30. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
-31. Close and reopen the app, then click 검토 목록 before sending again.
-32. Confirm the left project status says "이전 미리보기 발견".
-33. Confirm the chat transcript also says "이전 미리보기 발견" and keeps the boundary visible as "order-ready 아님".
-34. Confirm the short bottom status says "이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록."
-35. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
-36. The folder path is:
+17. Confirm the saved preview bottom status says "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님." instead of a long local path.
+18. Confirm the large left preview body shows the next action and keeps detailed files behind 검토 목록.
+19. Confirm the chat transcript mentions "KiCad CLI check".
+20. Confirm kicad-pcb-check.txt is listed in the saved preview folder.
+21. Confirm the chat transcript mentions "KiCad ERC/DRC reports".
+22. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
+23. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
+24. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
+25. Confirm the bottom status says "검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review." when local ERC/DRC reports are clear.
+26. Click PCB 열기 to inspect chatpcb3-esp32s3.kicad_pcb.
+27. Confirm the bottom status says either "KiCad PCB Editor에서 preview PCB를 열었습니다." or "preview PCB 파일을 열었습니다. PCB Editor가 열리지 않았다면 KiCad 10을 설치하세요."
+28. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
+29. Click 검토 목록 to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
+30. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
+31. Confirm manufacturing-readiness-preview.txt says not to upload this preview to JLCPCB.
+32. Close and reopen the app, then click 검토 목록 before sending again.
+33. Confirm the left project status says "이전 미리보기 발견".
+34. Confirm the chat transcript also says "이전 미리보기 발견" and keeps the boundary visible as "order-ready 아님".
+35. Confirm the short bottom status says "이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록."
+36. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
+37. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
 
 Current boundary

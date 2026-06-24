@@ -445,9 +445,12 @@ fn left_workspace_status_moves_from_placeholder_to_saved_preview() {
     );
 
     assert!(status.contains("미리보기 저장 완료"));
-    assert!(status.contains("ChatPCB3\\Projects"));
+    assert!(status.contains("검토 목록"));
+    assert!(status.contains("저장 위치"));
     assert!(status.contains("prototype-review"));
     assert!(status.contains("order-ready 아님"));
+    assert!(!status.contains("C:\\Users"));
+    assert!(!status.contains("ChatPCB3\\Projects"));
     assert!(!status.contains("Preview workspace saved"));
 }
 
@@ -529,7 +532,9 @@ fn saved_preview_tabs_keep_workspace_context_after_send_design() {
     let schematic_status = saved_preview_tab_status(0, project_dir);
     assert!(schematic_status.contains("회로도"));
     assert!(schematic_status.contains("저장된 미리보기"));
-    assert!(schematic_status.contains(project_dir));
+    assert!(schematic_status.contains("검토 목록"));
+    assert!(!schematic_status.contains(project_dir));
+    assert!(!schematic_status.contains("C:\\Users"));
 
     let schematic = saved_preview_tab_body(0, project_dir);
     assert!(schematic.contains("미리보기 저장 완료"));
@@ -712,9 +717,12 @@ fn recovered_preview_workspace_text_orients_relaunch_users() {
     let visible_lines = body.lines().filter(|line| !line.trim().is_empty()).count();
 
     assert!(status.contains("이전 미리보기 발견"));
-    assert!(status.contains("chatpcb3-esp32s3-preview"));
+    assert!(status.contains("검토 목록"));
+    assert!(status.contains("저장 위치"));
     assert!(status.contains("prototype-review"));
     assert!(status.contains("order-ready 아님"));
+    assert!(!status.contains("C:\\Users"));
+    assert!(!status.contains("chatpcb3-esp32s3-preview"));
     assert!(body.contains("이전 미리보기 발견"));
     assert!(body.contains("검토 목록으로 저장 위치와 파일을 확인"));
     assert!(body.contains("채팅 입력칸"));

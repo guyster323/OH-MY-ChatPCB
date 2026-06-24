@@ -714,6 +714,7 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(
         guide.contains("large left preview body keeps KiCad/ERC/DRC details behind `검토 목록`")
     );
+    assert!(guide.contains("Computer Use verified the saved preview bottom status stays path-free"));
     assert!(guide.contains("`다음 행동`"));
     assert!(guide.contains("`채팅 입력칸에 바꿀 점을 적고 Enter`"));
     assert!(!guide.contains("Computer Use verified the fresh first-chat view lists"));
@@ -795,5 +796,21 @@ fn docs_explain_recovered_preview_keeps_immediate_chat_visible() {
         assert!(text.contains("이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록."));
         assert!(text.contains("short bottom status"));
         assert!(!text.contains("Recovered preview: C:\\"));
+    }
+}
+
+#[test]
+fn docs_explain_saved_preview_status_hides_local_paths() {
+    let root_readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
+    let guide = fs::read_to_string(workspace_root().join("docs/user-test-guide.md")).unwrap();
+    let package_readme =
+        fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
+
+    for text in [root_readme, guide, package_readme] {
+        assert!(text.contains(
+            "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님."
+        ));
+        assert!(text.contains("saved preview bottom status"));
+        assert!(!text.contains("미리보기 저장 완료: C:\\"));
     }
 }
