@@ -1495,7 +1495,7 @@ mod win32_app {
                 chatpcb_desktop::ui_model::open_evidence_pipeline_status(),
             );
         } else {
-            set_pipeline_status(controls, "No checklist yet: click Send design first.");
+            set_pipeline_status(controls, "아직 검토 목록 없음: 먼저 설계 생성을 누르세요.");
         }
     }
 
@@ -1509,7 +1509,7 @@ mod win32_app {
         if let Some(path) = &controls.last_workspace_dir {
             open_preview_pcb(path, controls);
         } else {
-            set_pipeline_status(controls, "No PCB yet: click Send design first.");
+            set_pipeline_status(controls, "아직 PCB 없음: 먼저 설계 생성을 누르세요.");
         }
     }
 
@@ -1522,7 +1522,7 @@ mod win32_app {
                 chatpcb_desktop::ui_model::open_pcb_pipeline_status(opened_with_kicad),
             );
         } else {
-            set_pipeline_status(controls, "PCB file missing: click Send design again.");
+            set_pipeline_status(controls, "PCB 파일 없음: 설계 생성을 다시 누르세요.");
         }
     }
 

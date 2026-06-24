@@ -135,7 +135,7 @@ fn provider_login_does_not_block_the_builtin_preview_when_no_cli_is_ready() {
     assert!(ui_model.contains("login_hint"));
     assert!(ui_model.contains("로컬 provider 없음; built-in-preview는 계속 사용 가능합니다."));
     assert!(!ui_model.contains("No local provider found; built-in preview still works."));
-    assert!(ui_model.contains("그래도 Send design으로 ESP32-S3 preview를 만들 수 있습니다."));
+    assert!(ui_model.contains("그래도 설계 생성으로 ESP32-S3 preview를 만들 수 있습니다."));
     assert!(!ui_model.contains("You can still press Send design"));
     assert!(ui_model.contains("selected_model_for_statuses"));
     assert!(main.contains("provider_login_pipeline_status(selected_provider)"));
@@ -285,7 +285,7 @@ fn user_test_guide_checks_the_korean_first_screen_cue() {
     let readme = fs::read_to_string(workspace_root().join("README.md")).unwrap();
 
     assert!(guide.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
-    assert!(guide.contains("Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example."));
+    assert!(guide.contains("준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시."));
     assert!(readme.contains("바로 채팅: 만들 보드를 Chat prompt에 적고 Enter."));
 }
 
@@ -487,7 +487,7 @@ fn native_preview_has_open_evidence_button_for_saved_workspace() {
 
     assert!(ui_model.contains("open_evidence_opens_preview_workspace"));
     assert!(main.contains("ID_OPEN_EVIDENCE"));
-    assert!(main.contains("Review checklist"));
+    assert!(main.contains("검토 목록"));
     assert!(!main.contains("\"Open evidence\""));
     assert!(main.contains("handle_open_evidence"));
     assert!(main.contains("last_workspace_dir"));
@@ -547,7 +547,7 @@ fn open_evidence_selects_beginner_next_steps_for_non_experts() {
     let first_run_summary_index = main.find("FIRST-RUN-SUMMARY.txt").unwrap();
     assert!(
         beginner_next_steps_index < first_run_summary_index,
-        "Review checklist should select BEGINNER-NEXT-STEPS.txt before falling back to FIRST-RUN-SUMMARY.txt"
+        "검토 목록 should select BEGINNER-NEXT-STEPS.txt before falling back to FIRST-RUN-SUMMARY.txt"
     );
     assert!(!main.contains("Opened first-run summary in evidence folder."));
 }
@@ -562,7 +562,7 @@ fn native_preview_has_open_pcb_button_for_saved_workspace() {
 
     assert!(ui_model.contains("open_pcb_opens_preview_board"));
     assert!(main.contains("ID_OPEN_PCB"));
-    assert!(main.contains("Open PCB"));
+    assert!(main.contains("PCB 열기"));
     assert!(main.contains("handle_open_pcb"));
     assert!(main.contains("open_preview_pcb"));
     assert!(main.contains("open_preview_pcb_file"));
@@ -653,7 +653,7 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`jlcpcb-cpl-preview.csv`"));
     assert!(guide.contains("`manufacturing-readiness-preview.txt`"));
     assert!(guide.contains("Computer Use verified the recovered preview launch status"));
-    assert!(guide.contains("`Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.`"));
+    assert!(guide.contains("`이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.`"));
     assert!(guide.contains("not hidden by automatic provider detection"));
     assert!(guide.contains(
         "Computer Use reinstalled the current package after the saved/recovered copy localization"
@@ -694,6 +694,14 @@ fn user_test_guide_keeps_computer_use_status_separate_from_code_verification() {
     assert!(guide.contains("`다음 행동`"));
     assert!(guide.contains("no old `Assistant: What happened` heading"));
     assert!(guide.contains("Code and installed-package checks still passed"));
+    assert!(guide.contains(
+        "Computer Use reinstalled and relaunched the package after the status-copy localization"
+    ));
+    assert!(guide.contains("`이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.`"));
+    assert!(
+        guide.contains("`검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`")
+    );
+    assert!(guide.contains("no old `Open PCB/checklist`, `Open PCB/Review checklist`, `Recovered:`, or `Ready:` status text"));
 }
 
 #[test]
@@ -719,7 +727,7 @@ fn docs_explain_recovered_preview_keeps_immediate_chat_visible() {
         fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
     for text in [root_readme, guide, package_readme] {
-        assert!(text.contains("Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."));
+        assert!(text.contains("이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록."));
         assert!(text.contains("short bottom status"));
         assert!(!text.contains("Recovered preview: C:\\"));
     }

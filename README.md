@@ -21,7 +21,7 @@ For a non-expert first run from GitHub:
 
 The first chat transcript also shows
 `바로 채팅: 만들 보드를 Chat prompt에 적고 Enter.`, and the bottom status says
-`Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example.`
+`준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시.`
 
 Boundary: `prototype-review`, not order-ready. Do not upload this preview to JLCPCB.
 Korean first-run users can open `README-FIRST-KO.txt` from the unzipped package
@@ -53,11 +53,11 @@ Implemented in this first vertical slice:
 - The left design pane shows a native read-only preview body for each tab, so a
   first-run user sees schematic, layout, validation, and manufacturing context
   instead of a blank canvas.
-- `Review checklist` opens the saved preview workspace folder from inside the app
+- `검토 목록` opens the saved preview workspace folder from inside the app
   with `BEGINNER-NEXT-STEPS.txt` selected for first-run users. The same folder
   still contains `FIRST-RUN-SUMMARY.txt` and the release evidence report,
   including after relaunch when a previous preview workspace already exists.
-- `Open PCB` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview with KiCad
+- `PCB 열기` opens the generated `chatpcb3-esp32s3.kicad_pcb` preview with KiCad
   10's PCB Editor when it is installed; otherwise it falls back to the Windows
   file association and tells the user to install KiCad 10 if PCB Editor did not
   open.
@@ -73,7 +73,7 @@ Implemented in this first vertical slice:
   `manufacturing-readiness-preview.txt`. The readiness report blocks upload and
   keeps the package at `prototype-review`, not order-ready.
 - After local ERC/DRC reports are clear, the bottom pipeline status stays short
-  and points the user to `Open PCB` or `Review checklist` instead of truncating the
+  and points the user to `PCB 열기` or `검토 목록` instead of truncating the
   full report summary.
 - Pressing Enter in the prompt input sends the design through the same native
   path as the `Send design` button.
@@ -215,7 +215,7 @@ upgrade` as a compatibility check and saves `kicad-pcb-check.txt` in the same
 folder. It also runs KiCad CLI ERC/DRC JSON checks and saves
 `erc-report.json`, `drc-report.json`, and `kicad-validation-summary.txt`. When
 those local reports are clear, the bottom pipeline status says
-`검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.`
+`검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
 The JLCPCB preview blocker report is saved as
 `manufacturing-readiness-preview.txt` and says not to upload this preview to
 JLCPCB.
@@ -228,7 +228,7 @@ folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
 exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
 same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
 boundary and `release-evidence-preview.md` for saved evidence. The bottom status
-says `Opened BEGINNER-NEXT-STEPS.txt for checklist review.` so a first-run user
+says `검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다.` so a first-run user
 knows which file was selected.
 After closing and reopening the app,
 `검토 목록` recovers the same preview folder if it already exists, and the
@@ -236,7 +236,7 @@ left project pane marks that previous preview workspace before another send. The
 chat transcript also
 mentions that recovered workspace, so a returning user can continue from the
 right pane without guessing what happened. The short bottom status says
-`Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist.` instead
+`이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록.` instead
 of filling the status line with a long local path. See `docs/user-test-guide.md`
 for the user-facing check.
 

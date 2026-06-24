@@ -99,7 +99,7 @@ pub fn left_tab_status(index: usize) -> &'static str {
     match index {
         0 => initial_left_workspace_status(),
         1 => "PCB Layout: chatpcb3-esp32s3.kicad_pcb 미리보기. 배치/배선은 아직 생성 전입니다.",
-        2 => "Validation: ERC/DRC 아직 실행 전. Send design은 prototype-review 증거만 만듭니다.",
+        2 => "Validation: ERC/DRC 아직 실행 전. 설계 생성은 prototype-review 증거만 만듭니다.",
         3 => "Manufacturing Preview: Gerber/BOM/CPL 아직 생성 전. JLCPCB 업로드 패키지는 계속 blocked입니다.",
         _ => initial_left_workspace_status(),
     }
@@ -123,7 +123,7 @@ pub fn left_tab_body(index: usize) -> &'static str {
               - KiCad report와 artifact가 생길 때까지 release gate는 prototype-review입니다.",
         3 => "Manufacturing Preview\r\n\
               - Gerber/Drill 파일은 아직 생성 전입니다.\r\n\
-              - BOM/CPL preview 파일은 Send design 후 확인용으로 생성되지만 업로드 가능 상태가 아님.\r\n\
+              - BOM/CPL preview 파일은 설계 생성 후 확인용으로 생성되지만 업로드 가능 상태가 아님.\r\n\
               - schematic, layout, ERC, DRC, Gerber, drill, placement-reviewed CPL 증거 전까지 JLCPCB upload는 blocked입니다.\r\n\
               - 실제 주문 전에는 반드시 멈추고 사용자 확인을 받아야 합니다.",
         _ => left_tab_body(0),
@@ -131,11 +131,11 @@ pub fn left_tab_body(index: usize) -> &'static str {
 }
 
 pub fn initial_pipeline_status() -> &'static str {
-    "Ready: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 example."
+    "준비: 만들 보드 입력 후 Enter. 빈칸=ESP32-S3 예시."
 }
 
 pub fn example_loaded_pipeline_status() -> &'static str {
-    "Example loaded: edit, press Enter, or Send design."
+    "예시 입력됨: 고치고 Enter 또는 설계 생성."
 }
 
 pub fn provider_login_pipeline_status(selected_model: Option<&str>) -> String {
@@ -165,14 +165,14 @@ pub fn selected_model_for_statuses(statuses: &[ProviderUiStatus]) -> &'static st
 }
 
 pub fn design_pipeline_status() -> &'static str {
-    "Preview plan queued: schematic -> layout -> DRC -> JLCPCB."
+    "미리보기 계획: schematic -> layout -> DRC -> JLCPCB."
 }
 
 pub fn validation_pipeline_status(validation_summary: &str) -> String {
     if validation_summary.contains("ERC: 0 errors, 0 warnings")
         && validation_summary.contains("DRC: 0 errors, 0 warnings, 0 unconnected")
     {
-        return "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review.".to_string();
+        return "검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.".to_string();
     }
 
     "검증 확인 필요: checklist에서 ERC/DRC 확인. 아직 prototype-review.".to_string()
@@ -180,7 +180,7 @@ pub fn validation_pipeline_status(validation_summary: &str) -> String {
 
 pub fn visible_empty_prompt_pipeline_status(status: &str) -> String {
     if status.contains("검증 완료") {
-        return "내장 예시 사용. 검증 완료: Open PCB/checklist. 아직 prototype-review.".to_string();
+        return "내장 예시 사용. 검증 완료: PCB 열기/검토 목록. 아직 prototype-review.".to_string();
     }
 
     format!("내장 예시 사용. {status}")
@@ -188,18 +188,18 @@ pub fn visible_empty_prompt_pipeline_status(status: &str) -> String {
 
 pub fn open_pcb_pipeline_status(opened_with_kicad: bool) -> &'static str {
     if opened_with_kicad {
-        "Opened preview PCB in KiCad PCB Editor."
+        "KiCad PCB Editor에서 preview PCB를 열었습니다."
     } else {
-        "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
+        "preview PCB 파일을 열었습니다. PCB Editor가 열리지 않았다면 KiCad 10을 설치하세요."
     }
 }
 
 pub fn open_evidence_pipeline_status() -> &'static str {
-    "Opened BEGINNER-NEXT-STEPS.txt for checklist review."
+    "검토 목록: BEGINNER-NEXT-STEPS.txt를 열었습니다."
 }
 
 pub fn recovered_preview_pipeline_status() -> &'static str {
-    "Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."
+    "이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록."
 }
 
 pub fn example_board_prompt() -> &'static str {
@@ -236,7 +236,7 @@ pub fn send_design_transcript(prompt: &str) -> String {
          - schematic -> placement -> Freerouting autoroute -> DRC -> manufacturing package 흐름을 준비했습니다.\r\n\
          Preview engine: built-in local generator; provider/model selection is readiness only. No provider CLI is invoked for this preview slice.\r\n\
          다음 행동\r\n\
-         - Open PCB 또는 Review checklist로 저장된 preview를 확인하세요.\r\n\
+         - PCB 열기 또는 검토 목록으로 저장된 preview를 확인하세요.\r\n\
          - order-ready 파일은 실제 KiCad fork 통합과 제조 증거 검토가 필요합니다.\r\n\
          Status: preview only, not order-ready yet.\r\n"
     )
@@ -258,10 +258,10 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
         "미리보기 저장 완료\r\n\
          - 프로젝트 폴더: {project_dir}\r\n\
          - KiCad preview scaffold: chatpcb3-esp32s3.kicad_pro, chatpcb3-esp32s3.kicad_sch, chatpcb3-esp32s3.kicad_pcb\r\n\
-         - 다음 단계: BEGINNER-NEXT-STEPS.txt와 Open PCB/Review checklist 확인 후 chat에서 후속 입력.\r\n\
+         - 다음 단계: BEGINNER-NEXT-STEPS.txt와 PCB 열기/검토 목록 확인 후 chat에서 후속 입력.\r\n\
          - JLCPCB 확인 파일: manufacturing-readiness-preview.txt, jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv.\r\n\
          - PCB preview: 50mm x 50mm Edge.Cuts 외곽선만 있음. 배치/배선은 아직 없음.\r\n\
-         - Open PCB로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\
+         - PCB 열기로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\
          - Release evidence: {release_report_file}\r\n\
          Status: prototype-review, order-ready 아님.\r\n"
     )
@@ -269,7 +269,7 @@ pub fn preview_workspace_saved_transcript(project_dir: &str, release_report_file
 
 pub fn preview_result_summary_transcript() -> &'static str {
     "결과: 미리보기 저장 완료\r\n\
-     - Open PCB 또는 Review checklist로 확인하세요.\r\n\
+     - PCB 열기 또는 검토 목록으로 확인하세요.\r\n\
      - 아직 JLCPCB 주문 금지: prototype-review 상태입니다.\r\n"
 }
 
@@ -313,12 +313,12 @@ pub fn saved_preview_tab_body(index: usize, project_dir: &str) -> String {
             "PCB Layout\r\n\
              프로젝트 폴더:\r\n\
              {project_dir}\r\n\r\n\
-             Open PCB:\r\n\
+             PCB 열기:\r\n\
              {project_dir}\\chatpcb3-esp32s3.kicad_pcb\r\n\r\n\
              현재 preview:\r\n\
              - 50mm x 50mm Edge.Cuts outline.\r\n\
              - 배치와 배선은 아직 preview 단계입니다.\r\n\
-             - Open PCB로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
+             - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
              Gate: prototype-review, order-ready 아님."
         ),
         2 => format!(
@@ -374,8 +374,8 @@ pub fn preview_workspace_body(project_dir: &str, release_report_file: &str) -> S
          - release-evidence-preview.md\r\n\r\n\
          PCB preview:\r\n\
          50mm x 50mm Edge.Cuts 외곽선만 있음. 배치/배선은 아직 없습니다.\r\n\r\n\
-         Open PCB로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\r\n\
-         Review checklist로 BEGINNER-NEXT-STEPS.txt를 읽고 chat에서 후속 입력을 하세요.\r\n\r\n\
+         PCB 열기로 KiCad 10에서 chatpcb3-esp32s3.kicad_pcb를 확인하세요.\r\n\r\n\
+         검토 목록으로 BEGINNER-NEXT-STEPS.txt를 읽고 chat에서 후속 입력을 하세요.\r\n\r\n\
          Release evidence:\r\n\
          {release_report_file}\r\n\r\n\
          Gate: prototype-review, order-ready 아님."
@@ -461,8 +461,8 @@ pub fn recovered_preview_workspace_body(project_dir: &str) -> String {
         "이전 미리보기 발견\r\n\
          프로젝트 폴더:\r\n\
          {project_dir}\r\n\r\n\
-         Review checklist로 저장 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
-         Open PCB로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
+         검토 목록으로 저장 파일을 확인한 뒤 다음 설계를 보내세요.\r\n\
+         PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\r\n\
          예상 파일:\r\n\
          - prompt.txt\r\n\
          - artifact-manifest.json\r\n\
@@ -487,8 +487,8 @@ pub fn recovered_preview_workspace_transcript(project_dir: &str) -> String {
     format!(
         "이전 미리보기 발견\r\n\
          - 프로젝트 폴더: {project_dir}\r\n\
-         - Review checklist로 저장 파일을 확인하세요.\r\n\
-         - Open PCB로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
+         - 검토 목록으로 저장 파일을 확인하세요.\r\n\
+         - PCB 열기로 KiCad 10에서 저장된 board outline을 확인하세요.\r\n\
          Status: prototype-review, order-ready 아님.\r\n"
     )
 }
@@ -524,16 +524,16 @@ pub fn provider_login_transcript(statuses: &[ProviderUiStatus]) -> String {
             "Provider/model 선택은 준비 상태 확인용입니다; preview 생성은 built-in local generator를 사용하며 provider CLI는 호출하지 않습니다.\r\n",
         );
         transcript.push_str(
-            "사용 가능한 provider를 모델 선택에서 고르세요. 그런 다음 만들 보드를 입력하고 Enter 또는 Send design을 누르세요.\r\n",
+            "사용 가능한 provider를 모델 선택에서 고르세요. 그런 다음 만들 보드를 입력하고 Enter 또는 설계 생성을 누르세요.\r\n",
         );
     } else {
         transcript.push_str("아직 준비된 로컬 provider가 없습니다.\r\n");
-        transcript.push_str("그래도 Send design으로 ESP32-S3 preview를 만들 수 있습니다.\r\n");
+        transcript.push_str("그래도 설계 생성으로 ESP32-S3 preview를 만들 수 있습니다.\r\n");
         transcript.push_str(
             "CLI login은 나중에 해도 됩니다; provider-backed design은 local CLI login을 마친 뒤 Provider Login을 다시 누르세요.\r\n",
         );
         transcript.push_str(
-            "지금은 built-in-preview로 계속 진행하고, 만들 보드를 입력한 뒤 Enter 또는 Send design을 누르세요.\r\n",
+            "지금은 built-in-preview로 계속 진행하고, 만들 보드를 입력한 뒤 Enter 또는 설계 생성을 누르세요.\r\n",
         );
     }
 

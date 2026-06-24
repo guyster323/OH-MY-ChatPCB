@@ -68,9 +68,9 @@ First chat
 21. Confirm erc-report.json, drc-report.json, and kicad-validation-summary.txt are listed in the saved preview folder.
 22. Confirm BEGINNER-NEXT-STEPS.txt is listed in the saved preview folder.
 23. Confirm jlcpcb-bom-preview.csv, jlcpcb-cpl-preview.csv, and manufacturing-readiness-preview.txt are listed in the saved preview folder.
-24. Confirm the bottom status says "검증 완료: Open PCB/checklist 또는 후속 입력. 아직 prototype-review." when local ERC/DRC reports are clear.
+24. Confirm the bottom status says "검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review." when local ERC/DRC reports are clear.
 25. Click PCB 열기 to inspect chatpcb3-esp32s3.kicad_pcb.
-26. Confirm the bottom status says either "Opened preview PCB in KiCad PCB Editor." or "Opened preview PCB file. Install KiCad 10 if PCB Editor did not open."
+26. Confirm the bottom status says either "KiCad PCB Editor에서 preview PCB를 열었습니다." or "preview PCB 파일을 열었습니다. PCB Editor가 열리지 않았다면 KiCad 10을 설치하세요."
 27. If KiCad 10 is installed, confirm the KiCad PCB preview contains a 50mm x 50mm Edge.Cuts outline.
 28. Click 검토 목록 to inspect the first-run evidence folder with BEGINNER-NEXT-STEPS.txt selected.
 29. Confirm FIRST-RUN-SUMMARY.txt stays in the same folder for the prototype-review boundary.
@@ -78,7 +78,7 @@ First chat
 31. Close and reopen the app, then click 검토 목록 before sending again.
 32. Confirm the left project status says "이전 미리보기 발견".
 33. Confirm the chat transcript also says "이전 미리보기 발견" and keeps the boundary visible as "order-ready 아님".
-34. Confirm the short bottom status says "Recovered: 이어서 입력 후 Enter. Open PCB/Review checklist."
+34. Confirm the short bottom status says "이전 미리보기: 이어서 입력 후 Enter. PCB 열기/검토 목록."
 35. Confirm it reopens the same previous preview folder with BEGINNER-NEXT-STEPS.txt selected.
 36. The folder path is:
    %LOCALAPPDATA%\ChatPCB3\Projects\chatpcb3-esp32s3-preview
