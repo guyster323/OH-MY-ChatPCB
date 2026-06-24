@@ -61,6 +61,9 @@ try {
     Assert-Contains $releaseEvidence "ChatPCB KiCad Preview release evidence" "RELEASE-EVIDENCE.txt is not the expected package evidence."
     Assert-Contains $releaseEvidence "Start Here Start Menu shortcut" "Release evidence must include the start-here shortcut."
     Assert-Contains $releaseEvidence "First Chat Guide Start Menu shortcut" "Release evidence must include the first chat guide shortcut."
+    Assert-Contains $releaseEvidence "Provider model selector is readiness-only for preview generation" "Release evidence must say provider selection is readiness-only."
+    Assert-Contains $releaseEvidence "Preview generation uses the built-in local generator" "Release evidence must say preview generation is local."
+    Assert-Contains $releaseEvidence "No provider CLI is invoked for preview generation" "Release evidence must say provider CLIs are not invoked for preview generation."
     Assert-Contains $releaseEvidence "Preview only; not order-ready KiCad output yet" "Release boundary must stay honest before GitHub replacement."
 
     $sha256 = Get-Content -Raw -Path $sha256Path
@@ -73,6 +76,9 @@ try {
     Assert-Contains $firstReadme "First chat" "README-FIRST.txt must explain the first chat path."
     Assert-Contains $firstReadme "INSTALL-READY.txt" "README-FIRST.txt must mention the install-ready summary."
     Assert-Contains $firstReadme "Boundary: prototype-review, not order-ready" "README-FIRST.txt must preserve the preview boundary."
+    Assert-Contains $firstReadme "provider/model selection is readiness-only" "README-FIRST.txt must explain selected providers are readiness-only."
+    Assert-Contains $firstReadme "built-in local generator" "README-FIRST.txt must explain preview generation stays local."
+    Assert-Contains $firstReadme "No provider CLI is invoked" "README-FIRST.txt must explain provider CLIs are not invoked for preview generation."
 
     $installer = Get-Content -Raw -Path $installerPath
     Assert-Contains $installer "Start Here.lnk" "Packaged installer must create the Start Here Start Menu shortcut."

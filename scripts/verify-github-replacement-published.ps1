@@ -65,6 +65,8 @@ try {
     $releaseEvidence = Get-Content -Raw -Path $releaseEvidencePath
     Assert-Contains $releaseEvidence "Git commit: $shortHead" "RELEASE-EVIDENCE.txt does not match HEAD $shortHead."
     Assert-Contains $releaseEvidence "Working tree: clean" "RELEASE-EVIDENCE.txt must record a clean working tree."
+    Assert-Contains $releaseEvidence "Provider model selector is readiness-only for preview generation" "Release evidence must say provider selection is readiness-only."
+    Assert-Contains $releaseEvidence "No provider CLI is invoked for preview generation" "Release evidence must say provider CLIs are not invoked for preview generation."
     Assert-Contains $releaseEvidence "Preview only; not order-ready KiCad output yet" "Release boundary must stay honest after publication."
 
     $remoteHeadLine = (git ls-remote origin refs/heads/main).Trim()

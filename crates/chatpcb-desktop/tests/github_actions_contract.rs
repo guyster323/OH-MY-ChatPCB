@@ -64,6 +64,10 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("First Chat Guide Start Menu shortcut"));
     assert!(script.contains("Git commit: $head"));
     assert!(script.contains("Working tree: clean"));
+    assert!(script.contains("Provider model selector is readiness-only for preview generation"));
+    assert!(script.contains("Preview generation uses the built-in local generator"));
+    assert!(script.contains("No provider CLI is invoked for preview generation"));
+    assert!(script.contains("provider/model selection is readiness-only"));
     assert!(script.contains("CheckRemoteHead"));
     assert!(script.contains("git ls-remote origin refs/heads/main"));
     assert!(script.contains("NO_PUSH_PERFORMED"));
@@ -89,6 +93,8 @@ fn github_replacement_published_verifier_confirms_remote_matches_local_head() {
     assert!(script.contains("RELEASE-EVIDENCE.txt"));
     assert!(script.contains("Git commit: $shortHead"));
     assert!(script.contains("Working tree: clean"));
+    assert!(script.contains("Provider model selector is readiness-only for preview generation"));
+    assert!(script.contains("No provider CLI is invoked for preview generation"));
     assert!(script.contains("Remote main matches local HEAD"));
     assert!(script.contains("GitHub replacement published verification passed"));
     assert!(!script.contains("git push"));
