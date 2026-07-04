@@ -23,9 +23,9 @@ fn order_ready_state(package: ManufacturingPackage) -> chatpcb_core::release_gat
 #[test]
 fn provider_catalog_reports_local_cli_statuses_without_secrets() {
     let providers = catalog_with_probe(|command| match command {
-        "codex" => Some("codex 0.41.0".to_string()),
+        "codex" => Some("codex-cli 0.142.3".to_string()),
         "claude" => Some("Claude Code 1.2.3".to_string()),
-        "gemini" => None,
+        "antigravity" => Some("Antigravity CLI 1.0.12".to_string()),
         _ => None,
     });
 
@@ -33,13 +33,37 @@ fn provider_catalog_reports_local_cli_statuses_without_secrets() {
     assert_eq!(providers[0].kind, ProviderKind::Codex);
     assert_eq!(providers[0].login_mode, LoginMode::LocalCli);
     assert!(providers[0].available);
+    assert!(providers[0].logged_in);
+    assert_eq!(providers[0].version.as_deref(), Some("codex-cli 0.142.3"));
+    assert_eq!(providers[0].models[0].id, "codex:gpt-5");
+    assert_eq!(providers[0].models[0].cli_model, "gpt-5");
+    assert!(providers[0].models[0].display_name.contains("0.142.3"));
+    assert_eq!(providers[0].models[0].display_name, "Codex 0.142.3 gpt-5");
+    assert_eq!(
+        providers[0].models[1].display_name,
+        "Codex 0.142.3 gpt-5-codex"
+    );
     assert_eq!(providers[1].kind, ProviderKind::Claude);
     assert!(providers[1].available);
-    assert_eq!(providers[2].kind, ProviderKind::Gemini);
-    assert!(!providers[2].available);
+    assert!(providers[1]
+        .models
+        .iter()
+        .any(|model| model.cli_model == "sonnet"));
+    assert!(providers[1]
+        .models
+        .iter()
+        .any(|model| model.cli_model == "opus"));
+    assert_eq!(providers[2].kind, ProviderKind::Antigravity);
+    assert!(providers[2].available);
+    assert_eq!(
+        providers[2].version.as_deref(),
+        Some("Antigravity CLI 1.0.12")
+    );
+    assert_eq!(providers[2].models[0].id, "antigravity:auto");
+    assert!(providers[2].models[0].display_name.contains("Antigravity"));
     assert!(providers[0].login_hint.contains("Install Codex CLI"));
     assert!(providers[1].login_hint.contains("Install Claude Code"));
-    assert!(providers[2].login_hint.contains("Install Gemini CLI"));
+    assert!(providers[2].login_hint.contains("Install Antigravity CLI"));
     assert!(providers[2].login_hint.contains("complete local login"));
 
     let serialized = serde_json::to_string(&providers).unwrap();
@@ -79,6 +103,40 @@ fn esp32s3_board_spec_is_fixed_order_ready_target() {
         .manufacturing_constraints
         .iter()
         .any(|rule| rule.contains("JLCPCB")));
+}
+
+#[test]
+fn esp32s3_board_spec_reflects_prompt_requested_h2_sensor_and_touch_display() {
+    let spec = esp32s3_usb_sensor_board_spec(
+        "ESP32-S3와 터치 디스플레이를 가지고 H2 Sensor를 포함하며 USB-C로 전원을 인가받는 회로",
+    );
+
+    assert!(spec
+        .interfaces
+        .iter()
+        .any(|interface| interface == "H2 gas sensor"));
+    assert!(spec
+        .interfaces
+        .iter()
+        .any(|interface| interface == "Touch display"));
+
+    let package = build_jlcpcb_package(&spec);
+    assert!(package
+        .parts
+        .iter()
+        .any(|part| part.value.contains("H2 module interface 1x4")));
+    assert!(package
+        .parts
+        .iter()
+        .any(|part| part.value.contains("H2 ADC divider")));
+    assert!(package
+        .parts
+        .iter()
+        .any(|part| part.value.contains("H2 ADC filter")));
+    assert!(package
+        .parts
+        .iter()
+        .any(|part| part.value.contains("Touch display interface 1x12")));
 }
 
 #[test]
@@ -282,6 +340,34 @@ fn validation_summarizes_erc_drc_counts_without_order_ready_claims() {
     assert!(!summary.contains("0 errors"));
     assert!(!summary.contains("1 warning"));
     assert!(!summary.contains("unconnected"));
+    assert!(!summary.to_ascii_lowercase().contains("order-ready"));
+}
+
+#[test]
+fn validation_summarizes_clean_erc_drc_as_release_candidate_gate_without_order_ready_claim() {
+    let erc = parse_kicad_report(
+        r#"{
+            "sheets": [{"path": "/", "violations": []}]
+        }"#,
+    )
+    .unwrap();
+    let drc = parse_kicad_report(
+        r#"{
+            "unconnected_items": [],
+            "violations": []
+        }"#,
+    )
+    .unwrap();
+
+    let summary = chatpcb_core::validation::summarize_erc_drc_reports(&erc, &drc);
+
+    assert!(summary.contains("ERC: 오류 0개, 경고 0개"));
+    assert!(summary.contains("DRC: 오류 0개, 경고 0개"));
+    assert!(summary.contains("미연결 0개"));
+    assert!(summary.contains("90점 품질 게이트 통과"));
+    assert!(summary.contains("ReleaseCandidate"));
+    assert!(summary.contains("사람 제조 검토"));
+    assert!(!summary.contains("prototype-review"));
     assert!(!summary.to_ascii_lowercase().contains("order-ready"));
 }
 

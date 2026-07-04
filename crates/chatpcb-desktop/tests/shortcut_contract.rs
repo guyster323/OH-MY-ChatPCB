@@ -212,9 +212,16 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(guide.contains("PASS JLCPCB manufacturing preview blockers written"));
     assert!(guide.contains("PASS KiCad compatibility report written"));
     assert!(guide.contains("PASS ERC/DRC validation summary written"));
+    assert!(guide.contains("PASS design quality report reflects ERC/DRC validation gate"));
     assert!(guide.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(guide.contains("design-quality-report.md"));
+    assert!(guide.contains("production/chatpcb3-esp32s3"));
+    assert!(guide.contains("visual-review"));
     assert!(guide.contains("jlcpcb-bom-preview.csv"));
     assert!(guide.contains("jlcpcb-cpl-preview.csv"));
+    assert!(guide.contains("chat-to-circuit-trace.md"));
+    assert!(guide.contains("part-selection-review.md"));
+    assert!(guide.contains("circuit-review-findings.md"));
     assert!(guide.contains("manufacturing-readiness-preview.txt"));
     assert!(guide.contains("`검토 목록` opens the preview evidence folder with"));
     assert!(guide.contains("`BEGINNER-NEXT-STEPS.txt` selected"));
@@ -227,9 +234,16 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(package_readme.contains("PASS JLCPCB manufacturing preview blockers written"));
     assert!(package_readme.contains("PASS KiCad compatibility report written"));
     assert!(package_readme.contains("PASS ERC/DRC validation summary written"));
+    assert!(package_readme.contains("PASS design quality report reflects ERC/DRC validation gate"));
     assert!(package_readme.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(package_readme.contains("design-quality-report.md"));
+    assert!(package_readme.contains("production/chatpcb3-esp32s3"));
+    assert!(package_readme.contains("visual-review"));
     assert!(package_readme.contains("jlcpcb-bom-preview.csv"));
     assert!(package_readme.contains("jlcpcb-cpl-preview.csv"));
+    assert!(package_readme.contains("chat-to-circuit-trace.md"));
+    assert!(package_readme.contains("part-selection-review.md"));
+    assert!(package_readme.contains("circuit-review-findings.md"));
     assert!(package_readme.contains("manufacturing-readiness-preview.txt"));
     assert!(package_readme.contains("with BEGINNER-NEXT-STEPS.txt selected"));
     assert!(package_readme.contains("FIRST-RUN-SUMMARY.txt stays in the same folder"));
@@ -237,9 +251,16 @@ fn installers_add_first_chat_smoke_test_for_non_expert_verification() {
     assert!(root_readme.contains("PASS JLCPCB manufacturing preview blockers written"));
     assert!(root_readme.contains("PASS KiCad compatibility report written"));
     assert!(root_readme.contains("PASS ERC/DRC validation summary written"));
+    assert!(root_readme.contains("PASS design quality report reflects ERC/DRC validation gate"));
     assert!(root_readme.contains("BEGINNER-NEXT-STEPS.txt"));
+    assert!(root_readme.contains("design-quality-report.md"));
+    assert!(root_readme.contains("production/chatpcb3-esp32s3"));
+    assert!(root_readme.contains("visual-review"));
     assert!(root_readme.contains("jlcpcb-bom-preview.csv"));
     assert!(root_readme.contains("jlcpcb-cpl-preview.csv"));
+    assert!(root_readme.contains("chat-to-circuit-trace.md"));
+    assert!(root_readme.contains("part-selection-review.md"));
+    assert!(root_readme.contains("circuit-review-findings.md"));
     assert!(root_readme.contains("manufacturing-readiness-preview.txt"));
     assert!(root_readme.contains("with `BEGINNER-NEXT-STEPS.txt` selected"));
     assert!(root_readme.contains("검토 목록을 열었습니다."));
@@ -437,7 +458,9 @@ fn installers_add_korean_first_chat_guide_for_non_expert_users() {
     assert!(korean_guide.contains("prototype-review"));
     assert!(korean_guide.contains("Provider Login은 선택 사항입니다"));
     assert!(korean_guide.contains("앱 안의 기본 생성기로 미리보기를 만듭니다"));
-    assert!(korean_guide.contains("Codex, Claude Code, Gemini 로컬 도구를 대신 실행하지 않습니다"));
+    assert!(
+        korean_guide.contains("Codex, Claude Code, Antigravity 로컬 도구를 대신 실행하지 않습니다")
+    );
     assert!(!korean_guide.contains("Provider/model"));
     assert!(!korean_guide.contains("preview 생성"));
     assert!(!korean_guide.contains("built-in local generator"));
@@ -514,7 +537,8 @@ fn package_first_readme_matches_current_validation_status_copy() {
     assert!(readme.contains("검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review."));
     assert!(readme.contains("미리보기 저장 완료"));
     assert!(readme.contains("이전 미리보기 발견"));
-    assert!(readme.contains("order-ready 아님"));
+    assert!(readme.contains("품질 리포트 90점 게이트 확인"));
+    assert!(readme.contains("주문 준비 전"));
     assert!(!readme.contains("Confirm the chat transcript says \"Preview workspace saved\""));
     assert!(!readme.contains("Previous preview workspace found"));
     assert!(readme.contains("예시 문구가 선택되어 있으므로 바로 타이핑하면 덮어씁니다."));
@@ -591,7 +615,8 @@ fn package_script_writes_release_evidence_and_hashes() {
     assert!(script.contains("50mm PCB preview outline"));
     assert!(script.contains("KiCad CLI preview compatibility check"));
     assert!(script.contains("KiCad ERC and DRC JSON reports on Send design"));
-    assert!(script.contains("JLCPCB BOM/CPL preview blockers"));
+    assert!(script.contains("JLCPCB Gerber/drill/BOM/CPL review artifacts"));
+    assert!(script.contains("Design quality report evaluates the 90-point validation gate"));
     assert!(script.contains("Beginner next steps file for first-run users"));
     assert!(
         script.contains("$pcbOpenLabel = \"PCB \" + [string][char]0xC5F4 + [string][char]0xAE30")
@@ -607,6 +632,10 @@ fn package_script_writes_release_evidence_and_hashes() {
         .contains("\"- $pcbOpenLabel/$checklistLabel waits until a preview workspace exists\""));
     assert!(script.contains("Installer writes INSTALL-SELF-TEST.txt"));
     assert!(script.contains("\"- $checklistLabel button for the saved preview workspace\""));
+    assert!(script.contains("Installer auto-launch opens a clean first-chat screen"));
+    assert!(
+        script.contains("Installer fresh-start launch preserves normal recovered preview relaunch")
+    );
     assert!(script
         .contains("\"- $checklistLabel selects BEGINNER-NEXT-STEPS.txt for non-expert review\""));
     assert!(script.contains("\"- $pcbOpenLabel button launches the generated KiCad PCB preview\""));
@@ -640,7 +669,7 @@ fn first_run_docs_explain_provider_selection_is_not_invoked_for_preview() {
         fs::read_to_string(workspace_root().join("packaging/README-FIRST.txt")).unwrap();
 
     for document in [readme, guide, package_readme] {
-        assert!(document.contains("Provider 선택은 로그인 상태 확인용"));
+        assert!(document.contains("Provider 선택은 로그인 상태와 모델 확인용"));
         assert!(document.contains("앱 안의 기본 생성기"));
         assert!(document.contains("로컬 도구를 대신 실행하지 않습니다"));
         assert!(!document.contains("Provider/model 선택은 준비 상태 확인용"));

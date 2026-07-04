@@ -79,6 +79,8 @@ try {
         "- First chat smoke test shortcut for non-expert verification",
         "- Installer writes INSTALL-FIRST-CHAT-SMOKE.txt after copying executables",
         "- Installer copies Korean-first INSTALL-READY.txt with immediate first-chat instructions",
+        "- Installer auto-launch opens a clean first-chat screen",
+        "- Installer fresh-start launch preserves normal recovered preview relaunch",
         "- Start Here Start Menu shortcut",
         "- First Chat Guide Start Menu shortcut",
         "- Korean first chat guide for non-expert users",
@@ -92,7 +94,8 @@ try {
         "- 50mm PCB preview outline in generated KiCad PCB",
         "- KiCad CLI preview compatibility check on Send design",
         "- KiCad ERC and DRC JSON reports on Send design",
-        "- JLCPCB BOM/CPL preview blockers for non-upload review",
+        "- JLCPCB Gerber/drill/BOM/CPL review artifacts for non-upload review",
+        "- Design quality report evaluates the 90-point validation gate",
         "- Beginner next steps file for first-run users",
         "- Actionable validation status points to $pcbOpenLabel and $checklistLabel",
         "- Left workspace status update after Send design",
@@ -113,7 +116,7 @@ try {
         "",
         "Current boundary:",
         "- Preview only; not order-ready KiCad output yet",
-        "- No completed schematic, PCB autoroute, Gerber, drill, or placement-reviewed BOM/CPL generation yet",
+        "- Gerber/drill/BOM/CPL outputs are review artifacts; no unattended order-ready manufacturing package yet",
         "- No provider CLI is invoked for preview generation",
         "- No provider credentials are stored by ChatPCB3"
     )

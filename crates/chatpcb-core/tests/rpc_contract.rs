@@ -5,9 +5,9 @@ use std::path::PathBuf;
 
 fn rpc(line: &str) -> Value {
     let response = handle_json_rpc_line_with_probe(line, |command| match command {
-        "codex" => Some("codex 0.41.0".to_string()),
+        "codex" => Some("codex-cli 0.142.3".to_string()),
         "claude" => None,
-        "gemini" => Some("gemini 1.0.0".to_string()),
+        "antigravity" => Some("Antigravity CLI 1.0.12".to_string()),
         _ => None,
     })
     .unwrap();
@@ -22,6 +22,24 @@ fn json_rpc_dispatches_provider_list_without_network_transport() {
     assert_eq!(response["id"], "provider-1");
     assert_eq!(response["result"]["providers"].as_array().unwrap().len(), 3);
     assert_eq!(response["result"]["providers"][0]["kind"], "Codex");
+    assert_eq!(
+        response["result"]["providers"][0]["version"],
+        "codex-cli 0.142.3"
+    );
+    assert_eq!(response["result"]["providers"][0]["logged_in"], true);
+    assert_eq!(
+        response["result"]["providers"][0]["models"][0]["id"],
+        "codex:gpt-5"
+    );
+    assert_eq!(
+        response["result"]["providers"][0]["models"][1]["cli_model"],
+        "gpt-5-codex"
+    );
+    assert_eq!(response["result"]["providers"][2]["kind"], "Antigravity");
+    assert_eq!(
+        response["result"]["providers"][2]["version"],
+        "Antigravity CLI 1.0.12"
+    );
     assert_eq!(response["result"]["transport"], "stdio-jsonl");
 
     let serialized = response.to_string();

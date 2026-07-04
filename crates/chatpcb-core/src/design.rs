@@ -21,6 +21,26 @@ pub struct BoardSpec {
 }
 
 pub fn esp32s3_usb_sensor_board_spec(prompt: &str) -> BoardSpec {
+    let prompt_lower = prompt.to_ascii_lowercase();
+    let has_h2_sensor = prompt_lower.contains("h2") || prompt.contains("수소");
+    let has_touch_display = prompt_lower.contains("touch")
+        || prompt_lower.contains("display")
+        || prompt_lower.contains("oled")
+        || prompt.contains("디스플레이");
+    let mut interfaces = vec![
+        "USB device".to_string(),
+        "I2C sensor".to_string(),
+        "UART debug".to_string(),
+        "GPIO header".to_string(),
+        "JTAG debug".to_string(),
+    ];
+    if has_h2_sensor {
+        interfaces.push("H2 gas sensor".to_string());
+    }
+    if has_touch_display {
+        interfaces.push("Touch display".to_string());
+    }
+
     BoardSpec {
         product_name: "ChatPCB3 ESP32-S3 USB-C Sensor Board".to_string(),
         source_prompt: prompt.trim().to_string(),
@@ -38,13 +58,7 @@ pub fn esp32s3_usb_sensor_board_spec(prompt: &str) -> BoardSpec {
                 current_ma: 500,
             },
         ],
-        interfaces: vec![
-            "USB device".to_string(),
-            "I2C sensor".to_string(),
-            "UART debug".to_string(),
-            "GPIO header".to_string(),
-            "JTAG debug".to_string(),
-        ],
+        interfaces,
         layers: 2,
         max_board_size_mm: (50, 50),
         manufacturing_constraints: vec![

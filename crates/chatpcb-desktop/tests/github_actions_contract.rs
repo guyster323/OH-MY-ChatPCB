@@ -69,9 +69,16 @@ fn github_replacement_readiness_script_is_a_dry_run_gate() {
     assert!(script.contains("Working tree: clean"));
     assert!(script.contains("Provider model selector is readiness-only for preview generation"));
     assert!(script.contains("Korean first-screen chat cue"));
+    assert!(script.contains("Installer auto-launch opens a clean first-chat screen"));
+    assert!(
+        script.contains("Installer fresh-start launch preserves normal recovered preview relaunch")
+    );
     assert!(script.contains("Preview generation uses the built-in local generator"));
     assert!(script.contains("No provider CLI is invoked for preview generation"));
-    assert!(script.contains("Assert-Contains $firstReadme \"Provider 선택은 로그인 상태 확인용\""));
+    assert!(script.contains("Design quality report evaluates the 90-point validation gate"));
+    assert!(script.contains("Gerber/drill/BOM/CPL outputs are review artifacts"));
+    assert!(script
+        .contains("Assert-Contains $firstReadme \"Provider 선택은 로그인 상태와 모델 확인용\""));
     assert!(script.contains("Assert-Contains $firstReadme \"앱 안의 기본 생성기\""));
     assert!(script.contains("Assert-Contains $firstReadme \"로컬 도구를 대신 실행하지 않습니다\""));
     assert!(script.contains("Assert-Contains $firstReadmeKo \"채팅 입력칸\""));
@@ -112,8 +119,14 @@ fn github_replacement_published_verifier_confirms_remote_matches_local_head() {
     assert!(script.contains("RELEASE-EVIDENCE.txt"));
     assert!(script.contains("Git commit: $shortHead"));
     assert!(script.contains("Working tree: clean"));
+    assert!(script.contains("Installer auto-launch opens a clean first-chat screen"));
+    assert!(
+        script.contains("Installer fresh-start launch preserves normal recovered preview relaunch")
+    );
     assert!(script.contains("Provider model selector is readiness-only for preview generation"));
     assert!(script.contains("No provider CLI is invoked for preview generation"));
+    assert!(script.contains("Design quality report evaluates the 90-point validation gate"));
+    assert!(script.contains("Gerber/drill/BOM/CPL outputs are review artifacts"));
     assert!(script.contains("Remote main matches local HEAD"));
     assert!(script.contains("GitHub replacement published verification passed"));
     assert!(!script.contains("git push"));

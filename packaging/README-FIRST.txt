@@ -23,12 +23,12 @@ ChatPCB KiCad Preview 빠른 시작
 3. 예: USB-C ESP32-S3 온습도 센서 보드, I2C 센서, JLCPCB 조립
 4. 입력칸을 비운 채 Enter를 누르면 내장 ESP32-S3 예시가 사용됩니다.
 5. "예시 사용"을 누르면 예시 문구가 선택되어 있으므로 바로 타이핑하면 덮어씁니다.
-6. "Provider Login"은 선택 사항입니다. 로컬 Codex, Claude Code, Gemini 로그인
-   상태만 확인합니다.
-7. Provider 선택은 로그인 상태 확인용입니다. 미리보기 생성은 앱 안의 기본 생성기를
-   사용하며 Codex, Claude Code, Gemini 로컬 도구를 대신 실행하지 않습니다.
+6. "Provider Login"은 선택 사항입니다. 로컬 Codex, Claude Code, Antigravity 버전과
+   로그인 상태, 사용할 모델 선택지를 확인합니다.
+7. Provider 선택은 로그인 상태와 모델 확인용입니다. 미리보기 생성은 앱 안의 기본 생성기를
+   사용하며 Codex, Claude Code, Antigravity 로컬 도구를 대신 실행하지 않습니다.
 8. 모델 선택은 로컬 도구가 없으면 "내장 미리보기"를 보여주고, 로컬 도구가 있으면
-   "Codex 자동", "Claude Code 자동", "Gemini 자동" 같은 표시명을 보여줍니다.
+   "Codex 0.142.3 gpt-5", "Claude 2.1.191 sonnet" 같은 provider/model 표시명을 보여줍니다.
 9. 결과가 나오면 "PCB 열기"로 KiCad 파일을 보거나 "검토 목록"으로 저장된 검토
    파일을 확인합니다.
 10. 후속 변경은 다시 채팅 입력칸에 적고 Enter를 누릅니다.
@@ -37,14 +37,17 @@ ChatPCB KiCad Preview 빠른 시작
 ---------------------
 - 채팅에는 "미리보기 저장 완료"가 보여야 합니다.
 - saved preview bottom status:
-  "미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님."
+  "미리보기 저장 완료 | 품질 리포트 90점 게이트 확인 | prototype-review, 주문 준비 전."
 - 검증이 깨끗하면 하단 상태는
   "검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review." 입니다.
 - 검토 목록은 BEGINNER-NEXT-STEPS.txt를 선택한 상태로 미리보기 폴더를 엽니다
   (with BEGINNER-NEXT-STEPS.txt selected).
 - FIRST-RUN-SUMMARY.txt stays in the same folder.
-- 미리보기 폴더에는 BEGINNER-NEXT-STEPS.txt, jlcpcb-bom-preview.csv,
-  jlcpcb-cpl-preview.csv, manufacturing-readiness-preview.txt가 포함됩니다.
+- 미리보기 폴더에는 BEGINNER-NEXT-STEPS.txt, design-quality-report.md,
+  production/chatpcb3-esp32s3, visual-review, jlcpcb-bom-preview.csv,
+  jlcpcb-cpl-preview.csv, chat-to-circuit-trace.md,
+  part-selection-review.md, circuit-review-findings.md,
+  manufacturing-readiness-preview.txt가 포함됩니다.
 - 자세한 KiCad 확인 파일은 kicad-pcb-check.txt입니다.
 - 자세한 ERC/DRC 보고서는 erc-report.json, drc-report.json,
   kicad-validation-summary.txt입니다.
@@ -79,13 +82,14 @@ ChatPCB KiCad Preview 빠른 시작
   - PASS beginner next steps written
   - PASS JLCPCB manufacturing preview blockers written
   - PASS ERC/DRC validation summary written
+  - PASS design quality report reflects ERC/DRC validation gate
 
 현재 경계
 ---------
 Boundary: prototype-review, not order-ready.
 이 preview는 네이티브 앱 shell, 로컬 런타임, 첫 채팅 미리보기 저장 흐름을 검증합니다.
 아직 JLCPCB에 올리거나 주문할 수 있는 order-ready KiCad PCB 패키지가 아닙니다.
-Gerber, Drill, 사람이 검토한 BOM/CPL 생성 전까지는 주문하지 마세요.
+Gerber, Drill, BOM/CPL은 검토용으로 생성되지만 사람의 제조 검토 전까지는 주문하지 마세요.
 
 증거 파일
 ---------

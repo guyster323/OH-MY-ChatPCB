@@ -4,6 +4,7 @@ pub mod manufacturing;
 pub mod patch;
 pub mod project;
 pub mod provider;
+pub mod quality;
 pub mod release_gate;
 pub mod rpc;
 pub mod validation;

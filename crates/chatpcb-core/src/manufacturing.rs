@@ -37,6 +37,55 @@ pub enum ManufacturingError {
 
 pub fn build_jlcpcb_package(spec: &BoardSpec) -> ManufacturingPackage {
     let slug = "chatpcb3-esp32s3";
+    let mut parts = baseline_parts();
+    if spec
+        .interfaces
+        .iter()
+        .any(|interface| interface == "H2 gas sensor")
+    {
+        parts.push(PartSelection {
+            designator: "U5".to_string(),
+            value: "H2 module interface 1x4 2.54mm header".to_string(),
+            footprint: "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical".to_string(),
+            package: "Through Hole 1x4 2.54mm header".to_string(),
+            manufacturer_part_number: "ZHOURI PZ2.54-1x4-11.2".to_string(),
+            lcsc_part_number: "C29779969".to_string(),
+            placement_layer: "Top".to_string(),
+        });
+        parts.push(PartSelection {
+            designator: "R7,R8".to_string(),
+            value: "10k H2 ADC divider".to_string(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "0603WAF1002T5E".to_string(),
+            lcsc_part_number: "C25804".to_string(),
+            placement_layer: "Top".to_string(),
+        });
+        parts.push(PartSelection {
+            designator: "C6".to_string(),
+            value: "100nF 6.3V X7R 0603 +/-10% H2 ADC filter capacitor".to_string(),
+            footprint: "Capacitor_SMD:C_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "CL10B104KB8NNNC".to_string(),
+            lcsc_part_number: "C1591".to_string(),
+            placement_layer: "Top".to_string(),
+        });
+    }
+    if spec
+        .interfaces
+        .iter()
+        .any(|interface| interface == "Touch display")
+    {
+        parts.push(PartSelection {
+            designator: "DS1".to_string(),
+            value: "Touch display interface 1x12 2.54mm header".to_string(),
+            footprint: "Connector_PinHeader_2.54mm:PinHeader_1x12_P2.54mm_Vertical".to_string(),
+            package: "Through Hole 1x12 2.54mm header".to_string(),
+            manufacturer_part_number: "hanxia HX PZ2.54-1x12P ZZ".to_string(),
+            lcsc_part_number: "C42372504".to_string(),
+            placement_layer: "Top".to_string(),
+        });
+    }
 
     ManufacturingPackage {
         board_name: spec.product_name.clone(),
@@ -64,7 +113,7 @@ pub fn build_jlcpcb_package(spec: &BoardSpec) -> ManufacturingPackage {
             "Rotation".to_string(),
             "Layer".to_string(),
         ],
-        parts: baseline_parts(),
+        parts,
         release_report: "Order-ready evidence requires human signoff after JLCPCB upload preview."
             .to_string(),
     }
@@ -147,8 +196,35 @@ fn baseline_parts() -> Vec<PartSelection> {
             placement_layer: "Top".to_string(),
         },
         PartSelection {
+            designator: "U3".to_string(),
+            value: "BME280 I2C sensor".to_string(),
+            footprint: "Package_LGA:Bosch_LGA-8_2.5x2.5mm_P0.65mm".to_string(),
+            package: "LGA-8".to_string(),
+            manufacturer_part_number: "BME280".to_string(),
+            lcsc_part_number: "C92489".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "U4".to_string(),
+            value: "USB ESD protection".to_string(),
+            footprint: "Package_TO_SOT_SMD:SOT-23-6".to_string(),
+            package: "SOT-23-6".to_string(),
+            manufacturer_part_number: "USBLC6-2SC6".to_string(),
+            lcsc_part_number: "C282765".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "F1".to_string(),
+            value: "VBUS fuse 500mA".to_string(),
+            footprint: "Fuse:Fuse_1206_3216Metric".to_string(),
+            package: "1206".to_string(),
+            manufacturer_part_number: "1206L050YR".to_string(),
+            lcsc_part_number: "C70076".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
             designator: "R1,R2".to_string(),
-            value: "5.1k".to_string(),
+            value: "5.1k USB-C CC pulldown".to_string(),
             footprint: "Resistor_SMD:R_0603_1608Metric".to_string(),
             package: "0603".to_string(),
             manufacturer_part_number: "0603WAF5101T5E".to_string(),
@@ -156,8 +232,62 @@ fn baseline_parts() -> Vec<PartSelection> {
             placement_layer: "Top".to_string(),
         },
         PartSelection {
-            designator: "C1,C2,C3,C4".to_string(),
-            value: "100nF".to_string(),
+            designator: "R3,R4".to_string(),
+            value: "4.7k I2C pull-up".to_string(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "0603WAF4701T5E".to_string(),
+            lcsc_part_number: "C23162".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "R9,R10".to_string(),
+            value: "USB data 22R series resistor".to_string(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "0603WAF220JT5E".to_string(),
+            lcsc_part_number: "C23345".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "R5".to_string(),
+            value: "10k ESP_EN pull-up".to_string(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "0603WAF1002T5E".to_string(),
+            lcsc_part_number: "C25804".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "R6".to_string(),
+            value: "10k BOOT strap".to_string(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "0603WAF1002T5E".to_string(),
+            lcsc_part_number: "C25804".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "C1,C2".to_string(),
+            value: "10uF 10V X5R 0603 +/-10% rail capacitor".to_string(),
+            footprint: "Capacitor_SMD:C_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "CL10A106KP8NNNC".to_string(),
+            lcsc_part_number: "C19702".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "C3".to_string(),
+            value: "1uF 6.3V X5R 0603 +/-10% ESP32 bulk capacitor".to_string(),
+            footprint: "Capacitor_SMD:C_0603_1608Metric".to_string(),
+            package: "0603".to_string(),
+            manufacturer_part_number: "CL10A105KO8NNNC".to_string(),
+            lcsc_part_number: "C15849".to_string(),
+            placement_layer: "Top".to_string(),
+        },
+        PartSelection {
+            designator: "C4,C5".to_string(),
+            value: "100nF 6.3V X7R 0603 +/-10% local decoupling capacitor".to_string(),
             footprint: "Capacitor_SMD:C_0603_1608Metric".to_string(),
             package: "0603".to_string(),
             manufacturer_part_number: "CL10B104KB8NNNC".to_string(),

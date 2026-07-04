@@ -121,13 +121,28 @@ fn item_description(value: serde_json::Value) -> Option<String> {
 }
 
 pub fn summarize_erc_drc_reports(erc: &KicadReport, drc: &KicadReport) -> String {
-    format!(
-        "ERC: 오류 {}개, 경고 {}개. DRC: 오류 {}개, 경고 {}개, 미연결 {}개. 검토 목록에서 회로, PCB, 제조 파일을 확인하세요. 아직 주문 준비 상태가 아닙니다; 상태는 prototype-review입니다.",
+    let counts = format!(
+        "ERC: 오류 {}개, 경고 {}개. DRC: 오류 {}개, 경고 {}개, 미연결 {}개.",
         erc.error_count,
         erc.warning_count,
         drc.error_count,
         drc.warning_count,
         drc.unconnected_count
+    );
+
+    if erc.error_count == 0
+        && erc.warning_count == 0
+        && drc.error_count == 0
+        && drc.warning_count == 0
+        && drc.unconnected_count == 0
+    {
+        return format!(
+            "{counts} 90점 품질 게이트 통과: Level은 ReleaseCandidate입니다. 검토 목록에서 회로, PCB, 제조 파일을 확인하세요. JLCPCB 주문 전에는 사람 제조 검토가 필요합니다."
+        );
+    }
+
+    format!(
+        "{counts} 90점 품질 게이트 차단: 상태는 prototype-review입니다. 검토 목록에서 ERC/DRC blocker를 확인하세요. 아직 주문 준비 상태가 아닙니다."
     )
 }
 

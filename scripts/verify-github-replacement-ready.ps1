@@ -65,9 +65,13 @@ try {
     Assert-Contains $releaseEvidence "First Chat Guide Start Menu shortcut" "Release evidence must include the first chat guide shortcut."
     Assert-Contains $releaseEvidence "Korean first chat guide for non-expert users" "Release evidence must include the Korean first chat guide."
     Assert-Contains $releaseEvidence "Korean first-screen chat cue" "Release evidence must include the Korean first-screen chat cue."
+    Assert-Contains $releaseEvidence "Installer auto-launch opens a clean first-chat screen" "Release evidence must include the clean installer auto-launch proof."
+    Assert-Contains $releaseEvidence "Installer fresh-start launch preserves normal recovered preview relaunch" "Release evidence must include the normal relaunch recovery proof."
     Assert-Contains $releaseEvidence "Provider model selector is readiness-only for preview generation" "Release evidence must say provider selection is readiness-only."
     Assert-Contains $releaseEvidence "Preview generation uses the built-in local generator" "Release evidence must say preview generation is local."
     Assert-Contains $releaseEvidence "No provider CLI is invoked for preview generation" "Release evidence must say provider CLIs are not invoked for preview generation."
+    Assert-Contains $releaseEvidence "Design quality report evaluates the 90-point validation gate" "Release evidence must include the quantified design quality gate."
+    Assert-Contains $releaseEvidence "Gerber/drill/BOM/CPL outputs are review artifacts" "Release boundary must say manufacturing files are still review artifacts."
     Assert-Contains $releaseEvidence "Preview only; not order-ready KiCad output yet" "Release boundary must stay honest before GitHub replacement."
 
     $sha256 = Get-Content -Raw -Path $sha256Path
@@ -82,7 +86,7 @@ try {
     Assert-Contains $firstReadme "First chat" "README-FIRST.txt must explain the first chat path."
     Assert-Contains $firstReadme "INSTALL-READY.txt" "README-FIRST.txt must mention the install-ready summary."
     Assert-Contains $firstReadme "Boundary: prototype-review, not order-ready" "README-FIRST.txt must preserve the preview boundary."
-    Assert-Contains $firstReadme "Provider 선택은 로그인 상태 확인용" "README-FIRST.txt must explain selected providers are readiness-only."
+    Assert-Contains $firstReadme "Provider 선택은 로그인 상태와 모델 확인용" "README-FIRST.txt must explain selected providers are readiness/model status only."
     Assert-Contains $firstReadme "앱 안의 기본 생성기" "README-FIRST.txt must explain preview generation stays local."
     Assert-Contains $firstReadme "로컬 도구를 대신 실행하지 않습니다" "README-FIRST.txt must explain provider CLIs are not invoked for preview generation."
 

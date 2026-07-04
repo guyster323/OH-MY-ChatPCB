@@ -58,6 +58,7 @@ Expected result:
   `PASS empty prompt visibly uses the built-in ESP32-S3 example` and
   `PASS Send design returns focus for follow-up chat` and
   `PASS provider/model selection is readiness-only for preview generation` and
+  `PASS design quality report reflects ERC/DRC validation gate` and
   `PASS Use example selects prompt text for immediate overwrite` and
   `Boundary: prototype-review, not order-ready`.
 - Running `Run First Chat Smoke Test` prints `ChatPCB First Chat Smoke Test`,
@@ -66,6 +67,7 @@ Expected result:
   `PASS KiCad compatibility report written`,
   `PASS ERC/DRC validation summary written`,
   `PASS JLCPCB manufacturing preview blockers written`, and
+  `PASS design quality report reflects ERC/DRC validation gate`, and
   `PASS first-run summary blocks JLCPCB upload`.
 - The app starts automatically.
 
@@ -103,21 +105,22 @@ Expected result:
    saved. Confirm `PCB 열기` and `검토 목록` become enabled after `설계 생성` saves
    a preview or after a previous preview is recovered.
 10. Confirm the model selector says `내장 미리보기` when no local provider is
-   ready, or has already picked an available local provider such as
-   `Codex 자동`, `Claude Code 자동`, or `Gemini 자동` if Codex, Claude Code, or
-   Gemini CLI is installed.
+   ready, or has already picked an available logged-in provider/model such as
+   `Codex 0.142.3 gpt-5`, `Claude 2.1.191 sonnet`, or
+   `Antigravity Windows app auto`.
 11. Click `Provider Login`.
 12. Confirm the chat transcript reports local CLI provider status for Codex,
-   Claude Code, and Gemini CLI without erasing earlier chat turns. It should not
+   Claude Code, and Antigravity CLI without erasing earlier chat turns. It should not
    ask for an API key.
    If a provider is missing, confirm the transcript shows that provider's local
    CLI install/login hint and says to click `Provider Login` again after local
    CLI login.
-   If a provider is available, the model selector should move to that provider.
-   Confirm the transcript says Provider 선택은 로그인 상태 확인용:
-   미리보기 생성은 앱 안의 기본 생성기를 사용하며 Codex, Claude Code, Gemini
-   로컬 도구를 대신 실행하지 않습니다
-   for this preview slice.
+   If a provider is logged in, the model selector should move to that provider's
+   first available model and the transcript should list that provider's version
+   and model choices. Confirm the transcript says logged-in providers can be used
+   immediately and that the model selector chooses both provider and model.
+   Provider 선택은 로그인 상태와 모델 확인용이며, this preview still uses the
+   앱 안의 기본 생성기.
    Without clicking the prompt box again, type a short test request and confirm
    it appears in the prompt input.
 13. Click `예시 사용` if the prompt input is empty.
@@ -133,18 +136,18 @@ Expected result:
    - JLCPCB package contract
    - schematic
    - placement
-   - Freerouting autoroute
-   - DRC
-   - manufacturing package
+   - KiCad validation
+   - Gerber/Drill/BOM/CPL review artifacts
+   - design-quality-report
 17. Confirm the chat transcript says `미리보기 저장 완료`.
 18. Confirm the chat transcript is positioned at the latest response after the
     send, so the new design result is visible without manually scrolling down.
 19. Without clicking back inside the prompt box, type another short follow-up
     request and confirm it appears in the prompt input.
 20. Confirm the saved preview bottom status says
-    `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`
+    `미리보기 저장 완료 | 품질 리포트 90점 게이트 확인 | prototype-review, 주문 준비 전.`
     instead of a long local path, and confirm the large left preview body now
-    shows `미리보기 저장 완료` and `order-ready 아님` instead of only the
+    shows `미리보기 저장 완료` and `품질 리포트` instead of only the
     initial 회로도 미리보기.
 21. Confirm the chat transcript says the detailed KiCad CLI report is behind
     `검토 목록`, without showing `kicad-pcb-check.txt` or a local path.
@@ -152,8 +155,12 @@ Expected result:
     `검토 목록`, without showing `erc-report.json`, `drc-report.json`,
     `kicad-validation-summary.txt`, or a local path.
 23. Confirm `검토 목록` evidence mentions
-    `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
-    `jlcpcb-cpl-preview.csv`, and `manufacturing-readiness-preview.txt`.
+    `BEGINNER-NEXT-STEPS.txt`, `design-quality-report.md`,
+    `production/chatpcb3-esp32s3`, `visual-review`,
+    `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`,
+    `chat-to-circuit-trace.md`, `part-selection-review.md`,
+    `circuit-review-findings.md`, and
+    `manufacturing-readiness-preview.txt`.
 24. Confirm the bottom pipeline status stays short and says
     `검증 완료: PCB 열기/검토 목록 또는 후속 입력. 아직 prototype-review.`
     when local ERC/DRC reports are clear.
@@ -196,10 +203,21 @@ Expected files:
 - `artifact-manifest.json`
 - `FIRST-RUN-SUMMARY.txt`
 - `BEGINNER-NEXT-STEPS.txt`
+- `design-quality-report.json`
+- `design-quality-report.md`
 - `jlcpcb-bom-preview.csv`
 - `jlcpcb-cpl-preview.csv`
+- `chat-to-circuit-trace.md`
+- `part-selection-review.md`
+- `circuit-review-findings.md`
 - `manufacturing-readiness-preview.txt`
 - `release-evidence-preview.md`
+- `production/chatpcb3-esp32s3/gerbers/chatpcb3-esp32s3-F_Cu.gbr`
+- `production/chatpcb3-esp32s3/drill/chatpcb3-esp32s3.drl`
+- `production/chatpcb3-esp32s3/bom.csv`
+- `production/chatpcb3-esp32s3/positions.csv`
+- `visual-review/schematic-review.svg`
+- `visual-review/pcb-review.svg`
 - `kicad-pcb-check.txt`
 - `erc-report.json`
 - `drc-report.json`
@@ -213,7 +231,19 @@ Expected files:
 ## Computer Use Verification Status
 
 Latest run after installing the current preview package was checked on
-2026-06-24.
+2026-07-02.
+
+- Computer Use reinstalled the freshly generated package, launched the installed
+  `ChatPCB KiCad Preview.exe`, and captured a targetable
+  `ChatPCB KiCad Preview` window.
+- Computer Use typed `ESP32-S3 최종 90점 품질 리포트 확인 보드`, pressed
+  Enter, and verified the saved preview bottom status says
+  `미리보기 저장 완료 | 품질 리포트 90점 게이트 확인 | prototype-review, 주문 준비 전.`.
+- Computer Use verified the visible result mentions `design-quality-report.md`
+  and the 90-point quality target, keeps `PCB 열기` and `검토 목록` enabled, and
+  returns focus to `채팅 입력`.
+- Computer Use also verified the validation status remains honest:
+  `검증 확인 필요: checklist에서 ERC/DRC 확인. 아직 prototype-review.`.
 
 - Computer Use found the installed `ChatPCB KiCad Preview` app entry.
 - Computer Use launched the installed app from
@@ -320,7 +350,7 @@ Latest run after installing the current preview package was checked on
 - Computer Use verified the saved preview bottom status stays path-free:
   after reinstalling the current package and sending
   `ESP32-S3 quiet status board`, the bottom status showed
-  `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`;
+  `미리보기 저장 완료 | 품질 리포트 90점 게이트 확인 | prototype-review, 주문 준비 전.`;
   after switching to `검증`, it showed
   `검증: 저장된 미리보기. 검토 목록에서 KiCad ERC/DRC report 확인; prototype-review.`
 - Computer Use verified the first-chat transcript stays path-free:
@@ -357,10 +387,17 @@ Latest run after installing the current preview package was checked on
   preview state.
 - Computer Use reinstalled and relaunched the package after the friendly model selector update.
   `Claude Code 자동` fits in the collapsed model selector without clipping.
-  Opening the dropdown showed `내장 미리보기`, `Codex 자동`, `Claude Code 자동`, and `Gemini 자동`,
+  Opening the dropdown showed `내장 미리보기`, `Codex 자동`, `Claude Code 자동`, and `Antigravity 자동`,
   with no raw `built-in-preview` or `claude:auto` model id visible.
   Clicking `Provider Login` kept the bottom status at
   `Provider 감지: Claude Code 자동; 미리보기 생성은 앱 안에서만 진행됩니다.`.
+- Computer Use reinstalled and relaunched the package after the provider/model version update.
+  The collapsed selector showed `Codex 0.142.3 gpt-5`.
+  Opening the dropdown showed `내장 미리보기`, `Codex 0.142.3 gpt-5`,
+  `Codex 0.142.3 gpt-5-codex`, `Claude 2.1.191 sonnet`,
+  `Claude 2.1.191 opus`, and `Antigravity Windows app auto`.
+  Provider Login status showed
+  `Provider 감지: Codex 0.142.3 gpt-5; 로그인됨, 바로 사용 가능.`.
 - Computer Use relaunched the installed app after the Korean-first default guide update.
   The native app still opened with `채팅 입력칸`, `Provider Login`, and the model selector visible.
   Notepad approval timed out, so the guide content was verified from the installed file:
@@ -381,11 +418,13 @@ Latest run after installing the current preview package was checked on
 
 ## Current Honest Boundary
 
-This preview proves the native app shell and Rust runtime contract. It does not
-yet prove final KiCad schematic quality, autorouted PCB quality, or JLCPCB
-order readiness. The preview evidence folder is intentionally
-`prototype-review`, not an order-ready manufacturing package.
+This preview proves the native app shell, Rust runtime contract, generated
+KiCad 10 review files, clean local ERC/DRC reports, and a 90-point local design
+quality rubric for the constrained ESP32-S3 board. It still does not prove a
+full KiCad fork canvas workflow, Freerouting DSN/SES round trip, or JLCPCB order
+readiness. The preview evidence folder is intentionally `prototype-review`, not
+an order-ready manufacturing package.
 
 The next implementation gate is to register the native workspace inside a real
 KiCad latest-stable fork and connect `chatpcb-core.exe` to actual schematic,
-layout, ERC/DRC, and manufacturing-package generation.
+layout, ERC/DRC, routing, and manufacturing signoff workflows.

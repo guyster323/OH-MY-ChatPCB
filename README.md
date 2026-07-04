@@ -34,7 +34,7 @@ folder. `README-FIRST-KO.txt` remains as the Korean quick-start duplicate.
 Implemented in this first vertical slice:
 
 - Rust `chatpcb-core` library with the v1 public contracts:
-  - provider CLI status catalog for Codex, Claude Code, and Gemini CLI
+  - provider CLI status catalog for Codex, Claude Code, and Antigravity CLI
   - fixed ESP32-S3 USB-C sensor board specification
   - JLCPCB-oriented manufacturing package contract
   - KiCad ERC/DRC JSON report parsing
@@ -50,7 +50,7 @@ Implemented in this first vertical slice:
 - The left project status updates after `Send design`, so the design side and
   chat side both reflect the saved preview workspace without filling the status
   line with a local path. The saved preview bottom status says
-  `미리보기 저장 완료 | 검토 목록에서 저장 위치 확인 | prototype-review, order-ready 아님.`.
+  `미리보기 저장 완료 | 품질 리포트 90점 게이트 확인 | prototype-review, 주문 준비 전.`.
 - Clicking the left `회로도`, `PCB 레이아웃`, `검증`, and `제조 미리보기`
   tabs updates the project status with that view's current preview state while
   keeping saved file paths in `검토 목록` and the chat transcript.
@@ -73,8 +73,12 @@ Implemented in this first vertical slice:
   `drc-report.json`, and `kicad-validation-summary.txt` beside the preview
   files.
 - The first-run preview workspace also writes JLCPCB review-only manufacturing
-  preview files: `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
-  `manufacturing-readiness-preview.txt`. The readiness report blocks upload and
+  preview files: `jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`,
+  `chat-to-circuit-trace.md`, `part-selection-review.md`,
+  `circuit-review-findings.md`, `production/chatpcb3-esp32s3`, and
+  `manufacturing-readiness-preview.txt`.
+  It also writes `design-quality-report.json`, `design-quality-report.md`, and
+  `visual-review` SVG review files. The readiness report blocks upload and
   keeps the package at `prototype-review`, not order-ready.
 - After local ERC/DRC reports are clear, the bottom pipeline status stays short
   and points the user to `PCB 열기` or `검토 목록` instead of truncating the
@@ -102,8 +106,9 @@ Not implemented yet:
 
 - Full KiCad fork rebased on KiCad 10.0.4 source.
 - Real schematic and PCB canvas embedding in the new workspace.
-- Order-ready KiCad file writing, DSN/SES import/export, Freerouting execution, or
-  Gerber generation.
+- Order-ready KiCad fork workflow, DSN/SES import/export, Freerouting execution,
+  or unattended manufacturing signoff. The generated Gerber/drill/BOM/CPL files
+  are review artifacts, not a final order package.
 - Signed MSI/NSIS-style installer packaging. The current preview has a
   double-click zip installer.
 - Live provider invocation. The first slice only detects local CLI availability
@@ -154,8 +159,8 @@ adds a `Run First Chat Smoke Test` shortcut, writes
 `INSTALL-READY.txt` with `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.`,
 copies Korean-first `README-FIRST.txt` and `README-FIRST-KO.txt` beside the installed app,
 and starts the app.
-For this preview, Provider 선택은 로그인 상태 확인용입니다. 미리보기 생성은
-앱 안의 기본 생성기를 사용하며 Codex, Claude Code, Gemini 로컬 도구를 대신
+For this preview, Provider 선택은 로그인 상태와 모델 확인용입니다. 미리보기 생성은
+앱 안의 기본 생성기를 사용하며 Codex, Claude Code, Antigravity 로컬 도구를 대신
 실행하지 않습니다.
 
 For a source-tree first run on a machine with Rust installed, double-click:
@@ -177,18 +182,21 @@ selector, prompt input, `예시 사용`, `설계 생성`, `PCB 열기`, and pipe
 then become enabled after `설계 생성` saves the preview or after a previous
 preview is recovered. The left tabs also show a native preview body, not an
 empty placeholder. `Provider
-Login` reports local CLI availability without storing provider credentials, and
+Login` reports local CLI availability, login status, CLI version, and provider
+model choices without storing provider credentials, and
 it appends that status without erasing earlier chat turns. If no local provider
 is ready yet, the model selector stays on `내장 미리보기` and Provider Login
 says the built-in preview can still be created, so a first-run user is not
 blocked before pressing `설계 생성`. It also shows the local CLI install/login
 hint for each missing provider and tells the user to click `Provider Login`
 again after completing local CLI login. The model selector also picks the first
-available local provider on launch, so a first-run user sees a realistic model
-choice before pressing anything when a CLI is available. That provider/model
-selection is readiness-only for this slice; Provider 선택은 로그인 상태 확인용이고
+available logged-in provider model on launch, so a first-run user sees a realistic
+provider/model choice before pressing anything when a CLI is available. The selector
+shows the CLI version and model, such as `Codex 0.142.3 gpt-5`, when that provider is
+logged in. That provider/model selection is still preview-bounded for this slice;
+Provider 선택은 로그인 상태와 모델 확인용이고
 `설계 생성`의 미리보기 생성은 앱 안의 기본 생성기를 사용하며 Codex, Claude Code,
-Gemini 로컬 도구를 대신 실행하지 않습니다. `예시 사용` refills the starter prompt after a send. Both
+Antigravity 로컬 도구를 대신 실행하지 않습니다. `예시 사용` refills the starter prompt after a send. Both
 `Provider Login` and `예시 사용` return focus to the prompt, so the next typed request or Enter key works
 without another click. On launch, the starter prompt is already selected, so
 typing replaces it immediately. Pressing Enter in the prompt input or clicking
@@ -204,13 +212,19 @@ It also saves a local preview workspace under:
 
 That folder contains the prompt, artifact manifest, `FIRST-RUN-SUMMARY.txt`,
 `BEGINNER-NEXT-STEPS.txt`, `jlcpcb-bom-preview.csv`,
-`jlcpcb-cpl-preview.csv`, `manufacturing-readiness-preview.txt`, and a
-prototype-review release evidence report. The first-run summary points a
+`jlcpcb-cpl-preview.csv`, `chat-to-circuit-trace.md`,
+`part-selection-review.md`,
+`circuit-review-findings.md`,
+`design-quality-report.json`, `design-quality-report.md`,
+`production/chatpcb3-esp32s3`, `visual-review`,
+`manufacturing-readiness-preview.txt`, and a prototype-review release evidence
+report. The first-run summary points a
 non-expert back to the focused prompt for follow-up chat and says not to upload
 the preview to JLCPCB. The beginner next-steps file spells out the first
-clicks: PCB 열기, 검토 목록, then ask a follow-up in chat while Gerber,
-drill, and placement-reviewed JLCPCB files remain blocked. The BOM/CPL preview
-files are for review only. It also contains the generated KiCad preview
+clicks: PCB 열기, 검토 목록, then ask a follow-up in chat while the
+Gerber/drill/BOM/CPL review artifacts and 90-point quality report still require
+human signoff before ordering. The BOM/CPL preview files are for review only.
+It also contains the generated KiCad preview
 scaffold:
 `chatpcb3-esp32s3.kicad_pro`, `chatpcb3-esp32s3.kicad_sch`,
 `chatpcb3-esp32s3.kicad_pcb`, `sym-lib-table`, and `fp-lib-table`. The left
@@ -226,9 +240,12 @@ The JLCPCB preview blocker report is saved as
 JLCPCB.
 It is still not an order-ready KiCad board. Click
 `PCB 열기` to inspect `chatpcb3-esp32s3.kicad_pcb` in KiCad 10's PCB Editor and
-see the 50mm x 50mm `Edge.Cuts` preview outline. If KiCad 10 is not installed,
-the app opens the PCB file through Windows and says to install KiCad 10 if PCB
-Editor did not open. Click `검토 목록` in the app to open that
+see the 50mm x 50mm `Edge.Cuts` outline, placed footprints, pads, and routed
+review tracks. Click `검토 목록` to inspect `design-quality-report.md`; the local
+rubric target is 90 points, but the report still requires human manufacturing
+signoff. If KiCad 10 is not installed, the app opens the PCB file through
+Windows and says to install KiCad 10 if PCB Editor did not open. Click
+`검토 목록` in the app to open that
 folder without finding `%LOCALAPPDATA%` by hand; when the beginner checklist
 exists, Windows opens the folder with `BEGINNER-NEXT-STEPS.txt` selected. The
 same folder still contains `FIRST-RUN-SUMMARY.txt` for the prototype-review
@@ -283,10 +300,14 @@ prototype-review preview workspace without provider login. The smoke summary
 also prints `PASS beginner next steps written`,
 `PASS JLCPCB manufacturing preview blockers written`,
 `PASS KiCad compatibility report written`, and
-`PASS ERC/DRC validation summary written`, so a non-expert has local validation
-evidence and a next-action checklist before opening the full app. The saved
+`PASS ERC/DRC validation summary written`, and
+`PASS design quality report reflects ERC/DRC validation gate`, so a non-expert has local
+validation evidence and a next-action checklist before opening the full app. The saved
 preview workspace includes `BEGINNER-NEXT-STEPS.txt`,
-`jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`, and
+`design-quality-report.md`, `production/chatpcb3-esp32s3`, `visual-review`,
+`jlcpcb-bom-preview.csv`, `jlcpcb-cpl-preview.csv`,
+`chat-to-circuit-trace.md`, `part-selection-review.md`,
+`circuit-review-findings.md`, and
 `manufacturing-readiness-preview.txt`.
 The installed folder also includes `INSTALL-READY.txt`, a Korean-first one-screen
 start summary that says `만들 보드를 채팅 입력칸에 적고 Enter를 누릅니다.` and points

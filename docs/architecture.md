@@ -10,7 +10,7 @@ containing:
 - native wxWidgets ChatPCB workspace
 - `chatpcb-core.exe`
 - bundled Freerouting runtime
-- local provider CLI discovery for Codex, Claude Code, and Gemini CLI
+- local provider CLI discovery for Codex, Claude Code, and Antigravity CLI
 
 ## Native UI Contract
 
@@ -67,9 +67,10 @@ The first supported board is fixed:
 - JTAG debug
 - JLCPCB/LCSC-oriented part selection
 
-This constrained board is the proof vehicle for automatic placement,
-Freerouting-based autorouting, ERC/DRC validation, manufacturing package
-generation, and release evidence reporting.
+This constrained board is the proof vehicle for generated placement/routing
+review files, ERC/DRC validation, manufacturing review artifacts, quantified
+design quality reporting, and release evidence. The full KiCad fork canvas and
+Freerouting DSN/SES round trip remain later integration gates.
 
 ## Release Gate
 
@@ -87,4 +88,5 @@ The release gate is blocked if any of these are missing or failing:
 - BOM with JLCPCB-aligned columns
 - CPL / position file with JLCPCB-aligned columns
 - visual review evidence
+- design quality report at or above the current target score
 - explicit user signoff requirement

@@ -65,8 +65,12 @@ try {
     $releaseEvidence = Get-Content -Raw -Path $releaseEvidencePath
     Assert-Contains $releaseEvidence "Git commit: $shortHead" "RELEASE-EVIDENCE.txt does not match HEAD $shortHead."
     Assert-Contains $releaseEvidence "Working tree: clean" "RELEASE-EVIDENCE.txt must record a clean working tree."
+    Assert-Contains $releaseEvidence "Installer auto-launch opens a clean first-chat screen" "Release evidence must include the clean installer auto-launch proof."
+    Assert-Contains $releaseEvidence "Installer fresh-start launch preserves normal recovered preview relaunch" "Release evidence must include the normal relaunch recovery proof."
     Assert-Contains $releaseEvidence "Provider model selector is readiness-only for preview generation" "Release evidence must say provider selection is readiness-only."
     Assert-Contains $releaseEvidence "No provider CLI is invoked for preview generation" "Release evidence must say provider CLIs are not invoked for preview generation."
+    Assert-Contains $releaseEvidence "Design quality report evaluates the 90-point validation gate" "Release evidence must include the quantified design quality gate."
+    Assert-Contains $releaseEvidence "Gerber/drill/BOM/CPL outputs are review artifacts" "Release boundary must say manufacturing files are still review artifacts."
     Assert-Contains $releaseEvidence "Preview only; not order-ready KiCad output yet" "Release boundary must stay honest after publication."
 
     $remoteHeadLine = (git ls-remote origin refs/heads/main).Trim()

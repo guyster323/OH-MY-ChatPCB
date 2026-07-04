@@ -140,6 +140,18 @@ fn desktop_self_test_describes_non_web_native_workspace() {
         contract["chat_actions"]["app_launch_mentions_recovered_workspace_in_chat"],
         true
     );
+    assert_eq!(
+        contract["chat_actions"]["live_schematic_visible_in_left_pane"],
+        true
+    );
+    assert_eq!(
+        contract["chat_actions"]["chat_send_updates_live_schematic"],
+        true
+    );
+    assert_eq!(
+        contract["chat_actions"]["live_schematic_shows_apply_result"],
+        true
+    );
     assert_eq!(contract["layout"]["left_ratio"], 0.7);
     assert_eq!(contract["layout"]["right_ratio"], 0.3);
     assert_eq!(
@@ -240,11 +252,14 @@ fn desktop_self_test_summary_is_readable_for_first_run_users() {
     assert!(summary.contains("PASS pressing Enter sends the first design"));
     assert!(summary.contains("PASS empty prompt visibly uses the built-in ESP32-S3 example"));
     assert!(summary.contains("PASS Send design returns focus for follow-up chat"));
+    assert!(summary.contains("PASS live schematic updates beside chat and Agent answer"));
     assert!(summary.contains("PASS first chat can create the built-in ESP32-S3 preview"));
     assert!(summary.contains("PASS Use example selects prompt text for immediate overwrite"));
     assert!(summary.contains("PASS Open PCB/checklist wait for a saved preview"));
     assert!(summary.contains("PASS first-run evidence points back to follow-up chat"));
     assert!(summary.contains("PASS first-run evidence blocks JLCPCB upload"));
+    assert!(summary.contains("PASS design quality report checks 90-point validation gate"));
+    assert!(summary.contains("PASS design quality report keeps human signoff boundary"));
     assert!(summary.contains("Boundary: prototype-review, not order-ready"));
     assert!(!summary.contains("provider_login_shows_local_cli_login_hints"));
     assert!(!summary.trim_start().starts_with('{'));
@@ -279,11 +294,13 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(summary.contains("PASS JLCPCB manufacturing preview blockers written"));
     assert!(summary.contains("PASS KiCad compatibility report written"));
     assert!(summary.contains("PASS ERC/DRC validation summary written"));
+    assert!(summary.contains("PASS design quality report reflects ERC/DRC validation gate"));
     assert!(summary.contains("PASS first-run summary points back to follow-up chat"));
     assert!(summary.contains("PASS first-run summary blocks JLCPCB upload"));
     assert!(summary.contains("Prompt: built-in ESP32-S3 example prompt accepted"));
     assert!(!summary.contains("Prompt: USB-C ESP32-S3"));
-    assert!(summary.contains("Boundary: prototype-review, not order-ready"));
+    assert!(summary.contains("Quality gate: ReleaseCandidate >=90"));
+    assert!(summary.contains("manufacturing signoff still required"));
     assert!(!summary.trim_start().starts_with('{'));
 
     let workspace = root.join("chatpcb3-esp32s3-preview");
@@ -295,6 +312,8 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
     assert!(workspace.join("BEGINNER-NEXT-STEPS.txt").exists());
     assert!(workspace.join("jlcpcb-bom-preview.csv").exists());
     assert!(workspace.join("jlcpcb-cpl-preview.csv").exists());
+    assert!(workspace.join("design-quality-report.json").exists());
+    assert!(workspace.join("design-quality-report.md").exists());
     assert!(workspace
         .join("manufacturing-readiness-preview.txt")
         .exists());
@@ -325,6 +344,12 @@ fn desktop_first_chat_smoke_test_creates_preview_evidence_for_installed_users() 
         fs::read_to_string(workspace.join("manufacturing-readiness-preview.txt")).unwrap();
     assert!(manufacturing_readiness.contains("Do not upload this preview to JLCPCB"));
     assert!(manufacturing_readiness.contains("prototype-review, not order-ready"));
+    let quality_report = fs::read_to_string(workspace.join("design-quality-report.md")).unwrap();
+    assert!(quality_report.contains("Target score: 90"));
+    assert!(quality_report.contains("Level: ReleaseCandidate"));
+    assert!(quality_report.contains("Total score: 90/100"));
+    assert!(quality_report.contains("Blockers"));
+    assert!(quality_report.contains("none"));
 
     fs::remove_dir_all(&root).unwrap();
 }
