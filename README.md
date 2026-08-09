@@ -56,12 +56,12 @@ Open `apps/panel/index.html` in a WebView or browser while `npm run daemon` is r
 
 ## User Test Guide
 
-Use this flow when you want to try the current scaffold from a user perspective.
+Use this flow to create a named KiCad project from a Korean or English request.
 
 1. Start in the repository root:
 
 ```powershell
-cd C:\Users\windo\chatpcb2
+cd C:\path\to\OH-MY-ChatPCB
 ```
 
 2. Install dependencies and run the full local verification:
@@ -81,8 +81,8 @@ Expected result:
 - KiCad validation passes cleanly when `kicad-cli` is available; the generated project includes its own `ChatPCB` symbol library, so the sample ERC has `0` errors and `0` warnings
 - KiCad SVG export can render the generated sample schematic for visual review
 - simulation returns success or the typed `NGSPICE_UNAVAILABLE` skip when `ngspice` is not installed
-- panel verification starts `chatpcb-agentd`, sends the panel default prompt as a websocket `schematic.generate` tool call, and confirms generated artifact paths
-- browser UI verification opens the panel, types prompts, clicks `Generate`, previews/cancels/applies a patch, exercises provider Stop cancellation with a fake provider, and confirms artifact rows are rendered
+- panel verification starts `chatpcb-agentd`, creates a Korean-named project over WebSocket, sends a Korean `project.request`, and verifies the generated `.kicad_pro`, ERC, readiness review, and dirty-editor conflict contract
+- browser UI verification opens the real panel, creates a named project, presses **Send**, checks the independent request/ERC/review/KiCad-link cards, and confirms that a dirty host blocks the request without asking KiCad to reload
 
 3. Start the local daemon:
 
@@ -95,30 +95,35 @@ Keep this terminal running. The daemon owns the local websocket endpoint used by
 4. In another browser window, open:
 
 ```text
-C:\Users\windo\chatpcb2\apps\panel\index.html
+C:\path\to\OH-MY-ChatPCB\apps\panel\index.html
 ```
 
-You can also open `apps/panel/index.html` from a KiCad WebView host.
+You can also use the same panel from a ChatPCB-enabled KiCad fork. An official KiCad build does not provide the host bridge, so the standalone panel reports the project path for you to open manually.
 
-5. Use the default prompt or enter a prompt like:
+5. Enter a project name such as `가스 센서 보드 01` and click **New project**. The panel creates a safe project directory under the selected workspace root and shows it as the active project.
+
+6. Enter a Korean or English circuit request, then press **Send**. For example:
 
 ```text
-STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.
+ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘.
 ```
 
 Expected result:
 
 - the panel connects to `chatpcb-agentd`
-- pressing `Generate` sends a `schematic.generate` tool call
-- generated artifact paths appear in the panel
-- the generated `.kicad_sch` can be validated with `npm run validate:sample`
+- pressing **Send** runs one `project.request` against the active project and reports whether it generated or updated the project
+- request status, ERC results, readiness review, generated artifacts, and KiCad link state appear in independent cards
+- the artifacts include a normal `.kicad_pro` file; use **Open in KiCad** in the fork panel, or open that path manually from standalone browser mode
+- if the active KiCad editor has unsaved changes, the panel shows a conflict and refuses the automatic request/reload path until you save or discard those edits
+
+ERC and readiness are different gates. A clean schematic ERC only means that the checked electrical-rule set found no schematic errors; it does **not** prove that PCB DRC is clean or that sourcing, datasheet review, simulation evidence, layout review, and other release checks are complete. Always inspect both the ERC card and the readiness review card, then run PCB DRC and the remaining release checks in KiCad before manufacturing.
 
 ## Codex CLI verification
 
 Codex CLI is used as a local validation surface, not as a stored credential source. The command below bypasses approvals and sandboxing, so use it only in this local checkout after reviewing the prompt.
 
 ```powershell
-codex exec -C C:\Users\windo\chatpcb2 --dangerously-bypass-approvals-and-sandbox "Run exactly these commands: npm run verify:sample and npm run verify:ui. Then read README.md and answer whether the documented User Test Guide is enough for a user to test the current scaffold. Do not edit files."
+codex exec -C C:\path\to\OH-MY-ChatPCB --dangerously-bypass-approvals-and-sandbox "Run exactly these commands: npm run verify:sample and npm run verify:ui. Then read README.md and answer whether the documented User Test Guide is enough for a user to test the current scaffold. Do not edit files."
 ```
 
 The expected Codex CLI result is a concise report that confirms the sample and browser UI verifications ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
@@ -131,13 +136,15 @@ Run this command for the closest repeatable check to a user operating the curren
 npm run verify:ui
 ```
 
-It starts `chatpcb-agentd` on `127.0.0.1:41317`, serves `apps/panel/index.html`, opens the panel in a local Chromium-compatible browser, fills the project and prompt fields, clicks `Generate`, previews/cancels/applies a patch, exercises provider Stop cancellation, and verifies that generated artifacts appear in the UI.
+It starts an isolated `chatpcb-agentd`, serves `apps/panel/index.html`, opens the panel in a local Chromium-compatible browser, creates a Korean-named project, enters a request, presses **Send**, and verifies the request, ERC, review, artifact, KiCad-link, dirty-conflict, reload-acknowledgement, rollback, and safe-error states.
 
 ## Computer Use verification status
 
-Computer Use is available in the current Codex desktop session and can list, activate, inspect, and operate Windows apps. It was used to launch the local KiCad fork build at `C:\Users\windo\kicad-source-mirror-chatpcb\build\chatpcb-vcpkg\eeschema\eeschema.exe`, verify the visible right-side ChatPCB panel, confirm the panel auto-starts `chatpcb-agentd`, and click `Generate` from inside KiCad. The generated `chatpcb_mcu_peripheral.kicad_sch` also opens in the forked schematic editor.
+For an interactive end-to-end check, use the ChatPCB-enabled KiCad fork when it is available; otherwise use the standalone browser panel for project creation and open the returned `.kicad_pro` manually in KiCad. Create a temporary named project, send the request above, and confirm that the success, review, ERC, and KiCad-link cards are all visible.
 
-`npm run verify:ui` remains the strongest repeatable non-interactive user-flow check. It starts or reuses `chatpcb-agentd`, serves `apps/panel/index.html`, performs real browser input and click behavior, and verifies websocket generation plus artifact rendering for the same panel contract that the right-side KiCad WebView uses.
+After opening the `.kicad_pro`, run **Inspect → Electrical Rules Checker** and record the visible error and warning counts. Make an unsaved edit before another request and confirm the panel shows `conflict` without reloading. Save or discard the edit before continuing. Run PCB DRC separately; ERC alone is not a release decision.
+
+`npm run verify:ui` is the repeatable automated counterpart. It operates the same panel contract with a local browser and a mock KiCad host, including the dirty-editor guard.
 
 ## CLI
 
@@ -157,13 +164,15 @@ The intended KiCad fork keeps KiCad UI changes small:
 1. KiCad creates a right dock panel.
 2. The panel hosts `apps/panel` in `wxWebView`.
 3. The panel starts `chatpcb-agentd` on `127.0.0.1:41317`.
-4. The WebView sends `tool.call` envelopes over websocket.
-5. The daemon creates KiCad artifacts, runs CLI validation/simulation, and returns `tool.result`.
+4. The WebView sends `project.create` and `project.request` as `tool.call` envelopes over websocket.
+5. The daemon creates or updates normal KiCad artifacts, runs ERC validation, computes a separate readiness review, and returns one structured `tool.result`.
+6. The host bridge opens or reloads the `.kicad_pro` only when the active KiCad editor is clean; unsaved edits produce a conflict instead.
 
 The current tool-call names are:
 
 - `schematic.generate`
 - `project.create`
+- `project.request`
 - `schematic.patch`
 - `validate.erc`
 - `simulate.spice`

@@ -1,42 +1,99 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from '../src/runtime/envelope.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 
-const panelHtml = await readFile('apps/panel/index.html', 'utf8');
-const defaultPrompt = extractTextareaDefault(panelHtml, 'prompt');
-const defaultProjectDir = extractInputValue(panelHtml, 'project-dir');
-
-const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-panel-flow-'));
-const daemon = await startDaemon({ port: 0 });
+const projectName = '가스 센서 보드 01';
+const prompt = 'ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘.';
+const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-panel-flow-'));
+const daemon = await startDaemon({
+  port: 0,
+  dispatchOptions: {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'fake-provider',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => ({
+      exitCode: 0,
+      stderr: '',
+      events: [
+        createEnvelope('agent.delta', { text: '가스 센서 보드를 생성하겠습니다.' }),
+        createEnvelope('tool.call', {
+          id: 'panel-provider-generate',
+          name: 'schematic.generate',
+          args: { prompt }
+        })
+      ]
+    })
+  }
+});
 
 try {
-  assert.ok(defaultPrompt.includes('STM32'), 'panel default prompt should mention STM32');
-  assert.ok(defaultProjectDir.includes('workspaces'), 'panel default project should target a workspace path');
-
-  const result = await sendGenerateOverWebSocket({
-    url: daemon.url.replace('http:', 'ws:') + '/ws',
-    projectDir,
-    prompt: defaultPrompt
+  const url = daemon.url.replace('http:', 'ws:') + '/ws';
+  const created = await sendToolCallOverWebSocket({
+    url,
+    id: 'panel-project-create',
+    name: 'project.create',
+    args: { workspaceRoot, projectName }
   });
 
-  assert.equal(result.type, 'tool.result');
-  assert.equal(result.payload.ok, true);
-  assert.equal(result.payload.result.spec.kind, 'mcu-peripheral');
-  assert.match(result.payload.result.files.schematic, /\.kicad_sch$/);
+  assert.equal(created.type, 'tool.result');
+  assert.equal(created.payload.ok, true);
+  assert.equal(created.payload.result.displayName, projectName);
+  assert.equal(created.payload.result.projectDir, path.join(workspaceRoot, '가스-센서-보드-01'));
+
+  const requested = await sendToolCallOverWebSocket({
+    url,
+    id: 'panel-project-request',
+    name: 'project.request',
+    args: {
+      provider: 'codex',
+      projectDir: created.payload.result.projectDir,
+      prompt
+    }
+  });
+
+  assert.equal(requested.type, 'tool.result');
+  assert.equal(requested.payload.ok, true);
+  assert.equal(requested.payload.result.operation, 'generated');
+  assert.match(requested.payload.result.files.project, /\.kicad_pro$/);
+  assert.equal(path.dirname(requested.payload.result.files.project), created.payload.result.projectDir);
+  assert.equal(typeof requested.payload.result.validation.erc, 'object');
+  assert.equal(typeof requested.payload.result.validation.erc.errorCount, 'number');
+  assert.equal(typeof requested.payload.result.review, 'object');
+  assert.equal(typeof requested.payload.result.review.status, 'string');
+
+  const hostMessages = [];
+  const dirtyState = handleMockHostStateEvent(
+    {
+      type: 'project.status',
+      projectPath: created.payload.result.projectDir,
+      dirty: true
+    },
+    hostMessages
+  );
+  assert.equal(dirtyState.linkState, 'conflict');
+  assert.equal(dirtyState.dirty, true);
+  assert.equal(hostMessages.some((message) => message.type === 'project.reload'), false);
 
   console.log(
     JSON.stringify(
       {
         ok: true,
         service: 'chatpcb-agentd',
-        verified: 'panel schematic.generate websocket flow',
-        mcu: result.payload.result.spec.mcu.family,
-        files: result.payload.result.files
+        verified: 'named project.create and project.request websocket flow with dirty-host conflict gating',
+        displayName: created.payload.result.displayName,
+        operation: requested.payload.result.operation,
+        project: requested.payload.result.files.project,
+        erc: requested.payload.result.validation.erc,
+        reviewStatus: requested.payload.result.review.status,
+        dirtyHost: dirtyState
       },
       null,
       2
@@ -44,58 +101,35 @@ try {
   );
 } finally {
   await daemon.close();
-  await rm(projectDir, { force: true, recursive: true });
+  await rm(workspaceRoot, { force: true, recursive: true });
 }
 
-function extractTextareaDefault(html, id) {
-  const pattern = new RegExp(`<textarea[^>]*id="${id}"[^>]*>([\\s\\S]*?)<\\/textarea>`);
-  const match = html.match(pattern);
-  if (!match) {
-    throw new Error(`Could not find textarea#${id} in apps/panel/index.html.`);
+function handleMockHostStateEvent(event, outgoingMessages) {
+  assert.equal(event.type, 'project.status');
+
+  if (event.dirty) {
+    return { ...event, linkState: 'conflict' };
   }
-  return decodeHtml(match[1]).trim();
+
+  outgoingMessages.push({ type: 'project.reload', projectPath: event.projectPath });
+  return { ...event, linkState: 'reload-needed' };
 }
 
-function extractInputValue(html, id) {
-  const pattern = new RegExp(`<input[^>]*id="${id}"[^>]*value="([^"]*)"`);
-  const match = html.match(pattern);
-  if (!match) {
-    throw new Error(`Could not find input#${id} in apps/panel/index.html.`);
-  }
-  return decodeHtml(match[1]).trim();
-}
-
-function decodeHtml(value) {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
-}
-
-function sendGenerateOverWebSocket({ url, projectDir, prompt }) {
+function sendToolCallOverWebSocket({ url, id, name, args }) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url);
     const timeout = setTimeout(() => {
       socket.close();
-      reject(new Error('panel websocket verification timed out'));
-    }, 10000);
+      reject(new Error(`panel websocket verification timed out for ${name}`));
+    }, 30000);
 
     socket.addEventListener('open', () => {
-      socket.send(
-        JSON.stringify(
-          createEnvelope('tool.call', {
-            id: 'panel-flow-1',
-            name: 'schematic.generate',
-            args: { projectDir, prompt }
-          })
-        )
-      );
+      socket.send(JSON.stringify(createEnvelope('tool.call', { id, name, args })));
     });
 
     socket.addEventListener('message', (event) => {
       const envelope = parseEnvelope(event.data);
-      if (envelope.type !== 'tool.result') return;
+      if (envelope.type !== 'tool.result' || envelope.payload.id !== id) return;
       clearTimeout(timeout);
       socket.close();
       resolve(envelope);
