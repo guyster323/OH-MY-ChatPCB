@@ -246,6 +246,106 @@ test('daemon falls back to bounded generation then approved patch after a succes
   }
 });
 
+test('daemon confines provider-emitted project paths to the active project.request directory', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-confinement-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-outside-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Confined Board' }
+    });
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_confined',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Create an RP2040 sensor board.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_escape_attempt',
+            name: 'schematic.generate',
+            args: {
+              projectDir: outside,
+              prompt: 'RP2040 board with USB-C power and I2C connector.'
+            }
+          })
+        ]
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.files.spec, path.join(created.result.projectDir, 'chatpcb_mcu_peripheral.chatpcb.json'));
+    await assert.rejects(() => readFile(path.join(outside, 'chatpcb_mcu_peripheral.chatpcb.json'), 'utf8'), { code: 'ENOENT' });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(outside, { force: true, recursive: true });
+  }
+});
+
+test('daemon retains the last generation or patch result after later provider tools', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-multi-tool-'));
+
+  try {
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_multi_tool',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Create an STM32 board.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_generate_first',
+            name: 'schematic.generate',
+            args: { prompt: 'STM32 board with USB-C power, I2C connector, reset button, and status LED.' }
+          }),
+          createEnvelope('tool.call', {
+            id: 'call_validate_last',
+            name: 'validate.erc',
+            args: {}
+          })
+        ]
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.ok(result.result.files.schematic.endsWith('.kicad_sch'));
+    assert.ok(result.result.files.spec.endsWith('.chatpcb.json'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon does not fall back after provider parse, cancellation, or non-zero failures', async () => {
+  const failures = [
+    { name: 'parse', provider: async () => { throw new Error('Provider parse failure.'); }, error: /parse failure/ },
+    { name: 'cancellation', provider: async () => { throw new Error('Provider process cancelled.'); }, error: /cancelled/ },
+    { name: 'non-zero exit', provider: async () => ({ exitCode: 1, stderr: '', events: [] }), error: /exited with code 1/ }
+  ];
+
+  for (const failure of failures) {
+    const root = await mkdtemp(path.join(tmpdir(), `chatpcb-project-provider-${failure.name}-`));
+    try {
+      await assert.rejects(
+        () => dispatchToolCall(
+          {
+            id: `call_project_request_${failure.name}`,
+            name: 'project.request',
+            args: { provider: 'codex', projectDir: root, prompt: 'Create an RP2040 board.' }
+          },
+          providerOptions({ runProviderProcessImpl: failure.provider })
+        ),
+        failure.error
+      );
+      await assert.rejects(() => readFile(path.join(root, 'chatpcb_mcu_peripheral.chatpcb.json'), 'utf8'), { code: 'ENOENT' });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }
+});
+
 test('daemon restores existing project artifacts when automatic ERC validation fails', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-rollback-'));
 
@@ -449,7 +549,11 @@ test('daemon websocket cancels an in-flight provider invocation by id', async ()
   }
 });
 
-function providerOptions({ events, validation = { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } } }) {
+function providerOptions({
+  events = [],
+  validation = { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } },
+  runProviderProcessImpl = async () => ({ exitCode: 0, stderr: '', events })
+}) {
   return {
     checkProviderAvailabilityImpl: async ({ provider }) => ({
       provider,
@@ -457,7 +561,7 @@ function providerOptions({ events, validation = { ok: true, skipped: false, erc:
       available: true,
       status: 'available'
     }),
-    runProviderProcessImpl: async () => ({ exitCode: 0, stderr: '', events }),
+    runProviderProcessImpl,
     validateProjectImpl: async () => validation
   };
 }

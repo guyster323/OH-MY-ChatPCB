@@ -94,7 +94,7 @@ export async function dispatchToolCall(
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, autoApprovePatch = false }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, autoApprovePatch = false, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -145,7 +145,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   for (const event of transcript.events) {
     if (event.type !== 'tool.call') continue;
 
-    const toolCall = withProjectContext(event.payload, projectDir);
+    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
     if (autoApprovePatch && toolCall.name === 'schematic.patch') {
       toolCall.args.approved = true;
     }
@@ -186,10 +186,11 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       checkProviderAvailabilityImpl,
       validateProjectImpl,
       providerControllers,
-      autoApprovePatch: true
+      autoApprovePatch: true,
+      forceProjectDir: true
     });
     const applied = providerResult.toolResults.length
-      ? providerResult.toolResults.at(-1).result
+      ? lastMutatingResult(providerResult.toolResults)
       : hasSpec
         ? await applySchematicPatch({ projectDir, prompt, approved: true, validateProjectImpl })
         : await generateMcuPeripheralProject({ projectDir, prompt });
@@ -215,6 +216,14 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       await rm(snapshot.root, { force: true, recursive: true });
     }
   }
+}
+
+function lastMutatingResult(toolResults) {
+  const result = toolResults.findLast((toolResult) => toolResult.ok && toolResult.result?.files)?.result;
+  if (!result) {
+    throw new Error('Provider transcript did not apply a schematic generation or patch.');
+  }
+  return result;
 }
 
 async function projectHasSpec(projectDir) {
@@ -266,12 +275,12 @@ function cancelProvider(args = {}, providerControllers) {
   };
 }
 
-function withProjectContext(payload, projectDir) {
+function withProjectContext(payload, projectDir, forceProjectDir = false) {
   const args = {
     ...(payload.args ?? {})
   };
 
-  if (projectDir && !args.projectDir) {
+  if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
 
