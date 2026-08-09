@@ -355,6 +355,61 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
   }
 });
 
+test('supported profile generic segments avoid J3/J7 no-net pads and cross-net intersections', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pad-safe-generic-routing-'));
+  let noNetPadCount = 0;
+
+  try {
+    for (const [profile, prompt] of [
+      [
+        'esp32',
+        'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ],
+      [
+        'stm32',
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ]
+    ]) {
+      const result = await generateMcuPeripheralProject({
+        projectDir: path.join(root, profile),
+        prompt
+      });
+      const board = await readFile(result.files.board, 'utf8');
+      const segments = boardSegments(board);
+      const noNetPadCenters = boardNoNetPadCenters(board, ['J3', 'J7']);
+
+      noNetPadCount += noNetPadCenters.length;
+      for (const padCenter of noNetPadCenters) {
+        assert.equal(
+          segments.some((segment) => distanceFromBoardPointToSegment(padCenter, segment.start, segment.end) < 0.8),
+          false,
+          `${profile} board should keep generic segments clear of the ${padCenter.ref} no-net pad at ${padCenter.x},${padCenter.y}`
+        );
+      }
+
+      for (let firstIndex = 0; firstIndex < segments.length; firstIndex += 1) {
+        for (let secondIndex = firstIndex + 1; secondIndex < segments.length; secondIndex += 1) {
+          const first = segments[firstIndex];
+          const second = segments[secondIndex];
+          if (first.netId === second.netId) {
+            continue;
+          }
+
+          assert.equal(
+            boardSegmentsIntersect(first.start, first.end, second.start, second.end),
+            false,
+            `${profile} board should not intersect different-net segments ${first.netId} and ${second.netId}`
+          );
+        }
+      }
+    }
+
+    assert.ok(noNetPadCount > 0, 'supported profile boards should contain J3/J7 no-net pads');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 function boardSegmentSpans(board) {
   return [...board.matchAll(/\(segment\s+\(start\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)\s+\(end\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/g)].map(
     ([, startX, startY, endX, endY]) => Math.hypot(Number(endX) - Number(startX), Number(endY) - Number(startY))
@@ -381,5 +436,69 @@ function boardHasSegmentNear(board, first, second) {
       const end = { x: Number(endX), y: Number(endY) };
       return (matchesPoint(start, first) && matchesPoint(end, second)) || (matchesPoint(start, second) && matchesPoint(end, first));
     }
+  );
+}
+
+function boardSegments(board) {
+  return [...board.matchAll(/\(segment\s+\(start\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)\s+\(end\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)[\s\S]*?\(net\s+(\d+)\)/g)].map(
+    ([, startX, startY, endX, endY, netId]) => ({
+      start: { x: Number(startX), y: Number(startY) },
+      end: { x: Number(endX), y: Number(endY) },
+      netId: Number(netId)
+    })
+  );
+}
+
+function boardNoNetPadCenters(board, references) {
+  return references.flatMap((ref) => {
+    const footprint = boardFootprintBlock(board, ref);
+    const padStarts = [...footprint.matchAll(/^[ \t]*\(pad\s+"[^"]+"/gm)].map((match) => match.index);
+    return padStarts
+      .map((start, index) => footprint.slice(start, padStarts[index + 1]))
+      .filter((pad) => !/\n[ \t]*\(net\s+\d+\s+"/.test(pad))
+      .map((pad) => pad.match(/\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/))
+      .filter(Boolean)
+      .map(([, x, y]) => ({ ref, x: Number(x), y: Number(y) }));
+  });
+}
+
+function boardFootprintBlock(board, ref) {
+  const starts = [...board.matchAll(/^  \(footprint\b/gm)].map((match) => match.index);
+  for (let index = 0; index < starts.length; index += 1) {
+    const block = board.slice(starts[index], starts[index + 1]);
+    if (block.includes(`(property "Reference" "${ref}"`)) {
+      return block;
+    }
+  }
+
+  assert.fail(`board footprint ${ref} missing`);
+}
+
+function distanceFromBoardPointToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
+function boardSegmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+  const orientation = (start, end, point) => (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x);
+  const firstStartOrientation = orientation(firstStart, firstEnd, secondStart);
+  const firstEndOrientation = orientation(firstStart, firstEnd, secondEnd);
+  const secondStartOrientation = orientation(secondStart, secondEnd, firstStart);
+  const secondEndOrientation = orientation(secondStart, secondEnd, firstEnd);
+  const epsilon = 1e-9;
+  const isBetween = (value, start, end) => value >= Math.min(start, end) - epsilon && value <= Math.max(start, end) + epsilon;
+  const isOnSegment = (start, end, point) =>
+    Math.abs(orientation(start, end, point)) <= epsilon && isBetween(point.x, start.x, end.x) && isBetween(point.y, start.y, end.y);
+
+  return (
+    (firstStartOrientation > epsilon && firstEndOrientation < -epsilon || firstStartOrientation < -epsilon && firstEndOrientation > epsilon) &&
+      (secondStartOrientation > epsilon && secondEndOrientation < -epsilon || secondStartOrientation < -epsilon && secondEndOrientation > epsilon) ||
+    isOnSegment(firstStart, firstEnd, secondStart) ||
+    isOnSegment(firstStart, firstEnd, secondEnd) ||
+    isOnSegment(secondStart, secondEnd, firstStart) ||
+    isOnSegment(secondStart, secondEnd, firstEnd)
   );
 }

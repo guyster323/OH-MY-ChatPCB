@@ -578,18 +578,13 @@ function boardFootprintIdentifier(library, footprintName) {
 }
 
 function injectBoardPadNets(block, componentModel, netIds, footprintPosition = { x: 0, y: 0 }, padCentersByNet = null) {
-  if (!componentModel.pinNets) {
-    return block;
-  }
-
   return block.replace(/(\n[ \t]*\(pad "([^"]*)"[\s\S]*?)(\n[ \t]*\))/g, (match, prefix, pinNumber, closing) => {
-    const netName = componentModel.pinNets[pinNumber];
+    const netName = componentModel.pinNets?.[pinNumber];
     const netId = netIds.get(netName);
+    recordBoardPadCenter(padCentersByNet, netName, prefix, footprintPosition);
     if (!netName || !netId) {
       return match;
     }
-
-    recordBoardPadCenter(padCentersByNet, netName, prefix, footprintPosition);
 
     if (/\n[ \t]*\(net \d+ "/.test(prefix)) {
       return match;
@@ -600,7 +595,7 @@ function injectBoardPadNets(block, componentModel, netIds, footprintPosition = {
 }
 
 function recordBoardPadCenter(padCentersByNet, netName, padBlock, footprintPosition) {
-  if (!padCentersByNet || !netName) {
+  if (!padCentersByNet) {
     return;
   }
 
@@ -620,10 +615,11 @@ function recordBoardPadCenter(padCentersByNet, netName, padBlock, footprintPosit
 function renderBoardSegments(padCentersByNet, netIds, profileMode) {
   const segments = [];
   const segmentKeys = new Set();
+  const acceptedSegments = [];
   const allCenters = [...padCentersByNet.entries()].flatMap(([netName, centers]) => centers.map((center) => ({ ...center, netName })));
 
   if (profileMode) {
-    renderProfilePowerSegments(segments, segmentKeys, padCentersByNet, netIds, allCenters);
+    renderProfilePowerSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters);
   }
 
   for (const [netName, centers] of padCentersByNet.entries()) {
@@ -646,17 +642,17 @@ function renderBoardSegments(padCentersByNet, netIds, profileMode) {
           continue;
         }
 
-        addBoardSegment(segments, segmentKeys, start, end, netId);
+        addBoardSegment(segments, segmentKeys, acceptedSegments, start, end, netName, netId, allCenters);
       }
     }
 
-    addCrossFootprintBoardSegments(segments, segmentKeys, uniqueCenters, netName, netId, allCenters);
+    addCrossFootprintBoardSegments(segments, segmentKeys, acceptedSegments, uniqueCenters, netName, netId, allCenters);
   }
 
   return segments.join('\n');
 }
 
-function renderProfilePowerSegments(segments, segmentKeys, padCentersByNet, netIds, allCenters) {
+function renderProfilePowerSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters) {
   for (const [netName, references] of PROFILE_POWER_PATHS) {
     const netId = netIds.get(netName);
     if (!netId) {
@@ -668,7 +664,7 @@ function renderProfilePowerSegments(segments, segmentKeys, padCentersByNet, netI
       const endCenters = (padCentersByNet.get(netName) ?? []).filter((center) => center.ref === references[index]);
       const closestPair = closestSafeProfilePowerPair(startCenters, endCenters, netName, allCenters);
       if (closestPair) {
-        addBoardSegment(segments, segmentKeys, closestPair.start, closestPair.end, netId);
+        addBoardSegment(segments, segmentKeys, acceptedSegments, closestPair.start, closestPair.end, netName, netId, allCenters);
       }
     }
   }
@@ -707,7 +703,7 @@ function profilePowerSegmentRunsNearOtherNetPad(start, end, netName, allCenters)
   });
 }
 
-function addCrossFootprintBoardSegments(segments, segmentKeys, centers, netName, netId, allCenters) {
+function addCrossFootprintBoardSegments(segments, segmentKeys, acceptedSegments, centers, netName, netId, allCenters) {
   const connected = [centers[0]];
   const remaining = centers.slice(1);
 
@@ -720,7 +716,7 @@ function addCrossFootprintBoardSegments(segments, segmentKeys, centers, netName,
     const start = connected[best.connectedIndex];
     const end = remaining.splice(best.remainingIndex, 1)[0];
     connected.push(end);
-    addBoardSegment(segments, segmentKeys, start, end, netId);
+    addBoardSegment(segments, segmentKeys, acceptedSegments, start, end, netName, netId, allCenters);
   }
 }
 
@@ -808,14 +804,40 @@ function distanceFromPointToSegment(point, start, end) {
   return boardPointDistance(point, projection);
 }
 
-function addBoardSegment(segments, segmentKeys, start, end, netId) {
+function addBoardSegment(segments, segmentKeys, acceptedSegments, start, end, netName, netId, allCenters) {
   const key = boardSegmentKey(start, end, netId);
-  if (segmentKeys.has(key)) {
+  if (
+    segmentKeys.has(key) ||
+    segmentRunsNearOtherNetPad(start, end, netName, allCenters) ||
+    acceptedSegments.some((segment) => segment.netName !== netName && boardSegmentsIntersect(start, end, segment.start, segment.end))
+  ) {
     return;
   }
 
   segmentKeys.add(key);
+  acceptedSegments.push({ start, end, netName });
   segments.push(renderBoardSegment(start, end, netId));
+}
+
+function boardSegmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+  const orientation = (start, end, point) => (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x);
+  const firstStartOrientation = orientation(firstStart, firstEnd, secondStart);
+  const firstEndOrientation = orientation(firstStart, firstEnd, secondEnd);
+  const secondStartOrientation = orientation(secondStart, secondEnd, firstStart);
+  const secondEndOrientation = orientation(secondStart, secondEnd, firstEnd);
+  const epsilon = 1e-9;
+  const isBetween = (value, start, end) => value >= Math.min(start, end) - epsilon && value <= Math.max(start, end) + epsilon;
+  const isOnSegment = (start, end, point) =>
+    Math.abs(orientation(start, end, point)) <= epsilon && isBetween(point.x, start.x, end.x) && isBetween(point.y, start.y, end.y);
+
+  return (
+    (firstStartOrientation > epsilon && firstEndOrientation < -epsilon || firstStartOrientation < -epsilon && firstEndOrientation > epsilon) &&
+      (secondStartOrientation > epsilon && secondEndOrientation < -epsilon || secondStartOrientation < -epsilon && secondEndOrientation > epsilon) ||
+    isOnSegment(firstStart, firstEnd, secondStart) ||
+    isOnSegment(firstStart, firstEnd, secondEnd) ||
+    isOnSegment(secondStart, secondEnd, firstStart) ||
+    isOnSegment(secondStart, secondEnd, firstEnd)
+  );
 }
 
 function boardSegmentKey(start, end, netId) {
