@@ -2,39 +2,25 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('WebView panel bundle connects to the local ChatPCB daemon', async () => {
+test('WebView panel provides named-project creation and Send-only request controls', async () => {
   const html = await readFile('apps/panel/index.html', 'utf8');
   const script = await readFile('apps/panel/panel.js', 'utf8');
 
-  assert.match(html, /id="chat-log"/);
-  assert.match(html, /id="preview-patch-button"/);
-  assert.match(html, /id="provider"/);
-  assert.match(html, /id="provider-status"/);
-  assert.match(html, /id="cancel-provider-button"/);
-  assert.match(html, /id="patch-diff"/);
-  assert.match(html, /id="review-status"/);
-  assert.match(html, /id="review-blockers"/);
-  assert.match(html, /id="review-warnings"/);
-  assert.match(html, /id="review-notes"/);
-  assert.match(html, /id="review-fixes"/);
-  assert.match(html, /id="approve-patch-button"/);
-  assert.match(html, /id="cancel-patch-button"/);
-  assert.match(html, /panel\.js/);
-  assert.match(script, /ws:\/\/127\.0\.0\.1:41317\/ws/);
-  assert.match(script, /tool\.call/);
-  assert.match(script, /schematic\.generate/);
-  assert.match(script, /schematic\.patch/);
-  assert.match(script, /provider\.invoke/);
-  assert.match(script, /provider\.cancel/);
-  assert.match(script, /sendProviderChat/);
-  assert.match(script, /sendProviderCancel/);
-  assert.match(script, /activeProviderInvocationId/);
-  assert.match(script, /provider\.status/);
-  assert.match(script, /refreshProviderStatus/);
-  assert.match(script, /rolledBack/);
-  assert.match(script, /Patch validation failed/);
-  assert.match(script, /renderReview/);
-  assert.match(script, /ready for prototype review/i);
+  assert.match(html, /id="workspace-root"/);
+  assert.match(html, /id="project-name"/);
+  assert.match(html, /id="active-project"/);
+  assert.match(html, /aria-label="Active project"/);
+  assert.match(html, /id="request-status"/);
+  assert.match(html, /aria-label="Request status"/);
+  assert.match(html, /id="validation-status"/);
+  assert.match(html, /id="kicad-link"/);
+  assert.doesNotMatch(html, /id="generate-button"/);
+  assert.match(script, /project\.create/);
+  assert.match(script, /project\.request/);
+  assert.match(script, /renderRequestStatus/);
+  assert.match(script, /renderValidation/);
+  assert.match(script, /renderKiCadLink/);
+  assert.match(script, /chatpcbHost/);
 });
 
 test('KiCad fork skeleton declares a wxWebView-backed ChatPCB panel', async () => {

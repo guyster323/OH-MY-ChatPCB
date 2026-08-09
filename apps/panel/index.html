@@ -13,38 +13,50 @@
           <h1>ChatPCB</h1>
           <p id="connection-status">Connecting</p>
         </div>
-        <div class="provider-control">
+        <label class="provider-control">
+          <span>Provider</span>
           <select id="provider">
             <option value="codex">Codex CLI</option>
             <option value="claude">Claude Code</option>
             <option value="copilot">Copilot CLI</option>
           </select>
-          <p id="provider-status">Provider pending</p>
-        </div>
+          <span id="provider-status">Provider pending</span>
+        </label>
       </header>
 
-      <section class="context-strip">
-        <label>
-          <span>Project</span>
-          <input id="project-dir" value="./workspaces/panel-project" />
-        </label>
-        <div class="context-actions">
-          <button id="generate-button" type="button">Generate</button>
-          <button id="preview-patch-button" type="button">Preview</button>
-        </div>
+      <section class="project-setup" aria-labelledby="project-setup-title">
+        <h2 id="project-setup-title">Start a project</h2>
+        <form id="new-project-form" class="new-project-form">
+          <label>
+            <span>Workspace root</span>
+            <input id="workspace-root" value="./workspaces" autocomplete="off" />
+          </label>
+          <label>
+            <span>Project name</span>
+            <input id="project-name" autocomplete="off" required />
+          </label>
+          <button type="submit">New project</button>
+        </form>
       </section>
 
-      <section id="chat-log" class="chat-log" aria-live="polite"></section>
+      <section id="active-project" class="status-card active-project" role="status" aria-label="Active project" hidden>
+        <h2>Active project</h2>
+        <p id="active-project-name"></p>
+        <code id="active-project-directory"></code>
+      </section>
 
-      <section id="patch-review" class="patch-review" hidden>
-        <div class="patch-review-head">
-          <h2>Patch</h2>
-          <div class="patch-actions">
-            <button id="approve-patch-button" type="button">Apply</button>
-            <button id="cancel-patch-button" type="button" class="secondary-button">Cancel</button>
-          </div>
-        </div>
-        <pre id="patch-diff" tabindex="0"></pre>
+      <section class="request-card" aria-labelledby="request-card-title">
+        <h2 id="request-card-title">Request</h2>
+        <p id="request-status" role="status" aria-label="Request status" data-state="idle">Create a project to send a circuit request.</p>
+        <details id="request-technical-details" hidden>
+          <summary>Technical details</summary>
+          <pre id="request-technical-detail"></pre>
+        </details>
+      </section>
+
+      <section id="conflict-card" class="status-card conflict-card" hidden>
+        <h2>KiCad changes need attention</h2>
+        <p>Unsaved KiCad changes were detected. Save or discard them in KiCad before sending this update.</p>
       </section>
 
       <section id="review-panel" class="review-panel" hidden>
@@ -53,39 +65,36 @@
           <p id="review-status">Pending</p>
         </div>
         <div class="review-columns">
-          <section>
-            <h3>Blockers</h3>
-            <ul id="review-blockers"></ul>
-          </section>
-          <section>
-            <h3>Warnings</h3>
-            <ul id="review-warnings"></ul>
-          </section>
-          <section>
-            <h3>Notes</h3>
-            <ul id="review-notes"></ul>
-          </section>
+          <section><h3>Blockers</h3><ul id="review-blockers"></ul></section>
+          <section><h3>Warnings</h3><ul id="review-warnings"></ul></section>
+          <section><h3>Notes</h3><ul id="review-notes"></ul></section>
         </div>
-        <section>
-          <h3>Proposed fixes</h3>
-          <ul id="review-fixes"></ul>
-        </section>
+        <section><h3>Proposed fixes</h3><ul id="review-fixes"></ul></section>
+      </section>
+
+      <section class="status-card validation-card" aria-labelledby="validation-title">
+        <h2 id="validation-title">ERC validation</h2>
+        <p id="validation-status" data-state="idle">Not run</p>
+        <time id="validation-timestamp"></time>
+      </section>
+
+      <section id="kicad-link-card" class="status-card kicad-card" hidden>
+        <h2>KiCad project</h2>
+        <p id="kicad-link" data-state="available"></p>
+        <button id="open-kicad-button" type="button">Open in KiCad</button>
+        <p id="kicad-fallback" hidden></p>
       </section>
 
       <form id="composer" class="composer">
-        <textarea
-          id="prompt"
-          rows="4"
-          spellcheck="true"
-        >STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.</textarea>
-        <div class="composer-actions">
-          <button id="cancel-provider-button" type="button" class="secondary-button" disabled>Stop</button>
-          <button type="submit">Send</button>
-        </div>
+        <label>
+          <span>Circuit request</span>
+          <textarea id="prompt" rows="4" spellcheck="true" disabled></textarea>
+        </label>
+        <div class="composer-actions"><button type="submit" disabled>Send</button></div>
       </form>
 
-      <section class="results">
-        <h2>Artifacts</h2>
+      <section class="results" aria-labelledby="artifacts-title">
+        <h2 id="artifacts-title">Artifacts</h2>
         <ul id="artifact-list"></ul>
       </section>
     </main>
