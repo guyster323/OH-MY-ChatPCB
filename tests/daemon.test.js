@@ -169,6 +169,151 @@ test('daemon invokes a selected provider and executes emitted tool calls', async
   }
 });
 
+test('daemon creates a named project and runs provider generation with ERC validation', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-request-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: '가스 센서 보드 01' }
+    });
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_generate',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir: created.result.projectDir,
+          prompt: '가스 센서용 STM32 보드와 USB-C 전원을 만들어 주세요.'
+        }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('agent.delta', { text: '가스 센서 보드를 생성하겠습니다.' }),
+          createEnvelope('tool.call', {
+            id: 'call_generated_schematic',
+            name: 'schematic.generate',
+            args: { prompt: 'STM32 board with USB-C power, I2C gas sensor connector, reset button, and status LED.' }
+          })
+        ]
+      })
+    );
+
+    assert.equal(created.ok, true);
+    assert.equal(result.ok, true);
+    assert.equal(result.result.operation, 'generated');
+    assert.equal(result.result.validation.erc.errorCount, 0);
+    assert.ok(result.result.files.schematic.endsWith('.kicad_sch'));
+    assert.deepEqual(result.result.providerEvents.map((event) => event.type), ['agent.delta', 'tool.call']);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('daemon falls back to bounded generation then approved patch after a successful provider transcript without calls', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-fallback-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Fallback Board' }
+    });
+    const first = await dispatchToolCall(
+      {
+        id: 'call_project_request_first',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'RP2040 board with USB-C power and I2C connector.' }
+      },
+      providerOptions({ events: [createEnvelope('agent.delta', { text: 'Generating locally.' })] })
+    );
+    const second = await dispatchToolCall(
+      {
+        id: 'call_project_request_second',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.' }
+      },
+      providerOptions({ events: [createEnvelope('agent.delta', { text: 'Patching locally.' })] })
+    );
+
+    assert.equal(first.ok, true);
+    assert.equal(first.result.operation, 'generated');
+    assert.equal(second.ok, true);
+    assert.equal(second.result.operation, 'patched');
+    assert.equal(second.result.approved, true);
+    assert.equal(second.result.applied, true);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('daemon restores existing project artifacts when automatic ERC validation fails', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-rollback-'));
+
+  try {
+    const generated = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' }
+    });
+    const before = await readFile(generated.result.files.spec, 'utf8');
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_rollback',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_unsafe_regenerate',
+            name: 'schematic.generate',
+            args: { prompt: 'STM32 board with USB-C power and UART header.' }
+          })
+        ],
+        validation: { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.validation.erc.errorCount, 1);
+    assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon automatically approves a provider-emitted patch during project.request', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-patch-'));
+
+  try {
+    await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' }
+    });
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_patch',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Add reset button and status LED.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_provider_patch',
+            name: 'schematic.patch',
+            args: { prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.' }
+          })
+        ]
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.approved, true);
+    assert.equal(result.result.applied, true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon cancels an in-flight provider invocation', async () => {
   const controllers = new Map();
   let observedAbort = false;
@@ -303,6 +448,19 @@ test('daemon websocket cancels an in-flight provider invocation by id', async ()
     await daemon.close();
   }
 });
+
+function providerOptions({ events, validation = { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } } }) {
+  return {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => ({ exitCode: 0, stderr: '', events }),
+    validateProjectImpl: async () => validation
+  };
+}
 
 async function waitFor(predicate, timeoutMs = 1000) {
   const started = Date.now();

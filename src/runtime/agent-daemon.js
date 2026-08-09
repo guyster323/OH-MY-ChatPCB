@@ -1,5 +1,8 @@
 import http from 'node:http';
 import { createHash } from 'node:crypto';
+import { cp, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
@@ -8,6 +11,8 @@ import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.j
 import { applySchematicPatch } from '../workflow/schematic-patch.js';
 import { simulateProject } from '../workflow/simulate-project.js';
 import { validateProject } from '../workflow/validate-project.js';
+import { createNamedProject } from '../workflow/project-workspace.js';
+import { reviewCircuitReadiness } from '../workflow/review-project.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'simulate.spice'];
 
@@ -16,6 +21,7 @@ export async function dispatchToolCall(
   {
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
+    validateProjectImpl = validateProject,
     providerControllers = new Map()
   } = {}
 ) {
@@ -24,8 +30,10 @@ export async function dispatchToolCall(
   }
 
   switch (call.name) {
-    case 'schematic.generate':
     case 'project.create':
+      return ok(await createNamedProject({ workspaceRoot: call.args?.workspaceRoot, projectName: call.args?.projectName }));
+
+    case 'schematic.generate':
       return ok(
         await generateMcuPeripheralProject({
           projectDir: call.args?.projectDir,
@@ -35,7 +43,7 @@ export async function dispatchToolCall(
       );
 
     case 'validate.erc':
-      return ok(await validateProject({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
+      return ok(await validateProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
 
     case 'schematic.patch':
       return ok(
@@ -44,7 +52,8 @@ export async function dispatchToolCall(
           prompt: call.args?.prompt,
           projectName: call.args?.projectName,
           approved: call.args?.approved === true,
-          cancel: call.args?.cancel === true
+          cancel: call.args?.cancel === true,
+          validateProjectImpl
         })
       );
 
@@ -59,6 +68,17 @@ export async function dispatchToolCall(
         await invokeProvider(call, {
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
+          validateProjectImpl,
+          providerControllers
+        })
+      );
+
+    case 'project.request':
+      return ok(
+        await requestProject(call, {
+          runProviderProcessImpl,
+          checkProviderAvailabilityImpl,
+          validateProjectImpl,
           providerControllers
         })
       );
@@ -74,7 +94,7 @@ export async function dispatchToolCall(
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, providerControllers }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, autoApprovePatch = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -117,14 +137,21 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     providerControllers.delete(invocationId);
   }
 
+  if (transcript.exitCode !== 0) {
+    throw new Error(`${definition.label} exited with code ${transcript.exitCode}.`);
+  }
+
   const toolResults = [];
   for (const event of transcript.events) {
     if (event.type !== 'tool.call') continue;
 
     const toolCall = withProjectContext(event.payload, projectDir);
+    if (autoApprovePatch && toolCall.name === 'schematic.patch') {
+      toolCall.args.approved = true;
+    }
     toolResults.push({
       id: event.payload.id,
-      ...(await dispatchToolCall(toolCall, { checkProviderAvailabilityImpl, runProviderProcessImpl, providerControllers }))
+      ...(await dispatchToolCall(toolCall, { checkProviderAvailabilityImpl, runProviderProcessImpl, validateProjectImpl, providerControllers }))
     });
   }
 
@@ -137,6 +164,83 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     stderr: transcript.stderr,
     tracePath: transcript.tracePath
   };
+}
+
+async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers }) {
+  const args = call.args ?? {};
+  const projectDir = args.projectDir;
+  const prompt = args.prompt;
+  if (!projectDir) {
+    throw new Error('project.request requires a project directory.');
+  }
+  if (!prompt) {
+    throw new Error('project.request requires a prompt.');
+  }
+
+  const hasSpec = await projectHasSpec(projectDir);
+  const snapshot = hasSpec ? await snapshotProject(projectDir) : null;
+
+  try {
+    const providerResult = await invokeProvider(call, {
+      runProviderProcessImpl,
+      checkProviderAvailabilityImpl,
+      validateProjectImpl,
+      providerControllers,
+      autoApprovePatch: true
+    });
+    const applied = providerResult.toolResults.length
+      ? providerResult.toolResults.at(-1).result
+      : hasSpec
+        ? await applySchematicPatch({ projectDir, prompt, approved: true, validateProjectImpl })
+        : await generateMcuPeripheralProject({ projectDir, prompt });
+    const validation = await validateProjectImpl({ projectDir });
+    const rolledBack = hasSpec && !validation.ok;
+    if (rolledBack) {
+      await restoreProjectSnapshot(snapshot, projectDir);
+    }
+
+    const spec = rolledBack ? await readProjectSpec(projectDir) : applied.spec ?? await readProjectSpec(projectDir);
+    const review = reviewCircuitReadiness({ spec, validation });
+    return {
+      ...applied,
+      operation: hasSpec ? 'patched' : 'generated',
+      files: applied.files,
+      review,
+      validation,
+      providerEvents: providerResult.events,
+      ...(rolledBack ? { rolledBack: true } : {})
+    };
+  } finally {
+    if (snapshot) {
+      await rm(snapshot.root, { force: true, recursive: true });
+    }
+  }
+}
+
+async function projectHasSpec(projectDir) {
+  const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
+  return entries.some((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
+}
+
+async function readProjectSpec(projectDir) {
+  const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
+  const spec = entries.find((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
+  if (!spec) {
+    throw new Error('Project specification is missing after the requested operation.');
+  }
+  return JSON.parse(await readFile(path.join(projectDir, spec.name), 'utf8'));
+}
+
+async function snapshotProject(projectDir) {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-snapshot-'));
+  const copy = path.join(root, 'project');
+  await cp(projectDir, copy, { recursive: true });
+  return { root, copy };
+}
+
+async function restoreProjectSnapshot(snapshot, projectDir) {
+  await rm(projectDir, { force: true, recursive: true });
+  await cp(snapshot.copy, projectDir, { recursive: true });
 }
 
 function cancelProvider(args = {}, providerControllers) {
