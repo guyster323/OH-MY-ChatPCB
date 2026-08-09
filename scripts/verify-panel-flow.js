@@ -69,31 +69,17 @@ try {
   assert.equal(typeof requested.payload.result.review, 'object');
   assert.equal(typeof requested.payload.result.review.status, 'string');
 
-  const hostMessages = [];
-  const dirtyState = handleMockHostStateEvent(
-    {
-      type: 'project.status',
-      projectPath: created.payload.result.projectDir,
-      dirty: true
-    },
-    hostMessages
-  );
-  assert.equal(dirtyState.linkState, 'conflict');
-  assert.equal(dirtyState.dirty, true);
-  assert.equal(hostMessages.some((message) => message.type === 'project.reload'), false);
-
   console.log(
     JSON.stringify(
       {
         ok: true,
         service: 'chatpcb-agentd',
-        verified: 'named project.create and project.request websocket flow with dirty-host conflict gating',
+        verified: 'named project.create and project.request websocket flow',
         displayName: created.payload.result.displayName,
         operation: requested.payload.result.operation,
         project: requested.payload.result.files.project,
         erc: requested.payload.result.validation.erc,
-        reviewStatus: requested.payload.result.review.status,
-        dirtyHost: dirtyState
+        reviewStatus: requested.payload.result.review.status
       },
       null,
       2
@@ -102,17 +88,6 @@ try {
 } finally {
   await daemon.close();
   await rm(workspaceRoot, { force: true, recursive: true });
-}
-
-function handleMockHostStateEvent(event, outgoingMessages) {
-  assert.equal(event.type, 'project.status');
-
-  if (event.dirty) {
-    return { ...event, linkState: 'conflict' };
-  }
-
-  outgoingMessages.push({ type: 'project.reload', projectPath: event.projectPath });
-  return { ...event, linkState: 'reload-needed' };
 }
 
 function sendToolCallOverWebSocket({ url, id, name, args }) {

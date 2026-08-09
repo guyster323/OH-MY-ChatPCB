@@ -34,6 +34,9 @@ test('Phase 1 public development documents are present and actionable', async ()
   assert.match(readme, /independent cards/);
   assert.match(readme, /unsaved changes/);
   assert.match(readme, /PCB DRC/);
+  assert.match(readme, /`kicad\.exe`[^\n]*`\.kicad_pro`/);
+  assert.match(readme, /`eeschema\.exe`[^\n]*`\.kicad_sch`/);
+  assert.match(readme, /Never pass a `\.kicad_pro` file to `eeschema\.exe`/);
   assert.match(readme, /codex exec -C C:\\path\\to\\OH-MY-ChatPCB --dangerously-bypass-approvals-and-sandbox/);
   assert.doesNotMatch(readme, /--ask-for-approval/);
   assert.doesNotMatch(readme, /click `Generate` from inside KiCad/);

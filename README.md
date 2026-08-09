@@ -81,7 +81,7 @@ Expected result:
 - KiCad validation passes cleanly when `kicad-cli` is available; the generated project includes its own `ChatPCB` symbol library, so the sample ERC has `0` errors and `0` warnings
 - KiCad SVG export can render the generated sample schematic for visual review
 - simulation returns success or the typed `NGSPICE_UNAVAILABLE` skip when `ngspice` is not installed
-- panel verification starts `chatpcb-agentd`, creates a Korean-named project over WebSocket, sends a Korean `project.request`, and verifies the generated `.kicad_pro`, ERC, readiness review, and dirty-editor conflict contract
+- panel verification starts `chatpcb-agentd`, creates a Korean-named project over WebSocket, sends a Korean `project.request`, and verifies the generated `.kicad_pro`, ERC, and readiness review; browser UI verification owns the mock-host dirty-editor contract
 - browser UI verification opens the real panel, creates a named project, presses **Send**, checks the independent request/ERC/review/KiCad-link cards, and confirms that a dirty host blocks the request without asking KiCad to reload
 
 3. Start the local daemon:
@@ -142,7 +142,9 @@ It starts an isolated `chatpcb-agentd`, serves `apps/panel/index.html`, opens th
 
 For an interactive end-to-end check, use the ChatPCB-enabled KiCad fork when it is available; otherwise use the standalone browser panel for project creation and open the returned `.kicad_pro` manually in KiCad. Create a temporary named project, send the request above, and confirm that the success, review, ERC, and KiCad-link cards are all visible.
 
-After opening the `.kicad_pro`, run **Inspect → Electrical Rules Checker** and record the visible error and warning counts. Make an unsaved edit before another request and confirm the panel shows `conflict` without reloading. Save or discard the edit before continuing. Run PCB DRC separately; ERC alone is not a release decision.
+Use `kicad.exe` with the absolute `.kicad_pro` path to open the generated project in the official KiCad project manager. To open the schematic editor directly, use `eeschema.exe` with the matching `.kicad_sch` path. Never pass a `.kicad_pro` file to `eeschema.exe`; the schematic editor accepts schematic files, not project files.
+
+After opening the project (or its matching `.kicad_sch` in the schematic editor), run **Inspect → Electrical Rules Checker** and record the visible error and warning counts. Make an unsaved edit before another request and confirm the panel shows `conflict` without reloading. Save or discard the edit before continuing. Run PCB DRC separately; ERC alone is not a release decision.
 
 `npm run verify:ui` is the repeatable automated counterpart. It operates the same panel contract with a local browser and a mock KiCad host, including the dirty-editor guard.
 

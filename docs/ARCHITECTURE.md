@@ -19,7 +19,7 @@ The panel owns one active named project at a time:
 3. Before dispatch, the panel asks the KiCad host for `project.status`. A dirty editor produces `linkState: "conflict"`; the panel does not send `project.request` or request a reload until the unsaved edits are resolved.
 4. `project.request { projectDir, prompt, provider }` invokes the selected local provider, confines emitted tool calls to the active project, and falls back to bounded local generation or an automatically approved patch when the provider returns no call.
 5. The daemon validates ERC, restores the previous artifacts when an existing-project update fails validation, recomputes the readiness review, and returns `{ operation, files, validation, review, providerEvents }`.
-6. The panel renders request status, ERC, readiness review, artifacts, and KiCad link state independently. A clean host may receive `project.reload`; standalone browser mode instead shows the `.kicad_pro` path for manual opening.
+6. The panel renders request status, ERC, readiness review, artifacts, and KiCad link state independently. A clean host may receive `project.reload`; standalone browser mode instead shows the `.kicad_pro` path for manual opening. Official standalone KiCad opens that project path through `kicad.exe`; a direct `eeschema.exe` launch must receive the matching `.kicad_sch`, never the `.kicad_pro`.
 
 The host bridge accepts `project.open`, `project.status`, and `project.reload` messages. It validates absolute `.kicad_pro` paths, correlates responses with the containing active-project directory, uses the current schematic editor APIs, and refuses open/reload while the editor has unsaved content.
 
