@@ -142,11 +142,11 @@ function addProviderLine(events, line, allowedTools) {
   const parsed = tryParseJson(trimmed);
   if (parsed) {
     if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message') {
-      events.push(createEnvelope('agent.delta', { text: parsed.item.text ?? '' }));
+      parseProviderMessageText(events, parsed.item.text ?? '', allowedTools);
       return;
     }
 
-    if (['thread.started', 'turn.started', 'turn.completed'].includes(parsed.type)) {
+    if (parsed.type?.startsWith('item.') || ['thread.started', 'turn.started', 'turn.completed'].includes(parsed.type)) {
       return;
     }
 
@@ -160,6 +160,32 @@ function addProviderLine(events, line, allowedTools) {
   }
 
   events.push(createEnvelope('agent.delta', { text: line }));
+}
+
+function parseProviderMessageText(events, text, allowedTools) {
+  const assistantText = [];
+  const toolCalls = [];
+
+  for (const line of String(text).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    const parsed = trimmed ? tryParseJson(trimmed) : null;
+
+    if (parsed?.type === 'tool.call') {
+      validateProviderToolCall(parsed.payload, allowedTools);
+      toolCalls.push(parsed.payload);
+      continue;
+    }
+
+    if (trimmed) assistantText.push(line);
+  }
+
+  if (assistantText.length > 0) {
+    events.push(createEnvelope('agent.delta', { text: assistantText.join('\n') }));
+  }
+
+  for (const payload of toolCalls) {
+    events.push(createEnvelope('tool.call', payload));
+  }
 }
 
 async function writeProviderTrace({ traceDir, command, args, cwd, input, transcript }) {

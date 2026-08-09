@@ -89,6 +89,47 @@ test('parses Codex CLI json agent messages into assistant deltas', async () => {
   assert.equal(transcript.events[0].payload.text, 'CHATPCB_PROVIDER_SMOKE_OK');
 });
 
+test('normalizes Codex lifecycle events and Korean assistant messages with embedded tool calls', async () => {
+  const message = [
+    '요청한 회로 초안을 생성합니다.',
+    '{"type":"tool.call","payload":{"id":"call_ko","name":"schematic.generate","args":{"prompt":"ESP32-S3 회로"}}}'
+  ].join('\n');
+  const script = [
+    'console.log(JSON.stringify({type:"thread.started", thread_id:"thread_1"}));',
+    'console.log(JSON.stringify({type:"turn.started"}));',
+    'console.log(JSON.stringify({type:"item.started", item:{id:"item_1", type:"command_execution"}}));',
+    'console.log(JSON.stringify({type:"item.completed", item:{id:"item_1", type:"command_execution", status:"completed"}}));',
+    `console.log(JSON.stringify({type:"item.completed", item:{id:"item_2", type:"agent_message", text:${JSON.stringify(message)}}}));`,
+    'console.log(JSON.stringify({type:"turn.completed", usage:{input_tokens:1, output_tokens:1}}));'
+  ].join('');
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    timeoutMs: 2000
+  });
+
+  assert.deepEqual(transcript.events.map((event) => event.type), ['agent.delta', 'tool.call']);
+  assert.equal(transcript.events[0].payload.text, '요청한 회로 초안을 생성합니다.');
+  assert.equal(transcript.events[1].payload.id, 'call_ko');
+});
+
+test('rejects unsupported embedded calls while ignoring completed command executions', async () => {
+  const unsupportedMessage = [
+    '초안을 준비합니다.',
+    '{"type":"tool.call","payload":{"id":"call_bad","name":"board.autoroute","args":{}}}'
+  ].join('\n');
+  const script = [
+    'console.log(JSON.stringify({type:"item.completed", item:{id:"item_1", type:"command_execution", status:"completed"}}));',
+    `console.log(JSON.stringify({type:"item.completed", item:{id:"item_2", type:"agent_message", text:${JSON.stringify(unsupportedMessage)}}}));`
+  ].join('');
+
+  await assert.rejects(
+    () => runProviderProcess({ command: process.execPath, args: ['-e', script], timeoutMs: 2000 }),
+    /Unsupported provider tool call/
+  );
+});
+
 test('rejects provider-emitted tool results before execution', async () => {
   const script = 'console.log(JSON.stringify({type:"tool.result", payload:{id:"1", ok:true}}));';
 
