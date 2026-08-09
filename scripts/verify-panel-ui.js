@@ -17,7 +17,12 @@ const projectName = '가스 센서 보드 01';
 const prompt = 'ESP32-S3와 가스 센서를 연결한 회로를 만들어줘';
 const protocolFailurePrompt = 'Simulate a provider protocol failure.';
 const rollbackPrompt = 'Simulate a validation rollback.';
-let shouldFailValidation = false;
+const zeroCountFailurePrompt = 'Simulate a zero-count validation failure.';
+const skippedValidationPrompt = 'Simulate a skipped validation.';
+const unavailableValidationPrompt = 'Simulate unavailable validation tooling.';
+const delayedSwitchPrompt = 'Simulate a delayed request while switching projects.';
+let validationMode = 'passed';
+let providerRequestCount = 0;
 
 const staticServer = await startStaticServer(panelRoot);
 const daemon = await startUiDaemon();
@@ -59,7 +64,8 @@ try {
   assert.match(successfulRequest.review ?? '', /Review/);
 
   await page.getByRole('button', { name: 'Open in KiCad' }).click();
-  await page.getByText(/Open the project from KiCad using this directory/).waitFor();
+  await page.getByText(/Open this \.kicad_pro file from KiCad/).waitFor();
+  await assertStandaloneGuidanceNamesAFile(page);
   assert.doesNotMatch(successfulRequest.fallback ?? '', /reloaded/i);
 
   await page.getByLabel('Circuit request').fill(protocolFailurePrompt);
@@ -72,6 +78,53 @@ try {
   }));
   assert.doesNotMatch(failure.summary ?? '', /Providers may only emit/);
   assert.match(failure.technicalDetail ?? '', /Providers may only emit/);
+
+  await page.getByLabel('Project name').fill('Zero validation board');
+  await page.getByRole('button', { name: 'New project' }).click();
+  await page.getByRole('status', { name: 'Active project' }).getByText('Zero validation board').waitFor();
+  await page.getByLabel('Circuit request').fill(zeroCountFailurePrompt);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await page.waitForFunction(() => document.querySelector('#request-status')?.dataset.state === 'failed', null, { timeout: 2000 });
+  const failedZeroCountValidation = await page.evaluate(() => ({
+    state: document.querySelector('#validation-status')?.dataset.state,
+    text: document.querySelector('#validation-status')?.textContent
+  }));
+  assert.equal(failedZeroCountValidation.state, 'failed');
+  assert.match(failedZeroCountValidation.text ?? '', /ERC command failed before a report was produced/);
+  assert.doesNotMatch(failedZeroCountValidation.text ?? '', /\[object Object\]/);
+
+  await assertValidationState(page, skippedValidationPrompt, 'skipped', /ERC skipped: No schematic was available for ERC\./);
+  await assertValidationState(page, unavailableValidationPrompt, 'unavailable', /ERC unavailable: KiCad CLI was not available\./);
+
+  const silentHostPage = await browser.newPage();
+  await silentHostPage.addInitScript((url) => {
+    window.CHATPCB_DAEMON_WS_URL = url;
+    window.hostMessages = [];
+    window.chatpcbHost = {
+      postMessage(message) {
+        window.hostMessages.push(message);
+      }
+    };
+  }, `ws://127.0.0.1:${daemon.port}/ws`);
+  await silentHostPage.goto(`${staticServer.url}/index.html`);
+  await silentHostPage.getByText('Connected', { exact: true }).waitFor();
+  await silentHostPage.getByLabel('Workspace root').fill(workspaceRoot);
+  await silentHostPage.getByLabel('Project name').fill('Silent host board');
+  await silentHostPage.getByRole('button', { name: 'New project' }).click();
+  await silentHostPage.getByRole('status', { name: 'Active project' }).waitFor();
+  const providerRequestsBeforeSilentHost = providerRequestCount;
+  await silentHostPage.getByLabel('Circuit request').fill(prompt);
+  await silentHostPage.getByRole('button', { name: 'Send' }).click();
+  await silentHostPage.waitForTimeout(750);
+  const silentHostResult = await silentHostPage.evaluate(() => ({
+    requestState: document.querySelector('#request-status')?.dataset.state,
+    requestStatus: document.querySelector('#request-status')?.textContent,
+    hostMessages: window.hostMessages
+  }));
+  assert.equal(providerRequestCount, providerRequestsBeforeSilentHost);
+  assert.equal(silentHostResult.requestState, 'failed');
+  assert.match(silentHostResult.requestStatus ?? '', /KiCad host.*unavailable|host.*not responding/i);
+  assert.equal(silentHostResult.hostMessages.filter((message) => message.type === 'project.status').length, 1);
 
   const hostPage = await browser.newPage();
   await hostPage.addInitScript((url) => {
@@ -93,6 +146,25 @@ try {
   await hostPage.getByLabel('Project name').fill('Host status board');
   await hostPage.getByRole('button', { name: 'New project' }).click();
   await hostPage.getByRole('status', { name: 'Active project' }).waitFor();
+  await hostPage.getByRole('status', { name: 'Active project' }).getByText('Host status board').waitFor();
+
+  const hostProjectPath = await hostPage.locator('#active-project-directory').textContent();
+  await hostPage.evaluate((projectPath) => {
+    window.postMessage({ type: 'project.status', projectPath, dirty: false, linkState: 'linked' }, '*');
+  }, hostProjectPath);
+  await hostPage.waitForFunction(() => document.querySelector('#kicad-link')?.dataset.state === 'linked', null, { timeout: 2000 });
+  const linkedStatus = await hostPage.locator('#kicad-link').textContent();
+  await hostPage.evaluate(() => {
+    window.postMessage({ type: 'project.status', projectPath: 'C:\\stale-project', dirty: false, linkState: 'error' }, '*');
+  });
+  await hostPage.waitForTimeout(50);
+  assert.equal(await hostPage.locator('#kicad-link').textContent(), linkedStatus);
+  for (const linkState of ['unlinked', 'error']) {
+    await hostPage.evaluate(({ projectPath, linkState }) => {
+      window.postMessage({ type: 'project.status', projectPath, dirty: false, linkState }, '*');
+    }, { projectPath: hostProjectPath, linkState });
+    await hostPage.waitForFunction((expected) => document.querySelector('#kicad-link')?.dataset.state === expected, linkState, { timeout: 2000 });
+  }
 
   await hostPage.evaluate(() => { window.hostDirty = true; });
   await hostPage.getByLabel('Circuit request').fill(prompt);
@@ -109,6 +181,15 @@ try {
   const reloadCount = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
   assert.equal(reloadCount, 1);
 
+  await hostPage.evaluate((projectPath) => {
+    window.postMessage({ type: 'project.reload', projectPath, linkState: 'unlinked', completed: false }, '*');
+  }, hostProjectPath);
+  await hostPage.waitForFunction(() => document.querySelector('#kicad-link')?.dataset.state === 'unlinked', null, { timeout: 2000 });
+  await hostPage.evaluate((projectPath) => {
+    window.postMessage({ type: 'project.reload', projectPath, linkState: 'error', completed: false }, '*');
+  }, hostProjectPath);
+  await hostPage.waitForFunction(() => document.querySelector('#kicad-link')?.dataset.state === 'error', null, { timeout: 2000 });
+
   await hostPage.evaluate(() => {
     const projectPath = document.querySelector('#active-project-directory').textContent;
     window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
@@ -120,6 +201,53 @@ try {
   await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state === 'failed');
   const reloadCountAfterRollback = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
   assert.equal(reloadCountAfterRollback, reloadCount);
+
+  await hostPage.evaluate((projectPath) => {
+    window.postMessage({ type: 'project.status', projectPath, dirty: true, linkState: 'conflict' }, '*');
+  }, hostProjectPath);
+  await hostPage.locator('#conflict-card').waitFor();
+  const projectOpenCountBeforeSwitch = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.open').length);
+  await hostPage.getByLabel('Project name').fill('Switched board');
+  await hostPage.getByRole('button', { name: 'New project' }).click();
+  await hostPage.getByRole('status', { name: 'Active project' }).getByText('Switched board').waitFor();
+  const switchedProjectState = await hostPage.evaluate(() => ({
+    artifacts: document.querySelectorAll('#artifact-list li').length,
+    reviewHidden: document.querySelector('#review-panel')?.hidden,
+    validationState: document.querySelector('#validation-status')?.dataset.state,
+    validationText: document.querySelector('#validation-status')?.textContent,
+    validationTimestamp: document.querySelector('#validation-timestamp')?.textContent,
+    conflictHidden: document.querySelector('#conflict-card')?.hidden,
+    kiCadCardHidden: document.querySelector('#kicad-link-card')?.hidden,
+    kiCadLinkText: document.querySelector('#kicad-link')?.textContent,
+    fallbackHidden: document.querySelector('#kicad-fallback')?.hidden
+  }));
+  assert.deepEqual(switchedProjectState, {
+    artifacts: 0,
+    reviewHidden: true,
+    validationState: 'idle',
+    validationText: 'Not run',
+    validationTimestamp: '',
+    conflictHidden: true,
+    kiCadCardHidden: true,
+    kiCadLinkText: '',
+    fallbackHidden: true
+  });
+  await hostPage.locator('#open-kicad-button').evaluate((button) => button.click());
+  await hostPage.waitForTimeout(50);
+  assert.equal(
+    await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.open').length),
+    projectOpenCountBeforeSwitch
+  );
+
+  await hostPage.getByLabel('Circuit request').fill(delayedSwitchPrompt);
+  await hostPage.getByRole('button', { name: 'Send' }).click();
+  await hostPage.waitForTimeout(100);
+  await hostPage.getByLabel('Project name').fill('Final board');
+  await hostPage.getByRole('button', { name: 'New project' }).click();
+  await hostPage.getByRole('status', { name: 'Active project' }).getByText('Final board').waitFor();
+  await hostPage.waitForTimeout(500);
+  assert.equal(await hostPage.locator('#artifact-list li').count(), 0);
+  assert.equal(await hostPage.locator('#kicad-link-card').getAttribute('hidden'), '');
 
   assert.deepEqual(pageErrors, []);
 
@@ -135,6 +263,19 @@ async function expectSendDisabled(page) {
   assert.equal(await page.getByRole('button', { name: 'Send' }).isDisabled(), true);
 }
 
+async function assertStandaloneGuidanceNamesAFile(page) {
+  const guidance = await page.locator('#kicad-fallback').textContent();
+  assert.match(guidance ?? '', /\.kicad_pro file/i);
+  assert.doesNotMatch(guidance ?? '', /using this directory/i);
+}
+
+async function assertValidationState(page, request, expectedState, expectedText) {
+  await page.getByLabel('Circuit request').fill(request);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await page.waitForFunction((state) => document.querySelector('#validation-status')?.dataset.state === state, expectedState);
+  assert.match(await page.locator('#validation-status').textContent() ?? '', expectedText);
+}
+
 async function startUiDaemon() {
   return startDaemon({
     host: '127.0.0.1',
@@ -142,9 +283,26 @@ async function startUiDaemon() {
     dispatchOptions: {
       checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'fake-provider', available: true, status: 'available' }),
       runProviderProcessImpl: fakeProviderTranscript,
-      validateProjectImpl: async () => shouldFailValidation
-        ? { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
-        : { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }
+      validateProjectImpl: async () => {
+        if (validationMode === 'errors') {
+          return { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } };
+        }
+        if (validationMode === 'zero-failed') {
+          return {
+            ok: false,
+            skipped: false,
+            reason: { code: 'ERC_COMMAND_FAILED', message: 'ERC command failed before a report was produced.' },
+            erc: { errorCount: 0, warningCount: 0, byType: {} }
+          };
+        }
+        if (validationMode === 'skipped') {
+          return { ok: true, skipped: true, reason: { code: 'NO_SCHEMATIC', message: 'No schematic was available for ERC.' } };
+        }
+        if (validationMode === 'unavailable') {
+          return { ok: true, skipped: true, reason: { code: 'KICAD_CLI_UNAVAILABLE', message: 'KiCad CLI was not available.' } };
+        }
+        return { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } };
+      }
     }
   });
 }
@@ -153,7 +311,19 @@ async function fakeProviderTranscript({ input }) {
   if (input.includes(protocolFailurePrompt)) {
     throw new Error('Providers may only emit tool.call JSON or normal assistant text.');
   }
-  shouldFailValidation = input.includes(rollbackPrompt);
+  providerRequestCount += 1;
+  validationMode = input.includes(rollbackPrompt)
+    ? 'errors'
+    : input.includes(zeroCountFailurePrompt)
+      ? 'zero-failed'
+      : input.includes(skippedValidationPrompt)
+        ? 'skipped'
+        : input.includes(unavailableValidationPrompt)
+          ? 'unavailable'
+      : 'passed';
+  if (input.includes(delayedSwitchPrompt)) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
 
   return {
     exitCode: 0,

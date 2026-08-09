@@ -35,6 +35,7 @@ let socket;
 let activeProject = null;
 let activeProjectCreateId = null;
 let activeRequestId = null;
+let activeRequestProjectDir = null;
 let pendingHostStatus = null;
 const pendingCalls = new Map();
 
@@ -83,8 +84,21 @@ function createProject() {
 async function sendProjectRequest() {
   if (!activeProject || !promptEl.value.trim() || activeRequestId || pendingHostStatus) return;
 
+  const requestProject = activeProject;
   setRequestBusy(true);
   const status = await requestHostProjectStatus();
+  if (activeProject !== requestProject) {
+    setRequestBusy(false);
+    return;
+  }
+  if (status?.unavailable) {
+    renderRequestStatus({
+      state: 'failed',
+      summary: 'KiCad host is unavailable or not responding. Reopen the embedded panel or retry after KiCad is ready.'
+    });
+    setRequestBusy(false);
+    return;
+  }
   if (status?.dirty) {
     showConflict();
     setRequestBusy(false);
@@ -95,11 +109,12 @@ async function sendProjectRequest() {
   renderRequestStatus({ state: 'running', summary: 'Running request…' });
   const id = `project_request_${Date.now()}`;
   activeRequestId = id;
+  activeRequestProjectDir = requestProject.projectDir;
   pendingCalls.set(id, 'project.request');
   sendToolCall({
     id,
     name: 'project.request',
-    args: { projectDir: activeProject.projectDir, prompt: promptEl.value.trim(), provider: providerEl.value }
+    args: { projectDir: requestProject.projectDir, prompt: promptEl.value.trim(), provider: providerEl.value }
   });
 }
 
@@ -134,11 +149,18 @@ function handleEnvelope(envelope) {
 
   if (!envelope.payload.ok) {
     if (callName === 'project.create' || callName === 'project.request') {
-      if (callName === 'project.create') pendingCalls.delete(activeProjectCreateId);
-      if (callName === 'project.request') pendingCalls.delete(activeRequestId);
-      activeRequestId = null;
-      activeProjectCreateId = null;
-      if (callName === 'project.request') setRequestBusy(false);
+      if (callName === 'project.create') {
+        pendingCalls.delete(activeProjectCreateId);
+        activeProjectCreateId = null;
+      }
+      if (callName === 'project.request') {
+        const requestProjectDir = activeRequestProjectDir;
+        pendingCalls.delete(activeRequestId);
+        activeRequestId = null;
+        activeRequestProjectDir = null;
+        setRequestBusy(false);
+        if (requestProjectDir !== activeProject?.projectDir) return;
+      }
       renderRequestStatus({
         state: 'failed',
         summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
@@ -154,8 +176,11 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'project.request') {
+    const requestProjectDir = activeRequestProjectDir;
     activeRequestId = null;
+    activeRequestProjectDir = null;
     setRequestBusy(false);
+    if (requestProjectDir !== activeProject?.projectDir) return;
     renderProjectRequest(envelope.payload.result);
     return;
   }
@@ -167,21 +192,51 @@ function handleEnvelope(envelope) {
 }
 
 function activateProject(project) {
+  resetProjectResults();
   activeProject = project;
   activeProjectNameEl.textContent = project.displayName;
   activeProjectDirectoryEl.textContent = project.projectDir;
   activeProjectEl.hidden = false;
-  promptEl.disabled = false;
-  sendButtonEl.disabled = false;
+  setRequestBusy(Boolean(activeRequestId));
   projectNameEl.value = '';
   renderRequestStatus({ state: 'ready', summary: 'Project ready. Describe the circuit you want to create.' });
+}
+
+function resetProjectResults() {
+  if (pendingHostStatus) {
+    clearTimeout(pendingHostStatus.timeout);
+    const { resolve } = pendingHostStatus;
+    pendingHostStatus = null;
+    resolve({ cancelled: true });
+  }
+  artifactListEl.replaceChildren();
+  reviewPanelEl.hidden = true;
+  reviewStatusEl.textContent = 'Pending';
+  delete reviewStatusEl.dataset.status;
+  for (const list of [reviewBlockersEl, reviewWarningsEl, reviewNotesEl, reviewFixesEl]) list.replaceChildren();
+  validationStatusEl.dataset.state = 'idle';
+  validationStatusEl.textContent = 'Not run';
+  validationTimestampEl.textContent = '';
+  conflictCardEl.hidden = true;
+  kiCadLinkCardEl.hidden = true;
+  kiCadLinkEl.dataset.state = 'available';
+  kiCadLinkEl.textContent = '';
+  kiCadFallbackEl.hidden = true;
+  kiCadFallbackEl.textContent = '';
 }
 
 function renderProjectRequest(result) {
   renderReview(result.review);
   renderArtifacts(result.files);
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
-  renderRequestStatus({ state: result.rolledBack ? 'failed' : 'completed', summary: result.rolledBack ? 'Completed with validation issues; the previous project files were restored.' : `Completed: ${result.operation === 'patched' ? 'Updated project.' : 'Generated project.'}` });
+  const validationFailed = result.validation?.ok === false;
+  const requestFailed = result.rolledBack || validationFailed;
+  const summary = result.rolledBack
+    ? 'ERC validation failed; the previous project files were restored.'
+    : validationFailed
+      ? 'ERC validation failed. Review the validation details before continuing.'
+      : `Completed: ${result.operation === 'patched' ? 'Updated project.' : 'Generated project.'}`;
+  renderRequestStatus({ state: requestFailed ? 'failed' : 'completed', summary });
 
   const projectFile = findProjectFile(result.files);
   const successfulUpdate = !result.rolledBack && result.validation?.ok !== false;
@@ -203,10 +258,36 @@ function renderRequestStatus({ state, summary, technicalDetail = '' }) {
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;
 }
 
-function renderValidation({ erc, skipped, reason, completedAt }) {
-  validationStatusEl.dataset.state = skipped ? 'unavailable' : erc?.errorCount === 0 ? 'passed' : 'failed';
-  validationStatusEl.textContent = skipped ? reason : `${erc?.errorCount ?? 0} errors, ${erc?.warningCount ?? 0} warnings`;
+function renderValidation({ ok, erc, skipped, reason, completedAt, exitCode, stderr, formatUpgrade } = {}) {
+  const reasonText = validationReason({ reason, exitCode, stderr, formatUpgrade });
+  const counts = `${erc?.errorCount ?? 0} errors, ${erc?.warningCount ?? 0} warnings`;
+
+  if (skipped) {
+    const unavailable = reason?.code === 'KICAD_CLI_UNAVAILABLE';
+    validationStatusEl.dataset.state = unavailable ? 'unavailable' : 'skipped';
+    validationStatusEl.textContent = `${unavailable ? 'ERC unavailable' : 'ERC skipped'}: ${reasonText}`;
+  } else if (ok === false) {
+    validationStatusEl.dataset.state = 'failed';
+    validationStatusEl.textContent = `ERC failed: ${reasonText} (${counts} reported)`;
+  } else if (!erc) {
+    validationStatusEl.dataset.state = 'unavailable';
+    validationStatusEl.textContent = `ERC unavailable: ${reasonText}`;
+  } else {
+    validationStatusEl.dataset.state = erc.errorCount === 0 ? 'passed' : 'failed';
+    validationStatusEl.textContent = counts;
+  }
   validationTimestampEl.textContent = completedAt ?? '';
+}
+
+function validationReason({ reason, exitCode, stderr, formatUpgrade }) {
+  if (typeof reason === 'string' && reason.trim()) return reason.trim();
+  if (typeof reason?.message === 'string' && reason.message.trim()) return reason.message.trim();
+  if (typeof stderr === 'string' && stderr.trim()) return stderr.trim();
+  if (typeof formatUpgrade?.stderr === 'string' && formatUpgrade.stderr.trim()) return formatUpgrade.stderr.trim();
+  if (Number.isInteger(exitCode) && exitCode !== 0) return `KiCad ERC exited with code ${exitCode}.`;
+  if (formatUpgrade?.ok === false) return `KiCad schematic format upgrade exited with code ${formatUpgrade.exitCode ?? 'unknown'}.`;
+  if (typeof reason?.code === 'string' && reason.code) return reason.code.replaceAll('_', ' ').toLowerCase();
+  return 'ERC validation did not complete successfully.';
 }
 
 function renderKiCadLink({ linkState, projectPath, dirty = false }) {
@@ -280,21 +361,27 @@ function findProjectFileFromList() {
 }
 
 function showKiCadFallback(projectFile) {
-  kiCadFallbackEl.textContent = `Open the project from KiCad using this directory: ${projectFile}. The browser panel cannot reload KiCad.`;
+  kiCadFallbackEl.textContent = `Open this .kicad_pro file from KiCad: ${projectFile}. The browser panel cannot reload KiCad.`;
   kiCadFallbackEl.hidden = false;
 }
 
 async function requestHostProjectStatus() {
   const host = window.chatpcbHost;
   const message = { type: 'project.status', projectPath: activeProject.projectDir };
-  if (typeof host?.getProjectStatus === 'function') return awaitStatus(host.getProjectStatus(message));
+  if (typeof host?.getProjectStatus === 'function') {
+    try {
+      return await awaitStatus(host.getProjectStatus(message)) ?? { unavailable: true };
+    } catch {
+      return { unavailable: true };
+    }
+  }
   if (typeof host?.postMessage !== 'function' && typeof host?.send !== 'function') return null;
 
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       if (pendingHostStatus?.projectPath !== message.projectPath) return;
       pendingHostStatus = null;
-      resolve(null);
+      resolve({ unavailable: true });
     }, HOST_STATUS_TIMEOUT_MS);
     pendingHostStatus = { projectPath: message.projectPath, resolve, timeout };
     postHostMessage(message);
@@ -318,18 +405,33 @@ function handleHostMessage(message) {
   if (!message || typeof message !== 'object' || message.projectPath !== activeProject?.projectDir) return;
   if (message.type === 'project.status') {
     const dirty = message.dirty === true || message.unsavedChanges === true;
+    if (dirty || message.linkState === 'conflict') {
+      showConflict();
+    } else {
+      conflictCardEl.hidden = true;
+      if (typeof message.linkState === 'string') {
+        renderKiCadLink({ linkState: message.linkState, projectPath: findProjectFileFromList() ?? activeProject.projectDir });
+      }
+    }
     if (pendingHostStatus?.projectPath === message.projectPath) {
       clearTimeout(pendingHostStatus.timeout);
       const { resolve } = pendingHostStatus;
       pendingHostStatus = null;
-      resolve({ dirty });
-      return;
+      resolve({ dirty, linkState: message.linkState });
     }
-    if (dirty) showConflict();
     return;
   }
-  if (message.type === 'project.reload' && message.completed === true) {
-    renderKiCadLink({ linkState: 'reloaded', projectPath: findProjectFileFromList() ?? activeProject.projectDir });
+  if (message.type === 'project.reload') {
+    if (message.linkState === 'conflict') {
+      showConflict();
+      return;
+    }
+    const linkState = typeof message.linkState === 'string'
+      ? message.linkState
+      : message.completed === true
+        ? 'reloaded'
+        : 'error';
+    renderKiCadLink({ linkState, projectPath: findProjectFileFromList() ?? activeProject.projectDir });
   }
 }
 

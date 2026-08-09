@@ -130,6 +130,29 @@ test('rejects unsupported embedded calls while ignoring completed command execut
   );
 });
 
+test('rejects a syntactically malformed embedded tool call instead of treating it as assistant text', async () => {
+  const message = [
+    '초안을 준비합니다.',
+    '{"type":"tool.call","payload":{"id":"call_broken","name":"schematic.generate","args":{}}'
+  ].join('\n');
+  const script = `console.log(JSON.stringify({type:"item.completed", item:{id:"item_1", type:"agent_message", text:${JSON.stringify(message)}}}));`;
+
+  await assert.rejects(
+    () => runProviderProcess({ command: process.execPath, args: ['-e', script], timeoutMs: 2000 }),
+    /Malformed embedded provider tool call/
+  );
+});
+
+test('preserves ordinary non-JSON assistant text from completed messages', async () => {
+  const message = 'Use {R1, R2} as the divider and continue with the schematic.';
+  const script = `console.log(JSON.stringify({type:"item.completed", item:{id:"item_1", type:"agent_message", text:${JSON.stringify(message)}}}));`;
+
+  const transcript = await runProviderProcess({ command: process.execPath, args: ['-e', script], timeoutMs: 2000 });
+
+  assert.deepEqual(transcript.events.map((event) => event.type), ['agent.delta']);
+  assert.equal(transcript.events[0].payload.text, message);
+});
+
 test('rejects provider-emitted tool results before execution', async () => {
   const script = 'console.log(JSON.stringify({type:"tool.result", payload:{id:"1", ok:true}}));';
 

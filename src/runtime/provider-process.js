@@ -170,6 +170,10 @@ function parseProviderMessageText(events, text, allowedTools) {
     const trimmed = line.trim();
     const parsed = trimmed ? tryParseJson(trimmed) : null;
 
+    if (!parsed && looksLikeEmbeddedToolCall(trimmed)) {
+      throw new Error('Malformed embedded provider tool call.');
+    }
+
     if (parsed?.type === 'tool.call') {
       validateProviderToolCall(parsed.payload, allowedTools);
       toolCalls.push(parsed.payload);
@@ -186,6 +190,10 @@ function parseProviderMessageText(events, text, allowedTools) {
   for (const payload of toolCalls) {
     events.push(createEnvelope('tool.call', payload));
   }
+}
+
+function looksLikeEmbeddedToolCall(value) {
+  return value.startsWith('{') && /["']type["']\s*:\s*["']tool\.call["']/.test(value);
 }
 
 async function writeProviderTrace({ traceDir, command, args, cwd, input, transcript }) {
