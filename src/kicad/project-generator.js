@@ -9,7 +9,7 @@ const BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM = 1.0;
 const SCHEMATIC_GRID_COLUMNS = 5;
 const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
 const PROFILE_BOARD_PLACEMENTS = {
-  J4: { x: 18, y: 65, rotation: 90 }, C3: { x: 35, y: 55, rotation: 0 },
+  J4: { x: 18, y: 65, rotation: 0 }, C3: { x: 35, y: 55, rotation: 0 },
   U1: { x: 52, y: 55, rotation: 0 }, J6: { x: 135, y: 95, rotation: 0 }, L1: { x: 65, y: 55, rotation: 0 },
   C2: { x: 78, y: 54, rotation: 0 }
 };
@@ -66,7 +66,6 @@ export function renderKiCadBoard({ baseName, schematic, boardProfile }) {
     })
     .join('\n');
   const segments = renderBoardSegments(padCentersByNet, netIds, profileMode);
-  const groundZone = renderGroundZone(netIds, profileMode);
 
   return `(kicad_pcb
   (version 20240108)
@@ -109,7 +108,6 @@ ${netDeclarations}
   )
 ${footprints}
 ${segments}
-${groundZone}
 )`;
 }
 
@@ -629,9 +627,6 @@ function renderBoardSegments(padCentersByNet, netIds, profileMode) {
   }
 
   for (const [netName, centers] of padCentersByNet.entries()) {
-    if (profileMode && !PROFILE_POWER_PATHS.some(([powerNetName]) => powerNetName === netName)) {
-      continue;
-    }
     const netId = netIds.get(netName);
     const uniqueCenters = uniqueBoardPadCenters(centers);
     if (!netId || uniqueCenters.length < 2) {
@@ -704,7 +699,7 @@ function closestSafeProfilePowerPair(startCenters, endCenters, netName, allCente
 
 function profilePowerSegmentRunsNearOtherNetPad(start, end, netName, allCenters) {
   return allCenters.some((center) => {
-    if (center.netName === netName || center.ref === start.ref || center.ref === end.ref) {
+    if (center.netName === netName) {
       return false;
     }
 
@@ -836,19 +831,6 @@ function renderBoardSegment(start, end, netId) {
     (layer "F.Cu")
     (net ${netId})
     (uuid "${randomUUID()}")
-  )`;
-}
-
-function renderGroundZone(netIds, profileMode) {
-  const groundNetId = netIds.get('GND');
-  if (!profileMode || !groundNetId) {
-    return '';
-  }
-
-  return `  (zone (net ${groundNetId}) (net_name "GND") (layer "F.Cu") (hatch edge 0.5)
-    (connect_pads (clearance 0.15)) (min_thickness 0.25)
-    (fill yes (thermal_gap 0.3) (thermal_bridge_width 0.3))
-    (polygon (pts (xy 10.5 10.5) (xy 159.5 10.5) (xy 159.5 119.5) (xy 10.5 119.5)))
   )`;
 }
 

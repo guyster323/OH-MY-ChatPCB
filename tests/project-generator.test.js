@@ -321,7 +321,7 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
   }
 });
 
-test('supported profile PCB power intent uses fixed placement, routing, and ground zone', async () => {
+test('supported profile PCB power intent rejects unsafe endpoint-pad routes', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-power-routing-'));
 
   try {
@@ -341,14 +341,14 @@ test('supported profile PCB power intent uses fixed placement, routing, and grou
       });
       const board = await readFile(result.files.board, 'utf8');
 
-      assert.match(board, /\(at 18 65 90\)/);
+      assert.match(board, /\(at 18 65 0\)/);
+      assert.doesNotMatch(board, /\(at 18 65 90\)/);
       assert.match(board, /\(at 52 55 0\)/);
       assert.match(board, /\(at 78 54 0\)/);
       assert.match(board, /\(at 135 95 0\)/);
-      assert.match(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"\)[\s\S]*?\(layer "F\.Cu"\)/);
-      assert.ok(boardPowerSegmentCount(board, 'VBUS') >= 2);
-      assert.ok(boardPowerSegmentCount(board, 'SW_3V3') >= 1);
-      assert.ok(boardPowerSegmentCount(board, '+3V3') >= 2);
+      assert.doesNotMatch(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"/);
+      assert.equal(boardHasSegmentNear(board, { x: 34.225, y: 55 }, { x: 51, y: 54.5 }), false);
+      assert.ok(boardSegmentCount(board, 'GND') >= 1);
     }
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -361,11 +361,25 @@ function boardSegmentSpans(board) {
   );
 }
 
-function boardPowerSegmentCount(board, netName) {
+function boardSegmentCount(board, netName) {
   const declaration = [...board.matchAll(/\(net (\d+) "([^"]+)"\)/g)].find(([, , declaredNetName]) => declaredNetName === netName);
   assert.ok(declaration, `board net declaration missing for ${netName}`);
   const netId = declaration[1];
   return [...board.matchAll(/\(segment[\s\S]*?\(uuid "[^"]+"\)\s*\)/g)].filter(([segment]) =>
     segment.includes(`(net ${netId})`)
   ).length;
+}
+
+function boardHasSegmentNear(board, first, second) {
+  const tolerance = 0.02;
+  const matchesPoint = (point, expected) =>
+    Math.abs(point.x - expected.x) <= tolerance && Math.abs(point.y - expected.y) <= tolerance;
+
+  return [...board.matchAll(/\(segment\s+\(start\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)\s+\(end\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/g)].some(
+    ([, startX, startY, endX, endY]) => {
+      const start = { x: Number(startX), y: Number(startY) };
+      const end = { x: Number(endX), y: Number(endY) };
+      return (matchesPoint(start, first) && matchesPoint(end, second)) || (matchesPoint(start, second) && matchesPoint(end, first));
+    }
+  );
 }
