@@ -16,6 +16,8 @@ const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
 const projectName = '가스 센서 보드 01';
 const prompt = 'ESP32-S3와 가스 센서를 연결한 회로를 만들어줘';
 const protocolFailurePrompt = 'Simulate a provider protocol failure.';
+const rollbackPrompt = 'Simulate a validation rollback.';
+let shouldFailValidation = false;
 
 const staticServer = await startStaticServer(panelRoot);
 const daemon = await startUiDaemon();
@@ -70,6 +72,55 @@ try {
   }));
   assert.doesNotMatch(failure.summary ?? '', /Providers may only emit/);
   assert.match(failure.technicalDetail ?? '', /Providers may only emit/);
+
+  const hostPage = await browser.newPage();
+  await hostPage.addInitScript((url) => {
+    window.CHATPCB_DAEMON_WS_URL = url;
+    window.hostMessages = [];
+    window.hostDirty = false;
+    window.chatpcbHost = {
+      postMessage(message) {
+        window.hostMessages.push(message);
+        if (message.type === 'project.status') {
+          setTimeout(() => window.postMessage({ type: 'project.status', projectPath: message.projectPath, dirty: window.hostDirty }, '*'), 25);
+        }
+      }
+    };
+  }, `ws://127.0.0.1:${daemon.port}/ws`);
+  await hostPage.goto(`${staticServer.url}/index.html`);
+  await hostPage.getByText('Connected', { exact: true }).waitFor();
+  await hostPage.getByLabel('Workspace root').fill(workspaceRoot);
+  await hostPage.getByLabel('Project name').fill('Host status board');
+  await hostPage.getByRole('button', { name: 'New project' }).click();
+  await hostPage.getByRole('status', { name: 'Active project' }).waitFor();
+
+  await hostPage.evaluate(() => { window.hostDirty = true; });
+  await hostPage.getByLabel('Circuit request').fill(prompt);
+  await hostPage.getByRole('button', { name: 'Send' }).click();
+  assert.equal(await hostPage.getByRole('button', { name: 'Send' }).isDisabled(), true);
+  await hostPage.locator('#conflict-card').waitFor();
+  await hostPage.waitForTimeout(75);
+  assert.notEqual(await hostPage.locator('#request-status').getAttribute('data-state'), 'completed');
+
+  await hostPage.evaluate(() => { window.hostDirty = false; });
+  await hostPage.getByRole('button', { name: 'Send' }).click();
+  await hostPage.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
+  await hostPage.getByText(/reload-needed: .*\.kicad_pro/).waitFor();
+  const reloadCount = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
+  assert.equal(reloadCount, 1);
+
+  await hostPage.evaluate(() => {
+    const projectPath = document.querySelector('#active-project-directory').textContent;
+    window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
+  });
+  await hostPage.getByText(/reloaded: .*\.kicad_pro/).waitFor();
+
+  await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
+  await hostPage.getByRole('button', { name: 'Send' }).click();
+  await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state === 'failed');
+  const reloadCountAfterRollback = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
+  assert.equal(reloadCountAfterRollback, reloadCount);
+
   assert.deepEqual(pageErrors, []);
 
   console.log(JSON.stringify({ ok: true, verified: 'named project Send-only request and separate status cards', browser: browser.browserType().name() }, null, 2));
@@ -91,7 +142,9 @@ async function startUiDaemon() {
     dispatchOptions: {
       checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'fake-provider', available: true, status: 'available' }),
       runProviderProcessImpl: fakeProviderTranscript,
-      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+      validateProjectImpl: async () => shouldFailValidation
+        ? { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
+        : { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }
     }
   });
 }
@@ -100,6 +153,7 @@ async function fakeProviderTranscript({ input }) {
   if (input.includes(protocolFailurePrompt)) {
     throw new Error('Providers may only emit tool.call JSON or normal assistant text.');
   }
+  shouldFailValidation = input.includes(rollbackPrompt);
 
   return {
     exitCode: 0,

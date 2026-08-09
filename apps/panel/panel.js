@@ -1,4 +1,5 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
+const HOST_STATUS_TIMEOUT_MS = 500;
 
 const statusEl = document.querySelector('#connection-status');
 const newProjectFormEl = document.querySelector('#new-project-form');
@@ -34,6 +35,7 @@ let socket;
 let activeProject = null;
 let activeProjectCreateId = null;
 let activeRequestId = null;
+let pendingHostStatus = null;
 const pendingCalls = new Map();
 
 connect();
@@ -79,11 +81,13 @@ function createProject() {
 }
 
 async function sendProjectRequest() {
-  if (!activeProject || !promptEl.value.trim()) return;
+  if (!activeProject || !promptEl.value.trim() || activeRequestId || pendingHostStatus) return;
 
+  setRequestBusy(true);
   const status = await requestHostProjectStatus();
   if (status?.dirty) {
     showConflict();
+    setRequestBusy(false);
     return;
   }
 
@@ -118,6 +122,7 @@ function sendToolCall(payload) {
   } else {
     pendingCalls.delete(payload.id);
     renderRequestStatus({ state: 'failed', summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.', technicalDetail: 'chatpcb-agentd is not connected.' });
+    if (payload.name === 'project.request') setRequestBusy(false);
   }
 }
 
@@ -133,6 +138,7 @@ function handleEnvelope(envelope) {
       if (callName === 'project.request') pendingCalls.delete(activeRequestId);
       activeRequestId = null;
       activeProjectCreateId = null;
+      if (callName === 'project.request') setRequestBusy(false);
       renderRequestStatus({
         state: 'failed',
         summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
@@ -149,6 +155,7 @@ function handleEnvelope(envelope) {
   }
   if (callName === 'project.request') {
     activeRequestId = null;
+    setRequestBusy(false);
     renderProjectRequest(envelope.payload.result);
     return;
   }
@@ -177,6 +184,8 @@ function renderProjectRequest(result) {
   renderRequestStatus({ state: result.rolledBack ? 'failed' : 'completed', summary: result.rolledBack ? 'Completed with validation issues; the previous project files were restored.' : `Completed: ${result.operation === 'patched' ? 'Updated project.' : 'Generated project.'}` });
 
   const projectFile = findProjectFile(result.files);
+  const successfulUpdate = !result.rolledBack && result.validation?.ok !== false;
+  if (!successfulUpdate) return;
   if (projectFile) {
     kiCadLinkCardEl.hidden = false;
     const hostAvailable = postHostMessage({ type: 'project.reload', projectPath: activeProject.projectDir });
@@ -278,9 +287,18 @@ function showKiCadFallback(projectFile) {
 async function requestHostProjectStatus() {
   const host = window.chatpcbHost;
   const message = { type: 'project.status', projectPath: activeProject.projectDir };
-  if (typeof host?.getProjectStatus === 'function') return host.getProjectStatus(message);
-  postHostMessage(message);
-  return null;
+  if (typeof host?.getProjectStatus === 'function') return awaitStatus(host.getProjectStatus(message));
+  if (typeof host?.postMessage !== 'function' && typeof host?.send !== 'function') return null;
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      if (pendingHostStatus?.projectPath !== message.projectPath) return;
+      pendingHostStatus = null;
+      resolve(null);
+    }, HOST_STATUS_TIMEOUT_MS);
+    pendingHostStatus = { projectPath: message.projectPath, resolve, timeout };
+    postHostMessage(message);
+  });
 }
 
 function postHostMessage(message) {
@@ -298,8 +316,16 @@ function postHostMessage(message) {
 
 function handleHostMessage(message) {
   if (!message || typeof message !== 'object' || message.projectPath !== activeProject?.projectDir) return;
-  if (message.type === 'project.status' && (message.dirty === true || message.unsavedChanges === true)) {
-    showConflict();
+  if (message.type === 'project.status') {
+    const dirty = message.dirty === true || message.unsavedChanges === true;
+    if (pendingHostStatus?.projectPath === message.projectPath) {
+      clearTimeout(pendingHostStatus.timeout);
+      const { resolve } = pendingHostStatus;
+      pendingHostStatus = null;
+      resolve({ dirty });
+      return;
+    }
+    if (dirty) showConflict();
     return;
   }
   if (message.type === 'project.reload' && message.completed === true) {
@@ -310,4 +336,21 @@ function handleHostMessage(message) {
 function showConflict() {
   conflictCardEl.hidden = false;
   renderKiCadLink({ linkState: 'conflict', projectPath: activeProject.projectDir, dirty: true });
+}
+
+function setRequestBusy(isBusy) {
+  sendButtonEl.disabled = isBusy || !activeProject;
+  promptEl.disabled = isBusy || !activeProject;
+}
+
+async function awaitStatus(statusPromise) {
+  let timeout;
+  try {
+    return await Promise.race([
+      Promise.resolve(statusPromise).catch(() => null),
+      new Promise((resolve) => { timeout = setTimeout(() => resolve(null), HOST_STATUS_TIMEOUT_MS); })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
