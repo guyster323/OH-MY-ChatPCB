@@ -14,6 +14,18 @@ Create a KiCad 10.0.x fork branch that embeds ChatPCB as a right-side panel.
 6. Package `apps/panel/index.html`, `apps/panel/styles.css`, and `apps/panel/panel.js` into `share/chatpcb_panel/`.
 7. Ensure the installed KiCad distribution can run `chatpcb daemon --host 127.0.0.1 --port 41317`.
 
+## WebView Host Contract
+
+The fork registers `window.chatpcbHost` as a wxWebView script-message handler. The bundled panel sends one JSON object per message:
+
+- `project.open` supplies an absolute, existing `.kicad_pro` path. The host validates that normal KiCad project extension, resolves its same-basename `.kicad_sch`, and opens it through the current `SCH_EDIT_FRAME`; it does not start another KiCad executable.
+- `project.status` asks the host to respond with `type`, the requested `projectPath`, the editor's `dirty` state, and a `linkState` of `linked` or `unlinked`.
+- `project.reload` asks the current schematic editor to reload the linked project from disk. A successful response has `type: "project.reload"`, `linkState: "reloaded"`, and `completed: true`.
+
+Opening or reloading is refused when the schematic editor contains unsaved changes. The host posts a `project.status` event with `dirty: true` and `linkState: "conflict"`; it never saves, discards, or overwrites those edits. The user must save or cancel the editor changes before asking ChatPCB to update or reload the project.
+
+Official KiCad builds do not contain this fork panel. In that case the standalone browser fallback remains explicit: copy the displayed `.kicad_pro` path and open it manually in KiCad. The browser must not claim that KiCad was reloaded.
+
 ## Current Windows Configure Evidence
 
 The local `chatpcb-panel-scaffold` checkout is at:
@@ -49,7 +61,7 @@ The first fork milestone has been directly verified with Computer Use when:
 - KiCad launches with a visible right-side ChatPCB panel.
 - The panel connects to `chatpcb-agentd`.
 - A prompt creates a project draft in a chosen workspace.
-- The generated `.kicad_sch` opens in KiCad.
+- The generated `.kicad_pro` opens in KiCad (the fork resolves and loads its `.kicad_sch` in the existing schematic editor).
 - `chatpcb validate --project <dir>` runs or returns a typed skip reason.
 
 ## Constraint
