@@ -179,13 +179,14 @@ void CHATPCB_PANEL::PostHostEvent( const nlohmann::json& aEvent )
 void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
 {
     wxFileName projectFile( aProjectPath );
+    const wxString responsePath = projectFile.GetPath();
 
     if( !m_frame || !projectFile.IsAbsolute()
         || projectFile.GetExt().CmpNoCase( wxT( "kicad_pro" ) ) != 0
         || !projectFile.FileExists() )
     {
         PostHostEvent( { { "type", "project.status" },
-                         { "projectPath", ToUtf8( aProjectPath ) },
+                         { "projectPath", ToUtf8( responsePath ) },
                          { "dirty", IsEditorDirty() },
                          { "linkState", "invalid" } } );
         return;
@@ -194,7 +195,7 @@ void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
     if( IsEditorDirty() )
     {
         PostHostEvent( { { "type", "project.status" },
-                         { "projectPath", ToUtf8( aProjectPath ) },
+                         { "projectPath", ToUtf8( responsePath ) },
                          { "dirty", true },
                          { "linkState", "conflict" } } );
         return;
@@ -207,14 +208,14 @@ void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
         || !m_frame->OpenProjectFiles( { schematicFile.GetFullPath() } ) )
     {
         PostHostEvent( { { "type", "project.status" },
-                         { "projectPath", ToUtf8( aProjectPath ) },
+                         { "projectPath", ToUtf8( responsePath ) },
                          { "dirty", IsEditorDirty() },
                          { "linkState", "error" } } );
         return;
     }
 
     PostHostEvent( { { "type", "project.status" },
-                     { "projectPath", ToUtf8( aProjectPath ) },
+                     { "projectPath", ToUtf8( responsePath ) },
                      { "dirty", IsEditorDirty() },
                      { "linkState", "linked" } } );
 }

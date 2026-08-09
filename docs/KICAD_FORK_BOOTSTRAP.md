@@ -18,7 +18,7 @@ Create a KiCad 10.0.x fork branch that embeds ChatPCB as a right-side panel.
 
 The fork registers `window.chatpcbHost` as a wxWebView script-message handler. The bundled panel sends one JSON object per message:
 
-- `project.open` supplies an absolute, existing `.kicad_pro` path. The host validates that normal KiCad project extension, resolves its same-basename `.kicad_sch`, and opens it through the current `SCH_EDIT_FRAME`; it does not start another KiCad executable.
+- `project.open` supplies an absolute, existing `.kicad_pro` path. The host validates that normal KiCad project extension, resolves its same-basename `.kicad_sch`, and opens it through the current `SCH_EDIT_FRAME`; it does not start another KiCad executable. Every response normalizes `projectPath` to the containing project directory so it correlates with the panel's active project.
 - `project.status` asks the host to respond with `type`, the requested `projectPath`, the editor's `dirty` state, and a `linkState` of `linked` or `unlinked`.
 - `project.reload` asks the current schematic editor to reload the linked project from disk. A successful response has `type: "project.reload"`, `linkState: "reloaded"`, and `completed: true`.
 

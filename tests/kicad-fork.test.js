@@ -31,6 +31,20 @@ test('KiCad fork bridge uses the active editor APIs and protects unsaved changes
   assert.match(implementation, /"completed"\s*,\s*true/);
 });
 
+test('project.open responses correlate with the panel active project directory', async () => {
+  const implementation = await readFile('kicad-fork/chatpcb_panel/chatpcb_panel.cpp', 'utf8');
+  const panel = await readFile('apps/panel/panel.js', 'utf8');
+  const openProject = implementation.slice(
+    implementation.indexOf('void CHATPCB_PANEL::OpenProject'),
+    implementation.indexOf('bool CHATPCB_PANEL::IsEditorDirty')
+  );
+
+  assert.match(panel, /message\.projectPath\s*!==\s*activeProject\?\.projectDir/);
+  assert.match(openProject, /const wxString responsePath\s*=\s*projectFile\.GetPath\(\s*\)/);
+  assert.doesNotMatch(openProject, /"projectPath"\s*,\s*ToUtf8\(\s*aProjectPath\s*\)/);
+  assert.match(openProject, /"projectPath"\s*,\s*ToUtf8\(\s*responsePath\s*\)/);
+});
+
 test('KiCad fork bootstrap documents project opening and dirty conflict fallback', async () => {
   const bootstrap = await readFile('docs/KICAD_FORK_BOOTSTRAP.md', 'utf8');
 
