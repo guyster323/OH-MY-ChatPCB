@@ -8,6 +8,15 @@ const BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM = 30;
 const BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM = 1.0;
 const SCHEMATIC_GRID_COLUMNS = 5;
 const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
+const PROFILE_BOARD_PLACEMENTS = {
+  J4: { x: 18, y: 65, rotation: 90 }, C3: { x: 35, y: 55, rotation: 0 },
+  U1: { x: 52, y: 55, rotation: 0 }, J6: { x: 135, y: 95, rotation: 0 }, L1: { x: 65, y: 55, rotation: 0 },
+  C2: { x: 78, y: 54, rotation: 0 }
+};
+const PROFILE_POWER_PATHS = [
+  ['VBUS', ['J4', 'C3', 'U1']], ['SW_3V3', ['U1', 'L1']],
+  ['+3V3', ['L1', 'C2', 'U1']]
+];
 
 export function renderKiCadProject(baseName) {
   return `${JSON.stringify(
@@ -44,15 +53,20 @@ export function renderKiCadProject(baseName) {
   )}\n`;
 }
 
-export function renderKiCadBoard({ baseName, schematic }) {
+export function renderKiCadBoard({ baseName, schematic, boardProfile }) {
+  const profileMode = Boolean(boardProfile?.id);
   const components = schematic.components.filter((component) => component.footprint);
   const netIds = boardNetIdsFor(components);
   const padCentersByNet = new Map();
   const netDeclarations = [...netIds.entries()].map(([name, id]) => `  (net ${id} "${escapeSchText(name)}")`).join('\n');
   const footprints = components
-    .map((component, index) => renderBoardFootprint(component, 25 + (index % 5) * 22, 25 + Math.floor(index / 5) * 18, netIds, padCentersByNet))
+    .map((component, index) => {
+      const placement = boardPlacementFor(component, index, profileMode);
+      return renderBoardFootprint(component, placement.x, placement.y, placement.rotation, netIds, padCentersByNet);
+    })
     .join('\n');
-  const segments = renderBoardSegments(padCentersByNet, netIds);
+  const segments = renderBoardSegments(padCentersByNet, netIds, profileMode);
+  const groundZone = renderGroundZone(netIds, profileMode);
 
   return `(kicad_pcb
   (version 20240108)
@@ -95,7 +109,14 @@ ${netDeclarations}
   )
 ${footprints}
 ${segments}
+${groundZone}
 )`;
+}
+
+function boardPlacementFor(componentModel, index, profileMode) {
+  return profileMode && PROFILE_BOARD_PLACEMENTS[componentModel.ref]
+    ? PROFILE_BOARD_PLACEMENTS[componentModel.ref]
+    : { x: 25 + (index % 5) * 22, y: 25 + Math.floor(index / 5) * 18, rotation: 0 };
 }
 
 export function buildMcuSchematicAst(spec) {
@@ -464,8 +485,8 @@ ${[...fixtureBlocks, ...officialBlocks].join('\n')}
   )`;
 }
 
-function renderBoardFootprint(componentModel, x, y, netIds, padCentersByNet = null) {
-  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, netIds, padCentersByNet);
+function renderBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet = null) {
+  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet);
   if (embedded) {
     return embedded;
   }
@@ -475,7 +496,7 @@ function renderBoardFootprint(componentModel, x, y, netIds, padCentersByNet = nu
   return `  (footprint "${escapeSchText(componentModel.footprint)}"
     (layer "F.Cu")
     (uuid "${uuid}")
-    (at ${sch(x)} ${sch(y)} 0)
+    (at ${x} ${y} ${rotation})
     (property "Reference" "${escapeSchText(componentModel.ref)}"
       (at 0 -2 0)
       (layer "F.SilkS")
@@ -489,7 +510,7 @@ function renderBoardFootprint(componentModel, x, y, netIds, padCentersByNet = nu
   )`;
 }
 
-function renderEmbeddedBoardFootprint(componentModel, x, y, netIds, padCentersByNet = null) {
+function renderEmbeddedBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet = null) {
   const [library, footprintName] = componentModel.footprint.split(':');
   if (!library || !footprintName) {
     return null;
@@ -502,7 +523,7 @@ function renderEmbeddedBoardFootprint(componentModel, x, y, netIds, padCentersBy
 
   try {
     const source = readFileSync(footprintPath, 'utf8');
-    return indentBoardFootprintBlock(transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds, padCentersByNet));
+    return indentBoardFootprintBlock(transformBoardFootprintBlock(source, componentModel, x, y, rotation, library, footprintName, netIds, padCentersByNet));
   } catch {
     return null;
   }
@@ -523,7 +544,7 @@ function officialFootprintPath(library, footprintName) {
   return candidates.map((dir) => `${dir}/${library}.pretty/${footprintName}.kicad_mod`).find((file) => existsSync(file)) ?? null;
 }
 
-function transformBoardFootprintBlock(source, componentModel, x, y, library, footprintName, netIds, padCentersByNet = null) {
+function transformBoardFootprintBlock(source, componentModel, x, y, rotation, library, footprintName, netIds, padCentersByNet = null) {
   const lines = source.trim().split(/\r?\n/);
   const transformed = [];
   let insertedAt = false;
@@ -538,16 +559,16 @@ function transformBoardFootprintBlock(source, componentModel, x, y, library, foo
     transformed.push(nextLine);
 
     if (!insertedAt && /^\s*\(layer "F\.Cu"\)/.test(nextLine)) {
-      transformed.push(`\t(at ${sch(x)} ${sch(y)} 0)`);
+      transformed.push(`\t(at ${x} ${y} ${rotation})`);
       insertedAt = true;
     }
   }
 
   if (!insertedAt) {
-    transformed.splice(1, 0, `\t(at ${sch(x)} ${sch(y)} 0)`);
+    transformed.splice(1, 0, `\t(at ${x} ${y} ${rotation})`);
   }
 
-  return injectBoardPadNets(transformed.join('\n'), componentModel, netIds, { ref: componentModel.ref, x, y }, padCentersByNet);
+  return injectBoardPadNets(transformed.join('\n'), componentModel, netIds, { ref: componentModel.ref, x, y, rotation }, padCentersByNet);
 }
 
 function boardFootprintIdentifier(library, footprintName) {
@@ -589,20 +610,28 @@ function recordBoardPadCenter(padCentersByNet, netName, padBlock, footprintPosit
   const localX = localAt ? Number(localAt[1]) : 0;
   const localY = localAt ? Number(localAt[2]) : 0;
   const centers = padCentersByNet.get(netName) ?? [];
+  const radians = (footprintPosition.rotation ?? 0) * Math.PI / 180;
   centers.push({
     ref: footprintPosition.ref,
-    x: footprintPosition.x + localX,
-    y: footprintPosition.y + localY
+    x: footprintPosition.x + localX * Math.cos(radians) - localY * Math.sin(radians),
+    y: footprintPosition.y + localX * Math.sin(radians) + localY * Math.cos(radians)
   });
   padCentersByNet.set(netName, centers);
 }
 
-function renderBoardSegments(padCentersByNet, netIds) {
+function renderBoardSegments(padCentersByNet, netIds, profileMode) {
   const segments = [];
   const segmentKeys = new Set();
   const allCenters = [...padCentersByNet.entries()].flatMap(([netName, centers]) => centers.map((center) => ({ ...center, netName })));
 
+  if (profileMode) {
+    renderProfilePowerSegments(segments, segmentKeys, padCentersByNet, netIds, allCenters);
+  }
+
   for (const [netName, centers] of padCentersByNet.entries()) {
+    if (profileMode && !PROFILE_POWER_PATHS.some(([powerNetName]) => powerNetName === netName)) {
+      continue;
+    }
     const netId = netIds.get(netName);
     const uniqueCenters = uniqueBoardPadCenters(centers);
     if (!netId || uniqueCenters.length < 2) {
@@ -630,6 +659,57 @@ function renderBoardSegments(padCentersByNet, netIds) {
   }
 
   return segments.join('\n');
+}
+
+function renderProfilePowerSegments(segments, segmentKeys, padCentersByNet, netIds, allCenters) {
+  for (const [netName, references] of PROFILE_POWER_PATHS) {
+    const netId = netIds.get(netName);
+    if (!netId) {
+      continue;
+    }
+
+    for (let index = 1; index < references.length; index += 1) {
+      const startCenters = (padCentersByNet.get(netName) ?? []).filter((center) => center.ref === references[index - 1]);
+      const endCenters = (padCentersByNet.get(netName) ?? []).filter((center) => center.ref === references[index]);
+      const closestPair = closestSafeProfilePowerPair(startCenters, endCenters, netName, allCenters);
+      if (closestPair) {
+        addBoardSegment(segments, segmentKeys, closestPair.start, closestPair.end, netId);
+      }
+    }
+  }
+}
+
+function closestSafeProfilePowerPair(startCenters, endCenters, netName, allCenters) {
+  let closestPair = null;
+
+  for (const start of startCenters) {
+    for (const end of endCenters) {
+      const distance = boardPointDistance(start, end);
+      if (
+        sameBoardPoint(start, end) ||
+        distance > BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM ||
+        profilePowerSegmentRunsNearOtherNetPad(start, end, netName, allCenters)
+      ) {
+        continue;
+      }
+
+      if (!closestPair || distance < closestPair.distance) {
+        closestPair = { start, end, distance };
+      }
+    }
+  }
+
+  return closestPair;
+}
+
+function profilePowerSegmentRunsNearOtherNetPad(start, end, netName, allCenters) {
+  return allCenters.some((center) => {
+    if (center.netName === netName || center.ref === start.ref || center.ref === end.ref) {
+      return false;
+    }
+
+    return distanceFromPointToSegment(center, start, end) < BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM;
+  });
 }
 
 function addCrossFootprintBoardSegments(segments, segmentKeys, centers, netName, netId, allCenters) {
@@ -756,6 +836,19 @@ function renderBoardSegment(start, end, netId) {
     (layer "F.Cu")
     (net ${netId})
     (uuid "${randomUUID()}")
+  )`;
+}
+
+function renderGroundZone(netIds, profileMode) {
+  const groundNetId = netIds.get('GND');
+  if (!profileMode || !groundNetId) {
+    return '';
+  }
+
+  return `  (zone (net ${groundNetId}) (net_name "GND") (layer "F.Cu") (hatch edge 0.5)
+    (connect_pads (clearance 0.15)) (min_thickness 0.25)
+    (fill yes (thermal_gap 0.3) (thermal_bridge_width 0.3))
+    (polygon (pts (xy 10.5 10.5) (xy 159.5 10.5) (xy 159.5 119.5) (xy 10.5 119.5)))
   )`;
 }
 

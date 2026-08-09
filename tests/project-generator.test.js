@@ -343,6 +343,8 @@ test('supported profile PCB power intent uses fixed placement, routing, and grou
 
       assert.match(board, /\(at 18 65 90\)/);
       assert.match(board, /\(at 52 55 0\)/);
+      assert.match(board, /\(at 78 54 0\)/);
+      assert.match(board, /\(at 135 95 0\)/);
       assert.match(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"\)[\s\S]*?\(layer "F\.Cu"\)/);
       assert.ok(boardPowerSegmentCount(board, 'VBUS') >= 2);
       assert.ok(boardPowerSegmentCount(board, 'SW_3V3') >= 1);
@@ -360,7 +362,7 @@ function boardSegmentSpans(board) {
 }
 
 function boardPowerSegmentCount(board, netName) {
-  const declaration = board.match(new RegExp(`\\(net (\\d+) "${netName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}"\\)`));
+  const declaration = [...board.matchAll(/\(net (\d+) "([^"]+)"\)/g)].find(([, , declaredNetName]) => declaredNetName === netName);
   assert.ok(declaration, `board net declaration missing for ${netName}`);
   const netId = declaration[1];
   return [...board.matchAll(/\(segment[\s\S]*?\(uuid "[^"]+"\)\s*\)/g)].filter(([segment]) =>
