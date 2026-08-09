@@ -321,8 +321,49 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
   }
 });
 
+test('supported profile PCB power intent uses fixed placement, routing, and ground zone', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-power-routing-'));
+
+  try {
+    for (const [profile, prompt] of [
+      [
+        'esp32',
+        'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ],
+      [
+        'stm32',
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ]
+    ]) {
+      const result = await generateMcuPeripheralProject({
+        projectDir: path.join(root, profile),
+        prompt
+      });
+      const board = await readFile(result.files.board, 'utf8');
+
+      assert.match(board, /\(at 18 65 90\)/);
+      assert.match(board, /\(at 52 55 0\)/);
+      assert.match(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"\)[\s\S]*?\(layer "F\.Cu"\)/);
+      assert.ok(boardPowerSegmentCount(board, 'VBUS') >= 2);
+      assert.ok(boardPowerSegmentCount(board, 'SW_3V3') >= 1);
+      assert.ok(boardPowerSegmentCount(board, '+3V3') >= 2);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 function boardSegmentSpans(board) {
   return [...board.matchAll(/\(segment\s+\(start\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)\s+\(end\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/g)].map(
     ([, startX, startY, endX, endY]) => Math.hypot(Number(endX) - Number(startX), Number(endY) - Number(startY))
   );
+}
+
+function boardPowerSegmentCount(board, netName) {
+  const declaration = board.match(new RegExp(`\\(net (\\d+) "${netName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}"\\)`));
+  assert.ok(declaration, `board net declaration missing for ${netName}`);
+  const netId = declaration[1];
+  return [...board.matchAll(/\(segment[\s\S]*?\(uuid "[^"]+"\)\s*\)/g)].filter(([segment]) =>
+    segment.includes(`(net ${netId})`)
+  ).length;
 }
