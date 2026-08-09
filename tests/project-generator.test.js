@@ -410,6 +410,18 @@ test('supported profile generic segments avoid J3/J7 no-net pads and cross-net i
   }
 });
 
+test('maps no-net pad centers through their containing footprint transform', () => {
+  const board = `  (footprint "Connector_Generic:Conn_01x01"
+    (at 100 200 90)
+    (property "Reference" "J7")
+    (pad "1" thru_hole circle
+      (at 1 2)
+    )
+  )`;
+
+  assert.deepEqual(boardNoNetPadCenters(board, ['J7']), [{ ref: 'J7', x: 98, y: 201 }]);
+});
+
 function boardSegmentSpans(board) {
   return [...board.matchAll(/\(segment\s+\(start\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)\s+\(end\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/g)].map(
     ([, startX, startY, endX, endY]) => Math.hypot(Number(endX) - Number(startX), Number(endY) - Number(startY))
@@ -452,13 +464,20 @@ function boardSegments(board) {
 function boardNoNetPadCenters(board, references) {
   return references.flatMap((ref) => {
     const footprint = boardFootprintBlock(board, ref);
+    const [, footprintX, footprintY, footprintRotation = '0'] = footprint.match(/^\s*\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)(?:\s+(-?\d+(?:\.\d+)?))?\)/m) ?? [];
+    assert.ok(footprintX && footprintY, `board footprint ${ref} position missing`);
+    const radians = Number(footprintRotation) * Math.PI / 180;
     const padStarts = [...footprint.matchAll(/^[ \t]*\(pad\s+"[^"]+"/gm)].map((match) => match.index);
     return padStarts
       .map((start, index) => footprint.slice(start, padStarts[index + 1]))
       .filter((pad) => !/\n[ \t]*\(net\s+\d+\s+"/.test(pad))
       .map((pad) => pad.match(/\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/))
       .filter(Boolean)
-      .map(([, x, y]) => ({ ref, x: Number(x), y: Number(y) }));
+      .map(([, x, y]) => ({
+        ref,
+        x: Number(footprintX) + Number(x) * Math.cos(radians) - Number(y) * Math.sin(radians),
+        y: Number(footprintY) + Number(x) * Math.sin(radians) + Number(y) * Math.cos(radians)
+      }));
   });
 }
 
