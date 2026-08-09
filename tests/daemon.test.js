@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -278,6 +278,42 @@ test('daemon confines provider-emitted project paths to the active project.reque
     assert.equal(result.ok, true);
     assert.equal(result.result.files.spec, path.join(created.result.projectDir, 'chatpcb_mcu_peripheral.chatpcb.json'));
     await assert.rejects(() => readFile(path.join(outside, 'chatpcb_mcu_peripheral.chatpcb.json'), 'utf8'), { code: 'ENOENT' });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(outside, { force: true, recursive: true });
+  }
+});
+
+test('daemon rejects provider-emitted project.create calls during project.request', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-request-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-outside-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Active Board' }
+    });
+
+    await assert.rejects(
+      () => dispatchToolCall(
+        {
+          id: 'call_project_request_create',
+          name: 'project.request',
+          args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Create a second board.' }
+        },
+        providerOptions({
+          events: [
+            createEnvelope('tool.call', {
+              id: 'call_provider_create',
+              name: 'project.create',
+              args: { workspaceRoot: outside, projectName: 'Escaped Board' }
+            })
+          ]
+        })
+      ),
+      /project\.create is not allowed inside project\.request/
+    );
+    await assert.rejects(() => readdir(path.join(outside, 'Escaped-Board')), { code: 'ENOENT' });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(outside, { force: true, recursive: true });

@@ -145,6 +145,9 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   for (const event of transcript.events) {
     if (event.type !== 'tool.call') continue;
 
+    if (forceProjectDir && event.payload.name === 'project.create') {
+      throw new Error('project.create is not allowed inside project.request.');
+    }
     const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
     if (autoApprovePatch && toolCall.name === 'schematic.patch') {
       toolCall.args.approved = true;
