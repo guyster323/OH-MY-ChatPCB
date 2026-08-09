@@ -43,7 +43,7 @@ assert.doesNotMatch(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"/);
 assert.equal(boardHasSegmentNear(board, { x: 34.225, y: 55 }, { x: 51, y: 54.5 }), false);
 ```
 
-Keep the existing C2 and J6 profile-placement assertions. Add one assertion that the board still contains at least one generic signal segment, using the declared `SCL` net id and `boardPowerSegmentCount` renamed to `boardSegmentCount`.
+Keep the existing C2 and J6 profile-placement assertions. Add one assertion that the board still contains at least one generic GND segment, using the declared `GND` net id and `boardPowerSegmentCount` renamed to `boardSegmentCount`. This proves the generic router remains active without expanding the signal-routing scope.
 Add `boardHasSegmentNear(board, first, second)`, which parses each segment start/end coordinate and returns true when either direction is within 0.02 mm of both requested points.
 
 - [ ] **Step 2: Run the focused test to verify it fails**
