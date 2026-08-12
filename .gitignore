@@ -3,6 +3,11 @@ npm-debug.log*
 .worktrees/
 .superpowers/
 
+# Personal Codex request notes (kept locally, not shipped with the project).
+docs/codex-kicad-chat-request-guide.html
+docs/superpowers/plans/2026-08-12-codex-kicad-chat-request-guide.md
+docs/superpowers/specs/2026-08-12-codex-kicad-chat-request-guide-design.md
+
 workspaces/
 data/kicad-exports/
 test-results/
