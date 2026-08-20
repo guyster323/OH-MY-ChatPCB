@@ -78,7 +78,7 @@ function manufacturingMetadataFor(boardFileName) {
     boardDraft: {
       status: 'generated',
       file: boardFileName,
-      note: 'Initial placement-only PCB draft with board outline; routing, zones, constraints, DRC, Gerbers, and drill files remain pending.'
+      note: 'PCB draft with board outline, embedded footprints, conservative same-net traces, and supported-profile power-path routing; full routing signoff, DRC, Gerbers, and drill files remain pending.'
     },
     drc: {
       status: 'pending',

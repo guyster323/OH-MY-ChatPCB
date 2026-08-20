@@ -1,8 +1,14 @@
 # Handoff: OH-MY-ChatPCB
 
+## Current checkout
+
+- Runtime repo: `C:\Users\windo\orca\OH-MY-ChatPCB` (GitHub `guyster323/OH-MY-ChatPCB`, branch `main`)
+- Older notes below may still say `C:\Users\windo\chatpcb2`. Treat that as a previous machine path, not the current workspace.
+- GitHub MCP in Grok needs `GITHUB_PERSONAL_ACCESS_TOKEN`. `gh` CLI login does not feed that server.
+
 ## Current State
 
-`chatpcb2` now contains a runnable scaffold for the proposed KiCad ChatPCB plan, including real-symbol MCU schematic generation, safe patch review, provider status checks, provider chat invocation plumbing, provider Stop cancellation, and the first local provider adapter contracts.
+This checkout contains a runnable scaffold for the proposed KiCad ChatPCB plan, including real-symbol MCU schematic generation, supported-profile PCB drafts, safe patch review, provider status checks, provider chat invocation plumbing, provider Stop cancellation, and the first local provider adapter contracts.
 
 Working surfaces:
 
@@ -624,9 +630,20 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 & "C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe" pcb drc --output .\workspaces\stm32-usbc-sensor-profile\chatpcb-drc.json --format json .\workspaces\stm32-usbc-sensor-profile\chatpcb_mcu_peripheral.kicad_pcb
 ```
 
+## 2026-08-19 Review and P0 follow-up
+
+- Official KiCad CLI: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe` version `10.0.3`.
+- Regenerated supported profiles in this checkout:
+  - Schematic ERC: ESP32-S3 `0` errors/`0` warnings, STM32 `0` errors/`0` warnings.
+  - PCB DRC: ESP32-S3 `0` violations / `38` unconnected items; STM32 `0` violations / `35` unconnected items.
+- Supported-profile boards now emit a detoured `SW_3V3` route (U1 to L1) using Manhattan legs. Direct USB-C pad-field fanout (VBUS/CC/USB data on J4) still cannot be generated without KiCad clearance/solder-mask violations, so those nets stay unconnected on purpose. Getting DRC unconnected to zero is blocked by the HRO USB-C pad pitch, not by missing router code.
+- README Korean ESP32-S3 sensor prompt now selects `esp32-s3-usbc-sensor`. English JLCPCB/manufacturing prompts still stay on the blocked review loop unless they say `release profile`.
+- Invalid or missing ERC JSON now fails validation (`ERC_REPORT_INVALID`) instead of looking like a clean ERC.
+- Daemon generate/patch/request refuse the home directory and other protected paths. Failed validation restore no longer deletes the project directory node.
+
 ## Next Work
 
-1. Continue routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `40` and STM32 `37` to zero before manufacturing export, without adding new DRC violations.
+1. Continue routed PCB connections for both supported profiles so KiCad DRC unconnected items drop from ESP32-S3 `38` and STM32 `35` to zero before manufacturing export, without adding new DRC violations.
 2. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
 3. Generate and validate Gerber and drill outputs only after PCB DRC has zero violations and zero unconnected items.
 4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.

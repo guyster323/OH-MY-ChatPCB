@@ -16,12 +16,14 @@ This is not a full KiCad fork yet. It is the implementation scaffold that lets t
 
 Implemented now:
 
-- Natural-language MCU peripheral prompt normalization
+- Natural-language MCU peripheral prompt normalization (English regex plus Korean ESP32-S3 sensor-board matching for the supported profile)
 - Reviewable KiCad project draft generation with embedded ChatPCB fixture symbols, wire stubs, net labels, and footprint mappings
+- Supported ESP32-S3 and STM32 USB-C sensor profiles with production-facing KiCad support symbols, release gates, and calculation evidence
 - Project-local `ChatPCB` symbol library generation through `chatpcb.kicad_sym` and `sym-lib-table`
 - KiCad-compatible metadata using normal schematic objects and `.chatpcb.json`, not custom top-level `chatpcb_*` nodes
-- ERC report parsing that fails validation on KiCad `error` severity while surfacing warning-only reports
+- ERC report parsing that fails validation on KiCad `error` severity, invalid ERC JSON, or a missing report, while surfacing warning-only reports
 - Daemon startup now reports the actual bound port and rejects port collisions, so UI verification can reuse an already-running `chatpcb-agentd`
+- Daemon project-path guards that refuse home/Windows system directories and optional workspace-root confinement
 - Approval-gated `schematic.patch` preview/apply workflow with diff output, cancel handling, validation, and rollback
 - Provider registry and status checks for Codex CLI, Claude Code, and GitHub Copilot CLI
 - Strict local provider transcript parsing that accepts provider `tool.call` JSON only, redacts stderr secrets, and can write redacted trace files
@@ -30,16 +32,18 @@ Implemented now:
 - Process-level provider cancellation through `AbortSignal`, daemon-level `provider.cancel`, and the panel Stop button
 - Real Codex CLI provider smoke from panel chat without test injection
 - Source-level KiCad fork schematic editor integration for `CHATPCB_PANEL`
+- Supported-profile `.kicad_pcb` drafts: outline, embedded footprints, net table, conservative traces, and power-path routing
 - SPICE fixture generation for simple analog support circuits
 - Local daemon and WebView websocket surface
 - Windows KiCad CLI discovery including `C:/Program Files/KiCad/10.0` and `9.0`
 
 Not implemented yet:
 
-- Production-grade schematic symbols beyond the constrained MCU peripheral fixture set
-- PCB layout generation
-- Built KiCad fork binary with visible ChatPCB side panel
+- Production-grade schematic symbols for generic (non-profile) prompts
+- Complete PCB routing, copper-zone signoff, DRC-clean boards, Gerber/drill/BOM export
+- Packaged KiCad fork installer with a visible ChatPCB side panel
 - Full SPICE model selection for MCU vendor parts
+- Live JLCPCB/LCSC sourcing and datasheet release evidence
 
 ## Quick Start
 
@@ -112,6 +116,7 @@ Expected result:
 
 - the panel connects to `chatpcb-agentd`
 - pressing **Send** runs one `project.request` against the active project and reports whether it generated or updated the project
+- an ESP32-S3 + sensor + 3.3V request selects the supported `esp32-s3-usbc-sensor` profile and writes a `.kicad_pcb` draft; it is `ready-for-prototype-review`, not release-ready
 - request status, ERC results, readiness review, generated artifacts, and KiCad link state appear in independent cards
 - the artifacts include a normal `.kicad_pro` file; use **Open in KiCad** in the fork panel, or open that path manually from standalone browser mode
 - if the active KiCad editor has unsaved changes, the panel shows a conflict and refuses the automatic request/reload path until you save or discard those edits

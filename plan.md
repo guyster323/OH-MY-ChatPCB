@@ -49,7 +49,7 @@
 
 ## Current Baseline
 
-**Root repo:** `C:\Users\windo\chatpcb2`
+**Root repo:** `C:\Users\windo\orca\OH-MY-ChatPCB`
 
 **GitHub repo:** `https://github.com/guyster323/OH-MY-ChatPCB`
 
@@ -266,12 +266,13 @@ Goal: expand from schematic generation to board/manufacturing workflows.
 
 Work items:
 
-- [ ] Add `.kicad_pcb` draft generation with board outline.
-- [ ] Add component placement suggestions.
-- [ ] Add DRC validation through `kicad-cli pcb drc`.
+- [x] Add `.kicad_pcb` draft generation with board outline.
+- [x] Add component placement suggestions.
+- [x] Embed official footprint bodies, pad nets, conservative traces, and supported-profile power paths.
+- [ ] Add DRC validation through `kicad-cli pcb drc` as a first-class ChatPCB tool.
 - [ ] Add BOM export.
 - [ ] Add Gerber and drill export.
-- [ ] Add PDF/SVG export for review.
+- [ ] Add PDF/SVG export for review from the daemon/panel, not only from ad-hoc `kicad-cli`.
 - [ ] Add artifact cards in the panel for generated manufacturing files.
 
 Acceptance criteria:
@@ -463,7 +464,7 @@ Acceptance criteria:
 
 ## Verification Commands
 
-Run from `C:\Users\windo\chatpcb2`:
+Run from `C:\Users\windo\orca\OH-MY-ChatPCB`:
 
 ```powershell
 npm install
@@ -487,15 +488,14 @@ git log --oneline -1
 
 ## Next Immediate Task
 
-Continue Phase 8 before widening PCB/layout scope:
+Continue Phase 8 from measured PCB drafts, not from stale unconnected counts:
 
-1. Route both supported PCB drafts so unconnected items drop from ESP32-S3 `40` and STM32 `37` to zero without adding new DRC violations.
-2. Add initial copper zones and placement intent for critical buck loop, USB-C connector orientation, headers, reset/boot/debug access, and ground/power return paths.
+1. Official KiCad 10.0.3 remeasure after SW_3V3 detour routing: schematic ERC `0/0` for both profiles; PCB DRC ESP32-S3 `0` violations / `38` unconnected, STM32 `0` violations / `35` unconnected. USB-C (J4) pad-field fanout cannot be generated without clearance/solder-mask violations. Next routing work should use a filled copper pour or a hand-reviewed USB-C escape pattern, not centerline autoroutes through the HRO receptacle.
+2. Route remaining nets (especially GND and connector signals) without adding DRC violations. Do not resurrect naive global centerline autorouting.
 3. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.
 4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
-5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence for the MCU/module, TPS62177DQC, buck inductor, USB-C connector, debug connector, passives, switches, and LED.
-6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence for the selected buck regulator, inductor, input capacitor, output capacitor, PCB copper, and ambient assumptions.
-7. Extend simulation or calculation-backed evidence for reset/boot behavior, USB protection/ESD decisions, and regulator ripple/stability after the sourced regulator BOM is locked.
-8. Turn review-loop proposals into concrete user-selectable supported-board profiles and patch previews.
-9. Promote the ESP32-S3 and STM32 supported profiles from prototype-review to release-candidate only after exact orderable parts, datasheet pin mapping, layout, DRC, Gerbers, simulation, and JLCPCB sourcing evidence are complete.
-10. Keep validating official KiCad latest-stable compatibility and the ChatPCB fork panel as separate user paths.
+5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence.
+6. Replace the provisional `buck-loss-estimate` with sourced datasheet efficiency and thermal evidence.
+7. Keep `project.request` honest: the README ESP32-S3 sensor prompt now selects the supported profile, but manufacturing/JLCPCB wording still stays on the blocked review loop until evidence exists.
+8. Add GitHub Actions for `npm test`. GitHub MCP in Grok needs `GITHUB_PERSONAL_ACCESS_TOKEN`; `gh` login is not enough.
+9. Audit `origin/codex/schematic-quality-improvements` before merging any preview/installer work into `main`.

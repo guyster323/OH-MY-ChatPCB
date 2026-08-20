@@ -4,19 +4,22 @@ import { existsSync, readFileSync } from 'node:fs';
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
 const BOARD_TRACE_PAD_KEEP_OUT_MM = 0.8;
+const BOARD_SAME_FOOTPRINT_PAD_KEEP_OUT_MM = 0.45;
 const BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM = 30;
 const BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM = 1.0;
 const SCHEMATIC_GRID_COLUMNS = 5;
 const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
 const PROFILE_BOARD_PLACEMENTS = {
   J4: { x: 18, y: 65, rotation: 0 }, C3: { x: 35, y: 55, rotation: 0 },
-  U1: { x: 52, y: 55, rotation: 0 }, J6: { x: 135, y: 95, rotation: 0 }, L1: { x: 65, y: 55, rotation: 0 },
-  C2: { x: 78, y: 54, rotation: 0 }
+  U1: { x: 52, y: 55, rotation: 0 }, J6: { x: 135, y: 95, rotation: 0 }, L1: { x: 64, y: 68, rotation: 0 },
+  C2: { x: 78, y: 54, rotation: 0 }, R1: { x: 12, y: 82, rotation: 0 }, R2: { x: 36, y: 82, rotation: 0 }
 };
 const PROFILE_POWER_PATHS = [
-  ['VBUS', ['J4', 'C3', 'U1']], ['SW_3V3', ['U1', 'L1']],
-  ['+3V3', ['L1', 'C2', 'U1']]
+  ['SW_3V3', ['U1', 'L1'], { relaxSameFootprint: true }],
+  ['+3V3', ['L1', 'C2'], { relaxSameFootprint: false }]
 ];
+const BOARD_OUTLINE = { minX: 10, minY: 10, maxX: 160, maxY: 120 };
+const BOARD_ROUTE_ESCAPE_OFFSETS_MM = [2, 4, 6, 8, 10, 12, 16];
 
 export function renderKiCadProject(baseName) {
   return `${JSON.stringify(
@@ -653,7 +656,11 @@ function renderBoardSegments(padCentersByNet, netIds, profileMode) {
 }
 
 function renderProfilePowerSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters) {
-  for (const [netName, references] of PROFILE_POWER_PATHS) {
+  renderProfileNamedPathSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters, PROFILE_POWER_PATHS);
+}
+
+function renderProfileNamedPathSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters, paths) {
+  for (const [netName, references, options = {}] of paths) {
     const netId = netIds.get(netName);
     if (!netId) {
       continue;
@@ -662,45 +669,117 @@ function renderProfilePowerSegments(segments, segmentKeys, acceptedSegments, pad
     for (let index = 1; index < references.length; index += 1) {
       const startCenters = (padCentersByNet.get(netName) ?? []).filter((center) => center.ref === references[index - 1]);
       const endCenters = (padCentersByNet.get(netName) ?? []).filter((center) => center.ref === references[index]);
-      const closestPair = closestSafeProfilePowerPair(startCenters, endCenters, netName, allCenters);
-      if (closestPair) {
-        addBoardSegment(segments, segmentKeys, acceptedSegments, closestPair.start, closestPair.end, netName, netId, allCenters);
-      }
+      addBestSafeRoute(segments, segmentKeys, acceptedSegments, startCenters, endCenters, netName, netId, allCenters, options);
     }
   }
 }
 
-function closestSafeProfilePowerPair(startCenters, endCenters, netName, allCenters) {
-  let closestPair = null;
+function addBestSafeRoute(segments, segmentKeys, acceptedSegments, startCenters, endCenters, netName, netId, allCenters, options = {}) {
+  let best = null;
 
   for (const start of startCenters) {
     for (const end of endCenters) {
-      const distance = boardPointDistance(start, end);
-      if (
-        sameBoardPoint(start, end) ||
-        distance > BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM ||
-        profilePowerSegmentRunsNearOtherNetPad(start, end, netName, allCenters)
-      ) {
-        continue;
-      }
+      for (const path of candidateRoutePolylines(start, end)) {
+        const legs = polylineLegs(path);
+        if (
+          !legsEverySegmentSafe(legs, segmentKeys, acceptedSegments, netName, netId, allCenters, {
+            keepOutMm: BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM,
+            relaxSameFootprint: options.relaxSameFootprint === true
+          })
+        ) {
+          continue;
+        }
 
-      if (!closestPair || distance < closestPair.distance) {
-        closestPair = { start, end, distance };
+        const length = legs.reduce((sum, [first, second]) => sum + boardPointDistance(first, second), 0);
+        if (!best || length < best.length) {
+          best = { legs, length, from: start, to: end };
+        }
       }
     }
   }
 
-  return closestPair;
+  if (!best) {
+    return null;
+  }
+
+  for (const [start, end] of best.legs) {
+    addBoardSegment(segments, segmentKeys, acceptedSegments, start, end, netName, netId, allCenters, {
+      keepOutMm: BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM,
+      relaxSameFootprint: options.relaxSameFootprint === true
+    });
+  }
+
+  return best;
 }
 
-function profilePowerSegmentRunsNearOtherNetPad(start, end, netName, allCenters) {
-  return allCenters.some((center) => {
-    if (center.netName === netName) {
+function candidateRoutePolylines(start, end) {
+  const paths = [
+    [start, end],
+    [start, { x: end.x, y: start.y }, end],
+    [start, { x: start.x, y: end.y }, end]
+  ];
+
+  for (const offset of BOARD_ROUTE_ESCAPE_OFFSETS_MM) {
+    for (const sign of [-1, 1]) {
+      const dy = offset * sign;
+      const dx = offset * sign;
+      paths.push([start, { x: start.x, y: start.y + dy }, { x: end.x, y: end.y + dy }, end]);
+      paths.push([start, { x: start.x + dx, y: start.y }, { x: end.x + dx, y: end.y }, end]);
+    }
+
+    const busY = Math.min(start.y, end.y) - offset;
+    const busYHigh = Math.max(start.y, end.y) + offset;
+    const busX = Math.min(start.x, end.x) - offset;
+    const busXHigh = Math.max(start.x, end.x) + offset;
+    paths.push([start, { x: start.x, y: busY }, { x: end.x, y: busY }, end]);
+    paths.push([start, { x: start.x, y: busYHigh }, { x: end.x, y: busYHigh }, end]);
+    paths.push([start, { x: busX, y: start.y }, { x: busX, y: end.y }, end]);
+    paths.push([start, { x: busXHigh, y: start.y }, { x: busXHigh, y: end.y }, end]);
+  }
+
+  return paths.filter((path) => path.every(isInsideBoardOutline));
+}
+
+function polylineLegs(path) {
+  const legs = [];
+  for (let index = 1; index < path.length; index += 1) {
+    const start = path[index - 1];
+    const end = path[index];
+    if (sameBoardPoint(start, end)) {
+      continue;
+    }
+
+    if (boardPointDistance(start, end) > BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM) {
+      return null;
+    }
+
+    legs.push([start, end]);
+  }
+
+  return legs.length > 0 ? legs : null;
+}
+
+function legsEverySegmentSafe(legs, segmentKeys, acceptedSegments, netName, netId, allCenters, options) {
+  if (!legs) {
+    return false;
+  }
+
+  const pendingKeys = new Set(segmentKeys);
+  const pendingAccepted = [...acceptedSegments];
+  for (const [start, end] of legs) {
+    if (!canAddBoardSegment(pendingKeys, pendingAccepted, start, end, netName, netId, allCenters, options)) {
       return false;
     }
 
-    return distanceFromPointToSegment(center, start, end) < BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM;
-  });
+    pendingKeys.add(boardSegmentKey(start, end, netId));
+    pendingAccepted.push({ start, end, netName });
+  }
+
+  return true;
+}
+
+function isInsideBoardOutline(point) {
+  return point.x >= BOARD_OUTLINE.minX && point.x <= BOARD_OUTLINE.maxX && point.y >= BOARD_OUTLINE.minY && point.y <= BOARD_OUTLINE.maxY;
 }
 
 function addCrossFootprintBoardSegments(segments, segmentKeys, acceptedSegments, centers, netName, netId, allCenters) {
@@ -731,7 +810,7 @@ function nearestSafeBoardSegment(connected, remaining, netName, allCenters) {
       if (
         sameBoardPoint(start, end) ||
         distance > BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM ||
-        segmentRunsNearOtherNetPad(start, end, netName, allCenters, BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM)
+        segmentRunsNearOtherNetPad(start, end, netName, allCenters, { keepOutMm: BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM })
       ) {
         continue;
       }
@@ -778,13 +857,18 @@ function boardPointDistance(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function segmentRunsNearOtherNetPad(start, end, netName, allCenters, keepOutMm = BOARD_TRACE_PAD_KEEP_OUT_MM) {
+function segmentRunsNearOtherNetPad(start, end, netName, allCenters, options = {}) {
+  const keepOutMm = options.keepOutMm ?? BOARD_TRACE_PAD_KEEP_OUT_MM;
   return allCenters.some((center) => {
     if (center.netName === netName) {
       return false;
     }
 
-    return distanceFromPointToSegment(center, start, end) < keepOutMm;
+    const keepOut =
+      options.relaxSameFootprint && center.netName && center.ref && (center.ref === start.ref || center.ref === end.ref)
+        ? BOARD_SAME_FOOTPRINT_PAD_KEEP_OUT_MM
+        : keepOutMm;
+    return distanceFromPointToSegment(center, start, end) < keepOut;
   });
 }
 
@@ -804,13 +888,27 @@ function distanceFromPointToSegment(point, start, end) {
   return boardPointDistance(point, projection);
 }
 
-function addBoardSegment(segments, segmentKeys, acceptedSegments, start, end, netName, netId, allCenters) {
+function canAddBoardSegment(segmentKeys, acceptedSegments, start, end, netName, netId, allCenters, options = {}) {
   const key = boardSegmentKey(start, end, netId);
+  if (segmentKeys.has(key)) {
+    return true;
+  }
+
   if (
-    segmentKeys.has(key) ||
-    segmentRunsNearOtherNetPad(start, end, netName, allCenters) ||
+    sameBoardPoint(start, end) ||
+    boardPointDistance(start, end) > BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM ||
+    segmentRunsNearOtherNetPad(start, end, netName, allCenters, options) ||
     acceptedSegments.some((segment) => segment.netName !== netName && boardSegmentsIntersect(start, end, segment.start, segment.end))
   ) {
+    return false;
+  }
+
+  return true;
+}
+
+function addBoardSegment(segments, segmentKeys, acceptedSegments, start, end, netName, netId, allCenters, options = {}) {
+  const key = boardSegmentKey(start, end, netId);
+  if (segmentKeys.has(key) || !canAddBoardSegment(segmentKeys, acceptedSegments, start, end, netName, netId, allCenters, options)) {
     return;
   }
 

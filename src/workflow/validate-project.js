@@ -30,6 +30,34 @@ export async function validateProject({ projectDir, kicadCliPath, runKicadCliImp
     const erc = await readErcSummary(output);
     const upgradeOk = formatUpgrade.exitCode === 0;
 
+    if (erc.invalid) {
+      return {
+        ok: false,
+        skipped: false,
+        tool: result.command,
+        source: result.source,
+        formatUpgrade: {
+          ok: upgradeOk,
+          exitCode: formatUpgrade.exitCode,
+          stdout: formatUpgrade.stdout,
+          stderr: formatUpgrade.stderr
+        },
+        report: output,
+        erc: {
+          errorCount: 0,
+          warningCount: 0,
+          byType: {}
+        },
+        reason: {
+          code: 'ERC_REPORT_INVALID',
+          message: erc.message
+        },
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr
+      };
+    }
+
     return {
       ok: upgradeOk && result.exitCode === 0 && erc.errorCount === 0,
       skipped: false,
@@ -61,6 +89,10 @@ async function findFirst(projectDir, extension) {
 async function readErcSummary(reportPath) {
   try {
     const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    if (!report || typeof report !== 'object' || Array.isArray(report)) {
+      return { invalid: true, message: `ERC report is not a JSON object: ${reportPath}` };
+    }
+
     const violations = (report.sheets ?? []).flatMap((sheet) => sheet.violations ?? []);
     const byType = {};
     let errorCount = 0;
@@ -80,11 +112,10 @@ async function readErcSummary(reportPath) {
       warningCount,
       byType
     };
-  } catch {
+  } catch (error) {
     return {
-      errorCount: 0,
-      warningCount: 0,
-      byType: {}
+      invalid: true,
+      message: `ERC report could not be read: ${error.message}`
     };
   }
 }

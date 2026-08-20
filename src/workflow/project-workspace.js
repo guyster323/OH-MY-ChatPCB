@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -55,9 +56,51 @@ function slugify(displayName) {
   return slug;
 }
 
-function isInside(workspaceRoot, candidate) {
+export function isInside(workspaceRoot, candidate) {
   const relative = path.relative(workspaceRoot, candidate);
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
+}
+
+export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) {
+  if (typeof projectDir !== 'string' || projectDir.trim().length === 0) {
+    throw typedError('UNSAFE_PROJECT_DIR', 'Project directory is required.');
+  }
+
+  const resolvedProjectDir = path.resolve(projectDir);
+  if (isProtectedPath(resolvedProjectDir)) {
+    throw typedError('UNSAFE_PROJECT_DIR', `Refusing to use protected path as a project directory: ${resolvedProjectDir}`);
+  }
+
+  if (allowedWorkspaceRoot) {
+    const resolvedWorkspaceRoot = path.resolve(allowedWorkspaceRoot);
+    if (resolvedProjectDir !== resolvedWorkspaceRoot && !isInside(resolvedWorkspaceRoot, resolvedProjectDir)) {
+      throw typedError('UNSAFE_PROJECT_DIR', 'Project directory must stay inside the allowed workspace root.');
+    }
+  }
+
+  return resolvedProjectDir;
+}
+
+function isProtectedPath(candidate) {
+  const home = path.resolve(homedir());
+  const protectedPaths = new Set(
+    [
+      path.parse(candidate).root,
+      home,
+      path.dirname(home),
+      process.env.WINDIR,
+      process.env.SystemRoot,
+      process.env.ProgramFiles,
+      process.env['ProgramFiles(x86)'],
+      'C:\\Windows',
+      'C:\\Program Files',
+      'C:\\Program Files (x86)'
+    ]
+      .filter((value) => typeof value === 'string' && value.length > 0)
+      .map((value) => path.resolve(value))
+  );
+
+  return protectedPaths.has(candidate);
 }
 
 function typedError(code, message) {

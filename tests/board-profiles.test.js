@@ -208,6 +208,42 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
   }
 });
 
+test('README Korean ESP32-S3 sensor prompt selects the supported ESP32-S3 profile', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-readme-profile-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘.'
+    });
+
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    assert.equal(metadata.boardProfile.id, 'esp32-s3-usbc-sensor');
+    assert.equal(metadata.mcu.package, 'ESP32-S3-WROOM-1-N8R2');
+    assert.ok(result.files.board);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('generic STM32 prompt without sensor or USB-C stays off the supported profile', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-generic-stm32-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'STM32 board with 3.3V regulator, reset button, and status LED.'
+    });
+
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    assert.equal(metadata.boardProfile, undefined);
+    assert.equal(metadata.mcu.package, 'unspecified');
+    assert.equal(result.files.board, undefined);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 function assertProductionEvidence(metadata, { mcuRef, mcuValue, debugRole }) {
   const parts = metadata.boardProfile.productionParts;
   assert.ok(Array.isArray(parts), 'supported profiles should publish production part evidence');

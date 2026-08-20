@@ -16,6 +16,10 @@ test('validateProject passes absolute schematic and report paths to kicad-cli', 
       projectDir: root,
       runKicadCliImpl: async (args, options) => {
         calls.push({ args, options });
+        if (args[1] === 'erc') {
+          const reportPath = args[args.indexOf('--output') + 1];
+          await writeFile(reportPath, JSON.stringify({ sheets: [] }), 'utf8');
+        }
         return {
           exitCode: 0,
           stdout: '',
@@ -106,6 +110,32 @@ test('validateProject fails when KiCad ERC report contains errors', async () => 
       lib_symbol_issues: 1,
       pin_not_connected: 1
     });
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateProject fails when the ERC report is missing or not valid JSON', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-bad-report-'));
+  await writeFile(path.join(root, 'demo.kicad_sch'), '(kicad_sch)\n', 'utf8');
+
+  try {
+    const result = await validateProject({
+      projectDir: root,
+      runKicadCliImpl: async (args) => {
+        if (args[1] === 'upgrade') {
+          return { exitCode: 0, stdout: 'upgraded', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+        }
+
+        return { exitCode: 0, stdout: '', stderr: '', command: 'fake-kicad-cli', source: 'test' };
+      }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.skipped, false);
+    assert.equal(result.reason?.code, 'ERC_REPORT_INVALID');
+    assert.equal(result.erc.errorCount, 0);
+    assert.equal(result.erc.warningCount, 0);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

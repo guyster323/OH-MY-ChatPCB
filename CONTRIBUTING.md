@@ -38,8 +38,9 @@ Not allowed:
 
 The main ChatPCB runtime lives in this repository. The KiCad source fork work starts from:
 
+The KiCad source fork used during development is a local checkout of `https://github.com/guyster323/kicad-source-mirror` on branch `chatpcb-panel-scaffold`. Recheck that path on the current machine; older notes may say `C:\Users\windo\kicad-source-mirror-chatpcb`.
+
 ```powershell
-cd C:\Users\windo\kicad-source-mirror-chatpcb
 git checkout chatpcb-panel-scaffold
 ```
 

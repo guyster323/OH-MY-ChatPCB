@@ -266,11 +266,27 @@ function calculationEvidence() {
 
 function findSupportedProfile(spec) {
   const prompt = spec.sourcePrompt ?? '';
-  if (!/release\s+profile|supported\s+profile|release-quality|release quality/i.test(prompt)) {
+  const explicit = /release\s+profile|supported\s+profile|release-quality|release quality/i.test(prompt);
+  if (explicit) {
+    return SUPPORTED_PROFILES.find((profile) => spec.mcu?.family === profile.family) ?? null;
+  }
+
+  if (/jlcpcb|orderable|manufactur/i.test(prompt)) {
     return null;
   }
 
-  return SUPPORTED_PROFILES.find((profile) => spec.mcu?.family === profile.family) ?? null;
+  if (spec.mcu?.family === 'ESP32-S3' && looksLikeSupportedSensorBoard(prompt)) {
+    return SUPPORTED_PROFILES.find((profile) => profile.id === 'esp32-s3-usbc-sensor') ?? null;
+  }
+
+  return null;
+}
+
+function looksLikeSupportedSensorBoard(prompt) {
+  const hasSensor = /sensor|센서/i.test(prompt);
+  const hasUsb = /usb|usb-c|type-c/i.test(prompt);
+  const hasRail = /3\.3|3v3|\+3v3|전원|regulator/i.test(prompt);
+  return hasSensor && (hasUsb || hasRail);
 }
 
 function mergeInterfaces(existing = [], additions = []) {

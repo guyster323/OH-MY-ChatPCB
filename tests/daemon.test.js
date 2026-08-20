@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -243,6 +243,105 @@ test('daemon falls back to bounded generation then approved patch after a succes
     assert.equal(second.result.applied, true);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('daemon rejects generate and request calls that target the home directory', async () => {
+  const result = await dispatchToolCall({
+    name: 'schematic.generate',
+    args: {
+      projectDir: homedir(),
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'UNSAFE_PROJECT_DIR');
+});
+
+test('daemon restore after failed validation does not delete the project directory itself', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-dir-'));
+  const sentinel = path.join(root, 'user-note.txt');
+
+  try {
+    const generated = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: {
+        projectDir: root,
+        prompt: 'RP2040 board with USB-C power and I2C connector.'
+      }
+    });
+    await writeFile(sentinel, 'keep-me\n', 'utf8');
+    const before = await readFile(generated.result.files.spec, 'utf8');
+
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_restore_dir',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_unsafe_regenerate',
+            name: 'schematic.generate',
+            args: { prompt: 'STM32 board with USB-C power and UART header.' }
+          })
+        ],
+        validation: { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.rolledBack, true);
+    const dir = await readdir(root, { withFileTypes: true });
+    assert.ok(dir.some((entry) => entry.isDirectory() === false || entry.name));
+    assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
+    assert.equal(await readFile(sentinel, 'utf8'), 'keep-me\n');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon confines generate calls to an explicit workspace root', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-workspace-guard-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-workspace-outside-'));
+
+  try {
+    const rejected = await dispatchToolCall(
+      {
+        name: 'schematic.generate',
+        args: {
+          projectDir: outside,
+          prompt: 'RP2040 board with USB-C power and I2C connector.'
+        }
+      },
+      { allowedWorkspaceRoot: workspaceRoot }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.error.code, 'UNSAFE_PROJECT_DIR');
+
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Guarded Board' }
+    });
+    const allowed = await dispatchToolCall(
+      {
+        name: 'schematic.generate',
+        args: {
+          projectDir: created.result.projectDir,
+          prompt: 'RP2040 board with USB-C power and I2C connector.'
+        }
+      },
+      { allowedWorkspaceRoot: workspaceRoot }
+    );
+
+    assert.equal(allowed.ok, true);
+    assert.match(allowed.result.files.spec, /Guarded-Board/);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(outside, { force: true, recursive: true });
   }
 });
 

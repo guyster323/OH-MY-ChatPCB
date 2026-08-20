@@ -11,7 +11,7 @@ import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.j
 import { applySchematicPatch } from '../workflow/schematic-patch.js';
 import { simulateProject } from '../workflow/simulate-project.js';
 import { validateProject } from '../workflow/validate-project.js';
-import { createNamedProject } from '../workflow/project-workspace.js';
+import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { reviewCircuitReadiness } from '../workflow/review-project.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'simulate.spice'];
@@ -22,11 +22,18 @@ export async function dispatchToolCall(
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
     validateProjectImpl = validateProject,
-    providerControllers = new Map()
+    providerControllers = new Map(),
+    allowedWorkspaceRoot
   } = {}
 ) {
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
+  }
+
+  try {
+    guardToolProjectDir(call, allowedWorkspaceRoot);
+  } catch (error) {
+    return failure(error.code ?? 'UNSAFE_PROJECT_DIR', error.message);
   }
 
   switch (call.name) {
@@ -69,7 +76,8 @@ export async function dispatchToolCall(
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
           validateProjectImpl,
-          providerControllers
+          providerControllers,
+          allowedWorkspaceRoot
         })
       );
 
@@ -79,7 +87,8 @@ export async function dispatchToolCall(
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
           validateProjectImpl,
-          providerControllers
+          providerControllers,
+          allowedWorkspaceRoot
         })
       );
 
@@ -94,7 +103,7 @@ export async function dispatchToolCall(
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, autoApprovePatch = false, forceProjectDir = false }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -154,7 +163,13 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     }
     toolResults.push({
       id: event.payload.id,
-      ...(await dispatchToolCall(toolCall, { checkProviderAvailabilityImpl, runProviderProcessImpl, validateProjectImpl, providerControllers }))
+      ...(await dispatchToolCall(toolCall, {
+        checkProviderAvailabilityImpl,
+        runProviderProcessImpl,
+        validateProjectImpl,
+        providerControllers,
+        allowedWorkspaceRoot
+      }))
     });
   }
 
@@ -169,7 +184,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   };
 }
 
-async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers }) {
+async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, allowedWorkspaceRoot }) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -189,6 +204,7 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       checkProviderAvailabilityImpl,
       validateProjectImpl,
       providerControllers,
+      allowedWorkspaceRoot,
       autoApprovePatch: true,
       forceProjectDir: true
     });
@@ -251,8 +267,25 @@ async function snapshotProject(projectDir) {
 }
 
 async function restoreProjectSnapshot(snapshot, projectDir) {
-  await rm(projectDir, { force: true, recursive: true });
+  const currentEntries = await readdir(path.resolve(projectDir), { withFileTypes: true });
+  const snapshotNames = new Set(await readdir(snapshot.copy));
+
+  for (const entry of currentEntries) {
+    if (snapshotNames.has(entry.name)) {
+      await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
+    }
+  }
+
   await cp(snapshot.copy, projectDir, { recursive: true });
+}
+
+function guardToolProjectDir(call, allowedWorkspaceRoot) {
+  const projectDir = call.args?.projectDir;
+  if (typeof projectDir !== 'string' || projectDir.length === 0) {
+    return;
+  }
+
+  assertSafeProjectDir(projectDir, { allowedWorkspaceRoot });
 }
 
 function cancelProvider(args = {}, providerControllers) {
@@ -299,7 +332,8 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
   const providerControllers = dispatchOptions.providerControllers ?? new Map();
   const resolvedDispatchOptions = {
     ...dispatchOptions,
-    providerControllers
+    providerControllers,
+    allowedWorkspaceRoot: dispatchOptions.allowedWorkspaceRoot ?? process.env.CHATPCB_WORKSPACE_ROOT
   };
 
   const server = http.createServer(async (request, response) => {

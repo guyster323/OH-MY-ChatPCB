@@ -218,6 +218,8 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
     assert.equal(metadata.boardProfile.manufacturing.boardDraft.status, 'generated');
     assert.equal(metadata.boardProfile.manufacturing.boardDraft.file, 'chatpcb_mcu_peripheral.kicad_pcb');
+    assert.match(metadata.boardProfile.manufacturing.boardDraft.note, /conservative same-net traces/i);
+    assert.doesNotMatch(metadata.boardProfile.manufacturing.boardDraft.note, /placement-only/i);
     assert.equal(metadata.boardProfile.manufacturing.drc.status, 'pending');
     assert.equal(metadata.boardProfile.manufacturing.exports.gerber.status, 'pending');
     assert.equal(metadata.boardProfile.manufacturing.exports.drill.status, 'pending');
@@ -349,6 +351,10 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
       assert.doesNotMatch(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"/);
       assert.equal(boardHasSegmentNear(board, { x: 34.225, y: 55 }, { x: 51, y: 54.5 }), false);
       assert.ok(boardSegmentCount(board, 'GND') >= 1);
+      assert.ok(boardSegmentCount(board, 'SW_3V3') >= 1, `${profile} board should emit a detoured SW_3V3 route`);
+      assert.ok(boardSegmentCount(board, '+3V3') >= 1, `${profile} board should keep a +3V3 inductor-output route`);
+      assert.match(board, /\(at 12 82 0\)/);
+      assert.match(board, /\(at 36 82 0\)/);
     }
   } finally {
     await rm(root, { force: true, recursive: true });
