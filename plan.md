@@ -490,7 +490,7 @@ git log --oneline -1
 
 Continue Phase 8 from measured PCB drafts, not from stale unconnected counts:
 
-1. Official KiCad 10.0.3 remeasure after SW_3V3 detour routing: schematic ERC `0/0` for both profiles; PCB DRC ESP32-S3 `0` violations / `38` unconnected, STM32 `0` violations / `35` unconnected. USB-C (J4) pad-field fanout cannot be generated without clearance/solder-mask violations. Next routing work should use a filled copper pour or a hand-reviewed USB-C escape pattern, not centerline autoroutes through the HRO receptacle.
+1. Official KiCad 10.0.3 with `pcb drc --refill-zones`: schematic ERC `0/0`; PCB DRC ESP32-S3 `0` violations / `28` unconnected, STM32 `0` violations / `26` unconnected. Remaining unconnected items are mostly USB-C same-footprint pads. Do not centerline-autoroute the HRO receptacle. Next: a reviewed USB-C escape/pour pattern, then Gerbers only after unconnected is zero.
 2. Route remaining nets (especially GND and connector signals) without adding DRC violations. Do not resurrect naive global centerline autorouting.
 3. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.
 4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.

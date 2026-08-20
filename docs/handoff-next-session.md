@@ -636,7 +636,8 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 - Regenerated supported profiles in this checkout:
   - Schematic ERC: ESP32-S3 `0` errors/`0` warnings, STM32 `0` errors/`0` warnings.
   - PCB DRC: ESP32-S3 `0` violations / `38` unconnected items; STM32 `0` violations / `35` unconnected items.
-- Supported-profile boards now emit a detoured `SW_3V3` route (U1 to L1) using Manhattan legs. Direct USB-C pad-field fanout (VBUS/CC/USB data on J4) still cannot be generated without KiCad clearance/solder-mask violations, so those nets stay unconnected on purpose. Getting DRC unconnected to zero is blocked by the HRO USB-C pad pitch, not by missing router code.
+- Supported-profile boards now emit a detoured `SW_3V3` route (U1 to L1) using Manhattan legs. Direct USB-C pad-field fanout (VBUS/CC/USB data on J4) still cannot be generated without KiCad clearance/solder-mask violations, so those nets stay unconnected on purpose.
+- Supported-profile boards emit an F.Cu GND zone (outline inset, solid pad connection, no precomputed `filled_polygon`). Official KiCad 10.0.3 `pcb drc --refill-zones` fills it: ESP32-S3 `0` violations / `28` unconnected, STM32 `0` violations / `26` unconnected. Unfilled DRC does not count zone copper. Remaining unconnected items are mostly USB-C same-footprint power/data pads.
 - README Korean ESP32-S3 sensor prompt now selects `esp32-s3-usbc-sensor`. English JLCPCB/manufacturing prompts still stay on the blocked review loop unless they say `release profile`.
 - Invalid or missing ERC JSON now fails validation (`ERC_REPORT_INVALID`) instead of looking like a clean ERC.
 - Daemon generate/patch/request refuse the home directory and other protected paths. Failed validation restore no longer deletes the project directory node.

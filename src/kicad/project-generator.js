@@ -69,6 +69,7 @@ export function renderKiCadBoard({ baseName, schematic, boardProfile }) {
     })
     .join('\n');
   const segments = renderBoardSegments(padCentersByNet, netIds, profileMode);
+  const groundZone = renderGroundZone(netIds, profileMode);
 
   return `(kicad_pcb
   (version 20240108)
@@ -111,7 +112,46 @@ ${netDeclarations}
   )
 ${footprints}
 ${segments}
+${groundZone}
 )`;
+}
+
+function renderGroundZone(netIds, profileMode) {
+  const groundNetId = netIds.get('GND');
+  if (!profileMode || !groundNetId) {
+    return '';
+  }
+
+  const inset = 0.5;
+  const x0 = BOARD_OUTLINE.minX + inset;
+  const y0 = BOARD_OUTLINE.minY + inset;
+  const x1 = BOARD_OUTLINE.maxX - inset;
+  const y1 = BOARD_OUTLINE.maxY - inset;
+
+  return `  (zone
+    (net ${groundNetId})
+    (net_name "GND")
+    (layer "F.Cu")
+    (uuid "${randomUUID()}")
+    (hatch edge 0.5)
+    (connect_pads yes
+      (clearance 0.3)
+    )
+    (min_thickness 0.25)
+    (filled_areas_thickness no)
+    (fill
+      (thermal_gap 0.5)
+      (thermal_bridge_width 0.5)
+    )
+    (polygon
+      (pts
+        (xy ${sch(x0)} ${sch(y0)})
+        (xy ${sch(x1)} ${sch(y0)})
+        (xy ${sch(x1)} ${sch(y1)})
+        (xy ${sch(x0)} ${sch(y1)})
+      )
+    )
+  )`;
 }
 
 function boardPlacementFor(componentModel, index, profileMode) {

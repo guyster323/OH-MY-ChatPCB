@@ -78,7 +78,7 @@ function manufacturingMetadataFor(boardFileName) {
     boardDraft: {
       status: 'generated',
       file: boardFileName,
-      note: 'PCB draft with board outline, embedded footprints, conservative same-net traces, and supported-profile power-path routing; full routing signoff, DRC, Gerbers, and drill files remain pending.'
+      note: 'PCB draft with board outline, embedded footprints, conservative same-net traces, SW_3V3 detours, and an F.Cu GND zone that KiCad must refill (`pcb drc --refill-zones`) before DRC copper is counted; USB-C pad-field fanout, full routing signoff, Gerbers, and drill files remain pending.'
     },
     drc: {
       status: 'pending',

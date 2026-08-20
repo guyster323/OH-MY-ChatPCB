@@ -348,7 +348,11 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
       assert.match(board, /\(at 52 55 0\)/);
       assert.match(board, /\(at 78 54 0\)/);
       assert.match(board, /\(at 135 95 0\)/);
-      assert.doesNotMatch(board, /\(zone\s+\(net \d+\)\s+\(net_name "GND"/);
+      assert.match(
+        board,
+        /\(zone[\s\S]*?\(net_name "GND"\)[\s\S]*?\(layer "F\.Cu"\)[\s\S]*?\(fill\s+\(thermal_gap /
+      );
+      assert.doesNotMatch(board, /\(filled_polygon/);
       assert.equal(boardHasSegmentNear(board, { x: 34.225, y: 55 }, { x: 51, y: 54.5 }), false);
       assert.ok(boardSegmentCount(board, 'GND') >= 1);
       assert.ok(boardSegmentCount(board, 'SW_3V3') >= 1, `${profile} board should emit a detoured SW_3V3 route`);
