@@ -33,6 +33,7 @@ Implemented now:
 - Real Codex CLI provider smoke from panel chat without test injection
 - Source-level KiCad fork schematic editor integration for `CHATPCB_PANEL`
 - Supported-profile `.kicad_pcb` drafts: outline, embedded footprints, net table, conservative traces, and power-path routing
+- Board-level KiCad DRC workflow through `chatpcb drc` and the daemon `validate.drc` tool, including zone refill and typed violation/unconnected counts
 - SPICE fixture generation for simple analog support circuits
 - Local daemon and WebView websocket surface
 - Windows KiCad CLI discovery including `C:/Program Files/KiCad/10.0` and `9.0`
@@ -158,11 +159,23 @@ After opening the project (or its matching `.kicad_sch` in the schematic editor)
 ```powershell
 node ./bin/chatpcb-cli.js generate --project ./workspaces/demo --prompt "STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED."
 node ./bin/chatpcb-cli.js validate --project ./workspaces/demo
+node ./bin/chatpcb-cli.js drc --project ./workspaces/demo
 node ./bin/chatpcb-cli.js simulate --project ./workspaces/demo
 node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 ```
 
 `validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; the current generated MCU fixture is expected to validate with `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
+
+### ADBMS6830 BMS example
+
+Generate the schematic-only battery-monitor example with an explicit ADBMS6830 request:
+
+```powershell
+node ./bin/chatpcb-cli.js generate --project ./workspaces/adbms6830-16s-bms-example --prompt "ADBMS6830 16S Li-ion battery monitor with passive balancing, four 10k NTCs, and isoSPI."
+node ./bin/chatpcb-cli.js validate --project ./workspaces/adbms6830-16s-bms-example
+```
+
+The example assumes one 16S Li-ion stack (59.2V nominal, 67.2V at 4.2V/cell), includes 16 cell-tap inputs with 200R/10nF filter networks, 1k example balance resistors, four 10k NTC channels, an NPN VREG pass stage, and two isoSPI port pairs. It intentionally does **not** generate a PCB, and the U1 fixture has no assigned footprint or verified physical pin map. Charger, fuse, contactor, protection FET, and production safety design are also excluded. The generated review remains prototype-only until the exact ADBMS6830 package/pin revision, cell chemistry, protection strategy, balance thermal limits, high-voltage layout, isolation, sourcing, and fault testing are reviewed. The component reference is the [Analog Devices ADBMS6830 product page](https://www.analog.com/en/products/ADBMS6830.html); the current full pin/application detail publicly available from ADI is the closely related [ADBMS6830B datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/adbms6830b.pdf), so the example does not treat that B-variant pinout as final evidence for the requested A-variant.
 
 ## Architecture
 
@@ -182,6 +195,7 @@ The current tool-call names are:
 - `project.request`
 - `schematic.patch`
 - `validate.erc`
+- `validate.drc`
 - `simulate.spice`
 - `provider.status`
 - `provider.list`

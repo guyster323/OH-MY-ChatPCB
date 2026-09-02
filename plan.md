@@ -109,6 +109,7 @@ Current supported tool names:
 - `project.create`
 - `schematic.patch`
 - `validate.erc`
+- `validate.drc`
 - `simulate.spice`
 - `provider.status`
 - `provider.list`
@@ -119,7 +120,6 @@ Future tool names should stay action-oriented and explicit:
 
 - `schematic.patch`
 - `project.diff`
-- `validate.drc`
 - `export.bom`
 - `export.gerber`
 - `export.pdf`
@@ -269,7 +269,7 @@ Work items:
 - [x] Add `.kicad_pcb` draft generation with board outline.
 - [x] Add component placement suggestions.
 - [x] Embed official footprint bodies, pad nets, conservative traces, and supported-profile power paths.
-- [ ] Add DRC validation through `kicad-cli pcb drc` as a first-class ChatPCB tool.
+- [x] Add DRC validation through `kicad-cli pcb drc` as a first-class ChatPCB tool.
 - [ ] Add BOM export.
 - [ ] Add Gerber and drill export.
 - [ ] Add PDF/SVG export for review from the daemon/panel, not only from ad-hoc `kicad-cli`.
@@ -446,7 +446,7 @@ Acceptance criteria:
 - Supported profiles must not use a linear 3.3V regulator for the 5V to 3.3V 500mA release profile unless the thermal calculation, sourced package, copper area, ambient assumptions, and layout evidence prove it safe.
 - Supported profiles must not return `ready-for-release` while any release gate, production-part sourcing/datasheet/simulation evidence, release-evidence status, or calculation status is incomplete, warning, or blocker, even when ERC is clean.
 - Supported profiles must not return `ready-for-release` merely because a `.kicad_pcb` file exists; the generated board must have real footprint bodies or an equivalent KiCad-updated board, reviewed placement/routing/zones/constraints, PCB DRC with zero violations, and generated Gerber/drill outputs.
-- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; both supported profiles currently have zero PCB DRC violations, but STM32 still has `37` unconnected items and ESP32-S3 still has `40` unconnected items.
+- Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; both supported profiles currently have zero PCB DRC violations, but STM32 still has `22` unconnected items and ESP32-S3 still has `24` unconnected items.
 - PCB trace scaffolding must not reduce unconnected items by introducing new KiCad DRC violations; unsafe global or high-density centerline traces should remain review-loop findings instead of generated board copper.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
 - `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
@@ -490,8 +490,8 @@ git log --oneline -1
 
 Continue Phase 8 from measured PCB drafts, not from stale unconnected counts:
 
-1. Official KiCad 10.0.3 with `pcb drc --refill-zones`: schematic ERC `0/0`; PCB DRC ESP32-S3 `0` violations / `28` unconnected, STM32 `0` violations / `26` unconnected. Remaining unconnected items are mostly USB-C same-footprint pads. Do not centerline-autoroute the HRO receptacle. Next: a reviewed USB-C escape/pour pattern, then Gerbers only after unconnected is zero.
-2. Route remaining nets (especially GND and connector signals) without adding DRC violations. Do not resurrect naive global centerline autorouting.
+1. Official KiCad 10.0.3 with `pcb drc --refill-zones`: schematic ERC `0/0`; after the measured CC1/CC2 and I2C escape increments, PCB DRC ESP32-S3 is `0` violations / `24` unconnected and STM32 is `0` violations / `22` unconnected. VBUS, USB data, +3V3, and reset/boot remain incomplete; I2C J2-to-pull-up paths are now routed. Do not centerline-autoroute the HRO receptacle. Next: a reviewed USB-C VBUS/data escape or pour pattern, then Gerbers only after unconnected is zero.
+2. Route remaining nets (especially VBUS, USB data, +3V3, reset/boot, and connector signals) without adding DRC violations. Do not resurrect naive global centerline autorouting. Keep the ADBMS6830 BMS profile as a schematic-only cell monitor unless an exact part/package and high-voltage safety scope are approved.
 3. Generate Gerbers and drill files only after PCB DRC has zero violations and zero unconnected items.
 4. Add live orderable JLCPCB/LCSC part evidence for the supported regulator, inductor, USB-C connector, headers, passives, switch, LED, and MCU/module choices.
 5. Fill `boardProfile.productionParts[*].releaseChecks.datasheet` with pin/rating/footprint evidence.

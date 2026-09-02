@@ -56,6 +56,7 @@ The v1 generator produces review drafts for MCU peripheral circuits. It writes:
 - `sym-lib-table`
 - `.chatpcb.json`
 - `_simulation.cir`
+- `.kicad_pcb` for supported board profiles
 
 The schematic uses project-local ChatPCB fixture symbols, wire stubs, net labels, no-connect markers for intentionally unused optional pins, and review notes. ChatPCB metadata stays in `.chatpcb.json`; custom top-level `chatpcb_*` schematic nodes are not allowed.
 
@@ -71,3 +72,7 @@ KiCad CLI lookup order:
 If KiCad CLI or ngspice is missing, commands return `ok: true` with `skipped: true` and a typed reason.
 
 ERC and readiness are deliberately separate. ERC reports schematic electrical-rule errors and warnings. It does not run PCB DRC and cannot establish manufacturing readiness. The readiness review also accounts for unresolved parts, sourcing, datasheet checks, simulations, layout/DRC evidence, and other release gates; therefore `validation.erc.errorCount === 0` may coexist with warnings or a blocked review.
+
+Board validation is exposed separately as `validate.drc` and `chatpcb drc`. It runs `pcb drc --refill-zones --format json`, parses both `violations` and `unconnected_items`, and reports `ok: true` only when the KiCad command succeeds with zero entries in both arrays. A missing KiCad CLI or board returns typed `skipped` output; a malformed report or a real DRC finding returns `ok: false`.
+
+The ADBMS6830 path is intentionally schematic-only. It creates a named 16S Li-ion example with cell-tap filters, passive-balance branches, NTC inputs, an example VREG pass stage, and isoSPI connectors, while keeping the PCB artifact absent until the exact device variant, high-voltage safety architecture, placement, isolation, and manufacturing evidence are reviewed.

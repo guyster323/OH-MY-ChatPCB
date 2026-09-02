@@ -33,3 +33,23 @@ test('chatpcb CLI generates an MCU peripheral project', async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('chatpcb CLI exposes board-level DRC validation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-cli-drc-'));
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [path.resolve('bin/chatpcb-cli.js'), 'drc', '--project', root],
+      { cwd: process.cwd(), encoding: 'utf8' }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.result.skipped, true);
+    assert.equal(payload.result.reason.code, 'NO_BOARD');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

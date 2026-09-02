@@ -724,3 +724,51 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
   - `integration works`: still yes.
   - `cross-profile PCB DRC violations`: still `0` for both generated PCB drafts.
   - `release-quality circuit`: still no. Both profiles still have unconnected PCB items, no completed routing/zones, no Gerber/drill outputs, no sourced BOM evidence, and no datasheet/manufacturing signoff.
+
+## 2026-08-30 Board DRC workflow and CC escape increment
+
+- Added `validateBoard` and the `validate.drc` daemon tool plus `chatpcb drc --project <dir>` CLI command.
+- Board validation runs official KiCad `pcb drc --refill-zones --format json`, parses `violations` and `unconnected_items`, and returns `ok: true` only for zero entries in both arrays. Invalid reports and missing prerequisites remain typed results.
+- Added profile-aware CC1/CC2 escape routing outside the dense HRO USB-C pad field. The existing different-net and cross-segment safety checks remain active; the same-footprint `0.45mm` candidate relaxation is accepted only after the live KiCad check.
+- Official KiCad CLI: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`, version `10.0.3`.
+- Fresh `pcb drc --refill-zones` results after regeneration:
+  - ESP32-S3: `0` violations / `26` unconnected items.
+  - STM32: `0` violations / `24` unconnected items.
+- The CC escape reduced the previous `28`/`26` unconnected counts without retaining the attempted clearance-violating CC1 centerline route. VBUS same-footprint fanout, USB data, +3V3, reset/boot, and I2C connections remain incomplete.
+- Release decision: both profiles remain `ready-for-prototype-review`, not release-ready. Gerber/drill export is still gated on zero violations and zero unconnected items.
+- Verification:
+  - `npm test`: `102/102` pass.
+  - `npm run verify:sample`: pass; simulation reports typed `NGSPICE_UNAVAILABLE` skip.
+  - `npm run verify:panel`: pass.
+  - `npm run verify:ui`: pass.
+
+## 2026-08-30 ADBMS6830 16S BMS example
+
+- Added the `adbms6830-16s-bms-example` profile, selected by prompts containing `ADBMS6830` or `ADBMS 6830`.
+- The profile generates a schematic-only `battery-monitor` project and intentionally omits `.kicad_pcb` until high-voltage placement, isolation, exact device variant, and safety review are complete.
+- The example assumption is one 16S Li-ion stack: `59.2V` nominal and `67.2V` at `4.2V` per cell.
+- Generated topology includes 16 cell-tap inputs, 200R/10nF cell-input filters, 1k example passive-balance branches, four 10k NTC channels, an NPN DRIVE/VREG pass stage, VREF1/VREF2/VREG bypass capacitors, and two isoSPI port pairs.
+- After review, U1 intentionally has no assigned footprint and the profile carries `pinMapStatus: unverified-example-only`; its sequential fixture pins must not be treated as the requested ADBMS6830 physical package pinout.
+- Official KiCad 10.0.3 ERC: `0` errors / `0` warnings. SVG and PDF schematic exports both pass.
+- The example remains `ready-for-prototype-review`, not release-ready. Exact ADBMS6830 package/pin revision, cell chemistry, charger/protection architecture, fuse/contactors, balancing thermal analysis, isolation, high-voltage layout, sourcing, and fault testing remain pending.
+- Reference materials: Analog Devices [ADBMS6830 product page](https://www.analog.com/en/products/ADBMS6830.html) and related official [ADBMS6830B full datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/adbms6830b.pdf) used only as application/pin guidance; the B-variant is not treated as final evidence for the requested A-variant.
+
+## 2026-08-31 I2C signal-routing increment
+
+- Kept the ADBMS6830 project unchanged as a schematic-only cell-monitor example; this increment only improves the supported ESP32-S3 and STM32 PCB profiles.
+- Added explicit bounded SCL and SDA waypoint routes from J2 to R4/R5. The renderer uses the existing 30 mm maximum-leg, 1.0 mm other-net pad-keepout, and cross-net segment-intersection checks.
+- Root-cause measurements rejected the first SCL chain because it crossed J3 TX, then rejected the first SDA chain because it crossed the accepted CC2 escape. The final route moves SCL above J3 and SDA below/right of the CC2 escape instead of weakening either safety gate.
+- Official KiCad CLI: `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`, version `10.0.3`; `pcb drc --refill-zones` after fresh regeneration reports:
+  - ESP32-S3: `0` violations / `24` unconnected items (from `26`).
+  - STM32: `0` violations / `22` unconnected items (from `24`).
+- Verification: `npm test` passed `107/107`; `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` passed. The sample simulation retained the expected `NGSPICE_UNAVAILABLE` typed skip.
+- RESET/BOOT investigation: the switches are common, but their J7 endpoints differ by profile (ESP32 RESET/BOOT at `(47, 71.16)`/`(49.54, 71.16)`; STM32 at `(49.54, 66.08)`/`(47, 68.62)`). Do not add one fixed shared anchor chain without a profile-specific clearance/intersection measurement.
+- Release decision: not release-ready. Next PCB increments are RESET/BOOT only if their routes preserve the same gates, then placement/power topology and a reviewed USB-C VBUS/data escape. Gerber/drill export remains blocked until both DRC counts are zero.
+
+## 2026-08-31 DRC net diagnostics and routing-model finding
+
+- `validateBoard` now exposes `drc.unconnectedByNet`, parsed from KiCad's unconnected-item endpoint descriptions. Fresh results are ESP32-S3 `{ VBUS: 6, +3V3: 12, RESET: 1, BOOT: 1, USB_DP: 2, USB_DN: 2 }` and STM32 `{ VBUS: 6, +3V3: 12, RESET: 1, BOOT: 1, USB_DP: 1, USB_DN: 1 }`.
+- A temporary 2 mm center-point grid route for RESET/BOOT was tested with live KiCad 10.0.3 DRC. It reduced the signal ratsnest edges but produced 6 ESP32-S3 and 8 STM32 clearance violations, including J2/J5/J7 pads and the switch ground pad.
+- Root cause: center-to-segment distance does not represent actual pad outline clearance; after adding same-net-pad avoidance, RESET and BOOT also competed for the same profile corridor. The temporary routing code and tests were removed.
+- The retained output is safe: fresh DRC after removal is ESP32-S3 `0 violations / 24 unconnected`, STM32 `0 violations / 22 unconnected`; `npm test` passes `107/107`.
+- Before attempting RESET/BOOT, +3V3, VBUS, or USB data again, replace the center-only routing model with pad-shape/layer-aware clearance geometry and explicit per-net corridor reservation. The ADBMS6830 BMS profile remains schematic-only and unchanged.

@@ -37,6 +37,100 @@ test('daemon rejects unknown tool calls with a typed failure', async () => {
   assert.equal(result.error.code, 'UNKNOWN_TOOL');
 });
 
+test('daemon dispatches board-level DRC validation', async () => {
+  const calls = [];
+  const result = await dispatchToolCall(
+    {
+      name: 'validate.drc',
+      args: {
+        projectDir: 'C:/workspace/demo',
+        kicadCliPath: 'C:/KiCad/bin/kicad-cli.exe'
+      }
+    },
+    {
+      validateBoardImpl: async (args) => {
+        calls.push(args);
+        return {
+          ok: false,
+          skipped: false,
+          report: 'C:/workspace/demo/chatpcb-drc.json',
+          drc: {
+            violationCount: 1,
+            unconnectedCount: 2,
+            byType: { clearance: 1, unconnected_items: 2 }
+          }
+        };
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.ok, false);
+  assert.deepEqual(result.result.drc, {
+    violationCount: 1,
+    unconnectedCount: 2,
+    byType: { clearance: 1, unconnected_items: 2 }
+  });
+  assert.deepEqual(calls, [
+    {
+      projectDir: 'C:/workspace/demo',
+      kicadCliPath: 'C:/KiCad/bin/kicad-cli.exe'
+    }
+  ]);
+});
+
+test('daemon lets a provider invoke board-level DRC validation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-drc-'));
+
+  try {
+    const result = await dispatchToolCall(
+      {
+        id: 'call_provider_drc',
+        name: 'provider.invoke',
+        args: {
+          provider: 'codex',
+          projectDir: root,
+          prompt: 'Run board DRC.'
+        }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async ({ allowedToolNames }) => {
+          assert.ok(allowedToolNames.includes('validate.drc'));
+          return {
+            exitCode: 0,
+            stderr: '',
+            events: [
+              createEnvelope('tool.call', {
+                id: 'call_provider_drc_tool',
+                name: 'validate.drc',
+                args: {}
+              })
+            ]
+          };
+        },
+        validateBoardImpl: async ({ projectDir }) => ({
+          ok: true,
+          skipped: false,
+          projectDir,
+          drc: { violationCount: 0, unconnectedCount: 0, byType: {} }
+        })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.toolResults[0].ok, true);
+    assert.equal(result.result.toolResults[0].result.drc.unconnectedCount, 0);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon dispatches schematic.patch as an approval-gated preview', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-patch-'));
 

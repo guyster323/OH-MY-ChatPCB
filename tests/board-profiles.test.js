@@ -244,6 +244,46 @@ test('generic STM32 prompt without sensor or USB-C stays off the supported profi
   }
 });
 
+test('ADBMS6830 prompt selects a schematic-only 16S BMS example profile', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-profile-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'ADBMS6830 16S Li-ion battery monitor with passive balancing, four 10k NTCs, and isoSPI.'
+    });
+
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    const parts = new Map(metadata.boardProfile.productionParts.map((part) => [part.ref, part]));
+
+    assert.equal(metadata.kind, 'battery-monitor');
+    assert.equal(metadata.boardProfile.id, 'adbms6830-16s-bms-example');
+    assert.equal(metadata.boardProfile.kind, 'bms');
+    assert.equal(metadata.boardProfile.cellCount, 16);
+    assert.equal(metadata.boardProfile.pcbDraft, false);
+    assert.equal(metadata.boardProfile.pinMapStatus, 'unverified-example-only');
+    assert.equal(metadata.mcu.package, 'ADBMS6830');
+    assert.equal(metadata.power.input, 'battery-stack');
+    assert.equal(result.files.board, undefined);
+    assert.equal(parts.get('U1')?.value, 'ADBMS6830');
+    assert.equal(parts.get('U1')?.footprint, '');
+    assert.equal(metadata.schematic.components.find((component) => component.ref === 'U1')?.footprint, '');
+    assert.equal(parts.get('J1')?.role, '16s-cell-tap-header');
+    assert.equal(parts.get('R1')?.value, '200R');
+    assert.equal(parts.get('C1')?.value, '10nF');
+    assert.equal(parts.get('RB16')?.value, '1k');
+    assert.equal(parts.get('Q1')?.role, 'vreg-pass-transistor');
+    assert.ok(metadata.boardProfile.releaseGates.some((gate) => gate.id === 'safety-review'));
+    assert.ok(metadata.boardProfile.releaseEvidence.calculations.some((calculation) => calculation.id === 'pack-voltage-envelope'));
+    assert.equal(result.review.status, 'ready-for-prototype-review');
+    assert.ok(result.review.findings.warnings.some((finding) => finding.code === 'bms-example-only'));
+    assert.ok(!result.review.findings.notes.some((finding) => /USB-C sensor profile/i.test(finding.message)));
+    assert.ok(result.review.residualRisks.some((risk) => /safety-review/i.test(risk)));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 function assertProductionEvidence(metadata, { mcuRef, mcuValue, debugRole }) {
   const parts = metadata.boardProfile.productionParts;
   assert.ok(Array.isArray(parts), 'supported profiles should publish production part evidence');

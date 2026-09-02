@@ -23,12 +23,13 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
   const schematic = buildMcuSchematicAst(spec);
   const baseName = sanitizeProjectName(projectName);
   const boardFileName = `${baseName}.kicad_pcb`;
+  const hasBoardDraft = Boolean(spec.boardProfile?.id && spec.boardProfile?.pcbDraft !== false);
   const projectMetadata = {
     ...spec,
     boardProfile: spec.boardProfile
       ? {
           ...spec.boardProfile,
-          manufacturing: manufacturingMetadataFor(boardFileName)
+          ...(hasBoardDraft ? { manufacturing: manufacturingMetadataFor(boardFileName) } : {})
         }
       : spec.boardProfile,
     schematic
@@ -44,7 +45,7 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
     spec: path.join(projectDir, `${baseName}.chatpcb.json`)
   };
 
-  if (projectMetadata.boardProfile?.id) {
+  if (hasBoardDraft) {
     files.board = path.join(projectDir, boardFileName);
   }
 
@@ -78,11 +79,11 @@ function manufacturingMetadataFor(boardFileName) {
     boardDraft: {
       status: 'generated',
       file: boardFileName,
-      note: 'PCB draft with board outline, embedded footprints, conservative same-net traces, SW_3V3 detours, and an F.Cu GND zone that KiCad must refill (`pcb drc --refill-zones`) before DRC copper is counted; USB-C pad-field fanout, full routing signoff, Gerbers, and drill files remain pending.'
+      note: 'PCB draft with board outline, embedded footprints, conservative same-net traces, SW_3V3 detours, safe CC1/CC2 escapes, and an F.Cu GND zone that KiCad must refill (`pcb drc --refill-zones`) before DRC copper is counted; VBUS/USB-data pad-field fanout, full routing signoff, Gerbers, and drill files remain pending.'
     },
     drc: {
       status: 'pending',
-      reason: 'PCB DRC has not been run on a routed manufacturing board.'
+      reason: 'Board DRC is measured, but supported-profile drafts still contain unconnected items; release requires zero violations and zero unconnected items.'
     },
     exports: {
       gerber: {

@@ -47,6 +47,42 @@ const PROFILE_INTERFACES = [
   { kind: 'gpio', pins: ['GPIO0', 'GPIO1', 'GPIO2', '+3V3', 'GND'] }
 ];
 
+const BMS_CELL_COUNT = 16;
+const ADBMS6830_BMS_PROFILE_ID = 'adbms6830-16s-bms-example';
+
+const BMS_RELEASE_GATES = [
+  {
+    id: 'production-symbols',
+    status: 'pending',
+    reason: 'An exact ADBMS6830 symbol and package variant must be matched to the selected Analog Devices orderable part.'
+  },
+  {
+    id: 'sourcing',
+    status: 'pending',
+    reason: 'Exact ADBMS6830, connector, resistor, capacitor, NPN, and balancing-part orderability has not been verified.'
+  },
+  {
+    id: 'datasheet-pin-review',
+    status: 'pending',
+    reason: 'Cell-input, balance, VREG, reference, GPIO, and isoSPI pin mapping must be checked against the exact ADBMS6830 revision.'
+  },
+  {
+    id: 'safety-review',
+    status: 'pending',
+    reason: 'Cell chemistry, pack limits, fuse/protection FETs, charger behavior, creepage, fault handling, and balancing thermal limits are not designed here.'
+  },
+  {
+    id: 'simulation',
+    status: 'pending',
+    reason: 'Cell-input filtering, VREG startup, balancing current, thermistor behavior, and fault cases need simulation or calculation evidence.'
+  },
+  {
+    id: 'layout-drc',
+    status: 'pending',
+    reason: 'The BMS example is schematic-only; high-voltage layout, isolation, DRC, Gerbers, and manufacturing constraints are not generated.'
+  }
+];
+
 const COMMON_PRODUCTION_PARTS = [
   part('J1', 'power-input-header', 'Connector_Generic:Conn_01x02', 'POWER_INPUT', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical'),
   part('U1', '3v3-buck-regulator', 'Regulator_Switching:TPS62177DQC', 'TPS62177DQC', 'Package_SON:WSON-10-1EP_2x3mm_P0.5mm_EP0.84x2.4mm_ThermalVias', {
@@ -104,6 +140,11 @@ const RELEASE_GATES = [
 ];
 
 export function applyBoardProfile(spec) {
+  const bmsProfile = applyAdbms6830Profile(spec);
+  if (bmsProfile) {
+    return bmsProfile;
+  }
+
   const profile = findSupportedProfile(spec);
   if (!profile) {
     return spec;
@@ -155,6 +196,71 @@ export function applyBoardProfile(spec) {
   };
 }
 
+function applyAdbms6830Profile(spec) {
+  const prompt = spec.sourcePrompt ?? '';
+  if (!/adbms[\s-]?6830/i.test(prompt)) {
+    return null;
+  }
+
+  const cellTaps = Array.from({ length: BMS_CELL_COUNT + 1 }, (_value, index) => `PACK_B${index}`);
+  return {
+    ...spec,
+    kind: 'battery-monitor',
+    mcu: {
+      family: 'ADBMS6830',
+      package: 'ADBMS6830',
+      role: '16-channel-battery-monitor'
+    },
+    power: {
+      input: 'battery-stack',
+      rails: [
+        { name: 'PACK_STACK', voltage: 67.2, source: '16S Li-ion example maximum' },
+        { name: 'VREG', voltage: 5, source: 'ADBMS6830 local pass-transistor example' },
+        { name: 'VREF1', voltage: 3, source: 'ADBMS6830 reference output' },
+        { name: 'VREF2', voltage: 3, source: 'ADBMS6830 thermistor reference output' }
+      ]
+    },
+    interfaces: [
+      { kind: 'cell-taps', pins: cellTaps },
+      { kind: 'isoSPI', pins: ['ISOPA', 'ISOMA', 'ISOPB', 'ISOMB'] },
+      { kind: 'temperature', pins: ['TEMP1', 'TEMP2', 'TEMP3', 'TEMP4'] }
+    ],
+    peripherals: [
+      { kind: 'cell-input-filters', cellCount: BMS_CELL_COUNT, resistor: '200R', capacitor: '10nF' },
+      { kind: 'passive-cell-balancing', cellCount: BMS_CELL_COUNT, resistor: '1k' },
+      { kind: 'ntc-temperature-sensing', channelCount: 4, nominalResistance: '10k' },
+      { kind: 'vreg-pass-transistor', topology: 'DRIVE-controlled NPN with ferrite and reservoir capacitor' },
+      { kind: 'isoSPI-daisy-chain', ports: 2 }
+    ],
+    simulationGoals: ['cell-input-filter-response', 'passive-balance-current-estimate', 'vreg-pass-network'],
+    boardProfile: {
+      id: ADBMS6830_BMS_PROFILE_ID,
+      kind: 'bms',
+      family: 'ADBMS6830',
+      part: 'ADBMS6830',
+      cellCount: BMS_CELL_COUNT,
+      cellChemistry: 'Li-ion example assumption',
+      releaseTarget: 'example-review',
+      pcbDraft: false,
+      pinMapStatus: 'unverified-example-only',
+      assumptions: [
+        'This example assumes one 16S Li-ion stack: 3.7V nominal and 4.2V full-charge per cell.',
+        'The 59.2V nominal and 67.2V full-charge values are example calculations, not a validated pack specification.',
+        'The example monitors cells and shows passive balancing paths; it does not implement charger, fuse, contactor, or over-current/over-voltage protection.',
+        'The ADBMS6830 product page lists 72-/80-lead package options; the exact orderable package and pinout must be selected before fabrication.',
+        'The 1kΩ balance resistor is a conservative example value and is not a final thermal or balancing-time decision.'
+      ],
+      releaseGates: BMS_RELEASE_GATES.map((gate) => ({ ...gate })),
+      releaseEvidence: {
+        status: 'incomplete',
+        requiredChecks: ['safetyReview', 'sourcing', 'datasheet', 'simulation', 'layoutDrc'],
+        calculations: bmsCalculationEvidence()
+      },
+      productionParts: productionPartsForBms()
+    }
+  };
+}
+
 function productionPartsFor(profile) {
   return [
     withReleaseChecks(profile.mcuPart),
@@ -164,6 +270,109 @@ function productionPartsFor(profile) {
         requirements: profile.debug.nets.map((net) => `Expose ${net}`)
       })
     )
+  ];
+}
+
+function productionPartsForBms() {
+  const parts = [
+    part('U1', '16-channel-battery-monitor', 'ChatPCB:ADBMS6830', 'ADBMS6830', '', {
+      requirements: [
+        'Measure up to 16 series cells',
+        'Use the exact Analog Devices package/orderable variant',
+        'Connect exposed pad and all V− pins to the pack-negative reference'
+      ],
+      simulation: true
+    }),
+    part('J1', '16s-cell-tap-header', 'Connector_Generic:Conn_01x17', '16S_CELL_TAPS', 'Connector_PinHeader_2.54mm:PinHeader_1x17_P2.54mm_Vertical', {
+      requirements: ['Expose PACK_B0 through PACK_B16 in ascending cell-stack order']
+    }),
+    part('J2', 'isoSPI-header', 'Connector_Generic:Conn_01x06', 'ISOSPI_HOST', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical', {
+      requirements: ['Expose both bidirectional isoSPI port pairs and local reference']
+    }),
+    part('J4', 'temperature-header', 'Connector_Generic:Conn_01x06', 'TEMPERATURE_INPUTS', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical', {
+      requirements: ['Expose four 10k NTC channels, VREF2, and pack-negative reference']
+    }),
+    part('Q1', 'vreg-pass-transistor', 'ChatPCB:BMS_NPN', 'NPN_PASS', 'Package_TO_SOT_SMD:SOT-23', {
+      requirements: ['Provide sufficient beta and thermal dissipation for the exact VREG load']
+    }),
+    part('FB1', 'vreg-ferrite-bead', 'Device:L', 'VREG_FERRITE', 'Inductor_SMD:L_0603_1608Metric')
+  ];
+
+  for (let index = 1; index <= BMS_CELL_COUNT; index += 1) {
+    parts.push(
+      part(`R${index}`, 'cell-input-filter-resistor', 'Device:R', '200R', 'Resistor_SMD:R_0603_1608Metric', {
+        requirements: ['Place at the ADBMS6830 cell-input pin; confirm shared-pin and depopulation rules'],
+        simulation: true
+      }),
+      part(`C${index}`, 'cell-input-differential-filter', 'Device:C', '10nF', 'Capacitor_SMD:C_0603_1608Metric', {
+        requirements: ['Differential filter capacitor between adjacent filtered cell taps'],
+        simulation: true
+      }),
+      part(`RB${index}`, 'passive-balance-resistor', 'Device:R', '1k', 'Resistor_SMD:R_1206_3216Metric', {
+        requirements: ['Example cell discharge resistor; verify balancing current and thermal rise before population'],
+        simulation: true
+      })
+    );
+  }
+
+  parts.push(
+    part('R17', 'drive-pin-filter-resistor', 'Device:R', '10R', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+    part('R18', 'vreg-collector-filter-resistor', 'Device:R', '330R', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+    part('C17', 'drive-pin-filter-capacitor', 'Device:C', '10nF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+    part('C18', 'vreg-collector-filter-capacitor', 'Device:C', '10nF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+    part('C19', 'vreg-reservoir-capacitor', 'Device:C', '1uF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+    part('C20', 'vref1-bypass-capacitor', 'Device:C', '1uF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true }),
+    part('C21', 'vref2-bypass-capacitor', 'Device:C', '1uF', 'Capacitor_SMD:C_0603_1608Metric', { simulation: true })
+  );
+
+  for (let index = 1; index <= 4; index += 1) {
+    parts.push(
+      part(`R${19 + index}`, 'ntc-pullup-resistor', 'Device:R', '10k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true }),
+      part(`R${23 + index}`, 'ntc-thermistor', 'Device:R', 'NTC_10k', 'Resistor_SMD:R_0603_1608Metric', { simulation: true })
+    );
+  }
+
+  return parts.map((item) => withReleaseChecks(item));
+}
+
+function bmsCalculationEvidence() {
+  return [
+    {
+      id: 'pack-voltage-envelope',
+      status: 'warning',
+      subjectRefs: ['U1', 'J1'],
+      assumptions: ['16 series Li-ion cells', '3.7V nominal per cell', '4.2V full-charge per cell'],
+      equation: '16 * 3.7V = 59.2V nominal; 16 * 4.2V = 67.2V full-charge',
+      result: 'Illustrative 16S pack envelope is 59.2V nominal and 67.2V at full charge.',
+      releaseImpact: 'Confirm chemistry, cell count, ADBMS6830 V+ limits, connector sequencing, and pack protection before energizing.'
+    },
+    {
+      id: 'cell-input-filter',
+      status: 'warning',
+      subjectRefs: ['U1'],
+      assumptions: ['200R cell-input filter resistance', '10nF differential filter capacitance'],
+      equation: 'fc = 1 / (2*pi*200R*10nF) = 79.6kHz',
+      result: 'The example uses the 200R/10nF input-filter values described in the related ADI monitor application guidance.',
+      releaseImpact: 'Verify the exact ADBMS6830 revision, shared-resistor rules, depopulated-cell behavior, and measurement error before release.'
+    },
+    {
+      id: 'passive-balance-current',
+      status: 'warning',
+      subjectRefs: ['U1', 'RB1', 'RB16'],
+      assumptions: ['4.2V cell', '1k example balance resistor', '4R internal switch resistance as a related monitor reference'],
+      equation: '4.2V / (1000R + 4R) = 4.18mA',
+      result: 'The example balance branch is intentionally low-current; it is not a final balancing-time or thermal design.',
+      releaseImpact: 'Confirm the exact ADBMS6830 switch specification, resistor pulse rating, cell chemistry, and required balancing time.'
+    },
+    {
+      id: 'vreg-pass-network',
+      status: 'warning',
+      subjectRefs: ['U1', 'Q1', 'R17', 'R18', 'C17', 'C18', 'C19'],
+      assumptions: ['DRIVE-controlled NPN pass stage', '10R/10nF DRIVE filter', '330R/10nF collector filter', '1uF VREG reservoir'],
+      equation: 'VREG and transistor dissipation require the actual stack voltage, load, beta, and thermal design',
+      result: 'The example includes the documented pass-transistor topology but does not prove startup, regulation, or thermal margins.',
+      releaseImpact: 'Validate the exact ADBMS6830 VREG/DRIVE requirements and NPN choice under all pack and communication conditions.'
+    }
   ];
 }
 

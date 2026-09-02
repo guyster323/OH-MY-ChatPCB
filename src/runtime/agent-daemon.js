@@ -11,10 +11,11 @@ import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.j
 import { applySchematicPatch } from '../workflow/schematic-patch.js';
 import { simulateProject } from '../workflow/simulate-project.js';
 import { validateProject } from '../workflow/validate-project.js';
+import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { reviewCircuitReadiness } from '../workflow/review-project.js';
 
-const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'simulate.spice'];
+const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
 export async function dispatchToolCall(
   call,
@@ -22,6 +23,7 @@ export async function dispatchToolCall(
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
     validateProjectImpl = validateProject,
+    validateBoardImpl = validateBoard,
     providerControllers = new Map(),
     allowedWorkspaceRoot
   } = {}
@@ -52,6 +54,9 @@ export async function dispatchToolCall(
     case 'validate.erc':
       return ok(await validateProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
 
+    case 'validate.drc':
+      return ok(await validateBoardImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
+
     case 'schematic.patch':
       return ok(
         await applySchematicPatch({
@@ -76,6 +81,7 @@ export async function dispatchToolCall(
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
           validateProjectImpl,
+          validateBoardImpl,
           providerControllers,
           allowedWorkspaceRoot
         })
@@ -87,6 +93,7 @@ export async function dispatchToolCall(
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
           validateProjectImpl,
+          validateBoardImpl,
           providerControllers,
           allowedWorkspaceRoot
         })
@@ -103,7 +110,7 @@ export async function dispatchToolCall(
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -167,6 +174,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
         checkProviderAvailabilityImpl,
         runProviderProcessImpl,
         validateProjectImpl,
+        validateBoardImpl,
         providerControllers,
         allowedWorkspaceRoot
       }))
@@ -184,7 +192,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   };
 }
 
-async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, providerControllers, allowedWorkspaceRoot }) {
+async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot }) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -203,6 +211,7 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       runProviderProcessImpl,
       checkProviderAvailabilityImpl,
       validateProjectImpl,
+      validateBoardImpl,
       providerControllers,
       allowedWorkspaceRoot,
       autoApprovePatch: true,

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
+import { boardPadGeometry } from './pad-geometry.js';
+
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
 const BOARD_TRACE_PAD_KEEP_OUT_MM = 0.8;
@@ -17,6 +19,12 @@ const PROFILE_BOARD_PLACEMENTS = {
 const PROFILE_POWER_PATHS = [
   ['SW_3V3', ['U1', 'L1'], { relaxSameFootprint: true }],
   ['+3V3', ['L1', 'C2'], { relaxSameFootprint: false }]
+];
+const PROFILE_SIGNAL_PATHS = [
+  ['CC1', ['J4', 'R1'], { route: 'usb-c-escape', relaxSameFootprint: true }],
+  ['CC2', ['J4', 'R2'], { route: 'usb-c-escape', relaxSameFootprint: true }],
+  ['SCL', ['J2', 'R4'], { anchors: [{ x: 47, y: 39 }, { x: 70, y: 39 }, { x: 90, y: 60 }, { x: 113, y: 60 }] }],
+  ['SDA', ['J2', 'R5'], { anchors: [{ x: 42, y: 45.54 }, { x: 42, y: 65 }, { x: 44, y: 90 }, { x: 26, y: 90 }] }]
 ];
 const BOARD_OUTLINE = { minX: 10, minY: 10, maxX: 160, maxY: 120 };
 const BOARD_ROUTE_ESCAPE_OFFSETS_MM = [2, 4, 6, 8, 10, 12, 16];
@@ -161,6 +169,10 @@ function boardPlacementFor(componentModel, index, profileMode) {
 }
 
 export function buildMcuSchematicAst(spec) {
+  if (spec.boardProfile?.kind === 'bms') {
+    return buildBmsSchematicAst(spec);
+  }
+
   const profileMode = Boolean(spec.boardProfile?.id);
   const mcuConnectedPins = unique(['+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']);
   const mcuLibId = mcuSymbolFor(spec);
@@ -362,16 +374,203 @@ export function buildMcuSchematicAst(spec) {
   };
 }
 
+export function buildBmsSchematicAst(spec) {
+  const components = [];
+  const cellTaps = Array.from({ length: 17 }, (_value, index) => `PACK_B${index}`);
+  const pinConnections = adbms6830PinConnections();
+
+  components.push(
+    component('U1', 'ChatPCB:ADBMS6830', 'ADBMS6830 16-channel battery stack monitor example; exact package and pin revision review is required.', '', {
+      value: 'ADBMS6830',
+      pins: pinConnections.map((pin) => pin.name),
+      pinNets: Object.fromEntries(pinConnections.map((pin, index) => [String(index + 1), pin.net])),
+      connectedPins: unique(pinConnections.map((pin) => pin.net))
+    }),
+    component('J1', 'ChatPCB:BMS_CELL_CONNECTOR', '16S cell-tap connector. PACK_B0 is pack negative and PACK_B16 is pack positive in this example.', 'Connector_PinHeader_2.54mm:PinHeader_1x17_P2.54mm_Vertical', {
+      value: '16S_CELL_TAPS',
+      pins: cellTaps,
+      pinNets: Object.fromEntries(cellTaps.map((net, index) => [String(index + 1), net])),
+      connectedPins: cellTaps
+    }),
+    component('J2', 'Connector_Generic:Conn_01x06', 'isoSPI host/chain connector exposing both A/B differential pairs and local references.', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical', {
+      value: 'ISOSPI_HOST',
+      pins: ['ISOPA', 'ISOMA', 'ISOPB', 'ISOMB', 'VREG', 'PACK_B0'],
+      pinNets: { 1: 'ISOPA', 2: 'ISOMA', 3: 'ISOPB', 4: 'ISOMB', 5: 'VREG', 6: 'PACK_B0' },
+      connectedPins: ['ISOPA', 'ISOMA', 'ISOPB', 'ISOMB', 'VREG', 'PACK_B0']
+    }),
+    component('J4', 'Connector_Generic:Conn_01x06', 'Temperature connector for four 10k NTC channels, VREF2, and pack-negative reference.', 'Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical', {
+      value: 'TEMPERATURE_INPUTS',
+      pins: ['TEMP1', 'TEMP2', 'TEMP3', 'TEMP4', 'VREF2', 'PACK_B0'],
+      pinNets: { 1: 'TEMP1', 2: 'TEMP2', 3: 'TEMP3', 4: 'TEMP4', 5: 'VREF2', 6: 'PACK_B0' },
+      connectedPins: ['TEMP1', 'TEMP2', 'TEMP3', 'TEMP4', 'VREF2', 'PACK_B0']
+    })
+  );
+
+  for (let index = 1; index <= 16; index += 1) {
+    const previousFilterNet = index === 1 ? 'PACK_B0' : `FILTER_C${index - 1}`;
+    components.push(
+      component(`R${index}`, 'Device:R', `200R cell-input filter resistor for C${index}.`, 'Resistor_SMD:R_0603_1608Metric', {
+        value: '200R',
+        pins: [`PACK_B${index}`, `FILTER_C${index}`],
+        pinNets: { 1: `PACK_B${index}`, 2: `FILTER_C${index}` },
+        connectedPins: [`PACK_B${index}`, `FILTER_C${index}`]
+      }),
+      component(`C${index}`, 'Device:C', `10nF differential filter capacitor for cell ${index}.`, 'Capacitor_SMD:C_0603_1608Metric', {
+        value: '10nF',
+        pins: [`FILTER_C${index}`, previousFilterNet],
+        pinNets: { 1: `FILTER_C${index}`, 2: previousFilterNet },
+        connectedPins: [`FILTER_C${index}`, previousFilterNet]
+      }),
+      component(`RB${index}`, 'Device:R', `1k example passive balancing resistor for cell ${index}; verify population and thermal limits.`, 'Resistor_SMD:R_1206_3216Metric', {
+        value: '1k',
+        pins: [`PACK_B${index}`, `BAL_S${index}P`],
+        pinNets: { 1: `PACK_B${index}`, 2: `BAL_S${index}P` },
+        connectedPins: [`PACK_B${index}`, `BAL_S${index}P`]
+      })
+    );
+  }
+
+  components.push(
+    component('Q1', 'ChatPCB:BMS_NPN', 'External NPN pass transistor for the ADBMS6830 DRIVE/VREG example network.', 'Package_TO_SOT_SMD:SOT-23', {
+      value: 'NPN_PASS',
+      pins: ['B', 'C', 'E'],
+      pinNets: { 1: 'VREG_BASE', 2: 'VREG_COLLECTOR', 3: 'VREG_PASS' },
+      connectedPins: ['VREG_BASE', 'VREG_COLLECTOR', 'VREG_PASS']
+    }),
+    component('R17', 'Device:R', 'DRIVE pin filter resistor.', 'Resistor_SMD:R_0603_1608Metric', {
+      value: '10R',
+      pins: ['VREG_DRIVE', 'VREG_BASE'],
+      pinNets: { 1: 'VREG_DRIVE', 2: 'VREG_BASE' },
+      connectedPins: ['VREG_DRIVE', 'VREG_BASE']
+    }),
+    component('R18', 'Device:R', 'VREG collector transient filter resistor.', 'Resistor_SMD:R_0603_1608Metric', {
+      value: '330R',
+      pins: ['PACK_B16', 'VREG_COLLECTOR'],
+      pinNets: { 1: 'PACK_B16', 2: 'VREG_COLLECTOR' },
+      connectedPins: ['PACK_B16', 'VREG_COLLECTOR']
+    }),
+    component('C17', 'Device:C', 'DRIVE pin filter capacitor.', 'Capacitor_SMD:C_0603_1608Metric', {
+      value: '10nF',
+      pins: ['VREG_BASE', 'PACK_B0'],
+      pinNets: { 1: 'VREG_BASE', 2: 'PACK_B0' },
+      connectedPins: ['VREG_BASE', 'PACK_B0']
+    }),
+    component('C18', 'Device:C', 'VREG collector transient filter capacitor.', 'Capacitor_SMD:C_0603_1608Metric', {
+      value: '10nF',
+      pins: ['VREG_COLLECTOR', 'PACK_B0'],
+      pinNets: { 1: 'VREG_COLLECTOR', 2: 'PACK_B0' },
+      connectedPins: ['VREG_COLLECTOR', 'PACK_B0']
+    }),
+    component('FB1', 'Device:L', 'Ferrite bead between the NPN emitter and VREG reservoir.', 'Inductor_SMD:L_0603_1608Metric', {
+      value: 'VREG_FERRITE',
+      pins: ['VREG_PASS', 'VREG'],
+      pinNets: { 1: 'VREG_PASS', 2: 'VREG' },
+      connectedPins: ['VREG_PASS', 'VREG']
+    }),
+    component('C19', 'Device:C', 'VREG reservoir capacitor.', 'Capacitor_SMD:C_0603_1608Metric', {
+      value: '1uF',
+      pins: ['VREG', 'PACK_B0'],
+      pinNets: { 1: 'VREG', 2: 'PACK_B0' },
+      connectedPins: ['VREG', 'PACK_B0']
+    }),
+    component('C20', 'Device:C', 'VREF1 bypass capacitor; no DC load is assigned in this example.', 'Capacitor_SMD:C_0603_1608Metric', {
+      value: '1uF',
+      pins: ['VREF1', 'PACK_B0'],
+      pinNets: { 1: 'VREF1', 2: 'PACK_B0' },
+      connectedPins: ['VREF1', 'PACK_B0']
+    }),
+    component('C21', 'Device:C', 'VREF2 bypass capacitor for thermistor reference.', 'Capacitor_SMD:C_0603_1608Metric', {
+      value: '1uF',
+      pins: ['VREF2', 'PACK_B0'],
+      pinNets: { 1: 'VREF2', 2: 'PACK_B0' },
+      connectedPins: ['VREF2', 'PACK_B0']
+    })
+  );
+
+  for (let index = 1; index <= 4; index += 1) {
+    components.push(
+      component(`R${19 + index}`, 'Device:R', `10k pull-up for TEMP${index} from VREF2.`, 'Resistor_SMD:R_0603_1608Metric', {
+        value: '10k',
+        pins: ['VREF2', `TEMP${index}`],
+        pinNets: { 1: 'VREF2', 2: `TEMP${index}` },
+        connectedPins: ['VREF2', `TEMP${index}`]
+      }),
+      component(`R${23 + index}`, 'Device:R', `10k NTC example for TEMP${index}.`, 'Resistor_SMD:R_0603_1608Metric', {
+        value: 'NTC_10k',
+        pins: [`TEMP${index}`, 'PACK_B0'],
+        pinNets: { 1: `TEMP${index}`, 2: 'PACK_B0' },
+        connectedPins: [`TEMP${index}`, 'PACK_B0']
+      })
+    );
+  }
+
+  return {
+    components,
+    nets: unique(components.flatMap((item) => Object.values(item.pinNets ?? {}))).map((name) => ({
+      name,
+      explanation: explainNet(name)
+    }))
+  };
+}
+
+function adbms6830PinConnections() {
+  const pins = [{ name: 'V+', net: 'PACK_B16' }];
+
+  for (let index = 1; index <= 16; index += 1) {
+    pins.push({ name: `C${index}`, net: `FILTER_C${index}` });
+  }
+
+  for (let index = 1; index <= 16; index += 1) {
+    pins.push({ name: `S${index}N`, net: `PACK_B${index - 1}` });
+    pins.push({ name: `S${index}P`, net: `BAL_S${index}P` });
+  }
+
+  pins.push(
+    { name: 'IPA', net: 'ISOPA' },
+    { name: 'IMA', net: 'ISOMA' },
+    { name: 'CSB', net: null },
+    { name: 'SCK', net: null },
+    { name: 'SDI', net: null },
+    { name: 'SDO', net: null },
+    { name: 'ISOMD', net: 'VREG' },
+    { name: 'IPB', net: 'ISOPB' },
+    { name: 'IMB', net: 'ISOMB' },
+    { name: 'DRIVE', net: 'VREG_DRIVE' },
+    { name: 'NC', net: null },
+    { name: 'V-', net: 'PACK_B0' },
+    { name: 'VREF2', net: 'VREF2' },
+    { name: 'VREG', net: 'VREG' },
+    { name: 'VREF1', net: 'VREF1' }
+  );
+
+  for (let index = 1; index <= 10; index += 1) {
+    pins.push({ name: `GPIO${index}`, net: index <= 4 ? `TEMP${index}` : null });
+  }
+
+  pins.push({ name: 'EP', net: 'PACK_B0' });
+  return pins;
+}
+
 export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchematicAst(spec) }) {
   const uuid = randomUUID();
-  const notes = [
-    `ChatPCB generated MCU peripheral draft: ${spec.title}`,
-    `MCU family: ${spec.mcu.family}`,
-    `Power rails: ${spec.power.rails.map((rail) => `${rail.name}=${rail.voltage}V`).join(', ')}`,
-    `Interfaces: ${spec.interfaces.map((iface) => iface.kind.toUpperCase()).join(', ')}`,
-    `Peripherals: ${spec.peripherals.map((peripheral) => peripheral.kind).join(', ')}`,
-    'Review all symbols, footprints, net labels, and design rules before production.'
-  ];
+  const notes = spec.boardProfile?.kind === 'bms'
+    ? [
+        `ChatPCB generated BMS example: ${spec.title}`,
+        'IC: ADBMS6830 16-channel battery monitor; exact package and pin revision review is pending.',
+        'Example assumption: one 16S Li-ion stack, 3.7V nominal and 4.2V full-charge per cell.',
+        'Cell inputs use 200R filters and 10nF differential capacitors; balancing uses 1k example resistors.',
+        'The example includes four 10k NTC channels, an NPN VREG pass stage, and bidirectional isoSPI.',
+        'Monitoring/balancing example only: no charger, fuse, contactor, protection FET, or safety certification is included.',
+        'Review the exact Analog Devices datasheet, cell chemistry, protection strategy, isolation, thermal, and layout before energizing.'
+      ]
+    : [
+        `ChatPCB generated MCU peripheral draft: ${spec.title}`,
+        `MCU family: ${spec.mcu.family}`,
+        `Power rails: ${spec.power.rails.map((rail) => `${rail.name}=${rail.voltage}V`).join(', ')}`,
+        `Interfaces: ${spec.interfaces.map((iface) => iface.kind.toUpperCase()).join(', ')}`,
+        `Peripherals: ${spec.peripherals.map((peripheral) => peripheral.kind).join(', ')}`,
+        'Review all symbols, footprints, net labels, and design rules before production.'
+      ];
 
   return `(kicad_sch
   (version 20260306)
@@ -420,6 +619,16 @@ ${fixtureSymbols()
 }
 
 export function renderSpiceFixture(spec) {
+  if (spec.boardProfile?.kind === 'bms') {
+    return [
+      `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
+      '* This is a topology placeholder only; it does not model cells, balancing, protection, isolation, faults, or safety behavior.',
+      '* Do not use this netlist as battery-connection or production evidence.',
+      '.end',
+      ''
+    ].join('\n');
+  }
+
   const hasLed = spec.peripherals.some((peripheral) => peripheral.kind === 'status-led');
   const hasButton = spec.peripherals.some((peripheral) => peripheral.kind.includes('button'));
 
@@ -460,6 +669,30 @@ function interfaceNetNames(spec) {
 }
 
 function explainNet(name) {
+  if (/^PACK_B\d+$/.test(name)) {
+    return 'Battery-stack cell tap in the 16S example; verify connector order and pack polarity before connection.';
+  }
+
+  if (/^FILTER_C\d+$/.test(name)) {
+    return 'Filtered ADBMS6830 cell measurement node.';
+  }
+
+  if (/^BAL_S\d+P$/.test(name)) {
+    return 'ADBMS6830 passive-balance positive-side example node.';
+  }
+
+  if (/^TEMP\d+$/.test(name)) {
+    return '10k NTC temperature-sense node referenced to VREF2.';
+  }
+
+  if (/^ISOP[AB]$|^ISOM[AB]$/.test(name)) {
+    return 'ADBMS6830 bidirectional isoSPI differential signal.';
+  }
+
+  if (/^VREG(_|$)|^VREF[12]$/.test(name)) {
+    return 'ADBMS6830 local supply or reference node; verify exact datasheet load and bypass requirements.';
+  }
+
   switch (name) {
     case 'VBUS':
       return 'Primary 5V input rail.';
@@ -642,15 +875,13 @@ function recordBoardPadCenter(padCentersByNet, netName, padBlock, footprintPosit
     return;
   }
 
-  const localAt = padBlock.match(/\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);
-  const localX = localAt ? Number(localAt[1]) : 0;
-  const localY = localAt ? Number(localAt[2]) : 0;
+  const geometry = boardPadGeometry(padBlock, footprintPosition);
+  if (!geometry) {
+    return;
+  }
   const centers = padCentersByNet.get(netName) ?? [];
-  const radians = (footprintPosition.rotation ?? 0) * Math.PI / 180;
   centers.push({
-    ref: footprintPosition.ref,
-    x: footprintPosition.x + localX * Math.cos(radians) - localY * Math.sin(radians),
-    y: footprintPosition.y + localX * Math.sin(radians) + localY * Math.cos(radians)
+    ...geometry
   });
   padCentersByNet.set(netName, centers);
 }
@@ -697,6 +928,7 @@ function renderBoardSegments(padCentersByNet, netIds, profileMode) {
 
 function renderProfilePowerSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters) {
   renderProfileNamedPathSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters, PROFILE_POWER_PATHS);
+  renderProfileNamedPathSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters, PROFILE_SIGNAL_PATHS);
 }
 
 function renderProfileNamedPathSegments(segments, segmentKeys, acceptedSegments, padCentersByNet, netIds, allCenters, paths) {
@@ -719,7 +951,7 @@ function addBestSafeRoute(segments, segmentKeys, acceptedSegments, startCenters,
 
   for (const start of startCenters) {
     for (const end of endCenters) {
-      for (const path of candidateRoutePolylines(start, end)) {
+      for (const path of candidateRoutePolylines(start, end, options)) {
         const legs = polylineLegs(path);
         if (
           !legsEverySegmentSafe(legs, segmentKeys, acceptedSegments, netName, netId, allCenters, {
@@ -752,8 +984,12 @@ function addBestSafeRoute(segments, segmentKeys, acceptedSegments, startCenters,
   return best;
 }
 
-function candidateRoutePolylines(start, end) {
-  const paths = [
+function candidateRoutePolylines(start, end, options = {}) {
+  if (Array.isArray(options.anchors)) {
+    return [[start, ...options.anchors, end]].filter((path) => path.every(isInsideBoardOutline));
+  }
+
+  const paths = options.route === 'usb-c-escape' ? [] : [
     [start, end],
     [start, { x: end.x, y: start.y }, end],
     [start, { x: start.x, y: end.y }, end]
@@ -905,7 +1141,7 @@ function segmentRunsNearOtherNetPad(start, end, netName, allCenters, options = {
     }
 
     const keepOut =
-      options.relaxSameFootprint && center.netName && center.ref && (center.ref === start.ref || center.ref === end.ref)
+      options.relaxSameFootprint && center.ref && (center.ref === start.ref || center.ref === end.ref)
         ? BOARD_SAME_FOOTPRINT_PAD_KEEP_OUT_MM
         : keepOutMm;
     return distanceFromPointToSegment(center, start, end) < keepOut;
@@ -1016,6 +1252,9 @@ function fixtureSymbols() {
     ['ChatPCB:POWER_INPUT', 'J', 'POWER_INPUT'],
     ['ChatPCB:REGULATOR_3V3', 'U', 'REGULATOR_3V3'],
     ['ChatPCB:MCU_PLACEHOLDER', 'U', 'MCU_PLACEHOLDER'],
+    ['ChatPCB:ADBMS6830', 'U', 'ADBMS6830'],
+    ['ChatPCB:BMS_CELL_CONNECTOR', 'J', '16S_CELL_TAPS'],
+    ['ChatPCB:BMS_NPN', 'Q', 'NPN_PASS'],
     ['ChatPCB:ESP32_S3_WROOM_1', 'U', 'ESP32_S3_WROOM_1_N8R2'],
     ['ChatPCB:STM32G0B1CBT6', 'U', 'STM32G0B1CBT6'],
     ['ChatPCB:RESET_BUTTON', 'SW', 'RESET_BUTTON'],
@@ -1298,6 +1537,12 @@ function pinDef(number, x, y, rotation) {
 
 function symbolPinsFor(libId) {
   switch (libId) {
+    case 'ChatPCB:ADBMS6830':
+      return adbms6830PinConnections().map((pin) => pin.name);
+    case 'ChatPCB:BMS_CELL_CONNECTOR':
+      return Array.from({ length: 17 }, (_value, index) => `PACK_B${index}`);
+    case 'ChatPCB:BMS_NPN':
+      return ['B', 'C', 'E'];
     case 'ChatPCB:POWER_INPUT':
     case 'Connector_Generic:Conn_01x02':
       return ['VBUS', 'GND'];

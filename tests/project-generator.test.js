@@ -365,6 +365,66 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
   }
 });
 
+test('supported profiles emit safe CC escape routes outside the USB-C pad field', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-usbc-cc-escape-'));
+
+  try {
+    for (const [profile, prompt] of [
+      [
+        'esp32',
+        'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ],
+      [
+        'stm32',
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ]
+    ]) {
+      const result = await generateMcuPeripheralProject({
+        projectDir: path.join(root, profile),
+        prompt
+      });
+      const board = await readFile(result.files.board, 'utf8');
+
+      assert.ok(boardSegmentCount(board, 'CC1') >= 1, `${profile} board should route CC1 outside the USB-C pad field`);
+      assert.ok(boardSegmentCount(board, 'CC2') >= 1, `${profile} board should route CC2 outside the USB-C pad field`);
+      assert.equal(boardHasSegmentNear(board, { x: 16.75, y: 60.955 }, { x: 11.175, y: 82 }), false);
+      assert.equal(boardHasSegmentNear(board, { x: 19.75, y: 60.955 }, { x: 35.175, y: 82 }), false);
+      assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('supported profiles route I2C pull-up nets through bounded multi-leg chains', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-i2c-routing-'));
+
+  try {
+    for (const [profile, prompt] of [
+      [
+        'esp32',
+        'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ],
+      [
+        'stm32',
+        'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      ]
+    ]) {
+      const result = await generateMcuPeripheralProject({
+        projectDir: path.join(root, profile),
+        prompt
+      });
+      const board = await readFile(result.files.board, 'utf8');
+
+      assert.ok(boardSegmentCount(board, 'SCL') >= 2, `${profile} board should use a multi-leg SCL route`);
+      assert.ok(boardSegmentCount(board, 'SDA') >= 2, `${profile} board should use a multi-leg SDA route`);
+      assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('supported profile generic segments avoid J3/J7 no-net pads and cross-net intersections', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pad-safe-generic-routing-'));
   let noNetPadCount = 0;
@@ -430,6 +490,47 @@ test('maps no-net pad centers through their containing footprint transform', () 
   )`;
 
   assert.deepEqual(boardNoNetPadCenters(board, ['J7']), [{ ref: 'J7', x: 98, y: 201 }]);
+});
+
+test('ADBMS6830 BMS example generates cell filters, balancing branches, thermistors, and isoSPI', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-schematic-'));
+
+  try {
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'ADBMS6830 16S Li-ion battery monitor with passive balancing, four 10k NTCs, and isoSPI.'
+    });
+    const schematic = await readFile(result.files.schematic, 'utf8');
+    const symbols = await readFile(result.files.symbolLibrary, 'utf8');
+    const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
+    const refs = new Set(metadata.schematic.components.map((component) => component.ref));
+
+    assert.match(schematic, /\(lib_id "ChatPCB:ADBMS6830"\)/);
+    assert.match(schematic, /\(property "Value" "ADBMS6830"/);
+    assert.match(schematic, /PACK_B16/);
+    assert.match(schematic, /FILTER_C16/);
+    assert.match(schematic, /BAL_S16P/);
+    assert.match(schematic, /ISOPA/);
+    assert.match(schematic, /VREG_COLLECTOR/);
+    assert.match(symbols, /\(symbol "ADBMS6830"/);
+    assert.match(symbols, /\(symbol "BMS_NPN"/);
+    assert.equal(refs.has('J1'), true);
+    assert.equal(refs.has('J2'), true);
+    assert.equal(refs.has('J4'), true);
+    assert.equal(refs.has('R1'), true);
+    assert.equal(refs.has('R16'), true);
+    assert.equal(refs.has('C16'), true);
+    assert.equal(refs.has('RB1'), true);
+    assert.equal(refs.has('RB16'), true);
+    assert.equal(refs.has('Q1'), true);
+    assert.equal(refs.has('FB1'), true);
+    assert.equal(refs.has('R27'), true);
+    assert.equal(result.files.board, undefined);
+    assert.equal(metadata.boardProfile.releaseTarget, 'example-review');
+    assert.equal(metadata.boardProfile.releaseEvidence.status, 'incomplete');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });
 
 function boardSegmentSpans(board) {

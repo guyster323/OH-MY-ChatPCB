@@ -14,7 +14,7 @@ const INTERFACE_ALIASES = {
   gpio: [['GPIO', 'GPIO0']]
 };
 
-const PROFILE_MCU_SYMBOLS = new Set(['ChatPCB:ESP32_S3_WROOM_1', 'ChatPCB:STM32G0B1CBT6']);
+const PROFILE_MCU_SYMBOLS = new Set(['ChatPCB:ESP32_S3_WROOM_1', 'ChatPCB:STM32G0B1CBT6', 'ChatPCB:ADBMS6830']);
 
 export function reviewCircuitReadiness({ spec, validation } = {}) {
   if (!spec) {
@@ -59,6 +59,14 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     );
   }
 
+  if (spec.boardProfile?.kind === 'bms') {
+    addFinding(
+      findings.warnings,
+      'bms-example-only',
+      'This ADBMS6830 battery circuit is a schematic-only 16S Li-ion example; do not connect a real pack until chemistry, protection, isolation, pinout, and thermal reviews are complete.'
+    );
+  }
+
   const incompleteReleaseGates = (spec.boardProfile?.releaseGates ?? []).filter((gate) => gate.status !== 'complete');
   if (incompleteReleaseGates.length > 0) {
     addFinding(
@@ -97,7 +105,10 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   }
 
   if (spec.boardProfile?.id) {
-    addFinding(findings.notes, 'board-profile', `Using supported ${spec.mcu.family} USB-C sensor profile: ${spec.boardProfile.id}.`);
+    const profileMessage = spec.boardProfile.kind === 'bms'
+      ? `Using schematic-only ${spec.mcu.family} BMS example profile: ${spec.boardProfile.id}.`
+      : `Using supported ${spec.mcu.family} USB-C sensor profile: ${spec.boardProfile.id}.`;
+    addFinding(findings.notes, 'board-profile', profileMessage);
   }
 
   if (
