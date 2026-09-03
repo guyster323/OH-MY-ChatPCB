@@ -1,8 +1,9 @@
 export function boardPadGeometry(padBlock, footprintPosition = {}) {
+  const shape = padBlock.match(/^\s*\(pad\s+"[^"]*"\s+\S+\s+(\S+)/);
   const localAt = padBlock.match(/\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)(?:\s+(-?\d+(?:\.\d+)?))?/);
   const size = padBlock.match(/\(size\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/);
   const layers = padBlock.match(/\(layers\s+([^\)]+)\)/);
-  if (!localAt || !size || !layers) {
+  if (!shape || !localAt || !size || !layers) {
     return null;
   }
 
@@ -14,6 +15,7 @@ export function boardPadGeometry(padBlock, footprintPosition = {}) {
     ref: footprintPosition.ref,
     x: (footprintPosition.x ?? 0) + localX * Math.cos(radians) - localY * Math.sin(radians),
     y: (footprintPosition.y ?? 0) + localX * Math.sin(radians) + localY * Math.cos(radians),
+    shape: shape[1],
     width: Number(size[1]),
     height: Number(size[2]),
     rotation: footprintRotation + Number(localAt[3] ?? 0),

@@ -17,6 +17,7 @@ test('boardPadGeometry preserves a rotated pad center and copper dimensions', ()
     ref: 'SW1',
     x: 88.375,
     y: 24.15,
+    shape: 'rect',
     width: 1.55,
     height: 1,
     rotation: 180,
