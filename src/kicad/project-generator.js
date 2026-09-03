@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
 import { boardPadGeometry } from './pad-geometry.js';
+import { findGridRoute } from './board-route-planner.js';
 
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
@@ -951,7 +952,7 @@ function addBestSafeRoute(segments, segmentKeys, acceptedSegments, startCenters,
 
   for (const start of startCenters) {
     for (const end of endCenters) {
-      for (const path of candidateRoutePolylines(start, end, options)) {
+      for (const path of candidateRoutePolylines(start, end, options, { netName, allCenters, acceptedSegments })) {
         const legs = polylineLegs(path);
         if (
           !legsEverySegmentSafe(legs, segmentKeys, acceptedSegments, netName, netId, allCenters, {
@@ -984,9 +985,26 @@ function addBestSafeRoute(segments, segmentKeys, acceptedSegments, startCenters,
   return best;
 }
 
-function candidateRoutePolylines(start, end, options = {}) {
+function candidateRoutePolylines(start, end, options = {}, context = {}) {
   if (Array.isArray(options.anchors)) {
     return [[start, ...options.anchors, end]].filter((path) => path.every(isInsideBoardOutline));
+  }
+
+  if (options.route === 'grid') {
+    const route = findGridRoute({
+      start,
+      end,
+      netName: context.netName,
+      padGeometries: context.allCenters,
+      segments: context.acceptedSegments,
+      outline: BOARD_OUTLINE,
+      gridMm: 2,
+      keepOutMm: BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM,
+      traceWidthMm: options.width ?? 0.2,
+      maxLegMm: BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM,
+      layer: options.layer ?? 'F.Cu'
+    });
+    return route ? [route] : [];
   }
 
   const paths = options.route === 'usb-c-escape' ? [] : [
