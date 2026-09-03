@@ -67,6 +67,8 @@ test('Phase 1 migration documents describe the evidence-gated runtime contract',
   const handoff = await readFile('docs/handoff-next-session.md', 'utf8');
 
   assert.match(readme, /project\.inspect/);
+  assert.match(readme, /schema v2 migration is planned future work/i);
+  assert.doesNotMatch(readme, /Migrating a v1 manifest is an explicit preview-and-approval operation/);
   assert.match(architecture, /artifact-bound approval/i);
   assert.match(architecture, /KiCad files are the authoritative editable state/i);
   assert.match(architecture, /\.chatpcb\.json.*intent\/evidence manifest/i);
