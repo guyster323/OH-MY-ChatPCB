@@ -152,6 +152,17 @@ async function dispatchSchematicPatch(args, { validateProjectImpl, patchApproval
   }
 }
 
+async function previewAndApproveSchematicPatch(args, { validateProjectImpl, patchApprovalRegistry }) {
+  const preview = await dispatchSchematicPatch({ ...args, approved: false }, { validateProjectImpl, patchApprovalRegistry });
+  if (!preview.ok) throw new Error(preview.error.message);
+  const approval = await dispatchSchematicPatch(
+    { projectDir: args.projectDir, approved: true, patchId: preview.result.patchId },
+    { validateProjectImpl, patchApprovalRegistry }
+  );
+  if (!approval.ok) throw new Error(approval.error.message);
+  return approval.result;
+}
+
 async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
@@ -272,7 +283,7 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
     const applied = providerResult.toolResults.length
       ? lastMutatingResult(providerResult.toolResults)
       : hasSpec
-        ? await applySchematicPatch({ projectDir, prompt, approved: true, validateProjectImpl })
+        ? await previewAndApproveSchematicPatch({ projectDir, prompt }, { validateProjectImpl, patchApprovalRegistry })
         : await generateMcuPeripheralProject({ projectDir, prompt });
     const validation = await validateProjectImpl({ projectDir });
     const rolledBack = hasSpec && !validation.ok;

@@ -37,6 +37,10 @@ export async function applySchematicPatch({
     };
   }
 
+  if (approved && !expectedPatchId) {
+    return patchFailure('PATCH_APPROVAL_REQUIRED', 'expectedPatchId is required to apply a patch preview.');
+  }
+
   const plan = patchPlan ?? await buildPatchPlan({ projectDir: resolvedProjectDir, prompt, projectName });
   const ownsPlan = !patchPlan;
 

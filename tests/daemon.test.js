@@ -381,6 +381,13 @@ test('daemon creates a named project and runs provider generation with ERC valid
 
 test('daemon falls back to bounded generation then approved patch after a successful provider transcript without calls', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-fallback-'));
+  const registry = createPatchApprovalRegistry();
+  const register = registry.register;
+  let registrations = 0;
+  registry.register = (record) => {
+    registrations += 1;
+    return register(record);
+  };
 
   try {
     const created = await dispatchToolCall({
@@ -393,7 +400,7 @@ test('daemon falls back to bounded generation then approved patch after a succes
         name: 'project.request',
         args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'RP2040 board with USB-C power and I2C connector.' }
       },
-      providerOptions({ events: [createEnvelope('agent.delta', { text: 'Generating locally.' })] })
+      { ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'Generating locally.' })] }), patchApprovalRegistry: registry }
     );
     const second = await dispatchToolCall(
       {
@@ -401,7 +408,7 @@ test('daemon falls back to bounded generation then approved patch after a succes
         name: 'project.request',
         args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.' }
       },
-      providerOptions({ events: [createEnvelope('agent.delta', { text: 'Patching locally.' })] })
+      { ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'Patching locally.' })] }), patchApprovalRegistry: registry }
     );
 
     assert.equal(first.ok, true);
@@ -410,7 +417,9 @@ test('daemon falls back to bounded generation then approved patch after a succes
     assert.equal(second.result.operation, 'patched');
     assert.equal(second.result.approved, true);
     assert.equal(second.result.applied, true);
+    assert.equal(registrations, 1);
   } finally {
+    registry.disposeAll();
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });

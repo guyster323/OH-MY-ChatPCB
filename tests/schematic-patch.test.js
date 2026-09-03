@@ -5,7 +5,16 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-import { applySchematicPatch } from '../src/workflow/schematic-patch.js';
+import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
+
+async function applyApprovedPatch(options) {
+  const plan = await createSchematicPatchPlan(options);
+  try {
+    return await applySchematicPatch({ ...options, approved: true, expectedPatchId: plan.patchId, patchPlan: plan });
+  } finally {
+    await disposeSchematicPatchPlan(plan);
+  }
+}
 
 test('schematic patch preview returns a diff without modifying existing project files', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-preview-'));
@@ -43,10 +52,9 @@ test('approved schematic patch writes generated files and returns validation res
       prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
     });
 
-    const result = await applySchematicPatch({
+    const result = await applyApprovedPatch({
       projectDir: root,
       prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
-      approved: true,
       validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
     });
 
@@ -55,6 +63,21 @@ test('approved schematic patch writes generated files and returns validation res
     assert.equal(result.validation.ok, true);
     assert.equal(metadata.mcu.family, 'STM32');
     assert.ok(metadata.interfaces.some((iface) => iface.kind === 'uart'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('approved schematic patch requires an expected patch ID before building or writing a plan', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-required-'));
+
+  try {
+    const initial = await generateMcuPeripheralProject({ projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' });
+    const before = await readFile(initial.files.spec, 'utf8');
+    const result = await applySchematicPatch({ projectDir: root, prompt: 'STM32 board with USB-C power and UART header.', approved: true });
+    assert.equal(result.applied, false);
+    assert.equal(result.reason.code, 'PATCH_APPROVAL_REQUIRED');
+    assert.equal(await readFile(initial.files.spec, 'utf8'), before);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -69,20 +92,22 @@ test('approved schematic patch rejects a preview after project artifacts change'
       prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
     });
     const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
-    const preview = await applySchematicPatch({ projectDir: root, prompt, approved: false });
+    const plan = await createSchematicPatchPlan({ projectDir: root, prompt });
     await appendFile(initial.files.schematic, '\n(user edit)\n');
 
     const result = await applySchematicPatch({
       projectDir: root,
       prompt,
       approved: true,
-      expectedPatchId: preview.patchId,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan,
       validateProjectImpl: async () => ({ ok: true })
     });
 
     assert.equal(result.applied, false);
     assert.equal(result.reason.code, 'PATCH_STALE');
     assert.match(await readFile(initial.files.schematic, 'utf8'), /user edit/);
+    await disposeSchematicPatchPlan(plan);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -123,10 +148,9 @@ test('approved schematic patch rolls back files when validation fails', async ()
     });
     const before = await readFile(initial.files.spec, 'utf8');
 
-    const result = await applySchematicPatch({
+    const result = await applyApprovedPatch({
       projectDir: root,
       prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
-      approved: true,
       validateProjectImpl: async () => ({ ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } })
     });
 
@@ -148,11 +172,10 @@ test('approved schematic patch returns readiness review after validation reruns'
       prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
     });
 
-    const result = await applySchematicPatch({
+    const result = await applyApprovedPatch({
       projectDir: root,
       prompt:
         'USB-C powered ESP32-S3 sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, reset button, status LED, USB, SPI, GPIO header, JLCPCB order ready.',
-      approved: true,
       validateProjectImpl: async () => ({
         ok: true,
         skipped: false,

@@ -18,3 +18,38 @@ test('patch approval registry rejects an expired preview', () => {
   time = 1011;
   assert.equal(registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
 });
+
+test('patch approval registry expires at the exact boundary and disposes the retained plan once', () => {
+  let time = 1000;
+  let expiry;
+  let cleared = 0;
+  let disposed = 0;
+  const registry = createPatchApprovalRegistry({
+    ttlMs: 10,
+    now: () => time,
+    setTimeoutImpl: (callback) => { expiry = callback; return 'expiry-timer'; },
+    clearTimeoutImpl: () => { cleared += 1; }
+  });
+  registry.register({ patchId: 'sha256:abc', projectDir: 'C:/project', dispose: () => { disposed += 1; } });
+  time = 1010;
+  assert.equal(registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
+  assert.equal(disposed, 1);
+  assert.equal(cleared, 1);
+  expiry();
+  assert.equal(disposed, 1);
+});
+
+test('patch approval registry timer disposes an unconsumed approval and disposeAll clears timers', () => {
+  let expiry;
+  let disposed = 0;
+  let cleared = 0;
+  const registry = createPatchApprovalRegistry({
+    setTimeoutImpl: (callback) => { expiry = callback; return 'expiry-timer'; },
+    clearTimeoutImpl: () => { cleared += 1; }
+  });
+  registry.register({ patchId: 'sha256:abc', projectDir: 'C:/project', dispose: () => { disposed += 1; } });
+  expiry();
+  assert.equal(disposed, 1);
+  registry.disposeAll();
+  assert.equal(cleared, 1);
+});
