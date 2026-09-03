@@ -21,6 +21,7 @@ const zeroCountFailurePrompt = 'Simulate a zero-count validation failure.';
 const skippedValidationPrompt = 'Simulate a skipped validation.';
 const unavailableValidationPrompt = 'Simulate unavailable validation tooling.';
 const delayedSwitchPrompt = 'Simulate a delayed request while switching projects.';
+const previewPrompt = 'Simulate an approval-required patch preview.';
 let validationMode = 'passed';
 let providerRequestCount = 0;
 let inspectionDigest = 'a'.repeat(64);
@@ -79,6 +80,13 @@ try {
   assert.ok(successfulRequest.artifacts.some((artifact) => artifact?.includes('.kicad_pro')));
   assert.match(successfulRequest.erc ?? '', /0 errors, 0 warnings/);
   assert.match(successfulRequest.review ?? '', /Review/);
+
+  await page.getByLabel('Circuit request').fill(previewPrompt);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await page.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+  assert.equal(await page.getByRole('button', { name: 'Approve' }).isDisabled(), false);
+  await page.getByRole('button', { name: 'Approve' }).click();
+  await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
 
   await page.getByRole('button', { name: 'Open in KiCad' }).click();
   await page.getByText(/Open this \.kicad_pro file from KiCad/).waitFor();
@@ -221,8 +229,27 @@ try {
   assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), true);
   assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /stale evidence/i);
 
+  inspectionDigest = 'a'.repeat(64);
+  await hostPage.evaluate(() => {
+    const projectPath = document.querySelector('#active-project-directory').textContent;
+    window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
+  });
+  await hostPage.getByText('current', { exact: true }).waitFor();
+  await hostPage.getByLabel('Circuit request').fill(previewPrompt);
+  await hostPage.getByRole('button', { name: 'Send' }).click();
+  await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+  assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), false);
+  await hostPage.evaluate((projectPath) => {
+    window.postMessage({ type: 'project.status', projectPath, dirty: true, linkState: 'conflict' }, '*');
+  }, hostProjectPath);
+  await hostPage.locator('#conflict-card').waitFor();
+  assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), true);
+  assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /cleared/i);
+
   await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
+  await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+  await hostPage.getByRole('button', { name: 'Approve' }).click();
   await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state === 'failed');
   const reloadCountAfterRollback = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
   assert.equal(reloadCountAfterRollback, reloadCount);
@@ -297,6 +324,12 @@ async function assertStandaloneGuidanceNamesAFile(page) {
 async function assertValidationState(page, request, expectedState, expectedText) {
   await page.getByLabel('Circuit request').fill(request);
   await page.getByRole('button', { name: 'Send' }).click();
+  await page.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running');
+  const requestStatus = await page.locator('#request-status').textContent();
+  if (requestStatus === 'Patch preview is ready for approval.') {
+    await page.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+    await page.getByRole('button', { name: 'Approve' }).click();
+  }
   await page.waitForFunction((state) => document.querySelector('#validation-status')?.dataset.state === state, expectedState);
   assert.match(await page.locator('#validation-status').textContent() ?? '', expectedText);
 }
@@ -361,6 +394,10 @@ async function fakeProviderTranscript({ input }) {
       : 'passed';
   if (input.includes(delayedSwitchPrompt)) {
     await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  if (input.includes(previewPrompt) || input.includes(rollbackPrompt) || input.includes(skippedValidationPrompt) || input.includes(unavailableValidationPrompt)) {
+    return { exitCode: 0, stderr: '', events: [createEnvelope('agent.delta', { text: 'Preparing a patch preview.' })] };
   }
 
   return {

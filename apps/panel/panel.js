@@ -540,6 +540,7 @@ function handleHostMessage(message) {
   if (message.type === 'project.status') {
     const dirty = message.dirty === true || message.unsavedChanges === true;
     if (dirty || message.linkState === 'conflict') {
+      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes.');
       showConflict();
     } else {
       conflictCardEl.hidden = true;

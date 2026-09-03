@@ -379,7 +379,7 @@ test('daemon creates a named project and runs provider generation with ERC valid
   }
 });
 
-test('daemon falls back to bounded generation then approved patch after a successful provider transcript without calls', async () => {
+test('daemon returns an approval-gated patch preview for an existing project after a provider transcript without calls', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-fallback-'));
   const registry = createPatchApprovalRegistry();
   const register = registry.register;
@@ -415,9 +415,17 @@ test('daemon falls back to bounded generation then approved patch after a succes
     assert.equal(first.result.operation, 'generated');
     assert.equal(second.ok, true);
     assert.equal(second.result.operation, 'patched');
-    assert.equal(second.result.approved, true);
-    assert.equal(second.result.applied, true);
+    assert.equal(second.result.requiresApproval, true);
+    assert.equal(second.result.applied, false);
+    assert.ok(second.result.patchId);
     assert.equal(registrations, 1);
+
+    const approved = await dispatchToolCall(
+      { name: 'schematic.patch', args: { projectDir: created.result.projectDir, approved: true, patchId: second.result.patchId } },
+      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }) }
+    );
+    assert.equal(approved.ok, true);
+    assert.equal(approved.result.applied, true);
   } finally {
     registry.disposeAll();
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -440,6 +448,7 @@ test('daemon rejects generate and request calls that target the home directory',
 test('daemon restore after failed validation does not delete the project directory itself', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-dir-'));
   const sentinel = path.join(root, 'user-note.txt');
+  const registry = createPatchApprovalRegistry();
 
   try {
     const generated = await dispatchToolCall({
@@ -458,25 +467,23 @@ test('daemon restore after failed validation does not delete the project directo
         name: 'project.request',
         args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
       },
-      providerOptions({
-        events: [
-          createEnvelope('tool.call', {
-            id: 'call_unsafe_regenerate',
-            name: 'schematic.generate',
-            args: { prompt: 'STM32 board with USB-C power and UART header.' }
-          })
-        ],
-        validation: { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
-      })
+      { ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'Preparing a patch.' })] }), patchApprovalRegistry: registry }
     );
 
     assert.equal(result.ok, true);
-    assert.equal(result.result.rolledBack, true);
+    assert.equal(result.result.applied, false);
+    const approved = await dispatchToolCall(
+      { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
+      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }) }
+    );
+    assert.equal(approved.ok, true);
+    assert.equal(approved.result.rolledBack, true);
     const dir = await readdir(root, { withFileTypes: true });
     assert.ok(dir.some((entry) => entry.isDirectory() === false || entry.name));
     assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
     assert.equal(await readFile(sentinel, 'utf8'), 'keep-me\n');
   } finally {
+    registry.disposeAll();
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -659,8 +666,9 @@ test('daemon does not fall back after provider parse, cancellation, or non-zero 
   }
 });
 
-test('daemon restores existing project artifacts when automatic ERC validation fails', async () => {
+test('daemon restores existing project artifacts when an approved project.request patch fails ERC validation', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-rollback-'));
+  const registry = createPatchApprovalRegistry();
 
   try {
     const generated = await dispatchToolCall({
@@ -674,41 +682,40 @@ test('daemon restores existing project artifacts when automatic ERC validation f
         name: 'project.request',
         args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
       },
-      providerOptions({
-        events: [
-          createEnvelope('tool.call', {
-            id: 'call_unsafe_regenerate',
-            name: 'schematic.generate',
-            args: { prompt: 'STM32 board with USB-C power and UART header.' }
-          })
-        ],
-        validation: { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
-      })
+      { ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'Preparing a patch.' })] }), patchApprovalRegistry: registry }
     );
 
     assert.equal(result.ok, true);
-    assert.equal(result.result.validation.erc.errorCount, 1);
+    assert.equal(result.result.applied, false);
+    const approved = await dispatchToolCall(
+      { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
+      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }) }
+    );
+    assert.equal(approved.result.validation.erc.errorCount, 1);
     assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
   } finally {
+    registry.disposeAll();
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test('daemon automatically approves a provider-emitted patch during project.request', async () => {
+test('daemon returns a provider-emitted patch as a preview without writing until its patchId is approved', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-patch-'));
+  const registry = createPatchApprovalRegistry();
 
   try {
-    await dispatchToolCall({
+    const generated = await dispatchToolCall({
       name: 'schematic.generate',
       args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' }
     });
+    const before = await readFile(generated.result.files.spec, 'utf8');
     const result = await dispatchToolCall(
       {
         id: 'call_project_request_patch',
         name: 'project.request',
         args: { provider: 'codex', projectDir: root, prompt: 'Add reset button and status LED.' }
       },
-      providerOptions({
+      { ...providerOptions({
         events: [
           createEnvelope('tool.call', {
             id: 'call_provider_patch',
@@ -716,13 +723,22 @@ test('daemon automatically approves a provider-emitted patch during project.requ
             args: { prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.' }
           })
         ]
-      })
+      }), patchApprovalRegistry: registry }
     );
 
     assert.equal(result.ok, true);
-    assert.equal(result.result.approved, true);
-    assert.equal(result.result.applied, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.applied, false);
+    assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
+
+    const approved = await dispatchToolCall(
+      { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
+      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }) }
+    );
+    assert.equal(approved.ok, true);
+    assert.equal(approved.result.applied, true);
   } finally {
+    registry.disposeAll();
     await rm(root, { force: true, recursive: true });
   }
 });

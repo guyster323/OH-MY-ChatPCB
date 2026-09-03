@@ -152,18 +152,7 @@ async function dispatchSchematicPatch(args, { validateProjectImpl, patchApproval
   }
 }
 
-async function previewAndApproveSchematicPatch(args, { validateProjectImpl, patchApprovalRegistry }) {
-  const preview = await dispatchSchematicPatch({ ...args, approved: false }, { validateProjectImpl, patchApprovalRegistry });
-  if (!preview.ok) throw new Error(preview.error.message);
-  const approval = await dispatchSchematicPatch(
-    { projectDir: args.projectDir, approved: true, patchId: preview.result.patchId },
-    { validateProjectImpl, patchApprovalRegistry }
-  );
-  if (!approval.ok) throw new Error(approval.error.message);
-  return approval.result;
-}
-
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, allowGenerate = true, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -217,16 +206,10 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     if (forceProjectDir && event.payload.name === 'project.create') {
       throw new Error('project.create is not allowed inside project.request.');
     }
-    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
-    if (autoApprovePatch && toolCall.name === 'schematic.patch') {
-      const preview = await dispatchToolCall(
-        { ...toolCall, args: { ...toolCall.args, approved: false } },
-        { validateProjectImpl, patchApprovalRegistry, allowedWorkspaceRoot }
-      );
-      if (!preview.ok) throw new Error(preview.error.message);
-      toolCall.args.approved = true;
-      toolCall.args.patchId = preview.result.patchId;
+    if (!allowGenerate && event.payload.name === 'schematic.generate') {
+      throw new Error('schematic.generate is not allowed for an existing project.request; request a schematic.patch preview instead.');
     }
+    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
     toolResults.push({
       id: event.payload.id,
       ...(await dispatchToolCall(toolCall, {
@@ -277,14 +260,21 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       providerControllers,
       patchApprovalRegistry,
       allowedWorkspaceRoot,
-      autoApprovePatch: true,
+      allowGenerate: !hasSpec,
       forceProjectDir: true
     });
     const applied = providerResult.toolResults.length
       ? lastMutatingResult(providerResult.toolResults)
       : hasSpec
-        ? await previewAndApproveSchematicPatch({ projectDir, prompt }, { validateProjectImpl, patchApprovalRegistry })
+        ? (await dispatchSchematicPatch({ projectDir, prompt }, { validateProjectImpl, patchApprovalRegistry })).result
         : await generateMcuPeripheralProject({ projectDir, prompt });
+    if (applied.requiresApproval) {
+      return {
+        ...applied,
+        operation: 'patched',
+        providerEvents: providerResult.events
+      };
+    }
     const validation = await validateProjectImpl({ projectDir });
     const rolledBack = hasSpec && !validation.ok;
     if (rolledBack) {
