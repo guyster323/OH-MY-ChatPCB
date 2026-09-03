@@ -28,6 +28,19 @@ test('parses provider stdout into deltas and tool calls', async () => {
   assert.equal(transcript.events[1].payload.name, 'schematic.generate');
 });
 
+test('allows providers to request read-only project inspection', async () => {
+  const script = 'console.log(JSON.stringify({type:"tool.call", payload:{id:"inspect_1", name:"project.inspect", args:{projectDir:"C:/workspace/demo"}}}));';
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.equal(transcript.events[0].payload.name, 'project.inspect');
+});
+
 test('runs Windows command-shim provider scripts', { skip: process.platform !== 'win32' }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-cmd-'));
   const scriptPath = path.join(root, 'fake-provider.cmd');

@@ -37,6 +37,22 @@ test('daemon rejects unknown tool calls with a typed failure', async () => {
   assert.equal(result.error.code, 'UNKNOWN_TOOL');
 });
 
+test('daemon dispatches project inspection through its injectable implementation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-inspect-'));
+
+  try {
+    const result = await dispatchToolCall(
+      { name: 'project.inspect', args: { projectDir: root } },
+      { inspectProjectImpl: async () => ({ ok: true, inspection: { projectDigest: 'abc' } }) }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.inspection.projectDigest, 'abc');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon dispatches board-level DRC validation', async () => {
   const calls = [];
   const result = await dispatchToolCall(

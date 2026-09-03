@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { createEnvelope } from './envelope.js';
 
-const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'simulate.spice']);
+const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 
 export function runProviderProcess({
   command,

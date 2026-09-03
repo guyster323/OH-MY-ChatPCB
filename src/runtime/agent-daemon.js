@@ -10,18 +10,20 @@ import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, 
 import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.js';
 import { applySchematicPatch } from '../workflow/schematic-patch.js';
 import { simulateProject } from '../workflow/simulate-project.js';
+import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { reviewCircuitReadiness } from '../workflow/review-project.js';
 
-const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'validate.drc', 'simulate.spice'];
+const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
 export async function dispatchToolCall(
   call,
   {
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
+    inspectProjectImpl = inspectProject,
     validateProjectImpl = validateProject,
     validateBoardImpl = validateBoard,
     providerControllers = new Map(),
@@ -50,6 +52,9 @@ export async function dispatchToolCall(
           projectName: call.args?.projectName
         })
       );
+
+    case 'project.inspect':
+      return ok(await inspectProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
 
     case 'validate.erc':
       return ok(await validateProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
@@ -80,6 +85,7 @@ export async function dispatchToolCall(
         await invokeProvider(call, {
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
+          inspectProjectImpl,
           validateProjectImpl,
           validateBoardImpl,
           providerControllers,
@@ -92,6 +98,7 @@ export async function dispatchToolCall(
         await requestProject(call, {
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
+          inspectProjectImpl,
           validateProjectImpl,
           validateBoardImpl,
           providerControllers,
@@ -110,7 +117,7 @@ export async function dispatchToolCall(
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -173,6 +180,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
       ...(await dispatchToolCall(toolCall, {
         checkProviderAvailabilityImpl,
         runProviderProcessImpl,
+        inspectProjectImpl,
         validateProjectImpl,
         validateBoardImpl,
         providerControllers,
@@ -192,7 +200,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   };
 }
 
-async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot }) {
+async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot }) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -210,6 +218,7 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
     const providerResult = await invokeProvider(call, {
       runProviderProcessImpl,
       checkProviderAvailabilityImpl,
+      inspectProjectImpl,
       validateProjectImpl,
       validateBoardImpl,
       providerControllers,
