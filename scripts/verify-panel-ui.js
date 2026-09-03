@@ -23,6 +23,7 @@ const unavailableValidationPrompt = 'Simulate unavailable validation tooling.';
 const delayedSwitchPrompt = 'Simulate a delayed request while switching projects.';
 let validationMode = 'passed';
 let providerRequestCount = 0;
+let inspectionDigest = 'a'.repeat(64);
 
 const staticServer = await startStaticServer(panelRoot);
 const daemon = await startUiDaemon();
@@ -49,6 +50,22 @@ try {
   await page.getByLabel('Circuit request').fill(prompt);
   await page.getByRole('button', { name: 'Send' }).click();
   await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
+  await page.getByText('current', { exact: true }).waitFor();
+
+  const inspection = await page.evaluate(() => ({
+    freshness: document.querySelector('#inspection-freshness')?.textContent,
+    digest: document.querySelector('#inspection-digest')?.textContent,
+    artifacts: document.querySelector('#inspection-artifact-count')?.textContent,
+    erc: document.querySelector('#inspection-erc')?.textContent,
+    drc: document.querySelector('#inspection-drc')?.textContent
+  }));
+  assert.deepEqual(inspection, {
+    freshness: 'current',
+    digest: 'aaaaaaaaaaaa',
+    artifacts: '6 artifacts',
+    erc: 'ERC 0/0',
+    drc: 'DRC 0/2'
+  });
 
   const successfulRequest = await page.evaluate(() => ({
     hasGenerateButton: Boolean(document.querySelector('#generate-button')),
@@ -195,6 +212,14 @@ try {
     window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
   });
   await hostPage.getByText(/reloaded: .*\.kicad_pro/).waitFor();
+  inspectionDigest = 'b'.repeat(64);
+  await hostPage.evaluate(() => {
+    const projectPath = document.querySelector('#active-project-directory').textContent;
+    window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
+  });
+  await hostPage.getByText('stale', { exact: true }).waitFor();
+  assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), true);
+  assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /stale evidence/i);
 
   await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
@@ -302,7 +327,20 @@ async function startUiDaemon() {
           return { ok: true, skipped: true, reason: { code: 'KICAD_CLI_UNAVAILABLE', message: 'KiCad CLI was not available.' } };
         }
         return { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } };
-      }
+      },
+      inspectProjectImpl: async () => ({
+        inspection: { projectDigest: inspectionDigest, artifactCount: 6 },
+        manifest: {
+          schemaVersion: 2,
+          freshness: inspectionDigest.startsWith('a')
+            ? { status: 'current', reason: 'Evidence matches.' }
+            : { status: 'stale', reason: 'Evidence no longer matches.' }
+        },
+        validation: {
+          erc: { ok: true, erc: { errorCount: 0, warningCount: 0 } },
+          drc: { ok: false, drc: { violationCount: 0, unconnectedCount: 2 } }
+        }
+      })
     }
   });
 }

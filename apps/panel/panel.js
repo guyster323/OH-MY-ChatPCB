@@ -26,6 +26,15 @@ const reviewNotesEl = document.querySelector('#review-notes');
 const reviewFixesEl = document.querySelector('#review-fixes');
 const validationStatusEl = document.querySelector('#validation-status');
 const validationTimestampEl = document.querySelector('#validation-timestamp');
+const inspectionCardEl = document.querySelector('#inspection-card');
+const inspectionFreshnessEl = document.querySelector('#inspection-freshness');
+const inspectionDigestEl = document.querySelector('#inspection-digest');
+const inspectionArtifactCountEl = document.querySelector('#inspection-artifact-count');
+const inspectionErcEl = document.querySelector('#inspection-erc');
+const inspectionDrcEl = document.querySelector('#inspection-drc');
+const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
+const approvePatchButtonEl = document.querySelector('#approve-patch-button');
+const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
 const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
@@ -37,6 +46,8 @@ let activeProjectCreateId = null;
 let activeRequestId = null;
 let activeRequestProjectDir = null;
 let pendingHostStatus = null;
+let inspectionState = { projectDir: null, requestId: null, result: null };
+let patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
 const pendingCalls = new Map();
 
 connect();
@@ -51,13 +62,17 @@ formEl.addEventListener('submit', (event) => {
 });
 providerEl.addEventListener('change', refreshProviderStatus);
 openKiCadButtonEl.addEventListener('click', openInKiCad);
+approvePatchButtonEl.addEventListener('click', approvePatch);
+cancelPatchButtonEl.addEventListener('click', cancelPatch);
 window.addEventListener('message', (event) => handleHostMessage(event.data));
 
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
   socket.addEventListener('open', () => {
     statusEl.textContent = 'Connected';
+    clearPatchApproval();
     refreshProviderStatus();
+    inspectActiveProject();
   });
   socket.addEventListener('message', (event) => handleEnvelope(JSON.parse(event.data)));
   socket.addEventListener('close', () => {
@@ -167,6 +182,14 @@ function handleEnvelope(envelope) {
         technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
       });
     }
+    if (callName === 'project.inspect') {
+      if (inspectionState.requestId === id) renderInspectionFailure();
+      return;
+    }
+    if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
+      clearPatchApproval();
+      renderRequestStatus({ state: 'failed', summary: 'Patch approval could not be completed.', technicalDetail: envelope.payload.error?.message ?? 'Patch tool call failed.' });
+    }
     return;
   }
 
@@ -182,8 +205,20 @@ function handleEnvelope(envelope) {
     setRequestBusy(false);
     if (requestProjectDir !== activeProject?.projectDir) return;
     renderProjectRequest(envelope.payload.result);
+    inspectActiveProject();
     return;
   }
+  if (callName === 'project.inspect') {
+    if (inspectionState.projectDir === activeProject?.projectDir && inspectionState.requestId === id) renderInspection(envelope.payload.result);
+    return;
+  }
+  if (callName === 'schematic.patch.approve') {
+    clearPatchApproval();
+    renderProjectRequest(envelope.payload.result);
+    inspectActiveProject();
+    return;
+  }
+  if (callName === 'schematic.patch.cancel') return;
   if (callName === 'provider.status') {
     const provider = envelope.payload.result;
     providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
@@ -200,6 +235,7 @@ function activateProject(project) {
   setRequestBusy(Boolean(activeRequestId));
   projectNameEl.value = '';
   renderRequestStatus({ state: 'ready', summary: 'Project ready. Describe the circuit you want to create.' });
+  inspectActiveProject();
 }
 
 function resetProjectResults() {
@@ -217,6 +253,10 @@ function resetProjectResults() {
   validationStatusEl.dataset.state = 'idle';
   validationStatusEl.textContent = 'Not run';
   validationTimestampEl.textContent = '';
+  inspectionState = { projectDir: null, requestId: null, result: null };
+  inspectionCardEl.hidden = true;
+  renderInspection({});
+  clearPatchApproval();
   conflictCardEl.hidden = true;
   kiCadLinkCardEl.hidden = true;
   kiCadLinkEl.dataset.state = 'available';
@@ -226,6 +266,11 @@ function resetProjectResults() {
 }
 
 function renderProjectRequest(result) {
+  if (result?.requiresApproval && result.patchId) {
+    setPatchApproval(result);
+    renderRequestStatus({ state: 'ready', summary: 'Patch preview is ready for approval.' });
+    return;
+  }
   renderReview(result.review);
   renderArtifacts(result.files);
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
@@ -249,6 +294,95 @@ function renderProjectRequest(result) {
       showKiCadFallback(projectFile);
     }
   }
+}
+
+function inspectActiveProject() {
+  if (!activeProject?.projectDir) return;
+  const projectDir = activeProject.projectDir;
+  const id = `project_inspect_${Date.now()}_${crypto.randomUUID()}`;
+  inspectionState = { projectDir, requestId: id, result: null };
+  inspectionCardEl.hidden = false;
+  renderInspection({});
+  pendingCalls.set(id, 'project.inspect');
+  sendToolCall({ id, name: 'project.inspect', args: { projectDir } });
+}
+
+function renderInspection(result = {}) {
+  const freshness = result.manifest?.freshness ?? {};
+  const status = ['current', 'stale', 'legacy-unverified', 'missing'].includes(freshness.status)
+    ? freshness.status
+    : 'missing';
+  const digest = result.inspection?.projectDigest;
+  const artifactCount = result.inspection?.artifactCount;
+  const erc = result.validation?.erc?.erc ?? result.validation?.erc;
+  const drc = result.validation?.drc?.drc ?? result.validation?.drc;
+  inspectionFreshnessEl.dataset.state = status;
+  inspectionFreshnessEl.textContent = status;
+  inspectionFreshnessEl.title = freshness.reason ?? '';
+  inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : '—';
+  inspectionArtifactCountEl.textContent = `${Number.isInteger(artifactCount) ? artifactCount : 0} artifacts`;
+  inspectionErcEl.textContent = erc ? `ERC ${erc.errorCount ?? 0}/${erc.warningCount ?? 0}` : 'ERC —';
+  inspectionDrcEl.textContent = drc ? `DRC ${drc.violationCount ?? 0}/${drc.unconnectedCount ?? 0}` : 'DRC —';
+  inspectionState.result = result;
+  renderPatchApproval();
+}
+
+function renderInspectionFailure() {
+  inspectionCardEl.hidden = false;
+  renderInspection({ manifest: { freshness: { status: 'missing', reason: 'Inspection was unavailable.' } } });
+}
+
+function setPatchApproval(preview) {
+  clearPatchApproval();
+  patchApprovalState = { patchId: preview.patchId, expiresAt: preview.expiresAt, timeout: null };
+  const delay = Number(preview.expiresAt) - Date.now();
+  if (Number.isFinite(delay) && delay > 0) {
+    patchApprovalState.timeout = setTimeout(() => {
+      clearPatchApproval('Patch preview expired.');
+    }, delay);
+  }
+  renderPatchApproval();
+}
+
+function clearPatchApproval(message = 'No patch preview active.') {
+  if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
+  patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
+  patchApprovalStatusEl.dataset.state = 'idle';
+  patchApprovalStatusEl.textContent = message;
+  approvePatchButtonEl.disabled = true;
+  cancelPatchButtonEl.disabled = true;
+}
+
+function renderPatchApproval() {
+  const freshness = inspectionState.result?.manifest?.freshness?.status;
+  const current = freshness === 'current';
+  const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
+  const active = Boolean(patchApprovalState.patchId) && unexpired;
+  approvePatchButtonEl.disabled = !active || !current;
+  cancelPatchButtonEl.disabled = !active;
+  if (!current) {
+    patchApprovalStatusEl.dataset.state = 'stale';
+    patchApprovalStatusEl.textContent = 'Approval unavailable: stale evidence. Inspect the project again before approving.';
+    return;
+  }
+  if (!active) return;
+  patchApprovalStatusEl.dataset.state = 'ready';
+  patchApprovalStatusEl.textContent = 'Patch preview is ready for approval.';
+}
+
+function approvePatch() {
+  if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
+  const id = `patch_approve_${Date.now()}`;
+  pendingCalls.set(id, 'schematic.patch.approve');
+  sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
+}
+
+function cancelPatch() {
+  if (!activeProject || cancelPatchButtonEl.disabled || !patchApprovalState.patchId) return;
+  const id = `patch_cancel_${Date.now()}`;
+  pendingCalls.set(id, 'schematic.patch.cancel');
+  sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
+  clearPatchApproval('Patch preview cancelled.');
 }
 
 function renderRequestStatus({ state, summary, technicalDetail = '' }) {
@@ -423,6 +557,7 @@ function handleHostMessage(message) {
   }
   if (message.type === 'project.reload') {
     if (message.linkState === 'conflict') {
+      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes.');
       showConflict();
       return;
     }
@@ -432,6 +567,7 @@ function handleHostMessage(message) {
         ? 'reloaded'
         : 'error';
     renderKiCadLink({ linkState, projectPath: findProjectFileFromList() ?? activeProject.projectDir });
+    if (message.completed === true) inspectActiveProject();
   }
 }
 

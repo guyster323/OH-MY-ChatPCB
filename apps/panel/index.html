@@ -78,6 +78,24 @@
         <time id="validation-timestamp"></time>
       </section>
 
+      <section id="inspection-card" class="status-card inspection-card" aria-labelledby="inspection-title" hidden>
+        <h2 id="inspection-title">Project evidence</h2>
+        <p id="inspection-freshness" data-state="missing">missing</p>
+        <p><span class="inspection-label">Digest</span> <code id="inspection-digest">—</code></p>
+        <p id="inspection-artifact-count">0 artifacts</p>
+        <p id="inspection-erc">ERC —</p>
+        <p id="inspection-drc">DRC —</p>
+      </section>
+
+      <section id="patch-approval-card" class="status-card patch-approval-card" aria-labelledby="patch-approval-title">
+        <h2 id="patch-approval-title">Patch approval</h2>
+        <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
+        <div class="patch-approval-actions">
+          <button id="approve-patch-button" type="button" disabled>Approve</button>
+          <button id="cancel-patch-button" type="button" disabled>Cancel</button>
+        </div>
+      </section>
+
       <section id="kicad-link-card" class="status-card kicad-card" hidden>
         <h2>KiCad project</h2>
         <p id="kicad-link" data-state="available"></p>

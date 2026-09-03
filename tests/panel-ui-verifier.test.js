@@ -35,4 +35,10 @@ test('panel browser UI verifier drives the real panel like a user', async () => 
   assert.match(source, /conflict-card/);
   assert.match(source, /message\.type === 'project\.reload'/);
   assert.match(source, /reloadCountAfterRollback/);
+  assert.match(source, /inspection/);
+  assert.match(source, /aaaaaaaaaaaa/);
+  assert.match(source, /6 artifacts/);
+  assert.match(source, /ERC 0\/0/);
+  assert.match(source, /DRC 0\/2/);
+  assert.match(source, /approve-patch-button/);
 });

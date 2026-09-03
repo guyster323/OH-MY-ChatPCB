@@ -69,6 +69,19 @@ try {
   assert.equal(typeof requested.payload.result.review, 'object');
   assert.equal(typeof requested.payload.result.review.status, 'string');
 
+  const inspected = await sendToolCallOverWebSocket({
+    url,
+    id: 'panel-project-inspect',
+    name: 'project.inspect',
+    args: { projectDir: created.payload.result.projectDir }
+  });
+
+  assert.equal(inspected.type, 'tool.result');
+  assert.equal(inspected.payload.ok, true);
+  assert.equal(typeof inspected.payload.result.inspection.projectDigest, 'string');
+  assert.equal(typeof inspected.payload.result.inspection.artifactCount, 'number');
+  assert.equal(typeof inspected.payload.result.manifest.freshness.status, 'string');
+
   console.log(
     JSON.stringify(
       {
@@ -79,7 +92,8 @@ try {
         operation: requested.payload.result.operation,
         project: requested.payload.result.files.project,
         erc: requested.payload.result.validation.erc,
-        reviewStatus: requested.payload.result.review.status
+        reviewStatus: requested.payload.result.review.status,
+        freshness: inspected.payload.result.manifest.freshness.status
       },
       null,
       2
