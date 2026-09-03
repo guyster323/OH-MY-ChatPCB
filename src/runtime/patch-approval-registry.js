@@ -7,7 +7,11 @@ export function createPatchApprovalRegistry({ ttlMs = 900000, now = Date.now, se
     if (record.disposed) return;
     record.disposed = true;
     if (record.timer !== undefined) clearTimeoutImpl(record.timer);
-    record.dispose?.();
+    try {
+      Promise.resolve(record.dispose?.()).catch(() => {});
+    } catch {
+      // Cleanup failures must not escape expiry callbacks or create an unhandled rejection.
+    }
   }
 
   function remove(record) {
@@ -15,14 +19,20 @@ export function createPatchApprovalRegistry({ ttlMs = 900000, now = Date.now, se
     disposeRecord(record);
   }
 
+  function expire(record) {
+    if (approvals.get(record.patchId) !== record) return;
+    record.status = 'expired';
+    disposeRecord(record);
+  }
+
   return {
     register(record) {
       const expiresAt = now() + ttlMs;
-      const normalized = { ...record, projectDir: path.resolve(record.projectDir), expiresAt, disposed: false };
+      const normalized = { ...record, projectDir: path.resolve(record.projectDir), expiresAt, disposed: false, status: 'active' };
       const prior = approvals.get(record.patchId);
       if (prior) remove(prior);
       approvals.set(record.patchId, normalized);
-      normalized.timer = setTimeoutImpl(() => remove(normalized), ttlMs);
+      normalized.timer = setTimeoutImpl(() => expire(normalized), ttlMs);
       normalized.timer?.unref?.();
       return normalized;
     },
@@ -30,13 +40,14 @@ export function createPatchApprovalRegistry({ ttlMs = 900000, now = Date.now, se
     consume({ patchId, projectDir }) {
       const record = approvals.get(patchId);
       if (!record) return { ok: false, reason: { code: 'PATCH_APPROVAL_MISSING', message: 'Patch approval was not found.' } };
+      if (record.status === 'expired' || now() >= record.expiresAt) {
+        expire(record);
+        approvals.delete(patchId);
+        return { ok: false, reason: { code: 'PATCH_APPROVAL_EXPIRED', message: 'Patch approval has expired.' } };
+      }
       if (record.projectDir !== path.resolve(projectDir)) {
         remove(record);
         return { ok: false, reason: { code: 'PATCH_STALE', message: 'Patch approval belongs to a different project.' } };
-      }
-      if (now() >= record.expiresAt) {
-        remove(record);
-        return { ok: false, reason: { code: 'PATCH_APPROVAL_EXPIRED', message: 'Patch approval has expired.' } };
       }
       approvals.delete(patchId);
       if (record.timer !== undefined) clearTimeoutImpl(record.timer);

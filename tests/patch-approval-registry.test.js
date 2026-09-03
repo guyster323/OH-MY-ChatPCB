@@ -53,3 +53,18 @@ test('patch approval registry timer disposes an unconsumed approval and disposeA
   registry.disposeAll();
   assert.equal(cleared, 1);
 });
+
+test('patch approval registry retains an expired tombstone until it is consumed', async () => {
+  const registry = createPatchApprovalRegistry({ ttlMs: 5 });
+  registry.register({ patchId: 'sha256:expired', projectDir: 'C:/project' });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(registry.consume({ patchId: 'sha256:expired', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
+  assert.equal(registry.consume({ patchId: 'sha256:expired', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_MISSING');
+});
+
+test('patch approval registry absorbs rejected asynchronous disposal from expiry cleanup', async () => {
+  const registry = createPatchApprovalRegistry({ ttlMs: 5 });
+  registry.register({ patchId: 'sha256:reject', projectDir: 'C:/project', dispose: () => Promise.reject(new Error('cleanup failed')) });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(registry.consume({ patchId: 'sha256:reject', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
+});
