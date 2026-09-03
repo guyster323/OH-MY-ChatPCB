@@ -1,5 +1,27 @@
 # Handoff: OH-MY-ChatPCB
 
+## 2026-09-03 Evidence foundation migration
+
+- The active architectural direction is the evidence-gated runtime rebuild: KiCad files are authoritative editable state; `.chatpcb.json` is an intent/evidence manifest.
+- `project.inspect` is read-only and reports a deterministic saved-project digest, validation result, and evidence freshness.
+- Schema v1 remains readable but is `legacy-unverified`; schema v2 evidence and patch approvals are artifact-bound.
+- Patch approvals are explicit, single-use, expiring, and fail closed after any tracked artifact changes. Every generated artifact participates in preview and rollback.
+- Circuit JSON, kicad-happy, KiCad IPC, and solver integrations are optional pinned adapters, not core sources of truth.
+- The unmerged `guyster323/route-reset-boot` experiment remains diagnostic evidence only. Do not merge, delete, or extend it until the solver phase makes a measured retention decision.
+- Current release truth is unchanged: clean ERC/DRC is not release-ready. The supported boards still have PCB unconnected items and lack complete routing, manufacturing exports, sourced BOM, datasheet, and human release evidence.
+
+### Measured final gate (2026-09-04)
+
+- Node.js: `v24.14.1`.
+- KiCad CLI: `C:/Users/windo/AppData/Local/Programs/KiCad/10.0/bin/kicad-cli.exe`, version `10.0.3`.
+- `npm test`: `140` tests, `139` pass, `0` fail, `1` expected skipped symlink test.
+- `npm run verify:sample`: passed; sample ERC `0` errors / `0` warnings and simulation returned the typed `NGSPICE_UNAVAILABLE` skip.
+- `npm run verify:panel`: passed.
+- `npm run verify:ui`: passed.
+- Real `node ./bin/chatpcb-cli.js inspect --project ./workspaces/sample-mcu`: passed with digest `24b32ec470c2599aa886b014f0840a159e5d2facf4b06fa5a7ebf64b87b46980`, `5` artifacts, schema v1 freshness `legacy-unverified`, ERC `0` errors / `0` warnings, and typed `NO_BOARD` DRC skip.
+- `git diff --check`: passed.
+- Current PCB release blockers remain explicit: after the retained I2C routing increment, ESP32-S3 has `0` DRC violations / `24` unconnected items and STM32 has `0` DRC violations / `22` unconnected items. Both remain prototype-only: complete routing, Gerber/drill exports, sourced BOM, datasheet evidence, and human release approval are absent.
+
 ## Current checkout
 
 - Runtime repo: `C:\Users\windo\orca\OH-MY-ChatPCB` (GitHub `guyster323/OH-MY-ChatPCB`, branch `main`)

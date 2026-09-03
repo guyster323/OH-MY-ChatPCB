@@ -2,6 +2,19 @@
 
 Status is against `main` in this repository. Historical session notes live in `docs/handoff-next-session.md` and `plan.md`.
 
+OH-MY-ChatPCB is an evidence-gated KiCad agent runtime. This rebuild roadmap is the active source of architectural direction: saved KiCad artifacts remain authoritative, every write requires artifact-bound preview and approval, and no clean ERC/DRC result alone permits release-ready status.
+
+## Phase 1: Project Inspection and Evidence Foundation
+
+Status: complete.
+
+- Schema-versioned `.chatpcb.json` intent/evidence manifest
+- Deterministic `project.inspect` inventory and digest
+- Artifact-bound, expiring, single-use patch approval and rollback
+- Panel freshness state for current, stale, missing, and `legacy-unverified` evidence
+
+Schema v1 remains readable but unverified. Schema v2 is artifact-bound. Circuit JSON, kicad-happy, KiCad IPC, and solver integrations remain optional pinned adapters for later phases, not sources of editable truth.
+
 ## Phase 1: Runnable Scaffold
 
 Status: complete.
