@@ -21,6 +21,7 @@ test('normalization rejects unsupported versions and malformed arrays', () => {
   assert.throws(() => normalizeEvidenceManifest(null), /object/);
   assert.throws(() => normalizeEvidenceManifest({ schemaVersion: 3 }), /schema version/);
   assert.throws(() => normalizeEvidenceManifest({ schemaVersion: 2, facts: {} }), /facts.*array/);
+  assert.throws(() => normalizeEvidenceManifest({ schemaVersion: 2, artifacts: [{ path: 'C:/secret' }] }), /relative/);
 });
 
 test('v2 creation has stable keys, copied arrays, and relative artifact paths', () => {

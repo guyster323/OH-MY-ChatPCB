@@ -26,6 +26,7 @@ export function normalizeEvidenceManifest(raw) {
   manifest.facts = assertArray(manifest.facts, 'facts');
   manifest.findings = assertArray(manifest.findings, 'findings');
   manifest.approvals = assertArray(manifest.approvals, 'approvals');
+  if (manifest.artifacts !== undefined) manifest.artifacts = assertRelativeArtifacts(manifest.artifacts);
   if (manifest.inspection?.artifacts !== undefined) manifest.inspection.artifacts = assertRelativeArtifacts(manifest.inspection.artifacts);
   if (manifest.evidence?.artifacts !== undefined) manifest.evidence.artifacts = assertRelativeArtifacts(manifest.evidence.artifacts);
   return manifest;
