@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
 
 async function makeProject() {
@@ -36,6 +37,38 @@ test('inspectProject returns stable artifact evidence and separate validation re
     assert.equal(result.validation.erc.ok, true);
     assert.equal(result.validation.drc.ok, false);
     assert.equal(result.validationClean, false);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('inspectProject isolates validator mutations from saved project files and evidence', async () => {
+  const root = await makeProject();
+  const before = await snapshot(root);
+  const beforeInventory = await collectArtifactInventory({ projectDir: root });
+  const validationDirs = [];
+  try {
+    const result = await inspectProject({
+      projectDir: root,
+      validateProjectImpl: async ({ projectDir }) => {
+        validationDirs.push(projectDir);
+        await writeFile(path.join(projectDir, 'demo.kicad_sch'), '(mutated by ERC)\n', 'utf8');
+        await writeFile(path.join(projectDir, 'chatpcb-erc.json'), '{"generated":true}', 'utf8');
+        return { ok: true, erc: { errorCount: 0, warningCount: 0 } };
+      },
+      validateBoardImpl: async ({ projectDir }) => {
+        validationDirs.push(projectDir);
+        await writeFile(path.join(projectDir, 'chatpcb-drc.json'), '{"generated":true}', 'utf8');
+        return { ok: false, drc: { violationCount: 1, unconnectedCount: 0 } };
+      }
+    });
+
+    assert.equal(result.validation.erc.ok, true);
+    assert.equal(result.validation.drc.ok, false);
+    assert.equal(result.validationClean, false);
+    assert.equal(validationDirs.every((validationDir) => validationDir !== root), true);
+    assert.deepEqual(await snapshot(root), before);
+    assert.deepEqual(await collectArtifactInventory({ projectDir: root }), beforeInventory);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
