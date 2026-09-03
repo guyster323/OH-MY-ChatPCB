@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -55,6 +55,34 @@ test('approved schematic patch writes generated files and returns validation res
     assert.equal(result.validation.ok, true);
     assert.equal(metadata.mcu.family, 'STM32');
     assert.ok(metadata.interfaces.some((iface) => iface.kind === 'uart'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('approved schematic patch rejects a preview after project artifacts change', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-stale-'));
+
+  try {
+    const initial = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
+    });
+    const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
+    const preview = await applySchematicPatch({ projectDir: root, prompt, approved: false });
+    await appendFile(initial.files.schematic, '\n(user edit)\n');
+
+    const result = await applySchematicPatch({
+      projectDir: root,
+      prompt,
+      approved: true,
+      expectedPatchId: preview.patchId,
+      validateProjectImpl: async () => ({ ok: true })
+    });
+
+    assert.equal(result.applied, false);
+    assert.equal(result.reason.code, 'PATCH_STALE');
+    assert.match(await readFile(initial.files.schematic, 'utf8'), /user edit/);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

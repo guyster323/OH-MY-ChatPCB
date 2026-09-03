@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -14,6 +15,8 @@ export async function applySchematicPatch({
   projectName = 'chatpcb_mcu_peripheral',
   approved = false,
   cancel = false,
+  expectedPatchId,
+  patchPlan,
   validateProjectImpl = validateProject
 } = {}) {
   if (!projectDir) {
@@ -34,18 +37,30 @@ export async function applySchematicPatch({
     };
   }
 
-  const plan = await buildPatchPlan({ projectDir: resolvedProjectDir, prompt, projectName });
+  const plan = patchPlan ?? await buildPatchPlan({ projectDir: resolvedProjectDir, prompt, projectName });
+  const ownsPlan = !patchPlan;
 
   if (!approved) {
-    return {
+    const preview = {
       requiresApproval: true,
       approved: false,
       applied: false,
       files: plan.targetFiles,
       changedFiles: plan.changedFiles,
       diff: plan.diff,
-      review: plan.proposed.review
+      review: plan.proposed.review,
+      patchId: plan.patchId,
+      beforeArtifacts: plan.beforeArtifacts,
+      afterArtifacts: plan.afterArtifacts
     };
+    if (ownsPlan) await disposePatchPlan(plan);
+    return preview;
+  }
+
+  const currentBeforeArtifacts = await collectArtifacts(plan.targetFiles);
+  if ((expectedPatchId && expectedPatchId !== plan.patchId) || !artifactsMatch(currentBeforeArtifacts, plan.beforeArtifacts)) {
+    if (ownsPlan) await disposePatchPlan(plan);
+    return patchFailure('PATCH_STALE', 'Patch preview no longer matches the project artifacts.');
   }
 
   if (applyLocks.has(resolvedProjectDir)) {
@@ -86,8 +101,16 @@ export async function applySchematicPatch({
     };
   } finally {
     applyLocks.delete(resolvedProjectDir);
-    await rm(plan.tempDir, { force: true, recursive: true });
+    if (ownsPlan) await disposePatchPlan(plan);
   }
+}
+
+export async function createSchematicPatchPlan({ projectDir, prompt, projectName = 'chatpcb_mcu_peripheral' }) {
+  return buildPatchPlan({ projectDir: path.resolve(projectDir), prompt, projectName });
+}
+
+export async function disposeSchematicPatchPlan(plan) {
+  await disposePatchPlan(plan);
 }
 
 async function buildPatchPlan({ projectDir, prompt, projectName }) {
@@ -104,16 +127,30 @@ async function buildPatchPlan({ projectDir, prompt, projectName }) {
 
   const changedFiles = [];
   const diffSections = [];
+  const beforeArtifacts = [];
+  const afterArtifacts = [];
 
   for (const [kind, targetPath] of Object.entries(targetFiles)) {
     const proposedPath = proposedFiles[kind];
     const [before, after] = await Promise.all([readOptional(targetPath), readFile(proposedPath, 'utf8')]);
+    const relativeName = path.basename(targetPath);
+    beforeArtifacts.push(artifactRecord(relativeName, before));
+    afterArtifacts.push(artifactRecord(relativeName, after));
     if (before !== after) {
-      const relativeName = path.basename(targetPath);
       changedFiles.push(relativeName);
       diffSections.push(renderUnifiedDiff(relativeName, before ?? '', after));
     }
   }
+
+  beforeArtifacts.sort(compareArtifacts);
+  afterArtifacts.sort(compareArtifacts);
+  changedFiles.sort();
+  const patchId = `sha256:${createHash('sha256').update(JSON.stringify({
+    projectDir,
+    beforeArtifacts,
+    afterArtifacts,
+    changedFiles
+  })).digest('hex')}`;
 
   return {
     tempDir,
@@ -121,7 +158,10 @@ async function buildPatchPlan({ projectDir, prompt, projectName }) {
     proposedFiles,
     targetFiles,
     changedFiles,
-    diff: diffSections.join('\n')
+    diff: diffSections.join('\n'),
+    patchId,
+    beforeArtifacts,
+    afterArtifacts
   };
 }
 
@@ -166,6 +206,45 @@ async function readOptional(filePath) {
     }
     throw error;
   }
+}
+
+async function collectArtifacts(targetFiles) {
+  const artifacts = await Promise.all(
+    Object.values(targetFiles).map(async (targetPath) => artifactRecord(path.basename(targetPath), await readOptional(targetPath)))
+  );
+  return artifacts.sort(compareArtifacts);
+}
+
+function artifactRecord(relativePath, content) {
+  return {
+    path: relativePath,
+    hash: content === null ? null : `sha256:${createHash('sha256').update(content).digest('hex')}`
+  };
+}
+
+function compareArtifacts(left, right) {
+  return left.path.localeCompare(right.path);
+}
+
+function artifactsMatch(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function disposePatchPlan(plan) {
+  await rm(plan.tempDir, { force: true, recursive: true });
+}
+
+function patchFailure(code, message) {
+  return {
+    requiresApproval: false,
+    approved: true,
+    applied: false,
+    rolledBack: false,
+    files: {},
+    changedFiles: [],
+    diff: '',
+    reason: { code, message }
+  };
 }
 
 function renderUnifiedDiff(relativeName, before, after) {

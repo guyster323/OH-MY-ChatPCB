@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { dispatchToolCall, startDaemon } from '../src/runtime/agent-daemon.js';
+import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 
 test('daemon dispatches schematic.generate tool calls to the project generator', async () => {
@@ -171,9 +172,67 @@ test('daemon dispatches schematic.patch as an approval-gated preview', async () 
     assert.equal(result.ok, true);
     assert.equal(result.result.requiresApproval, true);
     assert.equal(result.result.applied, false);
+    assert.match(result.result.patchId, /^sha256:/);
+    assert.ok(Number.isFinite(result.result.expiresAt));
+    assert.ok(result.result.beforeArtifacts.every((artifact) => artifact.path && 'hash' in artifact));
+    assert.ok(result.result.afterArtifacts.every((artifact) => artifact.path && /^sha256:/.test(artifact.hash)));
     assert.match(result.result.diff, /--- chatpcb_mcu_peripheral.chatpcb.json/);
     assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
   } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon consumes a patch preview once and rejects replay or stale artifacts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-patch-approval-'));
+  const registry = createPatchApprovalRegistry();
+  const options = { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }) };
+  const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
+
+  try {
+    const generated = await dispatchToolCall({ name: 'schematic.generate', args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' } });
+    const preview = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, prompt } }, options);
+    const approved = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: preview.result.patchId } }, options);
+    const replay = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: preview.result.patchId } }, options);
+
+    assert.equal(approved.ok, true);
+    assert.equal(approved.result.applied, true);
+    assert.equal(replay.ok, false);
+    assert.equal(replay.error.code, 'PATCH_APPROVAL_MISSING');
+
+    const stalePreview = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, prompt } }, options);
+    await appendFile(generated.result.files.schematic, '\n(user edit)\n');
+    const stale = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: stalePreview.result.patchId } }, options);
+    assert.equal(stale.ok, true);
+    assert.equal(stale.result.reason.code, 'PATCH_STALE');
+  } finally {
+    registry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon rejects missing, cancelled, and expired patch approvals', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-patch-expiry-'));
+  let time = 1000;
+  const registry = createPatchApprovalRegistry({ ttlMs: 10, now: () => time });
+  const options = { patchApprovalRegistry: registry };
+  const prompt = 'STM32 board with USB-C power and UART header.';
+
+  try {
+    await dispatchToolCall({ name: 'schematic.generate', args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' } });
+    const missing = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, approved: true } }, options);
+    assert.equal(missing.error.code, 'PATCH_APPROVAL_REQUIRED');
+
+    const cancellable = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, prompt } }, options);
+    const cancelled = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, cancel: true, patchId: cancellable.result.patchId } }, options);
+    assert.equal(cancelled.result.canceled, true);
+
+    const expiring = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, prompt } }, options);
+    time = 1011;
+    const expired = await dispatchToolCall({ name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: expiring.result.patchId } }, options);
+    assert.equal(expired.error.code, 'PATCH_APPROVAL_EXPIRED');
+  } finally {
+    registry.disposeAll();
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -873,12 +932,12 @@ test('daemon websocket transports approved patch results with large diffs', asyn
             type: 'tool.call',
             createdAt: new Date().toISOString(),
             payload: {
-              id: 'call_large_patch',
+              id: 'call_large_patch_preview',
               name: 'schematic.patch',
               args: {
                 projectDir: root,
                 prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.',
-                approved: true
+                approved: false
               }
             }
           })
@@ -888,6 +947,17 @@ test('daemon websocket transports approved patch results with large diffs', asyn
       socket.addEventListener('message', (event) => {
         const envelope = JSON.parse(event.data);
         if (envelope.type !== 'tool.result') return;
+        if (envelope.payload.id === 'call_large_patch_preview') {
+          socket.send(
+            JSON.stringify(createEnvelope('tool.call', {
+              id: 'call_large_patch_apply',
+              name: 'schematic.patch',
+              args: { projectDir: root, approved: true, patchId: envelope.payload.result.patchId }
+            }))
+          );
+          return;
+        }
+        if (envelope.payload.id !== 'call_large_patch_apply') return;
         clearTimeout(timer);
         socket.close();
         resolve(envelope.payload);
