@@ -3,8 +3,9 @@ import path from 'node:path';
 
 import { analyzePcb } from './kicad-pcb.js';
 import { analyzeSchematic } from './kicad-schematic.js';
-import { normalizeFacts } from './fact-contract.js';
+import { normalizeFacts, normalizeFinding } from './fact-contract.js';
 import { collectArtifactInventory } from '../evidence/artifact-inventory.js';
+import { runConfiguredAnalyzer } from './external-adapter.js';
 
 const BUILTIN_ANALYZER = {
   id: 'builtin.kicad',
@@ -104,7 +105,6 @@ export async function analyzeProject({
   readFileImpl = readFile,
   collectInventoryImpl = collectArtifactInventory
 } = {}) {
-  void analyzerAdapters;
   if (!inventory || !Array.isArray(inventory.artifacts) || typeof inventory.projectDigest !== 'string') {
     throw new TypeError('inventory with artifacts and projectDigest is required');
   }
@@ -157,10 +157,40 @@ export async function analyzeProject({
   diagnostics.push(...normalized.diagnostics);
   diagnostics.sort(compareDiagnostics);
   const status = sourceArtifacts.length === 0 ? 'skipped' : diagnostics.length === 0 ? 'complete' : 'partial';
+  const builtinAnalyzer = { ...BUILTIN_ANALYZER, status, sourceArtifacts, diagnostics };
+
+  const external = [];
+  const mergedFacts = [...normalized.facts];
+  const factIds = new Set(mergedFacts.map((fact) => fact.id));
+  const mergedFindings = [...findings];
+  const adapterDefinitions = Array.isArray(analyzerAdapters) ? analyzerAdapters.slice().sort((left, right) => compareText(left?.id ?? '', right?.id ?? '')) : [];
+  for (const definition of adapterDefinitions) {
+    const result = await runConfiguredAnalyzer({ definition, projectDir, inventory, sourceFiles: contents });
+    const adapterDiagnostics = [...result.analyzer.diagnostics];
+    const adapterFacts = normalizeFacts(result.facts);
+    adapterDiagnostics.push(...adapterFacts.diagnostics);
+    for (const fact of adapterFacts.facts) {
+      if (factIds.has(fact.id)) {
+        adapterDiagnostics.push({ code: 'ANALYZER_FACT_COLLISION', message: `Duplicate fact ID: ${fact.id}`, factId: fact.id });
+      } else {
+        factIds.add(fact.id);
+        mergedFacts.push(fact);
+      }
+    }
+    for (const finding of result.findings) {
+      try { mergedFindings.push(normalizeFinding(finding)); }
+      catch (cause) {
+        adapterDiagnostics.push({ code: 'ANALYZER_FINDING_INVALID', message: cause.message, findingId: finding?.id });
+      }
+    }
+    adapterDiagnostics.sort(compareDiagnostics);
+    external.push({ ...result.analyzer, diagnostics: adapterDiagnostics });
+  }
+
   return {
-    facts: normalized.facts,
-    findings: normalizeFindings(findings),
-    analyzers: [{ ...BUILTIN_ANALYZER, status, sourceArtifacts, diagnostics }]
+    facts: normalizeFacts(mergedFacts).facts,
+    findings: normalizeFindings(mergedFindings),
+    analyzers: [builtinAnalyzer, ...external].sort((left, right) => compareText(left.id, right.id))
   };
 }
 

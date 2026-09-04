@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -19,6 +20,7 @@ const board = `(kicad_pcb (version 1) (layers (0 "F.Cu" signal))
     (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu") (net 1 "GND"))))`;
 
 const scopedId = (id, artifactPath) => `${id}@${Buffer.from(artifactPath, 'utf8').toString('base64url')}`;
+const executableHash = createHash('sha256').update(await readFile(process.execPath)).digest('hex');
 
 async function makeProject({ withBoard = true, withSchematic = true } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-analyzer-'));
@@ -165,6 +167,29 @@ test('analyzeProject discards facts when the post-extraction inventory digest ch
       diagnostics: [{ code: 'ANALYZER_INPUT_CHANGED', message: 'Project artifact digest changed during analysis' }]
     }]);
     assert.equal(calls, 2);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject keeps built-in facts when an external adapter collides with one', async () => {
+  const root = await makeProject();
+  const adapterPath = path.join(root, 'adapter.mjs');
+  await writeFile(adapterPath, `console.log(JSON.stringify({ schemaVersion: 1, facts: [{ id: 'board.summary', category: 'test', sourceArtifact: 'demo.kicad_pcb' }] }));`, 'utf8');
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const result = await analyzeProject({
+      projectDir: root,
+      inventory,
+      analyzerAdapters: [{
+        id: 'external.collision', namespace: 'builtin', version: '1', command: process.execPath,
+        args: [adapterPath], sha256: executableHash, timeoutMs: 5_000, input: 'json'
+      }]
+    });
+
+    assert.equal(result.facts.filter((fact) => fact.id === 'builtin.board.summary').length, 1);
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').status, 'complete');
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics[0].code, 'ANALYZER_FACT_COLLISION');
   } finally {
     await rm(root, { force: true, recursive: true });
   }
