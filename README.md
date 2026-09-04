@@ -173,7 +173,7 @@ node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 
 Saved KiCad files (`.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, libraries, and manufacturing outputs) are the authoritative editable state. `.chatpcb.json` is a versioned intent/evidence manifest, not a replacement for those files. Run `project.inspect` before reviewing a candidate patch: it reads saved artifacts, reports a stable digest, and makes stale or missing evidence visible. A clean ERC or DRC is not a release decision; release still requires fresh evidence and explicit human approval.
 
-Schema v1 manifests remain readable and inspect as `legacy-unverified`; they contain intent but no artifact-bound evidence. Schema v2 records an artifact-bound project digest. Schema v2 migration is planned future work; no migration tool or CLI is currently available.
+Schema v1 manifests remain readable and inspect as `legacy-unverified`; they contain intent but no artifact-bound evidence. Schema v2 stores canonical `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, and `releaseGates`; inspection derives its artifact-bound digest from the sorted saved-artifact records. Schema v2 migration is planned future work; no migration tool or CLI is currently available. The panel labels legacy or missing evidence as a warning but can still approve a patch protected by exact before/after hashes; stale evidence remains blocked.
 
 ### ADBMS6830 BMS example
 

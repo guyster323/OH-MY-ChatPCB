@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 
 async function applyApprovedPatch(options) {
@@ -107,6 +109,78 @@ test('approved schematic patch rejects a preview after project artifacts change'
     assert.equal(result.applied, false);
     assert.equal(result.reason.code, 'PATCH_STALE');
     assert.match(await readFile(initial.files.schematic, 'utf8'), /user edit/);
+    await disposeSchematicPatchPlan(plan);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('approved schematic patch becomes stale when an unchanged tracked artifact is added or edited', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-whole-project-stale-'));
+
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
+    });
+    const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
+    const plan = await createSchematicPatchPlan({ projectDir: root, prompt });
+    const unrelatedSchematic = path.join(root, 'user-sheet.kicad_sch');
+    await appendFile(unrelatedSchematic, '(user-authored-sheet)\n');
+
+    const result = await applySchematicPatch({
+      projectDir: root,
+      prompt,
+      approved: true,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan
+    });
+
+    assert.equal(result.applied, false);
+    assert.equal(result.reason.code, 'PATCH_STALE');
+    assert.match(await readFile(unrelatedSchematic, 'utf8'), /user-authored-sheet/);
+    await disposeSchematicPatchPlan(plan);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('approved schematic patch writes the KiCad-normalized candidate bytes it previewed', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-normalized-candidate-'));
+
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
+    });
+    const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
+    const validateCandidate = async ({ projectDir }) => {
+      await appendFile(path.join(projectDir, 'chatpcb_mcu_peripheral.kicad_sch'), '\n(kicad-cli-normalized)\n');
+      return { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } };
+    };
+    const plan = await createSchematicPatchPlan({ projectDir: root, prompt, validateProjectImpl: validateCandidate });
+    const preview = await applySchematicPatch({ projectDir: root, approved: false, patchPlan: plan });
+
+    assert.ok(preview.afterArtifacts.some((artifact) => artifact.path === 'chatpcb_mcu_peripheral.kicad_sch'));
+    const result = await applySchematicPatch({
+      projectDir: root,
+      approved: true,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan,
+      validateProjectImpl: async () => {
+        throw new Error('the authoritative project must not be revalidated after candidate approval');
+      }
+    });
+
+    assert.equal(result.applied, true);
+    assert.match(await readFile(path.join(root, 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8'), /kicad-cli-normalized/);
+    const saved = await collectArtifactInventory({ projectDir: root });
+    const finalSchematic = await readFile(path.join(root, 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8');
+    assert.equal(
+      preview.afterArtifacts.find((artifact) => artifact.path === 'chatpcb_mcu_peripheral.kicad_sch')?.hash,
+      `sha256:${createHash('sha256').update(finalSchematic).digest('hex')}`
+    );
+    assert.equal(saved.projectDigest, preview.afterProjectDigest);
     await disposeSchematicPatchPlan(plan);
   } finally {
     await rm(root, { force: true, recursive: true });

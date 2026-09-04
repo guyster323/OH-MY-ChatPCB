@@ -96,7 +96,7 @@ test('daemon dispatches board-level DRC validation', async () => {
   ]);
 });
 
-test('daemon lets a provider invoke board-level DRC validation', async () => {
+test('daemon returns provider board validation through a disposable inspection result', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-drc-'));
 
   try {
@@ -131,18 +131,23 @@ test('daemon lets a provider invoke board-level DRC validation', async () => {
             ]
           };
         },
-        validateBoardImpl: async ({ projectDir }) => ({
+        inspectProjectImpl: async ({ projectDir }) => ({
           ok: true,
-          skipped: false,
-          projectDir,
-          drc: { violationCount: 0, unconnectedCount: 0, byType: {} }
+          inspectedProjectDir: projectDir,
+          validation: {
+            drc: {
+              ok: true,
+              skipped: false,
+              drc: { violationCount: 0, unconnectedCount: 0, byType: {} }
+            }
+          }
         })
       }
     );
 
     assert.equal(result.ok, true);
     assert.equal(result.result.toolResults[0].ok, true);
-    assert.equal(result.result.toolResults[0].result.drc.unconnectedCount, 0);
+    assert.equal(result.result.toolResults[0].result.validation.drc.drc.unconnectedCount, 0);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -178,6 +183,42 @@ test('daemon dispatches schematic.patch as an approval-gated preview', async () 
     assert.ok(result.result.afterArtifacts.every((artifact) => artifact.path && /^sha256:/.test(artifact.hash)));
     assert.match(result.result.diff, /--- chatpcb_mcu_peripheral.chatpcb.json/);
     assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon routes provider-emitted validation through disposable project inspection', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-inspection-'));
+
+  try {
+    const result = await dispatchToolCall(
+      {
+        id: 'call_provider_erc',
+        name: 'provider.invoke',
+        args: { provider: 'codex', projectDir: root, prompt: 'Run ERC.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async () => ({
+          exitCode: 0,
+          stderr: '',
+          events: [createEnvelope('tool.call', { id: 'call_provider_erc_tool', name: 'validate.erc', args: {} })]
+        }),
+        validateProjectImpl: async () => {
+          throw new Error('provider validation must not target the authoritative project');
+        },
+        inspectProjectImpl: async ({ projectDir }) => ({
+          ok: true,
+          inspectedProjectDir: projectDir,
+          validation: { erc: { ok: true, erc: { errorCount: 0, warningCount: 0 } } }
+        })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.toolResults[0].result.validation.erc.ok, true);
+    assert.equal(result.result.toolResults[0].result.inspectedProjectDir, root);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -445,7 +486,7 @@ test('daemon rejects generate and request calls that target the home directory',
   assert.equal(result.error.code, 'UNSAFE_PROJECT_DIR');
 });
 
-test('daemon restore after failed validation does not delete the project directory itself', async () => {
+test('daemon candidate validation rejection does not delete the project directory itself', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-dir-'));
   const sentinel = path.join(root, 'user-note.txt');
   const registry = createPatchApprovalRegistry();
@@ -467,14 +508,20 @@ test('daemon restore after failed validation does not delete the project directo
         name: 'project.request',
         args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
       },
-      { ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'Preparing a patch.' })] }), patchApprovalRegistry: registry }
+      {
+        ...providerOptions({
+          events: [createEnvelope('agent.delta', { text: 'Preparing a patch.' })],
+          validation: { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
+        }),
+        patchApprovalRegistry: registry
+      }
     );
 
     assert.equal(result.ok, true);
     assert.equal(result.result.applied, false);
     const approved = await dispatchToolCall(
       { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
-      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }) }
+      { patchApprovalRegistry: registry }
     );
     assert.equal(approved.ok, true);
     assert.equal(approved.result.rolledBack, true);
@@ -666,7 +713,7 @@ test('daemon does not fall back after provider parse, cancellation, or non-zero 
   }
 });
 
-test('daemon restores existing project artifacts when an approved project.request patch fails ERC validation', async () => {
+test('daemon keeps existing project artifacts when candidate ERC validation fails', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-rollback-'));
   const registry = createPatchApprovalRegistry();
 
@@ -682,14 +729,20 @@ test('daemon restores existing project artifacts when an approved project.reques
         name: 'project.request',
         args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
       },
-      { ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'Preparing a patch.' })] }), patchApprovalRegistry: registry }
+      {
+        ...providerOptions({
+          events: [createEnvelope('agent.delta', { text: 'Preparing a patch.' })],
+          validation: { ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }
+        }),
+        patchApprovalRegistry: registry
+      }
     );
 
     assert.equal(result.ok, true);
     assert.equal(result.result.applied, false);
     const approved = await dispatchToolCall(
       { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
-      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: false, skipped: false, erc: { errorCount: 1, warningCount: 0, byType: { test: 1 } } }) }
+      { patchApprovalRegistry: registry }
     );
     assert.equal(approved.result.validation.erc.errorCount, 1);
     assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
@@ -739,6 +792,89 @@ test('daemon returns a provider-emitted patch as a preview without writing until
     assert.equal(approved.result.applied, true);
   } finally {
     registry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon normalizes provider patch controls to an approval-gated preview', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-normalized-patch-'));
+  const registry = createPatchApprovalRegistry();
+
+  try {
+    const generated = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' }
+    });
+    const before = await readFile(generated.result.files.spec, 'utf8');
+    const result = await dispatchToolCall(
+      {
+        id: 'call_provider_normalized_patch',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Add a reset button.' }
+      },
+      {
+        ...providerOptions({
+          events: [createEnvelope('tool.call', {
+            id: 'call_provider_patch_controls',
+            name: 'schematic.patch',
+            args: {
+              prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.',
+              approved: true,
+              cancel: true,
+              patchId: 'provider-supplied-approval'
+            }
+          })]
+        }),
+        patchApprovalRegistry: registry
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.applied, false);
+    assert.match(result.result.patchId, /^sha256:/);
+    assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
+  } finally {
+    registry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon restores an existing project snapshot after an exceptional provider exit', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-exception-restore-'));
+
+  try {
+    const generated = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' }
+    });
+    const before = await readFile(generated.result.files.spec, 'utf8');
+
+    await assert.rejects(
+      () => dispatchToolCall(
+        {
+          id: 'call_provider_exception_restore',
+          name: 'project.request',
+          args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+        },
+        {
+          ...providerOptions({
+            events: [
+              createEnvelope('tool.call', { id: 'call_provider_inspect_then_fail', name: 'project.inspect', args: {} }),
+              createEnvelope('tool.call', { id: 'call_provider_forbidden_create', name: 'project.create', args: { projectName: 'forbidden' } })
+            ]
+          }),
+          inspectProjectImpl: async ({ projectDir }) => {
+            await writeFile(generated.result.files.spec, 'mutated before exceptional exit\n', 'utf8');
+            return { ok: true, inspection: { projectDir } };
+          }
+        }
+      ),
+      /project\.create is not allowed inside project\.request/
+    );
+
+    assert.equal(await readFile(generated.result.files.spec, 'utf8'), before);
+  } finally {
     await rm(root, { force: true, recursive: true });
   }
 });

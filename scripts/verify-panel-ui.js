@@ -10,6 +10,7 @@ import { chromium } from 'playwright';
 
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
+import { inspectProject } from '../src/workflow/inspect-project.js';
 
 const panelRoot = path.resolve('apps/panel');
 const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
@@ -25,6 +26,8 @@ const previewPrompt = 'Simulate an approval-required patch preview.';
 let validationMode = 'passed';
 let providerRequestCount = 0;
 let inspectionDigest = 'a'.repeat(64);
+let inspectionFreshnessOverride = null;
+let inspectGeneratedProject = false;
 
 const staticServer = await startStaticServer(panelRoot);
 const daemon = await startUiDaemon();
@@ -88,6 +91,20 @@ try {
   await page.getByRole('button', { name: 'Approve' }).click();
   await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
 
+  inspectGeneratedProject = true;
+  await page.evaluate(() => {
+    const projectPath = document.querySelector('#active-project-directory').textContent;
+    window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
+  });
+  await page.getByText('legacy-unverified', { exact: true }).waitFor();
+  await page.getByLabel('Circuit request').fill(previewPrompt);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await page.waitForFunction(() => /legacy.*patch hash/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 2000 });
+  assert.equal(await page.getByRole('button', { name: 'Approve' }).isDisabled(), false);
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  inspectGeneratedProject = false;
+  inspectionFreshnessOverride = null;
+
   await page.getByRole('button', { name: 'Open in KiCad' }).click();
   await page.getByText(/Open this \.kicad_pro file from KiCad/).waitFor();
   await assertStandaloneGuidanceNamesAFile(page);
@@ -119,7 +136,9 @@ try {
   assert.doesNotMatch(failedZeroCountValidation.text ?? '', /\[object Object\]/);
 
   await assertValidationState(page, skippedValidationPrompt, 'skipped', /ERC skipped: No schematic was available for ERC\./);
+  await page.waitForFunction(() => /ERC skipped \[NO_SCHEMATIC\]: No schematic was available for ERC\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
   await assertValidationState(page, unavailableValidationPrompt, 'unavailable', /ERC unavailable: KiCad CLI was not available\./);
+  await page.waitForFunction(() => /ERC skipped \[KICAD_CLI_UNAVAILABLE\]: KiCad CLI was not available\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
 
   const silentHostPage = await browser.newPage();
   await silentHostPage.addInitScript((url) => {
@@ -244,7 +263,7 @@ try {
   }, hostProjectPath);
   await hostPage.locator('#conflict-card').waitFor();
   assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), true);
-  assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /cleared/i);
+  assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /dirty-project conflict, not stale evidence/i);
 
   await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
@@ -361,21 +380,43 @@ async function startUiDaemon() {
         }
         return { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } };
       },
-      inspectProjectImpl: async () => ({
-        inspection: { projectDigest: inspectionDigest, artifactCount: 6 },
-        manifest: {
-          schemaVersion: 2,
-          freshness: inspectionDigest.startsWith('a')
-            ? { status: 'current', reason: 'Evidence matches.' }
-            : { status: 'stale', reason: 'Evidence no longer matches.' }
-        },
-        validation: {
-          erc: { ok: true, erc: { errorCount: 0, warningCount: 0 } },
-          drc: { ok: false, drc: { violationCount: 0, unconnectedCount: 2 } }
+      inspectProjectImpl: async ({ projectDir }) => {
+        if (inspectGeneratedProject) {
+          return inspectProject({
+            projectDir,
+            getKicadVersionImpl: async () => null,
+            validateProjectImpl: async () => inspectionErcForMode(),
+            validateBoardImpl: async () => ({ ok: false, drc: { violationCount: 0, unconnectedCount: 2 } })
+          });
         }
-      })
+        const freshness = inspectionFreshnessOverride ?? (inspectionDigest.startsWith('a')
+          ? { status: 'current', reason: 'Evidence matches.' }
+          : { status: 'stale', reason: 'Evidence no longer matches.' });
+        const erc = inspectionErcForMode();
+        return {
+          inspection: { projectDigest: inspectionDigest, artifactCount: 6 },
+          manifest: {
+            schemaVersion: freshness.status === 'legacy-unverified' ? 1 : 2,
+            freshness
+          },
+          validation: {
+            erc,
+            drc: { ok: false, drc: { violationCount: 0, unconnectedCount: 2 } }
+          }
+        };
+      }
     }
   });
+}
+
+function inspectionErcForMode() {
+  if (validationMode === 'skipped') {
+    return { ok: true, skipped: true, reason: { code: 'NO_SCHEMATIC', message: 'No schematic was available for ERC.' } };
+  }
+  if (validationMode === 'unavailable') {
+    return { ok: true, skipped: true, reason: { code: 'KICAD_CLI_UNAVAILABLE', message: 'KiCad CLI was not available.' } };
+  }
+  return { ok: true, erc: { errorCount: 0, warningCount: 0 } };
 }
 
 async function fakeProviderTranscript({ input }) {

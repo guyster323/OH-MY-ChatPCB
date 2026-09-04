@@ -119,6 +119,8 @@ test('inspectProject reports a missing board through DRC validation without chan
     assert.equal(result.validation.drc.ok, true);
     assert.equal(result.validation.drc.skipped, true);
     assert.equal(result.validation.drc.reason.code, 'NO_BOARD');
+    assert.match(result.validation.drc.reason.message, new RegExp(root.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')));
+    assert.doesNotMatch(result.validation.drc.reason.message, /chatpcb-inspection-/);
     assert.deepEqual(await snapshot(root), before);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -133,6 +135,32 @@ test('inspectProject reports missing manifest freshness without changing source 
     assert.equal(result.manifest.schemaVersion, null);
     assert.equal(result.manifest.freshness.status, 'missing');
     assert.deepEqual(await snapshot(root), before);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('inspectProject records an available KiCad version and omits disposable validator report paths', async () => {
+  const root = await makeProject();
+  try {
+    const result = await inspectProject({
+      projectDir: root,
+      getKicadVersionImpl: async () => ({ version: '9.0.1', command: 'kicad-cli', source: 'test' }),
+      validateProjectImpl: async ({ projectDir }) => ({
+        ok: true,
+        report: path.join(projectDir, 'chatpcb-erc.json'),
+        erc: { errorCount: 0, warningCount: 0 }
+      }),
+      validateBoardImpl: async ({ projectDir }) => ({
+        ok: true,
+        report: path.join(projectDir, 'chatpcb-drc.json'),
+        drc: { violationCount: 0, unconnectedCount: 0 }
+      })
+    });
+
+    assert.deepEqual(result.inspection.toolchain.kicadCli, { version: '9.0.1', command: 'kicad-cli', source: 'test' });
+    assert.equal('report' in result.validation.erc, false);
+    assert.equal('report' in result.validation.drc, false);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

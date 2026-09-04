@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
 
 function assertArray(value, name) {
@@ -12,6 +14,9 @@ function assertRelativeArtifacts(artifacts) {
       !artifact.path || artifact.path.startsWith('/') || artifact.path.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(artifact.path) || artifact.path.split(/[\\/]/).includes('..')) {
       throw new TypeError('artifact paths must be relative');
     }
+    if (typeof artifact.kind !== 'string' || !artifact.kind || typeof artifact.sha256 !== 'string' || !artifact.sha256 || !Number.isInteger(artifact.size) || artifact.size < 0) {
+      throw new TypeError('artifacts must include kind, sha256, and non-negative size');
+    }
   }
   return result;
 }
@@ -21,26 +26,45 @@ export function normalizeEvidenceManifest(raw) {
   const version = raw.schemaVersion === undefined ? 1 : raw.schemaVersion;
   if (version !== 1 && version !== 2) throw new TypeError('unsupported schema version');
   if (version === 1) return { schemaVersion: 1, intent: clone(raw) };
-  const manifest = clone(raw);
-  manifest.schemaVersion = 2;
-  manifest.facts = assertArray(manifest.facts, 'facts');
-  manifest.findings = assertArray(manifest.findings, 'findings');
-  manifest.approvals = assertArray(manifest.approvals, 'approvals');
-  if (manifest.artifacts !== undefined) manifest.artifacts = assertRelativeArtifacts(manifest.artifacts);
-  if (manifest.inspection?.artifacts !== undefined) manifest.inspection.artifacts = assertRelativeArtifacts(manifest.inspection.artifacts);
-  if (manifest.evidence?.artifacts !== undefined) manifest.evidence.artifacts = assertRelativeArtifacts(manifest.evidence.artifacts);
-  return manifest;
+  return {
+    schemaVersion: 2,
+    intent: clone(raw.intent ?? {}),
+    constraints: assertArray(raw.constraints, 'constraints'),
+    artifacts: assertRelativeArtifacts(raw.artifacts),
+    toolchain: clone(raw.toolchain ?? {}),
+    facts: assertArray(raw.facts, 'facts'),
+    findings: assertArray(raw.findings, 'findings'),
+    approvals: assertArray(raw.approvals, 'approvals'),
+    releaseGates: assertArray(raw.releaseGates, 'releaseGates')
+  };
 }
 
 export function evidenceFreshness({ manifest, projectDigest }) {
   if (!manifest) return { status: 'missing', reason: 'No ChatPCB manifest exists.' };
   if (manifest.schemaVersion === 1) return { status: 'legacy-unverified', reason: 'Schema version 1 has no artifact-bound evidence.' };
-  const recorded = manifest.evidence?.projectDigest;
+  const recorded = manifest.artifacts.length > 0 ? projectDigestForArtifacts(manifest.artifacts) : null;
   if (!recorded) return { status: 'missing', reason: 'Schema version 2 has no project digest.' };
   if (recorded !== projectDigest) return { status: 'stale', reason: `Evidence digest ${recorded} does not match saved project digest ${projectDigest}.` };
   return { status: 'current', reason: 'Evidence matches the saved project artifacts.' };
 }
 
-export function createEvidenceManifestV2({ intent = {}, inspection = {}, toolchain = {}, facts = [], findings = [], approvals = [], evidence = {} } = {}) {
-  return normalizeEvidenceManifest({ schemaVersion: 2, intent: clone(intent), inspection: clone(inspection), toolchain: clone(toolchain), evidence: clone(evidence), facts, findings, approvals });
+export function projectDigestForArtifacts(artifacts) {
+  const normalized = assertRelativeArtifacts(artifacts)
+    .map(({ path, kind, sha256, size }) => ({ path, kind, sha256, size }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
+export function createEvidenceManifestV2({ intent = {}, constraints = [], artifacts = [], toolchain = {}, facts = [], findings = [], approvals = [], releaseGates = [] } = {}) {
+  return normalizeEvidenceManifest({
+    schemaVersion: 2,
+    intent: clone(intent),
+    constraints,
+    artifacts,
+    toolchain: clone(toolchain),
+    facts,
+    findings,
+    approvals,
+    releaseGates
+  });
 }

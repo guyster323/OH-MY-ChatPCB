@@ -123,7 +123,12 @@ async function dispatchSchematicPatch(args, { validateProjectImpl, patchApproval
   }
 
   if (args.approved !== true) {
-    const plan = await createSchematicPatchPlan({ projectDir, prompt: args.prompt, projectName: args.projectName });
+    const plan = await createSchematicPatchPlan({
+      projectDir,
+      prompt: args.prompt,
+      projectName: args.projectName,
+      validateProjectImpl
+    });
     const registration = patchApprovalRegistry.register({
       patchId: plan.patchId,
       projectDir,
@@ -292,6 +297,9 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       providerEvents: providerResult.events,
       ...(rolledBack ? { rolledBack: true } : {})
     };
+  } catch (error) {
+    if (snapshot) await restoreProjectSnapshot(snapshot, projectDir);
+    throw error;
   } finally {
     if (snapshot) {
       await rm(snapshot.root, { force: true, recursive: true });
@@ -378,13 +386,24 @@ function withProjectContext(payload, projectDir, forceProjectDir = false) {
     ...(payload.args ?? {})
   };
 
+  let name = payload.name;
+  if (name === 'schematic.patch') {
+    delete args.approved;
+    delete args.cancel;
+    delete args.patchId;
+    delete args.expectedPatchId;
+  }
+  if (name === 'validate.erc' || name === 'validate.drc') {
+    name = 'project.inspect';
+  }
+
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
 
   return {
     id: payload.id,
-    name: payload.name,
+    name,
     args
   };
 }

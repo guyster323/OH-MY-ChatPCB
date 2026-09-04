@@ -314,15 +314,15 @@ function renderInspection(result = {}) {
     : 'missing';
   const digest = result.inspection?.projectDigest;
   const artifactCount = result.inspection?.artifactCount;
-  const erc = result.validation?.erc?.erc ?? result.validation?.erc;
-  const drc = result.validation?.drc?.drc ?? result.validation?.drc;
+  const erc = result.validation?.erc;
+  const drc = result.validation?.drc;
   inspectionFreshnessEl.dataset.state = status;
   inspectionFreshnessEl.textContent = status;
   inspectionFreshnessEl.title = freshness.reason ?? '';
   inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : '—';
   inspectionArtifactCountEl.textContent = `${Number.isInteger(artifactCount) ? artifactCount : 0} artifacts`;
-  inspectionErcEl.textContent = erc ? `ERC ${erc.errorCount ?? 0}/${erc.warningCount ?? 0}` : 'ERC —';
-  inspectionDrcEl.textContent = drc ? `DRC ${drc.violationCount ?? 0}/${drc.unconnectedCount ?? 0}` : 'DRC —';
+  inspectionErcEl.textContent = renderInspectionValidation('ERC', erc);
+  inspectionDrcEl.textContent = renderInspectionValidation('DRC', drc);
   inspectionState.result = result;
   renderPatchApproval();
 }
@@ -330,6 +330,17 @@ function renderInspection(result = {}) {
 function renderInspectionFailure() {
   inspectionCardEl.hidden = false;
   renderInspection({ manifest: { freshness: { status: 'missing', reason: 'Inspection was unavailable.' } } });
+}
+
+function renderInspectionValidation(label, result) {
+  if (!result) return `${label} —`;
+  const reason = result.reason;
+  if (result.skipped) return `${label} skipped [${reason?.code ?? 'UNKNOWN'}]: ${reason?.message ?? 'No reason was provided.'}`;
+  if (result.ok === false && reason) return `${label} failed [${reason.code ?? 'UNKNOWN'}]: ${reason.message ?? 'No reason was provided.'}`;
+  const summary = label === 'ERC' ? result.erc ?? result : result.drc ?? result;
+  return label === 'ERC'
+    ? `ERC ${summary.errorCount ?? 0}/${summary.warningCount ?? 0}`
+    : `DRC ${summary.violationCount ?? 0}/${summary.unconnectedCount ?? 0}`;
 }
 
 function setPatchApproval(preview) {
@@ -355,17 +366,27 @@ function clearPatchApproval(message = 'No patch preview active.') {
 
 function renderPatchApproval() {
   const freshness = inspectionState.result?.manifest?.freshness?.status;
-  const current = freshness === 'current';
+  const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
   const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
   const active = Boolean(patchApprovalState.patchId) && unexpired;
-  approvePatchButtonEl.disabled = !active || !current;
+  approvePatchButtonEl.disabled = !active || !approvedEvidence;
   cancelPatchButtonEl.disabled = !active;
-  if (!current) {
+  if (freshness === 'stale') {
     patchApprovalStatusEl.dataset.state = 'stale';
     patchApprovalStatusEl.textContent = 'Approval unavailable: stale evidence. Inspect the project again before approving.';
     return;
   }
   if (!active) return;
+  if (freshness === 'legacy-unverified') {
+    patchApprovalStatusEl.dataset.state = 'warning';
+    patchApprovalStatusEl.textContent = 'Approval allowed with legacy-unverified evidence; exact patch hashes will still be verified.';
+    return;
+  }
+  if (freshness === 'missing' || !freshness) {
+    patchApprovalStatusEl.dataset.state = 'warning';
+    patchApprovalStatusEl.textContent = 'Approval allowed with no manifest evidence; exact patch hashes will still be verified.';
+    return;
+  }
   patchApprovalStatusEl.dataset.state = 'ready';
   patchApprovalStatusEl.textContent = 'Patch preview is ready for approval.';
 }
@@ -540,7 +561,7 @@ function handleHostMessage(message) {
   if (message.type === 'project.status') {
     const dirty = message.dirty === true || message.unsavedChanges === true;
     if (dirty || message.linkState === 'conflict') {
-      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes.');
+      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
       showConflict();
     } else {
       conflictCardEl.hidden = true;
@@ -558,7 +579,7 @@ function handleHostMessage(message) {
   }
   if (message.type === 'project.reload') {
     if (message.linkState === 'conflict') {
-      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes.');
+      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
       showConflict();
       return;
     }
