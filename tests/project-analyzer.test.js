@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -61,8 +61,60 @@ test('analyzeProject reports a typed missing-source diagnostic while preserving 
     assert.deepEqual(result.analyzers[0], {
       id: 'builtin.kicad', namespace: 'builtin', status: 'partial', version: '1',
       sourceArtifacts: ['demo.kicad_sch'],
-      diagnostics: [{ code: 'ANALYZER_SOURCE_MISSING', message: 'No .kicad_pcb source artifact found', sourceArtifact: 'demo.kicad_pcb' }]
+      diagnostics: [{ code: 'ANALYZER_SOURCE_MISSING', message: 'No .kicad_pcb source artifact found', sourceKind: 'board' }]
     });
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject discards analysis when an inventoried source disappears before it can be read', async () => {
+  const root = await makeProject();
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const result = await analyzeProject({
+      projectDir: root,
+      inventory,
+      readFileImpl: async (sourcePath) => {
+        await rm(sourcePath);
+        return readFile(sourcePath);
+      }
+    });
+
+    assert.deepEqual(result.facts, []);
+    assert.deepEqual(result.findings, []);
+    assert.deepEqual(result.analyzers, [{
+      id: 'builtin.kicad', namespace: 'builtin', status: 'failed', version: '1',
+      sourceArtifacts: ['demo.kicad_pcb', 'demo.kicad_sch'],
+      diagnostics: [{ code: 'ANALYZER_INPUT_CHANGED', message: 'Project artifact digest changed during analysis' }]
+    }]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject scopes local built-in IDs so every inventoried board and schematic survives normalization', async () => {
+  const root = await makeProject();
+  try {
+    await writeFile(path.join(root, 'alternate.kicad_sch'), schematic.replace(' (property "Footprint" "Package:Demo")', ''), 'utf8');
+    await writeFile(path.join(root, 'alternate.kicad_pcb'), board, 'utf8');
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const result = await analyzeProject({ projectDir: root, inventory });
+
+    assert.equal(result.facts.length, 16);
+    assert.equal(new Set(result.facts.map((fact) => fact.id)).size, 16);
+    assert.equal(result.facts.some((fact) => fact.id === 'builtin.schematic.component:schematic-1@alternate.kicad_sch'), true);
+    assert.equal(result.facts.some((fact) => fact.id === 'builtin.schematic.component:schematic-1@demo.kicad_sch'), true);
+    assert.equal(result.facts.some((fact) => fact.id === 'builtin.board.summary@alternate.kicad_pcb'), true);
+    assert.equal(result.facts.some((fact) => fact.id === 'builtin.board.summary@demo.kicad_pcb'), true);
+    assert.deepEqual(result.facts.find((fact) => fact.id === 'builtin.schematic.net:SDA@alternate.kicad_sch').value.labelFactIds, [
+      'builtin.schematic.label:0@alternate.kicad_sch'
+    ]);
+    assert.deepEqual(result.findings[0].factIds, ['builtin.schematic.component:schematic-1@alternate.kicad_sch']);
+    assert.deepEqual(result.analyzers[0].diagnostics, []);
+    assert.deepEqual(result.analyzers[0].sourceArtifacts, [
+      'alternate.kicad_pcb', 'alternate.kicad_sch', 'demo.kicad_pcb', 'demo.kicad_sch'
+    ]);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

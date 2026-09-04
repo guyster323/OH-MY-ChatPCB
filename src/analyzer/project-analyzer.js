@@ -16,6 +16,7 @@ const compareText = (left, right) => left < right ? -1 : left > right ? 1 : 0;
 
 function compareDiagnostics(left, right) {
   return compareText(left.code ?? '', right.code ?? '')
+    || compareText(left.sourceKind ?? '', right.sourceKind ?? '')
     || compareText(left.sourceArtifact ?? '', right.sourceArtifact ?? '')
     || compareText(left.factId ?? '', right.factId ?? '')
     || compareText(left.message ?? '', right.message ?? '');
@@ -41,11 +42,48 @@ function sourceArtifactsFrom(inventory) {
     .sort(compareText);
 }
 
-function missingSourceDiagnostic(extension, sourceArtifact) {
+function missingSourceDiagnostic(extension, sourceKind) {
   return {
     code: 'ANALYZER_SOURCE_MISSING',
     message: `No ${extension} source artifact found`,
-    sourceArtifact
+    sourceKind
+  };
+}
+
+function sourceType(artifactPath) {
+  if (artifactPath.endsWith('.kicad_sch')) return 'schematic';
+  if (artifactPath.endsWith('.kicad_pcb')) return 'board';
+  return null;
+}
+
+function scopeArtifactResult(result, artifactPath, shouldScope) {
+  if (!shouldScope) return result;
+  const factIds = new Map(result.facts.map((fact) => [fact.id, `${fact.id}@${artifactPath}`]));
+  return {
+    ...result,
+    facts: result.facts.map((fact) => ({
+      ...fact,
+      id: factIds.get(fact.id),
+      value: remapFactReferences(fact.value, factIds)
+    })),
+    findings: result.findings.map((finding) => ({
+      ...finding,
+      id: `${finding.id}@${artifactPath}`,
+      factIds: finding.factIds.map((factId) => factIds.get(factId) ?? factId)
+    }))
+  };
+}
+
+function remapFactReferences(value, factIds) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.labelFactIds)) return value;
+  return { ...value, labelFactIds: value.labelFactIds.map((factId) => factIds.get(factId) ?? factId) };
+}
+
+function sourceReadDiagnostic(error, artifact) {
+  return {
+    code: 'ANALYZER_SOURCE_READ_ERROR',
+    message: `Could not read source artifact ${artifact.path}: ${error.code ?? error.message}`,
+    sourceArtifact: artifact.path
   };
 }
 
@@ -75,26 +113,37 @@ export async function analyzeProject({
     .filter((artifact) => artifact.path.endsWith('.kicad_sch') || artifact.path.endsWith('.kicad_pcb'))
     .slice()
     .sort((left, right) => compareText(left.path, right.path));
-  const contents = await Promise.all(sources.map(async (artifact) => ({
+  const sourceCounts = new Map();
+  for (const artifact of sources) {
+    const type = sourceType(artifact.path);
+    sourceCounts.set(type, (sourceCounts.get(type) ?? 0) + 1);
+  }
+  const reads = await Promise.allSettled(sources.map(async (artifact) => ({
     artifact,
     source: asUtf8(await readFileImpl(path.join(projectDir, artifact.path)))
   })));
 
-  const diagnostics = [];
+  const failedReads = reads.flatMap((read, index) => read.status === 'rejected' ? [{ artifact: sources[index], error: read.reason }] : []);
+  if (failedReads.length > 0) {
+    const inventoryAfterReadFailure = await collectInventoryImpl({ projectDir });
+    if (inventoryAfterReadFailure.projectDigest !== inventory.projectDigest) return inputChangedResult(sourceArtifacts);
+  }
+  const contents = reads.flatMap((read) => read.status === 'fulfilled' ? [read.value] : []);
+
+  const diagnostics = failedReads.map(({ artifact, error }) => sourceReadDiagnostic(error, artifact));
   const facts = [];
   const findings = [];
-  const schematics = contents.filter(({ artifact }) => artifact.path.endsWith('.kicad_sch'));
-  const boards = contents.filter(({ artifact }) => artifact.path.endsWith('.kicad_pcb'));
-  if (schematics.length === 0) diagnostics.push(missingSourceDiagnostic('.kicad_sch', 'demo.kicad_sch'));
-  if (boards.length === 0) diagnostics.push(missingSourceDiagnostic('.kicad_pcb', 'demo.kicad_pcb'));
+  if ((sourceCounts.get('schematic') ?? 0) === 0) diagnostics.push(missingSourceDiagnostic('.kicad_sch', 'schematic'));
+  if ((sourceCounts.get('board') ?? 0) === 0) diagnostics.push(missingSourceDiagnostic('.kicad_pcb', 'board'));
 
   for (const { artifact, source } of contents) {
     const result = artifact.path.endsWith('.kicad_sch')
       ? analyzeSchematic({ source, sourceArtifact: artifact.path })
       : analyzePcb({ source, sourceArtifact: artifact.path });
-    facts.push(...result.facts);
-    findings.push(...result.findings);
-    diagnostics.push(...result.diagnostics);
+    const scoped = scopeArtifactResult(result, artifact.path, (sourceCounts.get(sourceType(artifact.path)) ?? 0) > 1);
+    facts.push(...scoped.facts);
+    findings.push(...scoped.findings);
+    diagnostics.push(...scoped.diagnostics);
   }
 
   const finalInventory = await collectInventoryImpl({ projectDir });
