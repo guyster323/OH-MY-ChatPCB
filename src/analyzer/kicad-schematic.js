@@ -39,6 +39,8 @@ function validateSchematic(root) {
   for (const symbol of children(root, 'symbol')) {
     const error = validateAt(symbol, 'symbol');
     if (error) return error;
+    const unit = child(symbol, 'unit');
+    if (unit && !isFiniteNumber(unit[1])) return 'symbol has invalid unit';
   }
   for (const label of children(root, 'label')) {
     const error = validateAt(label, 'label');

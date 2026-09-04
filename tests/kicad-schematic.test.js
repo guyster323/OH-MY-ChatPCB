@@ -83,6 +83,7 @@ test('analyzeSchematic fails closed for semantically malformed schematic nodes',
     '(kicad_sch (version 1) (label "SDA"))',
     '(kicad_sch (version 1) (symbol (uuid missing-position)))',
     '(kicad_sch (version 1) (symbol (at x 2 0)))',
+    '(kicad_sch (version 1) (symbol (at 1 2 0) (unit nope)))',
     '(kicad_sch (version 1) (wire (pts (xy x 2) (xy 3 4))))',
     '(kicad_sch (version 1) (junction (at 2 nope)))',
     '(kicad_sch (version 1) (no_connect (at nope 2)))'
