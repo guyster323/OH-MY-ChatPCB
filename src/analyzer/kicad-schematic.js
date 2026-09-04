@@ -43,6 +43,7 @@ function validateSchematic(root) {
     if (unit && !isFiniteNumber(unit[1])) return 'symbol has invalid unit';
   }
   for (const label of children(root, 'label')) {
+    if (typeof label[1] !== 'string' || label[1].trim() === '') return 'label requires non-empty text';
     const error = validateAt(label, 'label');
     if (error) return error;
   }

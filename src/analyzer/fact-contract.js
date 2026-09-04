@@ -1,5 +1,6 @@
 const CONFIDENCES = new Set(['deterministic', 'heuristic', 'datasheet-backed']);
 const SEVERITIES = new Set(['info', 'warning', 'blocker']);
+const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -37,7 +38,6 @@ export function normalizeFacts(facts) {
       diagnostics.push({ code: 'ANALYZER_FACT_INVALID', message: cause.message, factId: fact?.id });
     }
   }
-  const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
   valid.sort((left, right) => compare(left.id, right.id) || compare(left.category, right.category) || compare(canonicalJson(left.value), canonicalJson(right.value)) || compare(left.sourceArtifact, right.sourceArtifact) || compare(left.extractor, right.extractor) || compare(left.confidence, right.confidence));
   const result = [];
   for (const fact of valid) {
@@ -57,5 +57,5 @@ export function normalizeFinding(finding = {}) {
   if (!CONFIDENCES.has(finding.confidence)) throw new TypeError('finding confidence must be deterministic, heuristic, or datasheet-backed');
   if (!Array.isArray(finding.factIds) || finding.factIds.some((item) => typeof item !== 'string' || item.trim() === '')) throw new TypeError('finding factIds must be an array of non-empty strings');
   if (!Array.isArray(finding.sourceArtifacts) || finding.sourceArtifacts.some((item) => typeof item !== 'string' || item.trim() === '')) throw new TypeError('finding sourceArtifacts must be an array of non-empty strings');
-  return { ...clone(finding), id, extractor, severity: finding.severity, confidence: finding.confidence, factIds: [...finding.factIds], sourceArtifacts: [...finding.sourceArtifacts] };
+  return { ...clone(finding), id, extractor, severity: finding.severity, confidence: finding.confidence, factIds: [...new Set(finding.factIds)].sort(compare), sourceArtifacts: [...new Set(finding.sourceArtifacts)].sort(compare) };
 }

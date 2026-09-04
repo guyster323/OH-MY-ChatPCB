@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { cp, lstat, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -45,10 +45,20 @@ function validateDefinition(definition) {
   }
   if (typeof definition.command !== 'string' || !path.isAbsolute(definition.command)) return 'Adapter command must be an absolute path';
   if (!Array.isArray(definition.args) || definition.args.some((arg) => typeof arg !== 'string')) return 'Adapter args must be an array of strings';
+  if (definition.payloadFiles !== undefined && (!Array.isArray(definition.payloadFiles) || definition.payloadFiles.some((file) => !file || typeof file.path !== 'string' || !path.isAbsolute(file.path) || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)))) return 'Adapter payloadFiles must contain absolute paths with lowercase SHA-256 pins';
   if (typeof definition.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(definition.sha256)) return 'Adapter sha256 must be a lowercase SHA-256 digest';
   if (!Number.isInteger(definition.timeoutMs) || definition.timeoutMs <= 0 || definition.timeoutMs > MAX_TIMEOUT_MS) return 'Adapter timeoutMs must be an integer between 1 and 300000';
   if (definition.input !== 'project-copy' && definition.input !== 'json') return 'Adapter input must be project-copy or json';
   return null;
+}
+
+function isCodeFile(value) {
+  return path.isAbsolute(value) && ['.js', '.cjs', '.mjs', '.py', '.rb', '.exe', '.dll'].includes(path.extname(value).toLowerCase());
+}
+
+function hasProjectPath(value, projectDir) {
+  const resolved = path.resolve(projectDir).toLowerCase();
+  return String(value).toLowerCase().includes(resolved);
 }
 
 function hashBuffer(contents) {
@@ -85,6 +95,31 @@ async function assertSymlinkFree(directory, fileSystem) {
     if (entry.isSymbolicLink()) throw unsafeInputError(entryPath);
     if (entry.isDirectory()) await assertSymlinkFree(entryPath, fileSystem);
   }
+}
+
+async function verifiedPayload(definition, fileSystem, launchDir) {
+  const pinned = new Map((definition.payloadFiles ?? []).map((file) => [path.resolve(file.path), file.sha256]));
+  for (const arg of definition.args) {
+    if (isCodeFile(arg) && !pinned.has(path.resolve(arg))) throw invalidPayloadError(`Unpinned code-bearing adapter argument: ${arg}`);
+  }
+  const replacements = new Map();
+  for (const [payloadPath, expectedHash] of pinned) {
+    const before = await fileSystem.lstat(payloadPath);
+    if (before.isSymbolicLink() || !before.isFile()) throw invalidPayloadError(`Payload file is not a regular file: ${payloadPath}`);
+    const bytes = await fileSystem.readFile(payloadPath);
+    const after = await fileSystem.lstat(payloadPath);
+    if (after.isSymbolicLink() || before.size !== after.size || hashBuffer(bytes) !== expectedHash) throw invalidPayloadError(`Payload checksum does not match its pin: ${payloadPath}`);
+    const staged = path.join(launchDir, `${hashBuffer(Buffer.from(payloadPath)).slice(0, 16)}-${path.basename(payloadPath)}`);
+    await fileSystem.writeFile(staged, bytes);
+    replacements.set(payloadPath, staged);
+  }
+  return definition.args.map((arg) => replacements.get(path.resolve(arg)) ?? arg);
+}
+
+function invalidPayloadError(message) {
+  const error = new Error(message);
+  error.code = 'ANALYZER_ADAPTER_INVALID_DEFINITION';
+  return error;
 }
 
 function runProcess({ command, args, input, cwd, env, timeoutMs, spawnImpl }) {
@@ -194,11 +229,15 @@ export async function runConfiguredAnalyzer({
   const definitionError = validateDefinition(definition);
   if (definitionError) return invalidDefinition(definition, inventory, definitionError);
 
-  const fileSystem = { readFile, cp, lstat, mkdtemp, readdir, rm, ...fsImpl };
+  const fileSystem = { readFile, cp, lstat, mkdtemp, readdir, rm, writeFile, ...fsImpl };
+  if (definition.args.some((arg) => hasProjectPath(arg, projectDir))) return invalidDefinition(definition, inventory, 'Adapter args must not reference the saved project directory');
   let executable;
   try {
+    const executableStat = await fileSystem.lstat(definition.command);
+    if (executableStat.isSymbolicLink() || !executableStat.isFile()) throw invalidPayloadError('Adapter command must be a regular, non-symbolic-link executable');
     executable = await fileSystem.readFile(definition.command);
   } catch (error) {
+    if (error?.code === 'ANALYZER_ADAPTER_INVALID_DEFINITION') return invalidDefinition(definition, inventory, error.message);
     const code = 'ANALYZER_ADAPTER_UNAVAILABLE';
     return { analyzer: analyzerFor(definition, inventory, error?.code === 'ENOENT' ? 'skipped' : 'failed', [diagnostic(code, `Adapter executable is unavailable: ${error?.code ?? error?.message}`)]), facts: [], findings: [] };
   }
@@ -207,10 +246,12 @@ export async function runConfiguredAnalyzer({
   }
 
   let disposableProjectDir;
+  let launchDir;
   try {
-    let args = [...definition.args];
+    launchDir = await fileSystem.mkdtemp(path.join(tmpdir(), 'chatpcb-analyzer-launch-'));
+    let args = await verifiedPayload(definition, fileSystem, launchDir);
     let input = '';
-    const env = { ...process.env };
+    const env = Object.fromEntries(['PATH', 'Path', 'SystemRoot', 'ComSpec', 'TEMP', 'TMP'].flatMap((name) => process.env[name] === undefined ? [] : [[name, process.env[name]]]));
     if (definition.input === 'project-copy') {
       disposableProjectDir = await fileSystem.mkdtemp(path.join(tmpdir(), 'chatpcb-analyzer-'));
       await assertSymlinkFree(projectDir, fileSystem);
@@ -221,7 +262,7 @@ export async function runConfiguredAnalyzer({
     } else {
       input = JSON.stringify({ projectDigest: inventory?.projectDigest, artifacts: inventory?.artifacts ?? [], sources: sourceMap(sourceFiles, new Set(sourceArtifacts(inventory))) });
     }
-    const processResult = await runProcess({ command: definition.command, args, input, cwd: disposableProjectDir, env, timeoutMs: definition.timeoutMs, spawnImpl });
+    const processResult = await runProcess({ command: definition.command, args, input, cwd: disposableProjectDir ?? launchDir, env, timeoutMs: definition.timeoutMs, spawnImpl });
     if (processResult.timedOut) {
       return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic('ANALYZER_ADAPTER_TIMEOUT', `Adapter timed out after ${definition.timeoutMs}ms`, processResult.stderr)]), facts: [], findings: [] };
     }
@@ -237,7 +278,7 @@ export async function runConfiguredAnalyzer({
     const status = normalized.diagnostics.length === 0 ? 'complete' : 'partial';
     return { analyzer: analyzerFor(definition, inventory, status, normalized.diagnostics), facts: normalized.facts, findings: normalized.findings };
   } catch (error) {
-    if (error?.code === 'ANALYZER_ADAPTER_UNSAFE_INPUT') {
+    if (error?.code === 'ANALYZER_ADAPTER_UNSAFE_INPUT' || error?.code === 'ANALYZER_ADAPTER_INVALID_DEFINITION') {
       return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic(error.code, error.message)]), facts: [], findings: [] };
     }
     return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic('ANALYZER_ADAPTER_FAILED', `Adapter execution failed: ${error?.code ?? error?.message}`)]), facts: [], findings: [] };
@@ -245,6 +286,10 @@ export async function runConfiguredAnalyzer({
     if (disposableProjectDir) {
       try { await fileSystem.rm(disposableProjectDir, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 }); }
       catch { /* process has closed; cleanup failure must not override the typed adapter result */ }
+    }
+    if (launchDir) {
+      try { await fileSystem.rm(launchDir, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 }); }
+      catch { /* a typed adapter result must remain available */ }
     }
   }
 }

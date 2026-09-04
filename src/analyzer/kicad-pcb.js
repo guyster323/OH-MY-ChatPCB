@@ -116,7 +116,7 @@ function boardError(root) {
       const drill = child(via, 'drill');
       const layers = child(via, 'layers');
       const net = child(via, 'net');
-      if (!size || !numeric(size[1]) || !drill || !numeric(drill[1]) || !layers || layers.slice(1).some((item) => typeof item !== 'string') || !net || !numeric(net[1])) return 'via has invalid size, drill, layers, or net';
+      if (!size || !numeric(size[1]) || !drill || !numeric(drill[1]) || !layers || layers.length < 3 || layers.slice(1).some((item) => typeof item !== 'string' || item.trim() === '') || !net || !numeric(net[1])) return 'via has invalid size, drill, layers, or net';
     }
     for (const graphic of graphicNodes(root)) {
       if (child(graphic, 'layer')?.[1] !== 'Edge.Cuts') continue;

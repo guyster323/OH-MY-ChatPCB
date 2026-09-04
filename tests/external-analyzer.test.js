@@ -43,7 +43,7 @@ async function script(source) {
   const directory = await mkdtemp(path.join(tmpdir(), 'chatpcb-external-adapter-script-'));
   const scriptPath = path.join(directory, 'adapter.mjs');
   await writeFile(scriptPath, source, 'utf8');
-  return { directory, scriptPath };
+  return { directory, scriptPath, sha256: createHash('sha256').update(await readFile(scriptPath)).digest('hex') };
 }
 
 test('checksum mismatch skips before spawning the adapter', async () => {
@@ -73,7 +73,7 @@ test('project-copy adapter receives a disposable project copy', async () => {
   try {
     const before = await readFile(path.join(context.projectDir, 'demo.kicad_sch'), 'utf8');
     const result = await runConfiguredAnalyzer({
-      definition: validDefinition({ input: 'project-copy', args: [adapter.scriptPath, '{projectDir}'] }),
+      definition: validDefinition({ input: 'project-copy', args: [adapter.scriptPath, '{projectDir}'], payloadFiles: [{ path: adapter.scriptPath, sha256: adapter.sha256 }] }),
       ...context
     });
     assert.equal(result.analyzer.status, 'complete');
@@ -102,7 +102,7 @@ test('project-copy rejects symlinked source artifacts before an adapter can muta
     await rm(path.join(context.projectDir, 'demo.kicad_sch'));
     await symlink(outside, path.join(context.projectDir, 'demo.kicad_sch'), 'file');
     const result = await runConfiguredAnalyzer({
-      definition: validDefinition({ input: 'project-copy', args: [adapter.scriptPath, '{projectDir}'] }),
+      definition: validDefinition({ input: 'project-copy', args: [adapter.scriptPath, '{projectDir}'], payloadFiles: [{ path: adapter.scriptPath, sha256: adapter.sha256 }] }),
       ...context
     });
     assert.equal(result.analyzer.status, 'failed');
@@ -128,7 +128,7 @@ test('json adapter receives only relative source paths and namespaces normalized
   `);
   try {
     const result = await runConfiguredAnalyzer({
-      definition: validDefinition({ args: [adapter.scriptPath] }),
+      definition: validDefinition({ args: [adapter.scriptPath], payloadFiles: [{ path: adapter.scriptPath, sha256: adapter.sha256 }] }),
       ...context,
       sourceFiles: [...context.sourceFiles, { path: path.join(context.projectDir, 'must-not-be-sent.kicad_sch'), source: 'secret' }]
     });
@@ -148,7 +148,7 @@ test('timeout reports a typed diagnostic and redacts stderr secrets', async () =
   const adapter = await script(`console.error('API_KEY=not-for-logs'); setInterval(() => {}, 1_000);`);
   try {
     const result = await runConfiguredAnalyzer({
-      definition: validDefinition({ args: [adapter.scriptPath], timeoutMs: 30 }),
+      definition: validDefinition({ args: [adapter.scriptPath], payloadFiles: [{ path: adapter.scriptPath, sha256: adapter.sha256 }], timeoutMs: 30 }),
       ...context
     });
     assert.equal(result.analyzer.status, 'failed');
@@ -190,7 +190,7 @@ test('invalid adapter output returns no facts', async () => {
   const context = await makeContext();
   const adapter = await script(`console.log('not-json');`);
   try {
-    const result = await runConfiguredAnalyzer({ definition: validDefinition({ args: [adapter.scriptPath] }), ...context });
+    const result = await runConfiguredAnalyzer({ definition: validDefinition({ args: [adapter.scriptPath], payloadFiles: [{ path: adapter.scriptPath, sha256: adapter.sha256 }] }), ...context });
     assert.equal(result.analyzer.status, 'failed');
     assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_INVALID_OUTPUT');
     assert.deepEqual(result.facts, []);
@@ -204,7 +204,7 @@ test('malformed nested facts fail the adapter instead of reporting completion', 
   const context = await makeContext();
   const adapter = await script(`console.log(JSON.stringify({ schemaVersion: 1, facts: [{ id: 'bad', category: 42, sourceArtifact: 'demo.kicad_sch' }] }));`);
   try {
-    const result = await runConfiguredAnalyzer({ definition: validDefinition({ args: [adapter.scriptPath] }), ...context });
+    const result = await runConfiguredAnalyzer({ definition: validDefinition({ args: [adapter.scriptPath], payloadFiles: [{ path: adapter.scriptPath, sha256: adapter.sha256 }] }), ...context });
     assert.equal(result.analyzer.status, 'failed');
     assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_INVALID_OUTPUT');
   } finally {
@@ -224,5 +224,18 @@ test('an unavailable optional executable is skipped', async () => {
     assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_UNAVAILABLE');
   } finally {
     await rm(context.projectDir, { force: true, recursive: true });
+  }
+});
+
+test('an unpinned code-bearing argument is rejected before it can execute', async () => {
+  const context = await makeContext();
+  const adapter = await script(`throw new Error('must not execute');`);
+  try {
+    const result = await runConfiguredAnalyzer({ definition: validDefinition({ args: [adapter.scriptPath] }), ...context });
+    assert.equal(result.analyzer.status, 'failed');
+    assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_INVALID_DEFINITION');
+  } finally {
+    await rm(context.projectDir, { force: true, recursive: true });
+    await rm(adapter.directory, { force: true, recursive: true });
   }
 });

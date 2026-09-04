@@ -92,6 +92,12 @@ test('fails closed for unsupported Edge.Cuts geometry and a footprint without a 
   assert.match(missingLayer.diagnostics[0].message, /footprint requires a layer/);
 });
 
+test('analyzePcb rejects vias without two non-empty layers', () => {
+  const result = analyzePcb({ source: '(kicad_pcb (version 1) (via (at 1 2) (size 1) (drill 0.5) (layers "F.Cu") (net 1)))', sourceArtifact: 'demo.kicad_pcb' });
+  assert.deepEqual(result.facts, []);
+  assert.equal(result.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
+});
+
 test('flags undeclared pad nets and conservatively identifies unrouted nets', () => {
   const source = `(kicad_pcb (version 1) (layers (0 "F.Cu" signal))
     (net 1 "GND") (net 2 "VCC")

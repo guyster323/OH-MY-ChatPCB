@@ -27,6 +27,12 @@ test('normalizeFinding requires an extractor provenance field', () => {
   assert.equal(normalizeFinding({ id: 'finding:1', severity: 'warning', confidence: 'heuristic', factIds: [], sourceArtifacts: [], extractor: 'builtin@1' }).extractor, 'builtin@1');
 });
 
+test('normalizeFinding canonicalizes referenced IDs and artifact paths', () => {
+  const finding = normalizeFinding({ id: 'finding:1', severity: 'warning', confidence: 'heuristic', extractor: 'builtin@1', factIds: ['b', 'a', 'b'], sourceArtifacts: ['z.kicad_sch', 'a.kicad_sch', 'z.kicad_sch'] });
+  assert.deepEqual(finding.factIds, ['a', 'b']);
+  assert.deepEqual(finding.sourceArtifacts, ['a.kicad_sch', 'z.kicad_sch']);
+});
+
 test('normalizeFacts sorts invalid diagnostics deterministically', () => {
   const invalidA = { id: 'fact:b' };
   const invalidB = { id: 'fact:a' };

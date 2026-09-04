@@ -386,6 +386,7 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, analyz
   const args = {
     ...(payload.args ?? {})
   };
+  delete args.analyzerAdapters;
 
   let name = payload.name;
   if (name === 'schematic.patch') {
@@ -401,7 +402,7 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, analyz
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
-  if (name === 'project.inspect' && analyzerAdapters !== undefined && args.analyzerAdapters === undefined) {
+  if (name === 'project.inspect' && analyzerAdapters !== undefined) {
     args.analyzerAdapters = analyzerAdapters;
   }
 

@@ -174,7 +174,8 @@ test('analyzeProject discards facts when the post-extraction inventory digest ch
 
 test('analyzeProject keeps built-in facts and drops dangling findings when an external adapter collides', async () => {
   const root = await makeProject();
-  const adapterPath = path.join(root, 'adapter.mjs');
+  const adapterDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-analyzer-adapter-'));
+  const adapterPath = path.join(adapterDir, 'adapter.mjs');
   await writeFile(adapterPath, `console.log(JSON.stringify({ schemaVersion: 1, facts: [{ id: 'board.summary', category: 'test', sourceArtifact: 'demo.kicad_pcb' }], findings: [{ id: 'uses-summary', severity: 'warning', factIds: ['board.summary'], sourceArtifacts: ['demo.kicad_pcb'] }]}));`, 'utf8');
   try {
     const inventory = await collectArtifactInventory({ projectDir: root });
@@ -183,7 +184,7 @@ test('analyzeProject keeps built-in facts and drops dangling findings when an ex
       inventory,
       analyzerAdapters: [{
         id: 'external.collision', namespace: 'builtin', version: '1', command: process.execPath,
-        args: [adapterPath], sha256: executableHash, timeoutMs: 5_000, input: 'json'
+        args: [adapterPath], payloadFiles: [{ path: adapterPath, sha256: createHash('sha256').update(await readFile(adapterPath)).digest('hex') }], sha256: executableHash, timeoutMs: 5_000, input: 'json'
       }]
     });
 
@@ -194,12 +195,14 @@ test('analyzeProject keeps built-in facts and drops dangling findings when an ex
     assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics.some((diagnostic) => diagnostic.code === 'ANALYZER_FINDING_DANGLING_FACT'), true);
   } finally {
     await rm(root, { force: true, recursive: true });
+    await rm(adapterDir, { force: true, recursive: true });
   }
 });
 
-test('analyzeProject discards built-in and external results when an adapter mutates project input', async () => {
+test('analyzeProject rejects adapter arguments that name the saved project', async () => {
   const root = await makeProject();
-  const adapterPath = path.join(root, 'adapter.mjs');
+  const adapterDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-analyzer-adapter-'));
+  const adapterPath = path.join(adapterDir, 'adapter.mjs');
   await writeFile(adapterPath, `
     import { appendFile } from 'node:fs/promises';
     await appendFile(process.argv[2], ' adapter mutation');
@@ -212,12 +215,32 @@ test('analyzeProject discards built-in and external results when an adapter muta
       inventory,
       analyzerAdapters: [{
         id: 'external.mutator', namespace: 'external.mutator', version: '1', command: process.execPath,
-        args: [adapterPath, path.join(root, 'demo.kicad_sch')], sha256: executableHash, timeoutMs: 5_000, input: 'json'
+        args: [adapterPath, path.join(root, 'demo.kicad_sch')], payloadFiles: [{ path: adapterPath, sha256: createHash('sha256').update(await readFile(adapterPath)).digest('hex') }], sha256: executableHash, timeoutMs: 5_000, input: 'json'
       }]
     });
-    assert.deepEqual(result.facts, []);
-    assert.deepEqual(result.findings, []);
-    assert.equal(result.analyzers[0].diagnostics[0].code, 'ANALYZER_INPUT_CHANGED');
+    assert.equal(result.facts.length > 0, true);
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.mutator').status, 'failed');
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.mutator').diagnostics[0].code, 'ANALYZER_ADAPTER_INVALID_DEFINITION');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+    await rm(adapterDir, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject rejects duplicate adapter IDs and namespaces without spawning them', async () => {
+  const root = await makeProject();
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const result = await analyzeProject({
+      projectDir: root, inventory,
+      analyzerAdapters: [
+        { id: 'duplicate', namespace: 'external.one' },
+        { id: 'duplicate', namespace: 'external.two' }
+      ]
+    });
+    assert.equal(result.facts.length > 0, true);
+    assert.equal(result.analyzers.filter((analyzer) => analyzer.id === 'duplicate').every((analyzer) => analyzer.status === 'failed'), true);
+    assert.equal(result.analyzers.filter((analyzer) => analyzer.id === 'duplicate').every((analyzer) => analyzer.diagnostics[0].code === 'ANALYZER_ADAPTER_INVALID_DEFINITION'), true);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

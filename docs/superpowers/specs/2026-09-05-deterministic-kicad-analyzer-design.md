@@ -16,7 +16,7 @@ Phase 1 established the artifact inventory, whole-project digest, evidence fresh
 4. Every fact records its source artifact, extractor, and confidence.
 5. External adapters are optional, explicitly configured, versioned, checksummed, time-bounded, and never downloaded automatically.
 6. Namespaces are isolated: an adapter cannot replace or mutate built-in facts.
-7. Inspection is read-only. External processes receive a disposable copy or serialized input and cannot write into the saved project directory.
+7. Inspection is read-only. `project-copy` adapters receive a symlink-free disposable copy; `json` adapters receive only serialized inventory/source content keyed by relative paths. Both run from disposable directories and are never given saved-project paths.
 8. Parse failures are visible diagnostics with partial facts where safe; malformed input never becomes a fabricated clean result.
 
 ## Scope
@@ -118,7 +118,7 @@ The initial built-in analyzer creates only structural findings (for example, a s
 1. `inspectProject` validates the project path and computes the Phase 1 artifact inventory.
 2. It reads the saved source bytes once and passes immutable buffers to the built-in analyzer.
 3. It runs ERC/DRC in the existing disposable validation copy.
-4. It runs configured external adapters against a separate disposable copy or JSON payload.
+4. It runs configured external adapters against a separate disposable copy or JSON payload. JSON mode contains no original absolute project path, and both modes use a disposable child working directory.
 5. It normalizes, namespaces, sorts, and returns facts, analyzer statuses, and fact-linked findings.
 6. No analyzer writes the source project, manifest, reports, or evidence cache.
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { analyzePcb } from './kicad-pcb.js';
 import { analyzeSchematic } from './kicad-schematic.js';
-import { normalizeFacts, normalizeFinding } from './fact-contract.js';
+import { canonicalJson, normalizeFacts, normalizeFinding } from './fact-contract.js';
 import { collectArtifactInventory } from '../evidence/artifact-inventory.js';
 import { runConfiguredAnalyzer } from './external-adapter.js';
 
@@ -94,9 +94,8 @@ function sourceReadDiagnostic(error, artifact) {
 }
 
 function normalizeFindings(findings) {
-  return findings.slice().sort((left, right) => compareText(left.id, right.id)
-    || compareText(left.extractor, right.extractor)
-    || compareText(left.message ?? '', right.message ?? ''));
+  const sorted = findings.slice().sort((left, right) => compareText(left.id, right.id) || compareText(canonicalJson(left), canonicalJson(right)));
+  return sorted.filter((finding, index) => index === 0 || sorted[index - 1].id !== finding.id);
 }
 
 export async function analyzeProject({
@@ -165,7 +164,18 @@ export async function analyzeProject({
   const factIds = new Set(mergedFacts.map((fact) => fact.id));
   const retainedFactIdsByAnalyzer = new Map([[BUILTIN_ANALYZER.id, new Set(factIds)]]);
   const mergedFindings = findings.map((finding) => ({ finding, analyzerId: BUILTIN_ANALYZER.id }));
-  const adapterDefinitions = Array.isArray(analyzerAdapters) ? analyzerAdapters.slice().sort((left, right) => compareText(left?.id ?? '', right?.id ?? '')) : [];
+  const requestedAdapters = Array.isArray(analyzerAdapters) ? analyzerAdapters.slice().sort((left, right) => compareText(left?.id ?? '', right?.id ?? '')) : [];
+  const duplicateIds = new Set(requestedAdapters.filter((definition, index, all) => all.filter((item) => item?.id === definition?.id).length > 1).map((definition) => definition?.id));
+  const duplicateNamespaces = new Set(requestedAdapters.filter((definition, index, all) => all.filter((item) => item?.namespace === definition?.namespace).length > 1).map((definition) => definition?.namespace));
+  const adapterDefinitions = requestedAdapters.filter((definition) => !duplicateIds.has(definition?.id) && !duplicateNamespaces.has(definition?.namespace));
+  for (const definition of requestedAdapters) {
+    if (adapterDefinitions.includes(definition)) continue;
+    external.push({
+      id: definition?.id ?? 'unknown', namespace: definition?.namespace ?? 'unknown', version: definition?.version ?? 'unknown',
+      status: 'failed', sourceArtifacts,
+      diagnostics: [{ code: 'ANALYZER_ADAPTER_INVALID_DEFINITION', message: 'Adapter IDs and namespaces must be unique' }]
+    });
+  }
   for (const definition of adapterDefinitions) {
     const result = await runConfiguredAnalyzer({ definition, projectDir, inventory, sourceFiles: contents });
     const adapterDiagnostics = [...result.analyzer.diagnostics];

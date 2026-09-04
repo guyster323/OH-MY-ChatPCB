@@ -101,3 +101,9 @@ test('analyzeSchematic fails closed for semantically malformed schematic nodes',
     }, source);
   }
 });
+
+test('analyzeSchematic rejects empty labels without emitting facts', () => {
+  const result = analyzeSchematic({ source: '(kicad_sch (version 1) (label "" (at 1 2 0)))', sourceArtifact: 'demo.kicad_sch' });
+  assert.deepEqual(result.facts, []);
+  assert.equal(result.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
+});

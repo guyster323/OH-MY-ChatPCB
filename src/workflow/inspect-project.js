@@ -20,18 +20,24 @@ export async function inspectProject(options = {}) {
     validateInspectionCopy({ projectDir, options }),
     analyzeProject({ projectDir, inventory, analyzerAdapters: options.analyzerAdapters })
   ]);
+  const finalInventory = await collectArtifactInventory({ projectDir });
+  const boundAnalysis = finalInventory.projectDigest === inventory.projectDigest ? analysis : {
+    facts: [], findings: [], analyzers: analysis.analyzers.map((analyzer) => ({
+      ...analyzer, status: 'failed', diagnostics: [{ code: 'ANALYZER_INPUT_CHANGED', message: 'Project artifact digest changed during inspection' }]
+    }))
+  };
 
   return {
     ok: true,
     inspectedAt: (options.now ?? (() => new Date().toISOString()))(),
-    inspection: { ...inventory, artifactCount: inventory.artifacts.length, toolchain, facts: analysis.facts, analyzers: analysis.analyzers },
+    inspection: { ...inventory, artifactCount: inventory.artifacts.length, toolchain, facts: boundAnalysis.facts, analyzers: boundAnalysis.analyzers },
     manifest: {
       schemaVersion: manifest?.schemaVersion ?? null,
       freshness: evidenceFreshness({ manifest, projectDigest: inventory.projectDigest })
     },
     validation: { erc, drc },
     validationClean: erc.ok === true && drc.ok === true,
-    findings: analysis.findings
+    findings: boundAnalysis.findings
   };
 }
 
