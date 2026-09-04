@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createEvidenceManifestV2, evidenceFreshness, normalizeEvidenceManifest } from '../src/evidence/evidence-manifest.js';
+import { createEvidenceManifestV2, evidenceFreshness, normalizeEvidenceManifest, projectDigestForArtifacts } from '../src/evidence/evidence-manifest.js';
 
 test('legacy metadata remains readable but cannot claim current evidence', () => {
   const legacy = normalizeEvidenceManifest({ kind: 'mcu-peripheral', mcu: { family: 'STM32' } });
@@ -59,4 +59,18 @@ test('v2 creation has stable keys, copied arrays, and relative artifact paths', 
   assert.deepEqual(manifest.releaseGates, []);
   assert.equal(manifest.artifacts[0].path, 'board.kicad_pcb');
   assert.throws(() => createEvidenceManifestV2({ artifacts: [{ path: 'C:/secret.kicad_pcb' }] }), /relative/);
+});
+
+test('v2 manifest digest uses code-point ordering for mixed-case artifact paths', () => {
+  const handOrderedInventory = [
+    { path: 'B.kicad_sch', kind: 'schematic', sha256: 'b'.repeat(64), size: 2 },
+    { path: 'a.kicad_sch', kind: 'schematic', sha256: 'a'.repeat(64), size: 1 }
+  ];
+  const projectDigest = 'a3cb0691c039c8cd792e4e1a9dbf47f80dd0f3697deae823192f59d8840bbe68';
+  const manifest = normalizeEvidenceManifest({ schemaVersion: 2, artifacts: handOrderedInventory.toReversed() });
+
+  assert.equal(projectDigestForArtifacts(manifest.artifacts), projectDigest);
+  assert.deepEqual(evidenceFreshness({ manifest, projectDigest }), {
+    status: 'current', reason: 'Evidence matches the saved project artifacts.'
+  });
 });

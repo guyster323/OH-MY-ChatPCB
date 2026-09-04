@@ -879,6 +879,45 @@ test('daemon restores an existing project snapshot after an exceptional provider
   }
 });
 
+test('daemon removes provider-created files when restoring after an exceptional project request', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-created-file-restore-'));
+
+  try {
+    const generated = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: 'RP2040 board with USB-C power and I2C connector.' }
+    });
+    const originalFiles = await Promise.all(
+      Object.values(generated.result.files).map(async (file) => [file, await readFile(file)])
+    );
+    const createdFile = path.join(root, 'exception-created.kicad_sch');
+
+    await assert.rejects(
+      () => dispatchToolCall(
+        {
+          id: 'call_provider_created_file_exception_restore',
+          name: 'project.request',
+          args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+        },
+        providerOptions({
+          runProviderProcessImpl: async () => {
+            await writeFile(createdFile, 'provider-created schematic\n', 'utf8');
+            throw new Error('Provider failed after creating a project file.');
+          }
+        })
+      ),
+      /Provider failed after creating a project file/
+    );
+
+    await assert.rejects(() => readFile(createdFile), { code: 'ENOENT' });
+    for (const [file, content] of originalFiles) {
+      assert.deepEqual(await readFile(file), content);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon cancels an in-flight provider invocation', async () => {
   const controllers = new Map();
   let observedAbort = false;

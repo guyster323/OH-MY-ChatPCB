@@ -338,12 +338,9 @@ async function snapshotProject(projectDir) {
 
 async function restoreProjectSnapshot(snapshot, projectDir) {
   const currentEntries = await readdir(path.resolve(projectDir), { withFileTypes: true });
-  const snapshotNames = new Set(await readdir(snapshot.copy));
 
   for (const entry of currentEntries) {
-    if (snapshotNames.has(entry.name)) {
-      await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
-    }
+    await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
   }
 
   await cp(snapshot.copy, projectDir, { recursive: true });

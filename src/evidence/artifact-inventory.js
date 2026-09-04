@@ -12,6 +12,10 @@ const TRANSIENT_NAMES = new Set(['chatpcb-erc.json', 'chatpcb-drc.json']);
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
+export function compareArtifactPaths(left, right) {
+  return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+}
+
 async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
@@ -37,6 +41,6 @@ export async function collectArtifactInventory({ projectDir }) {
     const content = await readFile(absolutePath);
     artifacts.push({ path: relative, kind, sha256: sha256(content), size: (await stat(absolutePath)).size });
   }
-  artifacts.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  artifacts.sort(compareArtifactPaths);
   return { projectDigest: sha256(JSON.stringify(artifacts)), artifacts };
 }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { compareArtifactPaths } from './artifact-inventory.js';
 
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
 
@@ -51,7 +52,7 @@ export function evidenceFreshness({ manifest, projectDigest }) {
 export function projectDigestForArtifacts(artifacts) {
   const normalized = assertRelativeArtifacts(artifacts)
     .map(({ path, kind, sha256, size }) => ({ path, kind, sha256, size }))
-    .sort((left, right) => left.path.localeCompare(right.path));
+    .sort(compareArtifactPaths);
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
 
