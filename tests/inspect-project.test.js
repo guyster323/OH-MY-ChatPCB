@@ -42,6 +42,31 @@ test('inspectProject returns stable artifact evidence and separate validation re
   }
 });
 
+test('inspectProject exposes stable deterministic facts without changing validation cleanliness', async () => {
+  const root = await makeProject();
+  try {
+    const options = {
+      projectDir: root,
+      now: () => '2026-09-03T00:00:00.000Z',
+      validateProjectImpl: cleanErc,
+      validateBoardImpl: cleanDrc,
+      analyzerAdapters: []
+    };
+    const [first, second] = await Promise.all([inspectProject(options), inspectProject(options)]);
+
+    assert.equal(first.validationClean, true);
+    assert.equal(JSON.stringify(first.inspection.facts), JSON.stringify(second.inspection.facts));
+    assert.equal(first.inspection.facts.length > 0, true);
+    assert.deepEqual(first.inspection.analyzers, [{
+      id: 'builtin.kicad', namespace: 'builtin', status: 'complete', version: '1',
+      sourceArtifacts: ['demo.kicad_pcb', 'demo.kicad_sch'], diagnostics: []
+    }]);
+    assert.deepEqual(first.findings, []);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('inspectProject isolates validator mutations from saved project files and evidence', async () => {
   const root = await makeProject();
   const before = await snapshot(root);
