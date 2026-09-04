@@ -19,6 +19,13 @@ textarea { resize: vertical; min-height: 96px; padding: 9px; }
 button { min-height: 34px; border: 1px solid #235a97; border-radius: 6px; padding: 0 12px; background: #2568ad; color: #fff; font-weight: 650; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .status-card, .request-card, .composer, .results, .review-panel { display: grid; gap: 8px; }
+.inspection-card code { overflow-wrap: anywhere; }
+.inspection-label { color: #607086; font-size: 12px; }
+#inspection-freshness { font-weight: 700; text-transform: lowercase; }
+#inspection-freshness[data-state="current"] { color: #047857; }
+#inspection-freshness[data-state="stale"], #inspection-freshness[data-state="missing"] { color: #9f1239; }
+#inspection-freshness[data-state="legacy-unverified"] { color: #a16207; }
+.patch-approval-actions { display: flex; gap: 8px; }
 .active-project { border-color: #9fc4af; background: #f2fbf5; }
 .active-project code { overflow-wrap: anywhere; font-size: 12px; }
 #active-project-name { font-weight: 700; }

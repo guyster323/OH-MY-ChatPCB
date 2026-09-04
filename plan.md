@@ -178,8 +178,7 @@ Work items:
 
 - [x] Add `schematic.patch` tool-call support.
 - [x] Add a file snapshot model for before/after comparison.
-- [x] Add unified diff generation for currently generated project files: `.kicad_sch`, `.kicad_pro`, `.chatpcb.json`, `sym-lib-table`, `chatpcb.kicad_sym`, and SPICE fixture.
-- [ ] Extend patch diff handling to `.kicad_pcb` once PCB drafts exist.
+- [x] Add unified diff generation for all generated artifacts; all generated artifacts participate in preview and rollback, including `.kicad_pcb`, `.kicad_sch`, `.kicad_pro`, `.chatpcb.json`, libraries, and SPICE fixtures.
 - [x] Add panel UI for diff preview, approve, cancel, and rerun validation.
 - [x] Add daemon-side apply lock to prevent concurrent writes to the same project.
 - [x] Add rollback behavior using pre-apply snapshots.

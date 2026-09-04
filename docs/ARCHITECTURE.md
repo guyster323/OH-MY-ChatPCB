@@ -1,5 +1,7 @@
 # ChatPCB Architecture
 
+OH-MY-ChatPCB is a local-first, evidence-gated KiCad agent runtime that connects user-owned AI providers to native KiCad workflows with deterministic inspection, reviewable patches, validation, rollback, and human release gates.
+
 ## Runtime Boundaries
 
 ChatPCB is split into three local-only layers:
@@ -17,7 +19,7 @@ The panel owns one active named project at a time:
 1. `project.create { workspaceRoot, projectName }` validates the Unicode display name, creates a safe slugged directory inside the selected workspace, and returns its normal filesystem path.
 2. The user writes a Korean or English circuit request and presses **Send**.
 3. Before dispatch, the panel asks the KiCad host for `project.status`. A dirty editor produces `linkState: "conflict"`; the panel does not send `project.request` or request a reload until the unsaved edits are resolved.
-4. `project.request { projectDir, prompt, provider }` invokes the selected local provider, confines emitted tool calls to the active project, and falls back to bounded local generation or an automatically approved patch when the provider returns no call.
+4. `project.request { projectDir, prompt, provider }` invokes the selected local provider, confines emitted tool calls to the active project, and falls back to bounded local generation or an approval-gated patch preview when the provider returns no call.
 5. The daemon validates ERC, restores the previous artifacts when an existing-project update fails validation, recomputes the readiness review, and returns `{ operation, files, validation, review, providerEvents }`.
 6. The panel renders request status, ERC, readiness review, artifacts, and KiCad link state independently. A clean host may receive `project.reload`; standalone browser mode instead shows the `.kicad_pro` path for manual opening. Official standalone KiCad opens that project path through `kicad.exe`; a direct `eeschema.exe` launch must receive the matching `.kicad_sch`, never the `.kicad_pro`.
 
@@ -58,7 +60,17 @@ The v1 generator produces review drafts for MCU peripheral circuits. It writes:
 - `_simulation.cir`
 - `.kicad_pcb` for supported board profiles
 
-The schematic uses project-local ChatPCB fixture symbols, wire stubs, net labels, no-connect markers for intentionally unused optional pins, and review notes. ChatPCB metadata stays in `.chatpcb.json`; custom top-level `chatpcb_*` schematic nodes are not allowed.
+The schematic uses project-local ChatPCB fixture symbols, wire stubs, net labels, no-connect markers for intentionally unused optional pins, and review notes. KiCad files are the authoritative editable state. `.chatpcb.json` is an intent/evidence manifest that records ChatPCB context but never replaces saved KiCad state; custom top-level `chatpcb_*` schematic nodes are not allowed.
+
+## Inspection, evidence, and approval
+
+`project.inspect { projectDir, kicadCliPath? }` is read-only: it inventories saved project artifacts, computes deterministic hashes, runs validation against a copy, records toolchain evidence, and reports manifest freshness. It cannot modify the inspected project.
+
+Schema v1 `.chatpcb.json` files remain readable but unverified and inspect as `legacy-unverified`, because they have no artifact-bound evidence. Schema v2 is artifact-bound and uses canonical top-level `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, and `releaseGates`; inspection derives the project digest from sorted artifact records. Any tracked artifact change makes prior evidence stale.
+
+Every artifact-bound approval contains the exact candidate patch identity, before/after bytes, and whole-project digests. Candidate generation and KiCad validation run in the retained disposable copy, so the preview contains KiCad-normalized bytes. Applying it requires the same single-use, unexpired approval, recomputes the complete current project digest immediately before a write, writes the approved bytes exactly, and verifies final hashes. A stale input writes nothing; a final-byte mismatch restores the snapshot. Provider-emitted validation is routed through the same disposable inspection path. All generated artifacts participate in preview and rollback, including `.kicad_pcb` drafts.
+
+Circuit JSON, kicad-happy, KiCad IPC, and placement/routing solver integrations are optional pinned adapters, never the editable source of truth. Adapters must be version-pinned, checksummed, and fail closed; KiCad IPC enhances the file workflow but does not bypass preview, artifact-bound approval, or rollback.
 
 ## Validation Contract
 

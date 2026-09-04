@@ -2,6 +2,7 @@
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { simulateProject } from '../src/workflow/simulate-project.js';
+import { inspectProject } from '../src/workflow/inspect-project.js';
 import { validateBoard } from '../src/workflow/validate-board.js';
 import { validateProject } from '../src/workflow/validate-project.js';
 
@@ -16,6 +17,13 @@ try {
       projectName: flags.name ?? 'chatpcb_mcu_peripheral'
     });
     printJson({ ok: true, result });
+  } else if (command === 'inspect') {
+    const result = await inspectProject({
+      projectDir: requireFlag(flags, 'project'),
+      kicadCliPath: flags.kicadCli
+    });
+    printJson({ ok: true, result });
+    process.exitCode = 0;
   } else if (command === 'validate') {
     const result = await validateProject({
       projectDir: requireFlag(flags, 'project'),
@@ -99,6 +107,7 @@ function printJson(value) {
 function printUsage() {
   console.log(`Usage:
   chatpcb generate --project <dir> --prompt <text> [--name <project-name>]
+  chatpcb inspect --project <dir> [--kicad-cli <path>]
   chatpcb validate --project <dir> [--kicad-cli <path>]
   chatpcb drc --project <dir> [--kicad-cli <path>]
   chatpcb simulate --project <dir> [--ngspice <path>]

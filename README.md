@@ -1,6 +1,6 @@
 # OH-MY-ChatPCB
 
-OH-MY-ChatPCB is an open-source ChatPCB prototype for making KiCad agent-native.
+OH-MY-ChatPCB is a local-first, evidence-gated KiCad agent runtime that connects user-owned AI providers to native KiCad workflows with deterministic inspection, reviewable patches, validation, rollback, and human release gates.
 
 The current implementation is the first runnable foundation of the proposed plan:
 
@@ -34,6 +34,8 @@ Implemented now:
 - Source-level KiCad fork schematic editor integration for `CHATPCB_PANEL`
 - Supported-profile `.kicad_pcb` drafts: outline, embedded footprints, net table, conservative traces, and power-path routing
 - Board-level KiCad DRC workflow through `chatpcb drc` and the daemon `validate.drc` tool, including zone refill and typed violation/unconnected counts
+- Read-only `project.inspect` for deterministic saved-project artifact hashes, validation results, and evidence freshness
+- Artifact-bound patch approvals that are single-use, expire, and fail closed when a tracked project artifact changes
 - SPICE fixture generation for simple analog support circuits
 - Local daemon and WebView websocket surface
 - Windows KiCad CLI discovery including `C:/Program Files/KiCad/10.0` and `9.0`
@@ -160,11 +162,18 @@ After opening the project (or its matching `.kicad_sch` in the schematic editor)
 node ./bin/chatpcb-cli.js generate --project ./workspaces/demo --prompt "STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED."
 node ./bin/chatpcb-cli.js validate --project ./workspaces/demo
 node ./bin/chatpcb-cli.js drc --project ./workspaces/demo
+node ./bin/chatpcb-cli.js inspect --project ./workspaces/demo
 node ./bin/chatpcb-cli.js simulate --project ./workspaces/demo
 node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 ```
 
 `validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; the current generated MCU fixture is expected to validate with `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
+
+## Evidence and migration
+
+Saved KiCad files (`.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, libraries, and manufacturing outputs) are the authoritative editable state. `.chatpcb.json` is a versioned intent/evidence manifest, not a replacement for those files. Run `project.inspect` before reviewing a candidate patch: it reads saved artifacts, reports a stable digest, and makes stale or missing evidence visible. A clean ERC or DRC is not a release decision; release still requires fresh evidence and explicit human approval.
+
+Schema v1 manifests remain readable and inspect as `legacy-unverified`; they contain intent but no artifact-bound evidence. Schema v2 stores canonical `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, and `releaseGates`; inspection derives its artifact-bound digest from the sorted saved-artifact records. Schema v2 migration is planned future work; no migration tool or CLI is currently available. The panel labels legacy or missing evidence as a warning but can still approve a patch protected by exact before/after hashes; stale evidence remains blocked.
 
 ### ADBMS6830 BMS example
 

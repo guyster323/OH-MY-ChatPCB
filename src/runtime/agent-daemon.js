@@ -8,23 +8,27 @@ import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
 import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
 import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.js';
-import { applySchematicPatch } from '../workflow/schematic-patch.js';
+import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
+import { createPatchApprovalRegistry } from './patch-approval-registry.js';
 import { simulateProject } from '../workflow/simulate-project.js';
+import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { reviewCircuitReadiness } from '../workflow/review-project.js';
 
-const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'validate.erc', 'validate.drc', 'simulate.spice'];
+const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
 export async function dispatchToolCall(
   call,
   {
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
+    inspectProjectImpl = inspectProject,
     validateProjectImpl = validateProject,
     validateBoardImpl = validateBoard,
     providerControllers = new Map(),
+    patchApprovalRegistry = createPatchApprovalRegistry(),
     allowedWorkspaceRoot
   } = {}
 ) {
@@ -51,6 +55,9 @@ export async function dispatchToolCall(
         })
       );
 
+    case 'project.inspect':
+      return ok(await inspectProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
+
     case 'validate.erc':
       return ok(await validateProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
 
@@ -58,16 +65,7 @@ export async function dispatchToolCall(
       return ok(await validateBoardImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
 
     case 'schematic.patch':
-      return ok(
-        await applySchematicPatch({
-          projectDir: call.args?.projectDir,
-          prompt: call.args?.prompt,
-          projectName: call.args?.projectName,
-          approved: call.args?.approved === true,
-          cancel: call.args?.cancel === true,
-          validateProjectImpl
-        })
-      );
+      return dispatchSchematicPatch(call.args ?? {}, { validateProjectImpl, patchApprovalRegistry });
 
     case 'provider.status':
       return ok(await checkProviderAvailabilityImpl({ provider: call.args?.provider ?? 'codex' }));
@@ -80,9 +78,11 @@ export async function dispatchToolCall(
         await invokeProvider(call, {
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
+          inspectProjectImpl,
           validateProjectImpl,
           validateBoardImpl,
           providerControllers,
+          patchApprovalRegistry,
           allowedWorkspaceRoot
         })
       );
@@ -92,9 +92,11 @@ export async function dispatchToolCall(
         await requestProject(call, {
           runProviderProcessImpl,
           checkProviderAvailabilityImpl,
+          inspectProjectImpl,
           validateProjectImpl,
           validateBoardImpl,
           providerControllers,
+          patchApprovalRegistry,
           allowedWorkspaceRoot
         })
       );
@@ -110,7 +112,52 @@ export async function dispatchToolCall(
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot, autoApprovePatch = false, forceProjectDir = false }) {
+async function dispatchSchematicPatch(args, { validateProjectImpl, patchApprovalRegistry }) {
+  const projectDir = args.projectDir;
+  if (args.cancel === true) {
+    if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to cancel a patch preview.');
+    const approval = patchApprovalRegistry.consume({ patchId: args.patchId, projectDir });
+    if (!approval.ok) return { ok: false, error: approval.reason };
+    await disposeSchematicPatchPlan(approval.record.plan);
+    return ok({ requiresApproval: false, approved: false, canceled: true, applied: false, files: {}, changedFiles: [], diff: '' });
+  }
+
+  if (args.approved !== true) {
+    const plan = await createSchematicPatchPlan({
+      projectDir,
+      prompt: args.prompt,
+      projectName: args.projectName,
+      validateProjectImpl
+    });
+    const registration = patchApprovalRegistry.register({
+      patchId: plan.patchId,
+      projectDir,
+      plan,
+      dispose: () => disposeSchematicPatchPlan(plan)
+    });
+    const preview = await applySchematicPatch({ projectDir, approved: false, patchPlan: plan });
+    return ok({ ...preview, expiresAt: registration.expiresAt });
+  }
+
+  if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to approve a patch preview.');
+  const approval = patchApprovalRegistry.consume({ patchId: args.patchId, projectDir });
+  if (!approval.ok) return { ok: false, error: approval.reason };
+  try {
+    return ok(await applySchematicPatch({
+      projectDir,
+      prompt: args.prompt,
+      projectName: args.projectName,
+      approved: true,
+      expectedPatchId: args.patchId,
+      patchPlan: approval.record.plan,
+      validateProjectImpl
+    }));
+  } finally {
+    await disposeSchematicPatchPlan(approval.record.plan);
+  }
+}
+
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, allowGenerate = true, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -164,18 +211,20 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     if (forceProjectDir && event.payload.name === 'project.create') {
       throw new Error('project.create is not allowed inside project.request.');
     }
-    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
-    if (autoApprovePatch && toolCall.name === 'schematic.patch') {
-      toolCall.args.approved = true;
+    if (!allowGenerate && event.payload.name === 'schematic.generate') {
+      throw new Error('schematic.generate is not allowed for an existing project.request; request a schematic.patch preview instead.');
     }
+    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
     toolResults.push({
       id: event.payload.id,
       ...(await dispatchToolCall(toolCall, {
         checkProviderAvailabilityImpl,
         runProviderProcessImpl,
+        inspectProjectImpl,
         validateProjectImpl,
         validateBoardImpl,
         providerControllers,
+        patchApprovalRegistry,
         allowedWorkspaceRoot
       }))
     });
@@ -192,7 +241,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   };
 }
 
-async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, validateProjectImpl, validateBoardImpl, providerControllers, allowedWorkspaceRoot }) {
+async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot }) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -210,18 +259,27 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
     const providerResult = await invokeProvider(call, {
       runProviderProcessImpl,
       checkProviderAvailabilityImpl,
+      inspectProjectImpl,
       validateProjectImpl,
       validateBoardImpl,
       providerControllers,
+      patchApprovalRegistry,
       allowedWorkspaceRoot,
-      autoApprovePatch: true,
+      allowGenerate: !hasSpec,
       forceProjectDir: true
     });
     const applied = providerResult.toolResults.length
       ? lastMutatingResult(providerResult.toolResults)
       : hasSpec
-        ? await applySchematicPatch({ projectDir, prompt, approved: true, validateProjectImpl })
+        ? (await dispatchSchematicPatch({ projectDir, prompt }, { validateProjectImpl, patchApprovalRegistry })).result
         : await generateMcuPeripheralProject({ projectDir, prompt });
+    if (applied.requiresApproval) {
+      return {
+        ...applied,
+        operation: 'patched',
+        providerEvents: providerResult.events
+      };
+    }
     const validation = await validateProjectImpl({ projectDir });
     const rolledBack = hasSpec && !validation.ok;
     if (rolledBack) {
@@ -239,6 +297,9 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       providerEvents: providerResult.events,
       ...(rolledBack ? { rolledBack: true } : {})
     };
+  } catch (error) {
+    if (snapshot) await restoreProjectSnapshot(snapshot, projectDir);
+    throw error;
   } finally {
     if (snapshot) {
       await rm(snapshot.root, { force: true, recursive: true });
@@ -277,12 +338,9 @@ async function snapshotProject(projectDir) {
 
 async function restoreProjectSnapshot(snapshot, projectDir) {
   const currentEntries = await readdir(path.resolve(projectDir), { withFileTypes: true });
-  const snapshotNames = new Set(await readdir(snapshot.copy));
 
   for (const entry of currentEntries) {
-    if (snapshotNames.has(entry.name)) {
-      await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
-    }
+    await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
   }
 
   await cp(snapshot.copy, projectDir, { recursive: true });
@@ -325,13 +383,24 @@ function withProjectContext(payload, projectDir, forceProjectDir = false) {
     ...(payload.args ?? {})
   };
 
+  let name = payload.name;
+  if (name === 'schematic.patch') {
+    delete args.approved;
+    delete args.cancel;
+    delete args.patchId;
+    delete args.expectedPatchId;
+  }
+  if (name === 'validate.erc' || name === 'validate.drc') {
+    name = 'project.inspect';
+  }
+
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
 
   return {
     id: payload.id,
-    name: payload.name,
+    name,
     args
   };
 }
@@ -339,9 +408,11 @@ function withProjectContext(payload, projectDir, forceProjectDir = false) {
 export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOptions = {} } = {}) {
   const clients = new Set();
   const providerControllers = dispatchOptions.providerControllers ?? new Map();
+  const patchApprovalRegistry = dispatchOptions.patchApprovalRegistry ?? createPatchApprovalRegistry();
   const resolvedDispatchOptions = {
     ...dispatchOptions,
     providerControllers,
+    patchApprovalRegistry,
     allowedWorkspaceRoot: dispatchOptions.allowedWorkspaceRoot ?? process.env.CHATPCB_WORKSPACE_ROOT
   };
 
@@ -429,6 +500,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
         for (const client of clients) {
           client.destroy();
         }
+        patchApprovalRegistry.disposeAll();
         server.close((error) => (error ? reject(error) : resolve()));
       }),
     clients

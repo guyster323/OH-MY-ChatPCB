@@ -13,6 +13,13 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="request-status"/);
   assert.match(html, /aria-label="Request status"/);
   assert.match(html, /id="validation-status"/);
+  assert.match(html, /id="inspection-card"/);
+  assert.match(html, /id="inspection-freshness"/);
+  assert.match(html, /id="inspection-digest"/);
+  assert.match(html, /id="inspection-artifact-count"/);
+  assert.match(html, /id="inspection-erc"/);
+  assert.match(html, /id="inspection-drc"/);
+  assert.match(html, /id="approve-patch-button"/);
   assert.match(html, /id="kicad-link"/);
   assert.doesNotMatch(html, /id="generate-button"/);
   assert.match(script, /project\.create/);
@@ -20,6 +27,14 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /renderRequestStatus/);
   assert.match(script, /renderValidation/);
   assert.match(script, /renderKiCadLink/);
+  assert.match(script, /project\.inspect/);
+  assert.match(script, /inspectionState/);
+  assert.match(script, /renderInspection/);
+  assert.match(script, /patchId/);
+  assert.match(script, /expiresAt/);
+  assert.match(script, /clearPatchApproval/);
+  assert.match(script, /approved: true, patchId: patchApprovalState\.patchId/);
+  assert.match(script, /cancel: true, patchId: patchApprovalState\.patchId/);
   assert.match(script, /chatpcbHost/);
 });
 

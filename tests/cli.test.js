@@ -53,3 +53,22 @@ test('chatpcb CLI exposes board-level DRC validation', async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('chatpcb CLI inspects a project and reports its deterministic digest', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-cli-inspect-'));
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [path.resolve('bin/chatpcb-cli.js'), 'inspect', '--project', root],
+      { cwd: process.cwd(), encoding: 'utf8' }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.ok, true);
+    assert.match(parsed.result.inspection.projectDigest, /^[a-f0-9]{64}$/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

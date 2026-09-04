@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const WINDOWS_RESERVED_BASENAMES = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/iu;
@@ -79,6 +79,23 @@ export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) 
   }
 
   return resolvedProjectDir;
+}
+
+export async function readChatPcbManifest(projectDir) {
+  const manifests = (await readdir(projectDir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
+
+  if (manifests.length > 1) {
+    throw typedError('MULTIPLE_CHATPCB_MANIFESTS', 'A project may contain at most one .chatpcb.json manifest.');
+  }
+
+  if (manifests.length === 0) return null;
+
+  try {
+    return JSON.parse(await readFile(path.join(projectDir, manifests[0].name), 'utf8'));
+  } catch (error) {
+    throw typedError('CHATPCB_MANIFEST_INVALID', `ChatPCB manifest is invalid: ${error.message}`);
+  }
 }
 
 function isProtectedPath(candidate) {
