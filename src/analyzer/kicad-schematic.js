@@ -15,10 +15,49 @@ function number(value) {
   return Number(value);
 }
 
+function isFiniteNumber(value) {
+  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value));
+}
+
 function at(node) {
   const position = child(node, 'at');
   if (!position) return undefined;
   return { x: number(position[1]), y: number(position[2]), rotation: number(position[3] ?? 0) };
+}
+
+function validateAt(node, nodeName) {
+  const position = child(node, 'at');
+  if (!position) return `${nodeName} requires an at coordinate`;
+  if (!isFiniteNumber(position[1]) || !isFiniteNumber(position[2]) || (position[3] !== undefined && !isFiniteNumber(position[3]))) {
+    return `${nodeName} has invalid at coordinates`;
+  }
+  return undefined;
+}
+
+function validateSchematic(root) {
+  if (!Array.isArray(root) || root[0] !== 'kicad_sch') return 'expected kicad_sch root';
+  for (const symbol of children(root, 'symbol')) {
+    const error = validateAt(symbol, 'symbol');
+    if (error) return error;
+  }
+  for (const label of children(root, 'label')) {
+    const error = validateAt(label, 'label');
+    if (error) return error;
+  }
+  for (const wire of children(root, 'wire')) {
+    const points = children(child(wire, 'pts') ?? [], 'xy');
+    if (points.length < 2) return 'wire requires at least two xy points';
+    if (points.some((point) => !isFiniteNumber(point[1]) || !isFiniteNumber(point[2]))) return 'wire has invalid xy coordinates';
+  }
+  for (const junction of children(root, 'junction')) {
+    const error = validateAt(junction, 'junction');
+    if (error) return error;
+  }
+  for (const noConnect of children(root, 'no_connect')) {
+    const error = validateAt(noConnect, 'no_connect');
+    if (error) return error;
+  }
+  return undefined;
 }
 
 function properties(symbol) {
@@ -27,6 +66,15 @@ function properties(symbol) {
 
 function emptySummary() {
   return { formatVersion: undefined, symbolCount: 0, labelCount: 0, wireCount: 0, junctionCount: 0, noConnectCount: 0 };
+}
+
+function parseFailure(error, sourceArtifact) {
+  return {
+    facts: [],
+    findings: [],
+    diagnostics: [{ code: error.code, message: error.message, sourceArtifact }],
+    summary: emptySummary()
+  };
 }
 
 function sortByPositionAndText(left, right) {
@@ -39,13 +87,10 @@ export function analyzeSchematic({ source, sourceArtifact } = {}) {
     root = parseSExpression(source, { sourcePath: sourceArtifact });
   } catch (error) {
     if (!(error instanceof SExpressionParseError)) throw error;
-    return {
-      facts: [],
-      findings: [],
-      diagnostics: [{ code: error.code, message: error.message, sourceArtifact }],
-      summary: emptySummary()
-    };
+    return parseFailure(error, sourceArtifact);
   }
+  const structureError = validateSchematic(root);
+  if (structureError) return parseFailure(new SExpressionParseError(structureError, sourceArtifact), sourceArtifact);
 
   const symbols = children(root, 'symbol');
   const labels = children(root, 'label').map((node) => ({ text: node[1], position: at(node) }));

@@ -68,11 +68,35 @@ test('analyzeSchematic reports parse errors without fabricating facts', () => {
 
 test('analyzeSchematic warns when a placed component lacks required structural metadata', () => {
   const result = analyzeSchematic({
-    source: '(kicad_sch (version 20260306) (symbol (uuid broken-part) (property "Value" "Part")))',
+    source: '(kicad_sch (version 20260306) (symbol (at 1 2 0) (uuid broken-part) (property "Value" "Part")))',
     sourceArtifact: 'missing-metadata.kicad_sch'
   });
 
   assert.equal(result.findings.length, 1);
   assert.equal(result.findings[0].severity, 'warning');
   assert.match(result.findings[0].message, /Reference and Footprint/);
+});
+
+test('analyzeSchematic fails closed for semantically malformed schematic nodes', () => {
+  const malformedSources = [
+    '(foo)',
+    '(kicad_sch (version 1) (label "SDA"))',
+    '(kicad_sch (version 1) (symbol (uuid missing-position)))',
+    '(kicad_sch (version 1) (symbol (at x 2 0)))',
+    '(kicad_sch (version 1) (wire (pts (xy x 2) (xy 3 4))))',
+    '(kicad_sch (version 1) (junction (at 2 nope)))',
+    '(kicad_sch (version 1) (no_connect (at nope 2)))'
+  ];
+
+  for (const source of malformedSources) {
+    const result = analyzeSchematic({ source, sourceArtifact: 'malformed.kicad_sch' });
+
+    assert.deepEqual(result.facts, [], source);
+    assert.deepEqual(result.findings, [], source);
+    assert.equal(result.diagnostics[0]?.code, 'ANALYZER_PARSE_ERROR', source);
+    assert.deepEqual(result.summary, {
+      formatVersion: undefined, symbolCount: 0, labelCount: 0, wireCount: 0,
+      junctionCount: 0, noConnectCount: 0
+    }, source);
+  }
 });
