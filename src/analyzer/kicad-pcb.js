@@ -84,6 +84,8 @@ function boardError(root) {
   try {
     for (const footprint of children(root, 'footprint')) {
       position(footprint, 'footprint');
+      const footprintLayer = child(footprint, 'layer');
+      if (!footprintLayer || typeof footprintLayer[1] !== 'string' || footprintLayer[1].trim() === '') return 'footprint requires a layer';
       for (const pad of children(footprint, 'pad')) {
         if (typeof pad[1] !== 'string') return 'pad requires a number';
         if (typeof pad[2] !== 'string' || typeof pad[3] !== 'string') return 'pad requires a type and shape';
@@ -116,7 +118,11 @@ function boardError(root) {
       const net = child(via, 'net');
       if (!size || !numeric(size[1]) || !drill || !numeric(drill[1]) || !layers || layers.slice(1).some((item) => typeof item !== 'string') || !net || !numeric(net[1])) return 'via has invalid size, drill, layers, or net';
     }
-    for (const graphic of graphicNodes(root)) graphicPoints(graphic);
+    for (const graphic of graphicNodes(root)) {
+      if (child(graphic, 'layer')?.[1] !== 'Edge.Cuts') continue;
+      if (!['gr_rect', 'gr_line', 'gr_poly'].includes(graphic[0])) return `unsupported Edge.Cuts geometry: ${graphic[0]}`;
+      graphicPoints(graphic);
+    }
   } catch (error) {
     return error.message;
   }

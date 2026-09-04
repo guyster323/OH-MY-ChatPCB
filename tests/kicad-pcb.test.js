@@ -74,16 +74,28 @@ test('extracts through-hole drill and fails closed for malformed pad structure',
   const result = analyzePcb({ source: valid, sourceArtifact });
   assert.equal(factsById(result)['builtin.board.pad:J1:1'].value.drill, 1);
 
-  const malformed = analyzePcb({ source: `(kicad_pcb (version 1) (footprint "X" (at 0 0) (pad "1" smd rect (at 0 0) (size 1 1))))`, sourceArtifact });
+  const malformed = analyzePcb({ source: `(kicad_pcb (version 1) (footprint "X" (layer "F.Cu") (at 0 0) (pad "1" smd rect (at 0 0) (size 1 1))))`, sourceArtifact });
   assert.deepEqual(malformed.facts, []);
   assert.equal(malformed.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
   assert.match(malformed.diagnostics[0].message, /pad requires layers/);
 });
 
+test('fails closed for unsupported Edge.Cuts geometry and a footprint without a layer', () => {
+  const unsupportedOutline = analyzePcb({ source: `(kicad_pcb (version 1) (layers (44 "Edge.Cuts" user)) (gr_arc (start 0 0) (mid 5 5) (end 10 0) (layer "Edge.Cuts")))`, sourceArtifact });
+  assert.deepEqual(unsupportedOutline.facts, []);
+  assert.equal(unsupportedOutline.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
+  assert.match(unsupportedOutline.diagnostics[0].message, /unsupported Edge\.Cuts geometry: gr_arc/);
+
+  const missingLayer = analyzePcb({ source: `(kicad_pcb (version 1) (footprint "X" (at 0 0)))`, sourceArtifact });
+  assert.deepEqual(missingLayer.facts, []);
+  assert.equal(missingLayer.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
+  assert.match(missingLayer.diagnostics[0].message, /footprint requires a layer/);
+});
+
 test('flags undeclared pad nets and conservatively identifies unrouted nets', () => {
   const source = `(kicad_pcb (version 1) (layers (0 "F.Cu" signal))
     (net 1 "GND") (net 2 "VCC")
-    (footprint "X" (at 0 0) (property "Reference" "J1")
+    (footprint "X" (layer "F.Cu") (at 0 0) (property "Reference" "J1")
       (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu") (net 1 "GND"))
       (pad "2" thru_hole circle (at 2 0) (size 1 1) (drill 0.5) (layers "*.Cu") (net 9 "MISSING")))
   )`;
