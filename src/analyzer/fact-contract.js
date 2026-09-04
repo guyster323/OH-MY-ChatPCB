@@ -38,22 +38,24 @@ export function normalizeFacts(facts) {
     }
   }
   const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
-  valid.sort((left, right) => compare(left.id, right.id) || compare(left.category, right.category) || compare(canonicalJson(left.value), canonicalJson(right.value)));
+  valid.sort((left, right) => compare(left.id, right.id) || compare(left.category, right.category) || compare(canonicalJson(left.value), canonicalJson(right.value)) || compare(left.sourceArtifact, right.sourceArtifact) || compare(left.extractor, right.extractor) || compare(left.confidence, right.confidence));
   const result = [];
   for (const fact of valid) {
     if (result.some((existing) => existing.id === fact.id)) {
       diagnostics.push({ code: 'ANALYZER_FACT_COLLISION', message: `Duplicate fact ID: ${fact.id}`, factId: fact.id });
     } else result.push(fact);
   }
+  diagnostics.sort((left, right) => compare(left.code, right.code) || compare(left.factId ?? '', right.factId ?? '') || compare(left.message, right.message));
   return { facts: result, diagnostics };
 }
 
 export function normalizeFinding(finding = {}) {
   if (!finding || typeof finding !== 'object' || Array.isArray(finding)) throw new TypeError('finding must be an object');
   const id = requiredString(finding.id, 'finding id');
+  const extractor = requiredString(finding.extractor, 'finding extractor');
   if (!SEVERITIES.has(finding.severity)) throw new TypeError('finding severity must be info, warning, or blocker');
   if (!CONFIDENCES.has(finding.confidence)) throw new TypeError('finding confidence must be deterministic, heuristic, or datasheet-backed');
   if (!Array.isArray(finding.factIds) || finding.factIds.some((item) => typeof item !== 'string' || item.trim() === '')) throw new TypeError('finding factIds must be an array of non-empty strings');
   if (!Array.isArray(finding.sourceArtifacts) || finding.sourceArtifacts.some((item) => typeof item !== 'string' || item.trim() === '')) throw new TypeError('finding sourceArtifacts must be an array of non-empty strings');
-  return { ...clone(finding), id, severity: finding.severity, confidence: finding.confidence, factIds: [...finding.factIds], sourceArtifacts: [...finding.sourceArtifacts] };
+  return { ...clone(finding), id, extractor, severity: finding.severity, confidence: finding.confidence, factIds: [...finding.factIds], sourceArtifacts: [...finding.sourceArtifacts] };
 }
