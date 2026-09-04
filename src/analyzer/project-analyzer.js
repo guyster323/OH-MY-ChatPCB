@@ -58,7 +58,7 @@ function sourceType(artifactPath) {
 
 function scopeArtifactResult(result, artifactPath, shouldScope) {
   if (!shouldScope) return result;
-  const factIds = new Map(result.facts.map((fact) => [fact.id, `${fact.id}@${artifactPath}`]));
+  const factIds = new Map(result.facts.map((fact) => [fact.id, scopedId(fact.id, artifactPath)]));
   return {
     ...result,
     facts: result.facts.map((fact) => ({
@@ -68,10 +68,14 @@ function scopeArtifactResult(result, artifactPath, shouldScope) {
     })),
     findings: result.findings.map((finding) => ({
       ...finding,
-      id: `${finding.id}@${artifactPath}`,
+      id: scopedId(finding.id, artifactPath),
       factIds: finding.factIds.map((factId) => factIds.get(factId) ?? factId)
     }))
   };
+}
+
+function scopedId(id, artifactPath) {
+  return `${id}@${Buffer.from(artifactPath, 'utf8').toString('base64url')}`;
 }
 
 function remapFactReferences(value, factIds) {
