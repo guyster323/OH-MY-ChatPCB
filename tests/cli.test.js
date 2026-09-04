@@ -54,7 +54,7 @@ test('chatpcb CLI exposes board-level DRC validation', async () => {
   }
 });
 
-test('chatpcb CLI inspects a project and reports its deterministic digest', async () => {
+test('chatpcb CLI inspect retains deterministic facts and analyzer statuses in JSON output', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-cli-inspect-'));
 
   try {
@@ -68,6 +68,8 @@ test('chatpcb CLI inspects a project and reports its deterministic digest', asyn
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.ok, true);
     assert.match(parsed.result.inspection.projectDigest, /^[a-f0-9]{64}$/);
+    assert.ok(Array.isArray(parsed.result.inspection.facts));
+    assert.equal(typeof parsed.result.inspection.analyzers[0]?.status, 'string');
   } finally {
     await rm(root, { force: true, recursive: true });
   }

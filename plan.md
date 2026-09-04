@@ -46,6 +46,7 @@
 - [x] Added panel Stop UI and daemon-level cancellation for in-flight provider calls.
 - [x] Smoke-tested an installed Codex provider from panel chat without test injection.
 - [x] Added automated tests covering runtime envelopes, daemon dispatch, CLI generation, provider bridge, KiCad CLI resolution, validation paths, simulation paths, and panel assets.
+- [x] Added deterministic schematic/PCB inspection facts, confidence labels, analyzer status, and pinned external-adapter isolation; `project.inspect` remains read-only and forwards only explicitly supplied programmatic adapter definitions.
 
 ## Current Baseline
 

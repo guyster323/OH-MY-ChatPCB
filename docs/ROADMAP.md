@@ -15,6 +15,16 @@ Status: complete.
 
 Schema v1 remains readable but unverified. Schema v2 is artifact-bound. Circuit JSON, kicad-happy, KiCad IPC, and solver integrations remain optional pinned adapters for later phases, not sources of editable truth.
 
+### Deterministic analyzer increment
+
+Status: complete for structural inspection only.
+
+- Built-in saved-artifact facts and explicit confidence labels
+- Analyzer status/diagnostics in CLI and daemon inspection output
+- Pinned, checksum-verified programmatic adapters in disposable isolation with typed skips
+
+This increment does not establish electrical correctness, manufacturability, or release readiness. A pinned configuration-file UX remains future work; no adapter is selected or installed implicitly.
+
 ## Phase 1: Runnable Scaffold
 
 Status: complete.

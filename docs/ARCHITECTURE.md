@@ -64,13 +64,15 @@ The schematic uses project-local ChatPCB fixture symbols, wire stubs, net labels
 
 ## Inspection, evidence, and approval
 
-`project.inspect { projectDir, kicadCliPath? }` is read-only: it inventories saved project artifacts, computes deterministic hashes, runs validation against a copy, records toolchain evidence, and reports manifest freshness. It cannot modify the inspected project.
+`project.inspect { projectDir, kicadCliPath?, analyzerAdapters? }` is read-only: it inventories saved project artifacts, computes deterministic hashes, runs validation against a copy, records toolchain evidence, and reports manifest freshness. It cannot modify the inspected project. The daemon preserves its project-path guard and forwards explicitly supplied `analyzerAdapters` both for direct calls and provider-context inspection calls.
+
+Inspection returns `inspection.facts`, `inspection.analyzers`, and top-level `findings`. Built-in extractors produce deterministic saved-artifact facts for schematic structure (components, labels, wires, junctions, no-connects, nets) and PCB structure (nets, footprints, pads, segments, vias, summary); unrouted-net candidates are heuristic. Confidence is always `deterministic`, `heuristic`, or `datasheet-backed`: structural facts are review evidence, never proof of electrical correctness or release readiness. Analyzer status is `complete`, `partial`, `skipped`, or `failed`, with typed diagnostics.
 
 Schema v1 `.chatpcb.json` files remain readable but unverified and inspect as `legacy-unverified`, because they have no artifact-bound evidence. Schema v2 is artifact-bound and uses canonical top-level `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, and `releaseGates`; inspection derives the project digest from sorted artifact records. Any tracked artifact change makes prior evidence stale.
 
 Every artifact-bound approval contains the exact candidate patch identity, before/after bytes, and whole-project digests. Candidate generation and KiCad validation run in the retained disposable copy, so the preview contains KiCad-normalized bytes. Applying it requires the same single-use, unexpired approval, recomputes the complete current project digest immediately before a write, writes the approved bytes exactly, and verifies final hashes. A stale input writes nothing; a final-byte mismatch restores the snapshot. Provider-emitted validation is routed through the same disposable inspection path. All generated artifacts participate in preview and rollback, including `.kicad_pcb` drafts.
 
-Circuit JSON, kicad-happy, KiCad IPC, and placement/routing solver integrations are optional pinned adapters, never the editable source of truth. Adapters must be version-pinned, checksummed, and fail closed; KiCad IPC enhances the file workflow but does not bypass preview, artifact-bound approval, or rollback.
+Circuit JSON, kicad-happy, KiCad IPC, and placement/routing solver integrations are optional pinned adapters, never the editable source of truth. Adapters must be version-pinned, checksummed, and fail closed; KiCad IPC enhances the file workflow but does not bypass preview, artifact-bound approval, or rollback. No CLI flag auto-selects, downloads, or installs an analyzer. Explicit programmatic adapter definitions execute against a disposable project copy; unavailable adapters return typed skips and cannot mutate the inspected project.
 
 ## Validation Contract
 
