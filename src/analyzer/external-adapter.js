@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { redactProviderText } from '../runtime/provider-process.js';
+import { normalizeFacts, normalizeFinding } from './fact-contract.js';
 
 const MAX_TIMEOUT_MS = 5 * 60 * 1000;
+const TERMINATION_GRACE_MS = 75;
 const CONFIDENCES = new Set(['deterministic', 'heuristic', 'datasheet-backed']);
 
 function diagnostic(code, message, stderr = '') {
@@ -70,6 +72,21 @@ function asUtf8(value) {
   return typeof value === 'string' ? value : Buffer.from(value).toString('utf8');
 }
 
+function unsafeInputError(entry) {
+  const error = new Error(`Project copy contains a symbolic link: ${entry}`);
+  error.code = 'ANALYZER_ADAPTER_UNSAFE_INPUT';
+  return error;
+}
+
+async function assertSymlinkFree(directory, fileSystem) {
+  if ((await fileSystem.lstat(directory)).isSymbolicLink()) throw unsafeInputError(directory);
+  for (const entry of await fileSystem.readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) throw unsafeInputError(entryPath);
+    if (entry.isDirectory()) await assertSymlinkFree(entryPath, fileSystem);
+  }
+}
+
 function runProcess({ command, args, input, cwd, env, timeoutMs, spawnImpl }) {
   return new Promise((resolve) => {
     let child;
@@ -83,23 +100,30 @@ function runProcess({ command, args, input, cwd, env, timeoutMs, spawnImpl }) {
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timedOut = false;
+    let timer;
+    let forceKillTimer;
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
       resolve({ stdout, stderr, ...result });
     };
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
+      timedOut = true;
       try { child.kill('SIGTERM'); } catch { /* process is already gone */ }
-      finish({ timedOut: true });
+      forceKillTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* process is already gone */ }
+      }, TERMINATION_GRACE_MS);
     }, timeoutMs);
 
     child.stdout?.setEncoding?.('utf8');
     child.stderr?.setEncoding?.('utf8');
     child.stdout?.on('data', (chunk) => { stdout += chunk; });
     child.stderr?.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => finish({ error }));
-    child.once('close', (exitCode) => finish({ exitCode }));
+    child.once('error', (error) => finish({ error, timedOut }));
+    child.once('close', (exitCode) => finish({ exitCode, timedOut }));
     try {
       if (input) child.stdin.write(input);
       child.stdin.end();
@@ -148,7 +172,15 @@ function parseOutput(stdout, inventory, definition) {
       sourceArtifacts: finding.sourceArtifacts ?? []
     });
   }
-  return { facts, findings };
+  const normalizedFacts = normalizeFacts(facts);
+  if (normalizedFacts.diagnostics.some((item) => item.code === 'ANALYZER_FACT_INVALID')) return null;
+  const normalizedFindings = [];
+  try {
+    for (const finding of findings) normalizedFindings.push(normalizeFinding(finding));
+  } catch {
+    return null;
+  }
+  return { facts: normalizedFacts.facts, findings: normalizedFindings, diagnostics: normalizedFacts.diagnostics };
 }
 
 export async function runConfiguredAnalyzer({
@@ -162,13 +194,13 @@ export async function runConfiguredAnalyzer({
   const definitionError = validateDefinition(definition);
   if (definitionError) return invalidDefinition(definition, inventory, definitionError);
 
-  const fileSystem = { readFile, cp, mkdtemp, rm, ...fsImpl };
+  const fileSystem = { readFile, cp, lstat, mkdtemp, readdir, rm, ...fsImpl };
   let executable;
   try {
     executable = await fileSystem.readFile(definition.command);
   } catch (error) {
-    const code = error?.code === 'ENOENT' ? 'ANALYZER_ADAPTER_UNAVAILABLE' : 'ANALYZER_ADAPTER_UNAVAILABLE';
-    return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic(code, `Adapter executable is unavailable: ${error?.code ?? error?.message}`)]), facts: [], findings: [] };
+    const code = 'ANALYZER_ADAPTER_UNAVAILABLE';
+    return { analyzer: analyzerFor(definition, inventory, error?.code === 'ENOENT' ? 'skipped' : 'failed', [diagnostic(code, `Adapter executable is unavailable: ${error?.code ?? error?.message}`)]), facts: [], findings: [] };
   }
   if (hashBuffer(executable) !== definition.sha256) {
     return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic('ANALYZER_ADAPTER_CHECKSUM_MISMATCH', 'Adapter executable checksum does not match its pinned SHA-256')]), facts: [], findings: [] };
@@ -181,7 +213,9 @@ export async function runConfiguredAnalyzer({
     const env = { ...process.env };
     if (definition.input === 'project-copy') {
       disposableProjectDir = await fileSystem.mkdtemp(path.join(tmpdir(), 'chatpcb-analyzer-'));
+      await assertSymlinkFree(projectDir, fileSystem);
       await fileSystem.cp(projectDir, disposableProjectDir, { recursive: true });
+      await assertSymlinkFree(disposableProjectDir, fileSystem);
       args = args.map((arg) => arg === '{projectDir}' ? disposableProjectDir : arg);
       env.CHATPCB_ANALYZER_PROJECT_DIR = disposableProjectDir;
     } else {
@@ -193,16 +227,24 @@ export async function runConfiguredAnalyzer({
     }
     if (processResult.error || processResult.exitCode !== 0) {
       const code = processResult.error?.code === 'ENOENT' ? 'ANALYZER_ADAPTER_UNAVAILABLE' : 'ANALYZER_ADAPTER_FAILED';
-      return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic(code, `Adapter process failed${processResult.exitCode === undefined ? '' : ` with exit code ${processResult.exitCode}`}`, processResult.stderr)]), facts: [], findings: [] };
+      const status = code === 'ANALYZER_ADAPTER_UNAVAILABLE' ? 'skipped' : 'failed';
+      return { analyzer: analyzerFor(definition, inventory, status, [diagnostic(code, `Adapter process failed${processResult.exitCode === undefined ? '' : ` with exit code ${processResult.exitCode}`}`, processResult.stderr)]), facts: [], findings: [] };
     }
     const normalized = parseOutput(processResult.stdout.trim(), inventory, definition);
     if (!normalized) {
       return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic('ANALYZER_ADAPTER_INVALID_OUTPUT', 'Adapter output must be a valid analyzer JSON object', processResult.stderr)]), facts: [], findings: [] };
     }
-    return { analyzer: analyzerFor(definition, inventory, 'complete'), ...normalized };
+    const status = normalized.diagnostics.length === 0 ? 'complete' : 'partial';
+    return { analyzer: analyzerFor(definition, inventory, status, normalized.diagnostics), facts: normalized.facts, findings: normalized.findings };
   } catch (error) {
+    if (error?.code === 'ANALYZER_ADAPTER_UNSAFE_INPUT') {
+      return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic(error.code, error.message)]), facts: [], findings: [] };
+    }
     return { analyzer: analyzerFor(definition, inventory, 'failed', [diagnostic('ANALYZER_ADAPTER_FAILED', `Adapter execution failed: ${error?.code ?? error?.message}`)]), facts: [], findings: [] };
   } finally {
-    if (disposableProjectDir) await fileSystem.rm(disposableProjectDir, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 });
+    if (disposableProjectDir) {
+      try { await fileSystem.rm(disposableProjectDir, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 }); }
+      catch { /* process has closed; cleanup failure must not override the typed adapter result */ }
+    }
   }
 }

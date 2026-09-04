@@ -172,10 +172,10 @@ test('analyzeProject discards facts when the post-extraction inventory digest ch
   }
 });
 
-test('analyzeProject keeps built-in facts when an external adapter collides with one', async () => {
+test('analyzeProject keeps built-in facts and drops dangling findings when an external adapter collides', async () => {
   const root = await makeProject();
   const adapterPath = path.join(root, 'adapter.mjs');
-  await writeFile(adapterPath, `console.log(JSON.stringify({ schemaVersion: 1, facts: [{ id: 'board.summary', category: 'test', sourceArtifact: 'demo.kicad_pcb' }] }));`, 'utf8');
+  await writeFile(adapterPath, `console.log(JSON.stringify({ schemaVersion: 1, facts: [{ id: 'board.summary', category: 'test', sourceArtifact: 'demo.kicad_pcb' }], findings: [{ id: 'uses-summary', severity: 'warning', factIds: ['board.summary'], sourceArtifacts: ['demo.kicad_pcb'] }]}));`, 'utf8');
   try {
     const inventory = await collectArtifactInventory({ projectDir: root });
     const result = await analyzeProject({
@@ -188,8 +188,36 @@ test('analyzeProject keeps built-in facts when an external adapter collides with
     });
 
     assert.equal(result.facts.filter((fact) => fact.id === 'builtin.board.summary').length, 1);
-    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').status, 'complete');
+    assert.equal(result.findings.some((finding) => finding.id === 'builtin.uses-summary'), false);
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').status, 'partial');
     assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics[0].code, 'ANALYZER_FACT_COLLISION');
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics.some((diagnostic) => diagnostic.code === 'ANALYZER_FINDING_DANGLING_FACT'), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject discards built-in and external results when an adapter mutates project input', async () => {
+  const root = await makeProject();
+  const adapterPath = path.join(root, 'adapter.mjs');
+  await writeFile(adapterPath, `
+    import { appendFile } from 'node:fs/promises';
+    await appendFile(process.argv[2], ' adapter mutation');
+    console.log(JSON.stringify({ schemaVersion: 1, facts: [] }));
+  `, 'utf8');
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const result = await analyzeProject({
+      projectDir: root,
+      inventory,
+      analyzerAdapters: [{
+        id: 'external.mutator', namespace: 'external.mutator', version: '1', command: process.execPath,
+        args: [adapterPath, path.join(root, 'demo.kicad_sch')], sha256: executableHash, timeoutMs: 5_000, input: 'json'
+      }]
+    });
+    assert.deepEqual(result.facts, []);
+    assert.deepEqual(result.findings, []);
+    assert.equal(result.analyzers[0].diagnostics[0].code, 'ANALYZER_INPUT_CHANGED');
   } finally {
     await rm(root, { force: true, recursive: true });
   }

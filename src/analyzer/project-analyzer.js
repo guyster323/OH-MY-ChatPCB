@@ -20,6 +20,7 @@ function compareDiagnostics(left, right) {
     || compareText(left.sourceKind ?? '', right.sourceKind ?? '')
     || compareText(left.sourceArtifact ?? '', right.sourceArtifact ?? '')
     || compareText(left.factId ?? '', right.factId ?? '')
+    || compareText(left.findingId ?? '', right.findingId ?? '')
     || compareText(left.message ?? '', right.message ?? '');
 }
 
@@ -162,35 +163,67 @@ export async function analyzeProject({
   const external = [];
   const mergedFacts = [...normalized.facts];
   const factIds = new Set(mergedFacts.map((fact) => fact.id));
-  const mergedFindings = [...findings];
+  const retainedFactIdsByAnalyzer = new Map([[BUILTIN_ANALYZER.id, new Set(factIds)]]);
+  const mergedFindings = findings.map((finding) => ({ finding, analyzerId: BUILTIN_ANALYZER.id }));
   const adapterDefinitions = Array.isArray(analyzerAdapters) ? analyzerAdapters.slice().sort((left, right) => compareText(left?.id ?? '', right?.id ?? '')) : [];
   for (const definition of adapterDefinitions) {
     const result = await runConfiguredAnalyzer({ definition, projectDir, inventory, sourceFiles: contents });
     const adapterDiagnostics = [...result.analyzer.diagnostics];
     const adapterFacts = normalizeFacts(result.facts);
+    const adapterFactIds = new Set();
     adapterDiagnostics.push(...adapterFacts.diagnostics);
     for (const fact of adapterFacts.facts) {
       if (factIds.has(fact.id)) {
         adapterDiagnostics.push({ code: 'ANALYZER_FACT_COLLISION', message: `Duplicate fact ID: ${fact.id}`, factId: fact.id });
       } else {
         factIds.add(fact.id);
+        adapterFactIds.add(fact.id);
         mergedFacts.push(fact);
       }
     }
     for (const finding of result.findings) {
-      try { mergedFindings.push(normalizeFinding(finding)); }
+      try { mergedFindings.push({ finding: normalizeFinding(finding), analyzerId: result.analyzer.id }); }
       catch (cause) {
         adapterDiagnostics.push({ code: 'ANALYZER_FINDING_INVALID', message: cause.message, findingId: finding?.id });
       }
     }
     adapterDiagnostics.sort(compareDiagnostics);
+    retainedFactIdsByAnalyzer.set(result.analyzer.id, adapterFactIds);
     external.push({ ...result.analyzer, diagnostics: adapterDiagnostics });
   }
 
+  if (adapterDefinitions.length > 0) {
+    const inventoryAfterAdapters = await collectInventoryImpl({ projectDir });
+    if (inventoryAfterAdapters.projectDigest !== inventory.projectDigest) return inputChangedResult(sourceArtifacts);
+  }
+
+  const finalFacts = normalizeFacts(mergedFacts).facts;
+  const retainedFactIds = new Set(finalFacts.map((fact) => fact.id));
+  const allAnalyzers = [builtinAnalyzer, ...external];
+  const analyzersById = new Map(allAnalyzers.map((analyzer) => [analyzer.id, analyzer]));
+  const retainedFindings = [];
+  for (const { finding, analyzerId } of mergedFindings) {
+    const analyzerFactIds = retainedFactIdsByAnalyzer.get(analyzerId) ?? new Set();
+    if (finding.factIds.every((factId) => retainedFactIds.has(factId) && analyzerFactIds.has(factId))) {
+      retainedFindings.push(finding);
+    } else {
+      const analyzer = analyzersById.get(analyzerId);
+      analyzer?.diagnostics.push({
+        code: 'ANALYZER_FINDING_DANGLING_FACT',
+        message: `Finding references an omitted fact: ${finding.id}`,
+        findingId: finding.id
+      });
+    }
+  }
+  for (const analyzer of allAnalyzers) {
+    analyzer.diagnostics.sort(compareDiagnostics);
+    if (analyzer.status === 'complete' && analyzer.diagnostics.length > 0) analyzer.status = 'partial';
+  }
+
   return {
-    facts: normalizeFacts(mergedFacts).facts,
-    findings: normalizeFindings(mergedFindings),
-    analyzers: [builtinAnalyzer, ...external].sort((left, right) => compareText(left.id, right.id))
+    facts: finalFacts,
+    findings: normalizeFindings(retainedFindings),
+    analyzers: allAnalyzers.sort((left, right) => compareText(left.id, right.id))
   };
 }
 

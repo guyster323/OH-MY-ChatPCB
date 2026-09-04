@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { PassThrough } from 'node:stream';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -86,6 +88,33 @@ test('project-copy adapter receives a disposable project copy', async () => {
   }
 });
 
+test('project-copy rejects symlinked source artifacts before an adapter can mutate them', async () => {
+  const context = await makeContext();
+  const outside = path.join(context.projectDir, '..', `chatpcb-external-outside-${Date.now()}.kicad_sch`);
+  const adapter = await script(`
+    import { writeFile } from 'node:fs/promises';
+    import path from 'node:path';
+    await writeFile(path.join(process.argv[2], 'demo.kicad_sch'), 'adapter mutation');
+    console.log(JSON.stringify({ schemaVersion: 1, facts: [] }));
+  `);
+  try {
+    await writeFile(outside, 'protected source', 'utf8');
+    await rm(path.join(context.projectDir, 'demo.kicad_sch'));
+    await symlink(outside, path.join(context.projectDir, 'demo.kicad_sch'), 'file');
+    const result = await runConfiguredAnalyzer({
+      definition: validDefinition({ input: 'project-copy', args: [adapter.scriptPath, '{projectDir}'] }),
+      ...context
+    });
+    assert.equal(result.analyzer.status, 'failed');
+    assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_UNSAFE_INPUT');
+    assert.equal(await readFile(outside, 'utf8'), 'protected source');
+  } finally {
+    await rm(context.projectDir, { force: true, recursive: true });
+    await rm(outside, { force: true });
+    await rm(adapter.directory, { force: true, recursive: true });
+  }
+});
+
 test('json adapter receives only relative source paths and namespaces normalized output', async () => {
   const context = await makeContext();
   const adapter = await script(`
@@ -131,6 +160,32 @@ test('timeout reports a typed diagnostic and redacts stderr secrets', async () =
   }
 });
 
+test('timeout waits for a TERM-ignoring adapter to be killed before returning', async () => {
+  const context = await makeContext();
+  try {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    const signals = [];
+    child.kill = (signal) => {
+      signals.push(signal);
+      if (signal === 'SIGKILL') setImmediate(() => child.emit('close', null));
+    };
+    const started = Date.now();
+    const result = await runConfiguredAnalyzer({
+      definition: validDefinition({ timeoutMs: 30 }),
+      ...context,
+      spawnImpl: () => child
+    });
+    assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_TIMEOUT');
+    assert.ok(Date.now() - started >= 80);
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  } finally {
+    await rm(context.projectDir, { force: true, recursive: true });
+  }
+});
+
 test('invalid adapter output returns no facts', async () => {
   const context = await makeContext();
   const adapter = await script(`console.log('not-json');`);
@@ -142,5 +197,32 @@ test('invalid adapter output returns no facts', async () => {
   } finally {
     await rm(context.projectDir, { force: true, recursive: true });
     await rm(adapter.directory, { force: true, recursive: true });
+  }
+});
+
+test('malformed nested facts fail the adapter instead of reporting completion', async () => {
+  const context = await makeContext();
+  const adapter = await script(`console.log(JSON.stringify({ schemaVersion: 1, facts: [{ id: 'bad', category: 42, sourceArtifact: 'demo.kicad_sch' }] }));`);
+  try {
+    const result = await runConfiguredAnalyzer({ definition: validDefinition({ args: [adapter.scriptPath] }), ...context });
+    assert.equal(result.analyzer.status, 'failed');
+    assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_INVALID_OUTPUT');
+  } finally {
+    await rm(context.projectDir, { force: true, recursive: true });
+    await rm(adapter.directory, { force: true, recursive: true });
+  }
+});
+
+test('an unavailable optional executable is skipped', async () => {
+  const context = await makeContext();
+  try {
+    const result = await runConfiguredAnalyzer({
+      definition: validDefinition({ command: path.join(context.projectDir, 'missing-adapter.exe') }),
+      ...context
+    });
+    assert.equal(result.analyzer.status, 'skipped');
+    assert.equal(result.analyzer.diagnostics[0].code, 'ANALYZER_ADAPTER_UNAVAILABLE');
+  } finally {
+    await rm(context.projectDir, { force: true, recursive: true });
   }
 });
