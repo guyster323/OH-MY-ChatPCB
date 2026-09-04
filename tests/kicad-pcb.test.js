@@ -10,6 +10,7 @@ const board = `(kicad_pcb
   (net 1 "GND")
   (net 2 "VCC")
   (footprint "Resistor_SMD:R_0603_1608Metric"
+    (layer "F.Cu")
     (at 10 20 90)
     (property "Reference" "R1")
     (uuid "footprint-uuid")
@@ -30,16 +31,18 @@ test('extracts deterministic board facts with local pad geometry', () => {
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(result.summary, {
-    formatVersion: '20240108', layers: ['F.Cu', 'B.Cu', 'Edge.Cuts'], outline: true,
+    formatVersion: '20240108', layers: ['F.Cu', 'B.Cu', 'Edge.Cuts'], outline: { minX: 0, minY: 0, maxX: 30, maxY: 40 },
     footprintCount: 1, padCount: 2, segmentCount: 1, viaCount: 1, zoneCount: 1, graphicCount: 1
   });
   assert.deepEqual(facts['builtin.board.net:1'].value, { id: 1, name: 'GND' });
   assert.deepEqual(facts['builtin.board.footprint:footprint-uuid'].value.position, { x: 10, y: 20 });
   assert.equal(facts['builtin.board.footprint:footprint-uuid'].value.rotation, 90);
+  assert.equal(facts['builtin.board.footprint:footprint-uuid'].value.layer, 'F.Cu');
+  assert.equal(facts['builtin.board.footprint:footprint-uuid'].value.padCount, 2);
   assert.deepEqual(facts['builtin.board.pad:footprint-uuid:1'].value, {
     footprintId: 'footprint-uuid', number: '1', type: 'smd', shape: 'rect',
     position: { x: -1, y: 0 }, rotation: 0, footprintPosition: { x: 10, y: 20 }, footprintRotation: 90,
-    size: { x: 1, y: 1 }, layers: ['F.Cu', 'F.Mask', 'F.Paste'], netId: 1, netName: 'GND'
+    size: { x: 1, y: 1 }, drill: null, layers: ['F.Cu', 'F.Mask', 'F.Paste'], netId: 1, netName: 'GND'
   });
   assert.equal(facts['builtin.board.pad:footprint-uuid:2'].value.netId, null);
   assert.equal(facts['builtin.board.pad:footprint-uuid:2'].value.netName, null);
@@ -59,17 +62,30 @@ test('reports malformed boards without partial facts', () => {
   assert.match(result.diagnostics[0].message, /segment end requires coordinates/);
   assert.equal(result.diagnostics[0].sourceArtifact, sourceArtifact);
   assert.deepEqual(result.summary, {
-    formatVersion: undefined, layers: [], outline: false,
+    formatVersion: undefined, layers: [], outline: null,
     footprintCount: 0, padCount: 0, segmentCount: 0, viaCount: 0, zoneCount: 0, graphicCount: 0
   });
+});
+
+test('extracts through-hole drill and fails closed for malformed pad structure', () => {
+  const valid = `(kicad_pcb (version 1) (layers (0 "F.Cu" signal))
+    (footprint "Connector" (layer "F.Cu") (at 0 0) (property "Reference" "J1")
+      (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))`;
+  const result = analyzePcb({ source: valid, sourceArtifact });
+  assert.equal(factsById(result)['builtin.board.pad:J1:1'].value.drill, 1);
+
+  const malformed = analyzePcb({ source: `(kicad_pcb (version 1) (footprint "X" (at 0 0) (pad "1" smd rect (at 0 0) (size 1 1))))`, sourceArtifact });
+  assert.deepEqual(malformed.facts, []);
+  assert.equal(malformed.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
+  assert.match(malformed.diagnostics[0].message, /pad requires layers/);
 });
 
 test('flags undeclared pad nets and conservatively identifies unrouted nets', () => {
   const source = `(kicad_pcb (version 1) (layers (0 "F.Cu" signal))
     (net 1 "GND") (net 2 "VCC")
     (footprint "X" (at 0 0) (property "Reference" "J1")
-      (pad "1" thru_hole circle (at 0 0) (size 1 1) (layers "*.Cu") (net 1 "GND"))
-      (pad "2" thru_hole circle (at 2 0) (size 1 1) (layers "*.Cu") (net 9 "MISSING")))
+      (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.5) (layers "*.Cu") (net 1 "GND"))
+      (pad "2" thru_hole circle (at 2 0) (size 1 1) (drill 0.5) (layers "*.Cu") (net 9 "MISSING")))
   )`;
   const result = analyzePcb({ source, sourceArtifact });
   const facts = factsById(result);

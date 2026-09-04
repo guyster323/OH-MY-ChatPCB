@@ -23,7 +23,7 @@ function emptySummary() {
   return {
     formatVersion: undefined,
     layers: [],
-    outline: false,
+    outline: null,
     footprintCount: 0,
     padCount: 0,
     segmentCount: 0,
@@ -54,6 +54,25 @@ function properties(node) {
   return Object.fromEntries(children(node, 'property').map((property) => [property[1], property[2]]));
 }
 
+function graphicPoints(graphic) {
+  if (graphic[0] === 'gr_rect' || graphic[0] === 'gr_line') return [point(child(graphic, 'start'), `${graphic[0]} start`), point(child(graphic, 'end'), `${graphic[0]} end`)];
+  if (graphic[0] === 'gr_poly') {
+    const points = children(child(graphic, 'pts') ?? [], 'xy').map((node) => point(node, 'gr_poly point'));
+    if (points.length < 2) throw new Error('gr_poly requires at least two points');
+    return points;
+  }
+  return [];
+}
+
+function outlineBounds(graphics) {
+  const points = graphics.filter((graphic) => child(graphic, 'layer')?.[1] === 'Edge.Cuts').flatMap(graphicPoints);
+  if (points.length === 0) return null;
+  return {
+    minX: Math.min(...points.map((entry) => entry.x)), minY: Math.min(...points.map((entry) => entry.y)),
+    maxX: Math.max(...points.map((entry) => entry.x)), maxY: Math.max(...points.map((entry) => entry.y))
+  };
+}
+
 function boardError(root) {
   if (!Array.isArray(root) || root[0] !== 'kicad_pcb') return 'expected kicad_pcb root';
   for (const layer of children(root, 'layers')) {
@@ -67,9 +86,16 @@ function boardError(root) {
       position(footprint, 'footprint');
       for (const pad of children(footprint, 'pad')) {
         if (typeof pad[1] !== 'string') return 'pad requires a number';
+        if (typeof pad[2] !== 'string' || typeof pad[3] !== 'string') return 'pad requires a type and shape';
         position(pad, 'pad');
         const size = child(pad, 'size');
         if (!size || !numeric(size[1]) || !numeric(size[2])) return 'pad requires a valid size';
+        const layers = child(pad, 'layers');
+        if (!layers || layers.length < 2 || layers.slice(1).some((layer) => typeof layer !== 'string')) return 'pad requires layers';
+        if (pad[2] === 'thru_hole' || pad[2] === 'np_thru_hole') {
+          const drill = child(pad, 'drill');
+          if (!drill || !numeric(drill[1])) return 'through-hole pad requires a valid drill';
+        }
         const net = child(pad, 'net');
         if (net && (!numeric(net[1]) || typeof net[2] !== 'string')) return 'pad has invalid net';
       }
@@ -90,6 +116,7 @@ function boardError(root) {
       const net = child(via, 'net');
       if (!size || !numeric(size[1]) || !drill || !numeric(drill[1]) || !layers || layers.slice(1).some((item) => typeof item !== 'string') || !net || !numeric(net[1])) return 'via has invalid size, drill, layers, or net';
     }
+    for (const graphic of graphicNodes(root)) graphicPoints(graphic);
   } catch (error) {
     return error.message;
   }
@@ -122,7 +149,7 @@ export function analyzePcb({ source, sourceArtifact } = {}) {
   const pads = footprints.flatMap((footprint) => children(footprint, 'pad'));
   const summary = {
     formatVersion: child(root, 'version')?.[1], layers,
-    outline: graphics.some((graphic) => child(graphic, 'layer')?.[1] === 'Edge.Cuts'),
+    outline: outlineBounds(graphics),
     footprintCount: footprints.length, padCount: pads.length, segmentCount: segments.length,
     viaCount: vias.length, zoneCount: zones.length, graphicCount: graphics.length
   };
@@ -140,7 +167,7 @@ export function analyzePcb({ source, sourceArtifact } = {}) {
     const footprintFactId = `builtin.board.footprint:${footprintId}`;
     facts.push(createFact({
       id: footprintFactId, category: 'board.footprint',
-      value: { id: footprintId, reference: values.Reference, value: values.Value, library: footprint[1], position: { x: footprintPosition.x, y: footprintPosition.y }, rotation: footprintPosition.rotation },
+      value: { id: footprintId, reference: values.Reference, value: values.Value, library: footprint[1], layer: child(footprint, 'layer')?.[1], padCount: children(footprint, 'pad').length, position: { x: footprintPosition.x, y: footprintPosition.y }, rotation: footprintPosition.rotation },
       sourceArtifact, extractor: EXTRACTOR, confidence: 'deterministic'
     }));
     for (const pad of children(footprint, 'pad')) {
@@ -153,7 +180,7 @@ export function analyzePcb({ source, sourceArtifact } = {}) {
         value: {
           footprintId, number: pad[1], type: pad[2], shape: pad[3], position: { x: padPosition.x, y: padPosition.y }, rotation: padPosition.rotation,
           footprintPosition: { x: footprintPosition.x, y: footprintPosition.y }, footprintRotation: footprintPosition.rotation,
-          size: { x: asNumber(size[1]), y: asNumber(size[2]) }, layers: (child(pad, 'layers')?.slice(1) ?? []).slice().sort(), netId, netName: netId === null ? null : (netNames.get(netId) ?? net[2] ?? null)
+          size: { x: asNumber(size[1]), y: asNumber(size[2]) }, drill: (pad[2] === 'thru_hole' || pad[2] === 'np_thru_hole') ? asNumber(child(pad, 'drill')[1]) : null, layers: (child(pad, 'layers')?.slice(1) ?? []).slice().sort(), netId, netName: netId === null ? null : (netNames.get(netId) ?? net[2] ?? null)
         }, sourceArtifact, extractor: EXTRACTOR, confidence: 'deterministic'
       });
       facts.push(padFact);
