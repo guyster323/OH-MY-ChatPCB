@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { collectArtifactInventory } from '../evidence/artifact-inventory.js';
+import { analyzeProject } from '../analyzer/project-analyzer.js';
 import { evidenceFreshness, normalizeEvidenceManifest } from '../evidence/evidence-manifest.js';
 import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertSafeProjectDir, readChatPcbManifest } from './project-workspace.js';
@@ -14,21 +15,29 @@ export async function inspectProject(options = {}) {
   const inventory = await collectArtifactInventory({ projectDir });
   const rawManifest = await readChatPcbManifest(projectDir);
   const manifest = rawManifest ? normalizeManifest(rawManifest) : null;
-  const [toolchain, { erc, drc }] = await Promise.all([
+  const [toolchain, { erc, drc }, analysis] = await Promise.all([
     inspectToolchain({ projectDir, options }),
-    validateInspectionCopy({ projectDir, options })
+    validateInspectionCopy({ projectDir, options }),
+    analyzeProject({ projectDir, inventory, analyzerAdapters: options.analyzerAdapters })
   ]);
+  const finalInventory = await collectArtifactInventory({ projectDir });
+  const boundAnalysis = finalInventory.projectDigest === inventory.projectDigest ? analysis : {
+    facts: [], findings: [], analyzers: analysis.analyzers.map((analyzer) => ({
+      ...analyzer, status: 'failed', diagnostics: [{ code: 'ANALYZER_INPUT_CHANGED', message: 'Project artifact digest changed during inspection' }]
+    }))
+  };
 
   return {
     ok: true,
     inspectedAt: (options.now ?? (() => new Date().toISOString()))(),
-    inspection: { ...inventory, artifactCount: inventory.artifacts.length, toolchain },
+    inspection: { ...inventory, artifactCount: inventory.artifacts.length, toolchain, facts: boundAnalysis.facts, analyzers: boundAnalysis.analyzers },
     manifest: {
       schemaVersion: manifest?.schemaVersion ?? null,
       freshness: evidenceFreshness({ manifest, projectDigest: inventory.projectDigest })
     },
     validation: { erc, drc },
-    validationClean: erc.ok === true && drc.ok === true
+    validationClean: erc.ok === true && drc.ok === true,
+    findings: boundAnalysis.findings
   };
 }
 

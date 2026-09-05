@@ -38,17 +38,25 @@ test('daemon rejects unknown tool calls with a typed failure', async () => {
   assert.equal(result.error.code, 'UNKNOWN_TOOL');
 });
 
-test('daemon dispatches project inspection through its injectable implementation', async () => {
+test('daemon forwards project inspection adapter definitions to its injectable implementation', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-inspect-'));
+  const analyzerAdapters = [{ id: 'fixture-analyzer', command: 'fixture-analyzer', version: '1.0.0', sha256: 'a'.repeat(64) }];
+  let received;
 
   try {
     const result = await dispatchToolCall(
-      { name: 'project.inspect', args: { projectDir: root } },
-      { inspectProjectImpl: async () => ({ ok: true, inspection: { projectDigest: 'abc' } }) }
+      { name: 'project.inspect', args: { projectDir: root, analyzerAdapters } },
+      {
+        inspectProjectImpl: async (options) => {
+          received = options;
+          return { ok: true, inspection: { projectDigest: 'abc' } };
+        }
+      }
     );
 
     assert.equal(result.ok, true);
     assert.equal(result.result.inspection.projectDigest, 'abc');
+    assert.deepEqual(received, { projectDir: root, kicadCliPath: undefined, analyzerAdapters });
   } finally {
     await rm(root, { force: true, recursive: true });
   }

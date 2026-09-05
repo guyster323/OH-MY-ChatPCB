@@ -56,7 +56,11 @@ export async function dispatchToolCall(
       );
 
     case 'project.inspect':
-      return ok(await inspectProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
+      return ok(await inspectProjectImpl({
+        projectDir: call.args?.projectDir,
+        kicadCliPath: call.args?.kicadCliPath,
+        analyzerAdapters: call.args?.analyzerAdapters
+      }));
 
     case 'validate.erc':
       return ok(await validateProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
@@ -214,7 +218,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     if (!allowGenerate && event.payload.name === 'schematic.generate') {
       throw new Error('schematic.generate is not allowed for an existing project.request; request a schematic.patch preview instead.');
     }
-    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir);
+    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, args.analyzerAdapters);
     toolResults.push({
       id: event.payload.id,
       ...(await dispatchToolCall(toolCall, {
@@ -378,10 +382,11 @@ function cancelProvider(args = {}, providerControllers) {
   };
 }
 
-function withProjectContext(payload, projectDir, forceProjectDir = false) {
+function withProjectContext(payload, projectDir, forceProjectDir = false, analyzerAdapters) {
   const args = {
     ...(payload.args ?? {})
   };
+  delete args.analyzerAdapters;
 
   let name = payload.name;
   if (name === 'schematic.patch') {
@@ -396,6 +401,9 @@ function withProjectContext(payload, projectDir, forceProjectDir = false) {
 
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
+  }
+  if (name === 'project.inspect' && analyzerAdapters !== undefined) {
+    args.analyzerAdapters = analyzerAdapters;
   }
 
   return {
