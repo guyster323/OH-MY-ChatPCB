@@ -25,6 +25,8 @@ Status: complete for structural inspection only.
 
 This increment does not establish electrical correctness, manufacturability, or release readiness. A pinned configuration-file UX remains future work; no adapter is selected or installed implicitly.
 
+Remaining analyzer milestones: pin-to-net connectivity and power-tree facts, a KiCad 9/10 compatibility corpus, and an enforced sandbox before any external integration is restored. KiCad validation/toolchain executable selection and symlink-copy isolation need separate hardening. Current evidence covers structural fixtures and a live KiCad 10.0.3 sample, not general version compatibility.
+
 ## Phase 1: Runnable Scaffold
 
 Status: complete.

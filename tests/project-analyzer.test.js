@@ -19,6 +19,12 @@ const board = `(kicad_pcb (version 1) (layers (0 "F.Cu" signal))
     (property "Reference" "U1") (uuid "board-1")
     (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu") (net 1 "GND"))))`;
 
+const duplicateFindingSchematic = `(kicad_sch (version 1)
+  (symbol (lib_id "Demo:Part") (at 10 20 0) (uuid duplicate-component)
+    (property "Value" "Part"))
+  (symbol (lib_id "Demo:Part") (at 30 40 0) (uuid duplicate-component)
+    (property "Value" "Part")))`;
+
 const scopedId = (id, artifactPath) => `${id}@${Buffer.from(artifactPath, 'utf8').toString('base64url')}`;
 const executableHash = createHash('sha256').update(await readFile(process.execPath)).digest('hex');
 
@@ -183,7 +189,7 @@ test('analyzeProject keeps built-in facts when external execution is unavailable
       projectDir: root,
       inventory,
       analyzerAdapters: [{
-        id: 'external.collision', namespace: 'builtin', version: '1', command: process.execPath,
+        id: 'external.collision', namespace: 'external.collision', version: '1', command: process.execPath,
         args: [adapterPath], payloadFiles: [{ path: adapterPath, sha256: createHash('sha256').update(await readFile(adapterPath)).digest('hex') }], sha256: executableHash, timeoutMs: 5_000, input: 'json'
       }]
     });
@@ -240,6 +246,85 @@ test('analyzeProject rejects duplicate adapter IDs and namespaces without spawni
     assert.equal(result.facts.length > 0, true);
     assert.equal(result.analyzers.filter((analyzer) => analyzer.id === 'duplicate').every((analyzer) => analyzer.status === 'failed'), true);
     assert.equal(result.analyzers.filter((analyzer) => analyzer.id === 'duplicate').every((analyzer) => analyzer.diagnostics[0].code === 'ANALYZER_ADAPTER_INVALID_DEFINITION'), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject canonically orders tied adapter statuses independent of definition order', async () => {
+  const root = await makeProject();
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const forward = await analyzeProject({
+      projectDir: root,
+      inventory,
+      analyzerAdapters: [
+        { id: 'same-id', namespace: 'zeta' },
+        { id: 'same-id', namespace: 'alpha' }
+      ]
+    });
+    const reversed = await analyzeProject({
+      projectDir: root,
+      inventory,
+      analyzerAdapters: [
+        { id: 'same-id', namespace: 'alpha' },
+        { id: 'same-id', namespace: 'zeta' }
+      ]
+    });
+
+    assert.deepEqual(forward.analyzers, reversed.analyzers);
+    assert.deepEqual(forward.analyzers.slice(-2).map((analyzer) => analyzer.namespace), ['alpha', 'zeta']);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject rejects reserved built-in adapter identity and namespace without replacing built-in bookkeeping', async () => {
+  const root = await makeProject();
+  try {
+    await writeFile(path.join(root, 'demo.kicad_sch'), schematic.replace(' (property "Footprint" "Package:Demo")', ''), 'utf8');
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const baseline = await analyzeProject({ projectDir: root, inventory });
+    const result = await analyzeProject({
+      projectDir: root,
+      inventory,
+      analyzerAdapters: [
+        { id: 'builtin.kicad', namespace: 'external.identity', version: '2' },
+        { id: 'external.namespace', namespace: 'builtin', version: '3' }
+      ]
+    });
+
+    const builtin = result.analyzers.find((analyzer) => analyzer.id === 'builtin.kicad' && analyzer.namespace === 'builtin');
+    assert.deepEqual(builtin, {
+      id: 'builtin.kicad', namespace: 'builtin', status: 'complete', version: '1',
+      sourceArtifacts: ['demo.kicad_pcb', 'demo.kicad_sch'], diagnostics: []
+    });
+    assert.equal(baseline.findings.length > 0, true);
+    assert.deepEqual(result.facts, baseline.facts);
+    assert.deepEqual(result.findings, baseline.findings);
+    const rejected = result.analyzers.filter((analyzer) => analyzer.id === 'builtin.kicad' || analyzer.namespace === 'builtin')
+      .filter((analyzer) => analyzer !== builtin);
+    assert.equal(rejected.length, 2);
+    assert.equal(rejected.every((analyzer) => analyzer.status === 'failed'), true);
+    assert.equal(rejected.every((analyzer) => analyzer.diagnostics.some((diagnostic) => diagnostic.code === 'ANALYZER_ADAPTER_INVALID_DEFINITION')), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('analyzeProject reports duplicate finding IDs and keeps the retained built-in fact reference valid', async () => {
+  const root = await makeProject({ withBoard: false, withSchematic: false });
+  await writeFile(path.join(root, 'duplicate.kicad_sch'), duplicateFindingSchematic, 'utf8');
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const result = await analyzeProject({ projectDir: root, inventory });
+    const finding = result.findings.find((item) => item.id === 'builtin.schematic.component-metadata:builtin.schematic.component:duplicate-component');
+
+    assert.equal(result.findings.filter((item) => item.id === finding?.id).length, 1);
+    assert.deepEqual(finding?.factIds, ['builtin.schematic.component:duplicate-component']);
+    assert.equal(result.facts.some((fact) => fact.id === 'builtin.schematic.component:duplicate-component'), true);
+    assert.equal(result.analyzers[0].diagnostics.some((diagnostic) => diagnostic.code === 'ANALYZER_FINDING_COLLISION'), true);
+    assert.equal(result.analyzers[0].status, 'partial');
   } finally {
     await rm(root, { force: true, recursive: true });
   }

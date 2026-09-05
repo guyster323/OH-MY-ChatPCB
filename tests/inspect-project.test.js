@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
+import { analyzeProject } from '../src/analyzer/project-analyzer.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
 
 async function makeProject() {
@@ -21,6 +22,12 @@ async function snapshot(root) {
 
 const cleanErc = async () => ({ ok: true, erc: { errorCount: 0, warningCount: 0 } });
 const cleanDrc = async () => ({ ok: true, drc: { violationCount: 0, unconnectedCount: 0 } });
+
+function schematicWithoutFootprint() {
+  return `(kicad_sch (version 1)
+  (symbol (lib_id "Demo:Part") (at 10 20 0) (uuid schematic-without-footprint)
+    (property "Reference" "U1") (property "Value" "Part")))`;
+}
 
 test('inspectProject returns stable artifact evidence and separate validation results', async () => {
   const root = await makeProject();
@@ -95,6 +102,83 @@ test('inspectProject isolates validator mutations from saved project files and e
     assert.deepEqual(await snapshot(root), before);
     assert.deepEqual(await collectArtifactInventory({ projectDir: root }), beforeInventory);
   } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('inspectProject invokes its injected analyzer implementation for completion coordination', async () => {
+  const root = await makeProject();
+  let calls = 0;
+
+  try {
+    const result = await inspectProject({
+      projectDir: root,
+      validateProjectImpl: cleanErc,
+      validateBoardImpl: cleanDrc,
+      analyzeProjectImpl: async ({ projectDir, inventory, analyzerAdapters }) => {
+        calls += 1;
+        assert.equal(projectDir, root);
+        assert.equal(typeof inventory.projectDigest, 'string');
+        assert.equal(analyzerAdapters, undefined);
+        return {
+          facts: [],
+          findings: [],
+          analyzers: [{ id: 'fixture.analyzer', namespace: 'fixture', version: '1', status: 'complete', sourceArtifacts: [], diagnostics: [] }]
+        };
+      }
+    });
+
+    assert.equal(calls, 1);
+    assert.deepEqual(result.inspection.analyzers, [{
+      id: 'fixture.analyzer', namespace: 'fixture', version: '1', status: 'complete', sourceArtifacts: [], diagnostics: []
+    }]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('inspectProject discards facts and findings when the project mutates while validation is pending', async () => {
+  const root = await makeProject();
+  await writeFile(path.join(root, 'demo.kicad_sch'), schematicWithoutFootprint(), 'utf8');
+  let releaseValidation;
+  let validationStarted;
+  let validationReleased = false;
+  const validationBarrier = new Promise((resolve) => { releaseValidation = resolve; });
+  const validationStartedBarrier = new Promise((resolve) => { validationStarted = resolve; });
+  let analysisFinished;
+  const analysisFinishedBarrier = new Promise((resolve) => { analysisFinished = resolve; });
+
+  try {
+    const inspectionPromise = inspectProject({
+      projectDir: root,
+      validateProjectImpl: async () => {
+        validationStarted();
+        await validationBarrier;
+        validationReleased = true;
+        return { ok: true, erc: { errorCount: 0, warningCount: 0 } };
+      },
+      validateBoardImpl: cleanDrc,
+      analyzeProjectImpl: async (options) => {
+        const analysis = await analyzeProject(options);
+        assert.equal(analysis.facts.length > 0, true);
+        assert.equal(analysis.findings.length > 0, true);
+        assert.equal(validationReleased, false);
+        analysisFinished();
+        return analysis;
+      }
+    });
+    await Promise.all([validationStartedBarrier, analysisFinishedBarrier]);
+    await writeFile(path.join(root, 'demo.kicad_sch'), `${await readFile(path.join(root, 'demo.kicad_sch'), 'utf8')}\n`, 'utf8');
+    releaseValidation();
+
+    const result = await inspectionPromise;
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.inspection.facts, []);
+    assert.deepEqual(result.findings, []);
+    assert.equal(result.inspection.analyzers.every((analyzer) => analyzer.status === 'failed'), true);
+    assert.equal(result.inspection.analyzers.every((analyzer) => analyzer.diagnostics.some((diagnostic) => diagnostic.code === 'ANALYZER_INPUT_CHANGED')), true);
+  } finally {
+    releaseValidation?.();
     await rm(root, { force: true, recursive: true });
   }
 });

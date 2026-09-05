@@ -15,10 +15,11 @@ export async function inspectProject(options = {}) {
   const inventory = await collectArtifactInventory({ projectDir });
   const rawManifest = await readChatPcbManifest(projectDir);
   const manifest = rawManifest ? normalizeManifest(rawManifest) : null;
+  const analyzeProjectImpl = options.analyzeProjectImpl ?? analyzeProject;
   const [toolchain, { erc, drc }, analysis] = await Promise.all([
     inspectToolchain({ projectDir, options }),
     validateInspectionCopy({ projectDir, options }),
-    analyzeProject({ projectDir, inventory, analyzerAdapters: options.analyzerAdapters })
+    analyzeProjectImpl({ projectDir, inventory, analyzerAdapters: options.analyzerAdapters })
   ]);
   const finalInventory = await collectArtifactInventory({ projectDir });
   const boundAnalysis = finalInventory.projectDigest === inventory.projectDigest ? analysis : {
