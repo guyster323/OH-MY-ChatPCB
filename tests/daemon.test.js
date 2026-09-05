@@ -62,6 +62,96 @@ test('daemon forwards project inspection adapter definitions to its injectable i
   }
 });
 
+test('daemon strips nested provider analyzer definitions unless trusted outer definitions are supplied', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-analyzer-boundary-'));
+  const nested = [{ id: 'nested-untrusted', namespace: 'external.nested', version: '1' }];
+  const trusted = [{ id: 'trusted-outer', namespace: 'external.trusted', version: '1' }];
+  const received = [];
+
+  try {
+    const options = {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+      runProviderProcessImpl: async () => ({
+        exitCode: 0,
+        stderr: '',
+        events: [createEnvelope('tool.call', {
+          id: 'call_nested_inspect',
+          name: 'project.inspect',
+          args: { analyzerAdapters: nested }
+        })]
+      }),
+      inspectProjectImpl: async (args) => {
+        received.push(args);
+        return { ok: true, inspection: { projectDigest: 'fixture' } };
+      }
+    };
+
+    const withoutOuter = await dispatchToolCall({
+      id: 'call_without_outer_analyzers',
+      name: 'provider.invoke',
+      args: { provider: 'codex', projectDir: root, prompt: 'Inspect this project.' }
+    }, options);
+    const withOuter = await dispatchToolCall({
+      id: 'call_with_outer_analyzers',
+      name: 'provider.invoke',
+      args: { provider: 'codex', projectDir: root, prompt: 'Inspect this project.', analyzerAdapters: trusted }
+    }, options);
+
+    assert.equal(withoutOuter.ok, true);
+    assert.equal(withOuter.ok, true);
+    assert.equal(received.length, 2);
+    assert.equal(received[0].analyzerAdapters, undefined);
+    assert.deepEqual(received[1].analyzerAdapters, trusted);
+    assert.notDeepEqual(received[1].analyzerAdapters, nested);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon strips nested analyzer definitions from provider validation aliases and applies only trusted outer definitions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-validation-boundary-'));
+  const nested = [{ id: 'nested-validation', namespace: 'external.nested', version: '1' }];
+  const trusted = [{ id: 'trusted-validation', namespace: 'external.trusted', version: '1' }];
+  const received = [];
+
+  try {
+    const options = {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+      runProviderProcessImpl: async () => ({
+        exitCode: 0,
+        stderr: '',
+        events: [
+          createEnvelope('tool.call', { id: 'call_nested_erc', name: 'validate.erc', args: { analyzerAdapters: nested } }),
+          createEnvelope('tool.call', { id: 'call_nested_drc', name: 'validate.drc', args: { analyzerAdapters: nested } })
+        ]
+      }),
+      inspectProjectImpl: async (args) => {
+        received.push(args);
+        return { ok: true, inspection: { projectDigest: 'fixture' } };
+      }
+    };
+    const withoutOuter = await dispatchToolCall({
+      id: 'call_provider_validation_aliases_without_outer',
+      name: 'provider.invoke',
+      args: { provider: 'codex', projectDir: root, prompt: 'Validate this project.' }
+    }, options);
+    const withOuter = await dispatchToolCall({
+      id: 'call_provider_validation_aliases_with_outer',
+      name: 'provider.invoke',
+      args: { provider: 'codex', projectDir: root, prompt: 'Validate this project.', analyzerAdapters: trusted }
+    }, options);
+
+    assert.equal(withoutOuter.ok, true);
+    assert.equal(withOuter.ok, true);
+    assert.equal(received.length, 4);
+    assert.deepEqual(received.map((args) => args.analyzerAdapters), [undefined, undefined, trusted, trusted]);
+    assert.equal(withoutOuter.result.toolResults.every((toolResult) => toolResult.ok), true);
+    assert.equal(withOuter.result.toolResults.every((toolResult) => toolResult.ok), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon dispatches board-level DRC validation', async () => {
   const calls = [];
   const result = await dispatchToolCall(

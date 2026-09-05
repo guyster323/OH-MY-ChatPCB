@@ -13,7 +13,50 @@ const BUILTIN_ANALYZER = {
   version: '1'
 };
 
-const compareText = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+function safeText(value, fallback = '') {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return fallback;
+  try { return String(value); }
+  catch { return fallback; }
+}
+
+const compareText = (left, right) => {
+  const leftText = safeText(left);
+  const rightText = safeText(right);
+  return leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
+};
+
+function compareCanonical(left, right) {
+  let leftText;
+  let rightText;
+  try { leftText = canonicalJson(left); } catch { leftText = undefined; }
+  try { rightText = canonicalJson(right); } catch { rightText = undefined; }
+  return compareText(leftText ?? '', rightText ?? '');
+}
+
+function adapterText(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value : 'unknown';
+}
+
+function isReservedBuiltinAdapter(definition) {
+  return definition?.id === BUILTIN_ANALYZER.id || definition?.namespace === BUILTIN_ANALYZER.namespace;
+}
+
+function compareAdapterDefinitions(left, right) {
+  return compareText(adapterText(left?.id), adapterText(right?.id))
+    || compareText(adapterText(left?.namespace), adapterText(right?.namespace))
+    || compareText(adapterText(left?.version), adapterText(right?.version))
+    || compareCanonical(left, right);
+}
+
+function compareAnalyzers(left, right) {
+  return compareText(left?.id, right?.id)
+    || compareText(left?.namespace, right?.namespace)
+    || compareText(left?.version, right?.version)
+    || compareText(left?.status, right?.status)
+    || compareCanonical(left?.sourceArtifacts ?? [], right?.sourceArtifacts ?? [])
+    || compareCanonical(left?.diagnostics ?? [], right?.diagnostics ?? []);
+}
 
 function compareDiagnostics(left, right) {
   return compareText(left.code ?? '', right.code ?? '')
@@ -162,23 +205,37 @@ export async function analyzeProject({
   const external = [];
   const mergedFacts = [...normalized.facts];
   const factIds = new Set(mergedFacts.map((fact) => fact.id));
-  const retainedFactIdsByAnalyzer = new Map([[BUILTIN_ANALYZER.id, new Set(factIds)]]);
-  const mergedFindings = findings.map((finding) => ({ finding, analyzerId: BUILTIN_ANALYZER.id }));
-  const requestedAdapters = Array.isArray(analyzerAdapters) ? analyzerAdapters.slice().sort((left, right) => compareText(left?.id ?? '', right?.id ?? '')) : [];
-  const duplicateIds = new Set(requestedAdapters.filter((definition, index, all) => all.filter((item) => item?.id === definition?.id).length > 1).map((definition) => definition?.id));
-  const duplicateNamespaces = new Set(requestedAdapters.filter((definition, index, all) => all.filter((item) => item?.namespace === definition?.namespace).length > 1).map((definition) => definition?.namespace));
-  const adapterDefinitions = requestedAdapters.filter((definition) => !duplicateIds.has(definition?.id) && !duplicateNamespaces.has(definition?.namespace));
-  for (const definition of requestedAdapters) {
-    if (adapterDefinitions.includes(definition)) continue;
+  const retainedFactIdsByAnalyzer = new Map([[builtinAnalyzer, new Set(factIds)]]);
+  const mergedFindings = findings.map((finding) => ({ finding, analyzer: builtinAnalyzer }));
+  const requestedAdapters = Array.isArray(analyzerAdapters) ? analyzerAdapters.slice().sort(compareAdapterDefinitions) : [];
+  const adapterIdentities = requestedAdapters.map((definition) => ({
+    definition,
+    id: adapterText(definition?.id),
+    namespace: adapterText(definition?.namespace)
+  }));
+  const duplicateIds = new Set(adapterIdentities.filter(({ id }) => adapterIdentities.filter((item) => item.id === id).length > 1).map(({ id }) => id));
+  const duplicateNamespaces = new Set(adapterIdentities.filter(({ namespace }) => adapterIdentities.filter((item) => item.namespace === namespace).length > 1).map(({ namespace }) => namespace));
+  const adapterDefinitions = [];
+  for (const identity of adapterIdentities) {
+    const { definition, id, namespace } = identity;
+    const duplicate = duplicateIds.has(id) || duplicateNamespaces.has(namespace);
+    if (!duplicate && !isReservedBuiltinAdapter(definition)) {
+      adapterDefinitions.push(definition);
+      continue;
+    }
+
+    const message = isReservedBuiltinAdapter(definition)
+      ? 'Adapter IDs and namespaces cannot use the reserved built-in identity or namespace'
+      : 'Adapter IDs and namespaces must be unique';
     external.push({
-      id: definition?.id ?? 'unknown', namespace: definition?.namespace ?? 'unknown', version: definition?.version ?? 'unknown',
+      id, namespace, version: adapterText(definition?.version),
       status: 'failed', sourceArtifacts,
-      diagnostics: [{ code: 'ANALYZER_ADAPTER_INVALID_DEFINITION', message: 'Adapter IDs and namespaces must be unique' }]
+      diagnostics: [{ code: 'ANALYZER_ADAPTER_INVALID_DEFINITION', message }]
     });
   }
   for (const definition of adapterDefinitions) {
     const result = await runConfiguredAnalyzer({ definition, projectDir, inventory, sourceFiles: contents });
-    const adapterDiagnostics = [...result.analyzer.diagnostics];
+    const adapterDiagnostics = [...(result.analyzer?.diagnostics ?? [])];
     const adapterFacts = normalizeFacts(result.facts);
     const adapterFactIds = new Set();
     adapterDiagnostics.push(...adapterFacts.diagnostics);
@@ -192,14 +249,18 @@ export async function analyzeProject({
       }
     }
     for (const finding of result.findings) {
-      try { mergedFindings.push({ finding: normalizeFinding(finding), analyzerId: result.analyzer.id }); }
+      try { mergedFindings.push({ finding: normalizeFinding(finding), analyzer: result.analyzer }); }
       catch (cause) {
         adapterDiagnostics.push({ code: 'ANALYZER_FINDING_INVALID', message: cause.message, findingId: finding?.id });
       }
     }
     adapterDiagnostics.sort(compareDiagnostics);
-    retainedFactIdsByAnalyzer.set(result.analyzer.id, adapterFactIds);
-    external.push({ ...result.analyzer, diagnostics: adapterDiagnostics });
+    const externalAnalyzer = { ...result.analyzer, diagnostics: adapterDiagnostics };
+    retainedFactIdsByAnalyzer.set(externalAnalyzer, adapterFactIds);
+    for (const mergedFinding of mergedFindings) {
+      if (mergedFinding.analyzer === result.analyzer) mergedFinding.analyzer = externalAnalyzer;
+    }
+    external.push(externalAnalyzer);
   }
 
   if (adapterDefinitions.length > 0) {
@@ -210,17 +271,41 @@ export async function analyzeProject({
   const finalFacts = normalizeFacts(mergedFacts).facts;
   const retainedFactIds = new Set(finalFacts.map((fact) => fact.id));
   const allAnalyzers = [builtinAnalyzer, ...external];
-  const analyzersById = new Map(allAnalyzers.map((analyzer) => [analyzer.id, analyzer]));
-  const retainedFindings = [];
-  for (const { finding, analyzerId } of mergedFindings) {
-    const analyzerFactIds = retainedFactIdsByAnalyzer.get(analyzerId) ?? new Set();
+  const eligibleFindings = [];
+  for (const { finding, analyzer } of mergedFindings) {
+    const analyzerFactIds = retainedFactIdsByAnalyzer.get(analyzer) ?? new Set();
     if (finding.factIds.every((factId) => retainedFactIds.has(factId) && analyzerFactIds.has(factId))) {
-      retainedFindings.push(finding);
+      eligibleFindings.push({ finding, analyzer });
     } else {
-      const analyzer = analyzersById.get(analyzerId);
       analyzer?.diagnostics.push({
         code: 'ANALYZER_FINDING_DANGLING_FACT',
         message: `Finding references an omitted fact: ${finding.id}`,
+        findingId: finding.id
+      });
+    }
+  }
+  const findingsById = new Map();
+  for (const entry of eligibleFindings) {
+    const entries = findingsById.get(entry.finding.id) ?? [];
+    entries.push(entry);
+    findingsById.set(entry.finding.id, entries);
+  }
+  const retainedFindings = [];
+  for (const entries of findingsById.values()) {
+    entries.sort((left, right) => {
+      const leftBuiltin = left.analyzer === builtinAnalyzer;
+      const rightBuiltin = right.analyzer === builtinAnalyzer;
+      return (leftBuiltin === rightBuiltin ? 0 : leftBuiltin ? -1 : 1)
+        || compareCanonical(left.finding, right.finding)
+        || compareText(left.analyzer?.id, right.analyzer?.id)
+        || compareText(left.analyzer?.namespace, right.analyzer?.namespace);
+    });
+    const [winner, ...collisions] = entries;
+    retainedFindings.push(winner.finding);
+    for (const { finding, analyzer } of collisions) {
+      analyzer?.diagnostics.push({
+        code: 'ANALYZER_FINDING_COLLISION',
+        message: `Duplicate finding ID: ${finding.id}`,
         findingId: finding.id
       });
     }
@@ -233,7 +318,7 @@ export async function analyzeProject({
   return {
     facts: finalFacts,
     findings: normalizeFindings(retainedFindings),
-    analyzers: allAnalyzers.sort((left, right) => compareText(left.id, right.id))
+    analyzers: allAnalyzers.sort(compareAnalyzers)
   };
 }
 

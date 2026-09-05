@@ -1,5 +1,17 @@
 # Deterministic KiCad Analyzer Adapter Design
 
+## Delivery status after PR #3
+
+This document records the original target design. The following delivery status supersedes claims below about available external execution and connectivity:
+
+- Implemented: structural schematic/PCB facts, artifact provenance, fact-linked structural findings, multi-file ID scoping, and inspection digest checks.
+- Disabled: all external analyzer execution, including JSON/project-copy modes and kicad-happy. Definitions return typed skips; no executable or payload is opened or launched. The original external launcher plan is not an instruction to restore it.
+- Deferred: schematic pin-to-net reconstruction, component endpoint connectivity, power-tree analysis, and a pinned kicad-happy integration.
+- Compatibility evidence: generated fixtures and a live KiCad 10.0.3 sample were exercised. A KiCad 9/10 compatibility corpus and comprehensive syntax support are not complete. Unsupported Edge.Cuts shapes currently produce diagnostics.
+- Follow-up: independently harden the KiCad validation/toolchain path against caller-selected executable paths and symlinked validation copies. Disabling external analyzers does not itself establish that separate boundary.
+
+Implementation of residual normalization and regression coverage is tracked in `../plans/2026-09-05-analyzer-followup.md`.
+
 ## Goal
 
 Extend the read-only `project.inspect` workflow with deterministic facts extracted from the saved KiCad schematic and PCB, while keeping optional external analyzers isolated, pinned, and fail-closed.

@@ -40,3 +40,26 @@ test('normalizeFacts sorts invalid diagnostics deterministically', () => {
   const reversed = normalizeFacts([invalidB, invalidA]);
   assert.deepEqual(forward.diagnostics, reversed.diagnostics);
 });
+
+test('normalizeFacts keeps malformed fact IDs safe and preserves valid string IDs regardless of input order', () => {
+  const malformedObjectId = {
+    id: { unsafe: true }, category: 'board.net', value: {}, sourceArtifact: 'board.kicad_pcb', extractor: 'fixture@1', confidence: 'deterministic'
+  };
+  const malformedSymbolId = {
+    id: Symbol('unsafe'), category: 'board.net', value: {}, sourceArtifact: 'board.kicad_pcb', extractor: 'fixture@1', confidence: 'deterministic'
+  };
+  const malformedUndefinedId = {
+    id: undefined, category: 'board.net', value: {}, sourceArtifact: 'board.kicad_pcb', extractor: 'fixture@1', confidence: 'deterministic'
+  };
+  const malformedWithValidId = {
+    id: 'fact:valid', category: 'board.net', value: {}, sourceArtifact: 'board.kicad_pcb', confidence: 'deterministic'
+  };
+
+  const forward = normalizeFacts([malformedObjectId, malformedSymbolId, malformedUndefinedId, malformedWithValidId]);
+  const reversed = normalizeFacts([malformedWithValidId, malformedUndefinedId, malformedSymbolId, malformedObjectId]);
+
+  assert.deepEqual(forward, reversed);
+  assert.equal(JSON.stringify(forward.diagnostics), JSON.stringify(reversed.diagnostics));
+  assert.deepEqual(forward.diagnostics.filter((diagnostic) => 'factId' in diagnostic).map((diagnostic) => diagnostic.factId), ['fact:valid']);
+  assert.equal(forward.diagnostics.every((diagnostic) => typeof diagnostic.factId === 'string' || !('factId' in diagnostic)), true);
+});

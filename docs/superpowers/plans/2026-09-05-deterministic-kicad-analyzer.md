@@ -1,5 +1,11 @@
 # Deterministic KiCad Analyzer Adapter Implementation Plan
 
+## Execution status
+
+This is the historical Phase 2 plan, not a new execution queue. PR #3 delivered structural built-in analysis. Task 5's external process launcher was subsequently removed by commit `529d61f`; external definitions return `ANALYZER_SANDBOX_UNAVAILABLE`. Do not execute Task 5 to restore it.
+
+Pin-net reconstruction, power analysis, the KiCad 9/10 compatibility corpus, and a sandboxed external integration remain deferred. The unchecked steps below describe the original approach and are not evidence of completed delivery. Continue with `2026-09-05-analyzer-followup.md` for residual contracts and regression coverage.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add deterministic schematic/PCB facts and a fail-closed optional external analyzer path to the read-only `project.inspect` workflow.
@@ -376,4 +382,3 @@ Expected: no whitespace errors, only intentional Phase 2 commits, and a clean fe
 git add docs/superpowers/plans/2026-09-05-deterministic-kicad-analyzer.md
 git commit -m "docs: record deterministic analyzer verification"
 ```
-

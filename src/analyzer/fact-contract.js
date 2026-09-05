@@ -11,6 +11,10 @@ function requiredString(value, name) {
   return value;
 }
 
+function diagnosticFactId(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item) ?? 'null').join(',')}]`;
   if (value && typeof value === 'object') {
@@ -35,7 +39,10 @@ export function normalizeFacts(facts) {
   for (const fact of facts) {
     try { valid.push(createFact(fact)); }
     catch (cause) {
-      diagnostics.push({ code: 'ANALYZER_FACT_INVALID', message: cause.message, factId: fact?.id });
+      const diagnostic = { code: 'ANALYZER_FACT_INVALID', message: cause.message };
+      const factId = diagnosticFactId(fact?.id);
+      if (factId !== undefined) diagnostic.factId = factId;
+      diagnostics.push(diagnostic);
     }
   }
   valid.sort((left, right) => compare(left.id, right.id) || compare(left.category, right.category) || compare(canonicalJson(left.value), canonicalJson(right.value)) || compare(left.sourceArtifact, right.sourceArtifact) || compare(left.extractor, right.extractor) || compare(left.confidence, right.confidence));
