@@ -21,7 +21,7 @@ Status: complete for structural inspection only.
 
 - Built-in saved-artifact facts and explicit confidence labels
 - Analyzer status/diagnostics in CLI and daemon inspection output
-- Pinned, checksum-verified programmatic adapters in disposable isolation with typed skips
+- External analyzer definitions return typed skips; execution awaits an enforced sandbox and complete payload pinning
 
 This increment does not establish electrical correctness, manufacturability, or release readiness. A pinned configuration-file UX remains future work; no adapter is selected or installed implicitly.
 

@@ -182,7 +182,7 @@ Schema v1 manifests remain readable and inspect as `legacy-unverified`; they con
 
 Fact and finding confidence is explicit: `deterministic` means it was read directly from the saved KiCad artifact, `heuristic` means it is an inferred structural signal, and `datasheet-backed` is reserved for evidence tied to a datasheet. These facts help review saved structure; they do not establish electrical correctness, DRC cleanliness, manufacturability, or release readiness.
 
-The built-in extractor runs automatically. External analyzers are never auto-selected, downloaded, or installed: a caller must supply a pinned definition programmatically to `project.inspect`. Each external analyzer is checksum-verified and runs only against a disposable project copy. An unavailable executable produces a typed skip instead of changing the project. `project.inspect` remains read-only throughout this process.
+The built-in extractor runs automatically. External analyzer execution is disabled: every programmatic definition returns `skipped` with `ANALYZER_SANDBOX_UNAVAILABLE`, without reading or launching its executable or payload. Neither JSON nor project-copy mode bypasses this restriction. Re-enabling execution requires a sandboxed launcher that enforces complete payload integrity and denies writes to the saved project; path filters, checksums, and temporary copies alone do not provide that boundary.
 
 ### ADBMS6830 BMS example
 

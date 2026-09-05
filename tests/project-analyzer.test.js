@@ -172,7 +172,7 @@ test('analyzeProject discards facts when the post-extraction inventory digest ch
   }
 });
 
-test('analyzeProject keeps built-in facts and drops dangling findings when an external adapter collides', async () => {
+test('analyzeProject keeps built-in facts when external execution is unavailable', async () => {
   const root = await makeProject();
   const adapterDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-analyzer-adapter-'));
   const adapterPath = path.join(adapterDir, 'adapter.mjs');
@@ -190,9 +190,8 @@ test('analyzeProject keeps built-in facts and drops dangling findings when an ex
 
     assert.equal(result.facts.filter((fact) => fact.id === 'builtin.board.summary').length, 1);
     assert.equal(result.findings.some((finding) => finding.id === 'builtin.uses-summary'), false);
-    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').status, 'partial');
-    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics[0].code, 'ANALYZER_FACT_COLLISION');
-    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics.some((diagnostic) => diagnostic.code === 'ANALYZER_FINDING_DANGLING_FACT'), true);
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').status, 'skipped');
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.collision').diagnostics[0].code, 'ANALYZER_SANDBOX_UNAVAILABLE');
   } finally {
     await rm(root, { force: true, recursive: true });
     await rm(adapterDir, { force: true, recursive: true });
@@ -219,8 +218,8 @@ test('analyzeProject rejects adapter arguments that name the saved project', asy
       }]
     });
     assert.equal(result.facts.length > 0, true);
-    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.mutator').status, 'failed');
-    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.mutator').diagnostics[0].code, 'ANALYZER_ADAPTER_INVALID_DEFINITION');
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.mutator').status, 'skipped');
+    assert.equal(result.analyzers.find((analyzer) => analyzer.id === 'external.mutator').diagnostics[0].code, 'ANALYZER_SANDBOX_UNAVAILABLE');
   } finally {
     await rm(root, { force: true, recursive: true });
     await rm(adapterDir, { force: true, recursive: true });
