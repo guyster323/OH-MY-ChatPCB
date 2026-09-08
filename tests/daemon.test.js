@@ -152,7 +152,7 @@ test('daemon strips nested analyzer definitions from provider validation aliases
   }
 });
 
-test('daemon dispatches board-level DRC validation', async () => {
+test('daemon dispatches board-level DRC validation using server configuration', async () => {
   const calls = [];
   const result = await dispatchToolCall(
     {
@@ -163,6 +163,7 @@ test('daemon dispatches board-level DRC validation', async () => {
       }
     },
     {
+      kicadCliPath: 'C:/KiCad/bin/kicad-cli.exe',
       validateBoardImpl: async (args) => {
         calls.push(args);
         return {

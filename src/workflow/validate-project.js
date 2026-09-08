@@ -2,13 +2,14 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { runKicadCli } from '../kicad/kicad-cli.js';
+import { assertInspectionTree } from './inspection-copy.js';
 
-export async function validateProject({ projectDir, kicadCliPath, runKicadCliImpl = runKicadCli } = {}) {
+export async function validateProject({ projectDir, kicadCliPath, excludeProjectDir, runKicadCliImpl = runKicadCli } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
-  const resolvedProjectDir = path.resolve(projectDir);
+  const resolvedProjectDir = await assertInspectionTree(projectDir);
   const schematic = await findFirst(resolvedProjectDir, '.kicad_sch');
   if (!schematic) {
     return skipped('NO_SCHEMATIC', `No .kicad_sch file found in ${resolvedProjectDir}.`);
@@ -19,12 +20,14 @@ export async function validateProject({ projectDir, kicadCliPath, runKicadCliImp
   try {
     const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], {
       explicitPath: kicadCliPath,
-      cwd: resolvedProjectDir
+      cwd: resolvedProjectDir,
+      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
     });
 
     const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], {
       explicitPath: kicadCliPath,
-      cwd: resolvedProjectDir
+      cwd: resolvedProjectDir,
+      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
     });
 
     const erc = await readErcSummary(output);
@@ -76,6 +79,9 @@ export async function validateProject({ projectDir, kicadCliPath, runKicadCliImp
       stderr: result.stderr
     };
   } catch (error) {
+    if (error.code === 'KICAD_CLI_TIMEOUT') {
+      return { ok: false, skipped: false, reason: { code: error.code, message: error.message } };
+    }
     return skipped('KICAD_CLI_UNAVAILABLE', error.message);
   }
 }

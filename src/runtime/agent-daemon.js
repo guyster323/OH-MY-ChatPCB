@@ -25,13 +25,17 @@ export async function dispatchToolCall(
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
     inspectProjectImpl = inspectProject,
-    validateProjectImpl = validateProject,
-    validateBoardImpl = validateBoard,
+    validateProjectImpl: validateProjectImplementation = validateProject,
+    validateBoardImpl: validateBoardImplementation = validateBoard,
     providerControllers = new Map(),
     patchApprovalRegistry = createPatchApprovalRegistry(),
-    allowedWorkspaceRoot
+    allowedWorkspaceRoot,
+    kicadCliPath
   } = {}
 ) {
+  // Only server configuration selects executables. Never bind tool-call args.
+  const validateProjectImpl = (options) => validateProjectImplementation({ ...options, kicadCliPath });
+  const validateBoardImpl = (options) => validateBoardImplementation({ ...options, kicadCliPath });
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
   }
@@ -56,17 +60,18 @@ export async function dispatchToolCall(
       );
 
     case 'project.inspect':
-      return ok(await inspectProjectImpl({
+      return okOrInspectionFailure(inspectProjectImpl({
         projectDir: call.args?.projectDir,
-        kicadCliPath: call.args?.kicadCliPath,
+        kicadCliPath,
+        ...(allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {}),
         analyzerAdapters: call.args?.analyzerAdapters
       }));
 
     case 'validate.erc':
-      return ok(await validateProjectImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
+      return okOrInspectionFailure(validateProjectImpl({ projectDir: call.args?.projectDir }));
 
     case 'validate.drc':
-      return ok(await validateBoardImpl({ projectDir: call.args?.projectDir, kicadCliPath: call.args?.kicadCliPath }));
+      return okOrInspectionFailure(validateBoardImpl({ projectDir: call.args?.projectDir }));
 
     case 'schematic.patch':
       return dispatchSchematicPatch(call.args ?? {}, { validateProjectImpl, patchApprovalRegistry });
@@ -87,7 +92,8 @@ export async function dispatchToolCall(
           validateBoardImpl,
           providerControllers,
           patchApprovalRegistry,
-          allowedWorkspaceRoot
+          allowedWorkspaceRoot,
+          kicadCliPath
         })
       );
 
@@ -101,7 +107,8 @@ export async function dispatchToolCall(
           validateBoardImpl,
           providerControllers,
           patchApprovalRegistry,
-          allowedWorkspaceRoot
+          allowedWorkspaceRoot,
+          kicadCliPath
         })
       );
 
@@ -161,7 +168,7 @@ async function dispatchSchematicPatch(args, { validateProjectImpl, patchApproval
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, allowGenerate = true, forceProjectDir = false }) {
+async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, kicadCliPath, allowGenerate = true, forceProjectDir = false }) {
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -229,7 +236,8 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
         validateBoardImpl,
         providerControllers,
         patchApprovalRegistry,
-        allowedWorkspaceRoot
+        allowedWorkspaceRoot,
+        kicadCliPath
       }))
     });
   }
@@ -245,7 +253,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   };
 }
 
-async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot }) {
+async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, kicadCliPath }) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -269,6 +277,7 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
       providerControllers,
       patchApprovalRegistry,
       allowedWorkspaceRoot,
+      kicadCliPath,
       allowGenerate: !hasSpec,
       forceProjectDir: true
     });
@@ -387,6 +396,7 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, analyz
     ...(payload.args ?? {})
   };
   delete args.analyzerAdapters;
+  delete args.kicadCliPath;
 
   let name = payload.name;
   if (name === 'schematic.patch') {
@@ -517,6 +527,17 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
 
 function ok(result) {
   return { ok: true, result };
+}
+
+async function okOrInspectionFailure(work) {
+  try {
+    return ok(await work);
+  } catch (error) {
+    if (error.code === 'UNSAFE_INSPECTION_LINK' || error.code === 'UNSAFE_PROJECT_DIR') {
+      return failure(error.code, error.message);
+    }
+    throw error;
+  }
 }
 
 function failure(code, message) {

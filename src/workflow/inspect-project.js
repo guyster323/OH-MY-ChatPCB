@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,15 +9,16 @@ import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertSafeProjectDir, readChatPcbManifest } from './project-workspace.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
+import { assertInspectionTree, copyInspectionTree } from './inspection-copy.js';
 
 export async function inspectProject(options = {}) {
   const projectDir = assertSafeProjectDir(options.projectDir);
+  await assertInspectionTree(projectDir, { allowedWorkspaceRoot: options.allowedWorkspaceRoot });
   const inventory = await collectArtifactInventory({ projectDir });
   const rawManifest = await readChatPcbManifest(projectDir);
   const manifest = rawManifest ? normalizeManifest(rawManifest) : null;
   const analyzeProjectImpl = options.analyzeProjectImpl ?? analyzeProject;
-  const [toolchain, { erc, drc }, analysis] = await Promise.all([
-    inspectToolchain({ projectDir, options }),
+  const [{ toolchain, erc, drc }, analysis] = await Promise.all([
     validateInspectionCopy({ projectDir, options }),
     analyzeProjectImpl({ projectDir, inventory, analyzerAdapters: options.analyzerAdapters })
   ]);
@@ -44,35 +45,53 @@ export async function inspectProject(options = {}) {
 
 async function validateInspectionCopy({ projectDir, options }) {
   const inspectionRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-inspection-'));
-  const validationProjectDir = path.join(inspectionRoot, 'project');
+  let canonicalRoot = inspectionRoot;
 
   try {
-    await cp(projectDir, validationProjectDir, { recursive: true });
-    const [erc, drc] = await Promise.all([
-      (options.validateProjectImpl ?? validateProject)({ projectDir: validationProjectDir, kicadCliPath: options.kicadCliPath }),
-      (options.validateBoardImpl ?? validateBoard)({ projectDir: validationProjectDir, kicadCliPath: options.kicadCliPath })
+    canonicalRoot = await realpath(inspectionRoot);
+    const validationProjectDir = await copyInspectionTree(projectDir, path.join(canonicalRoot, 'project'));
+    const discovery = { kicadCliPath: options.kicadCliPath, excludeProjectDir: projectDir };
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => inspectToolchain({ projectDir: validationProjectDir, options: { ...options, ...discovery } })),
+      Promise.resolve().then(() => (options.validateProjectImpl ?? validateProject)({ projectDir: validationProjectDir, ...discovery })),
+      Promise.resolve().then(() => (options.validateBoardImpl ?? validateBoard)({ projectDir: validationProjectDir, ...discovery }))
     ]);
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure) throw failure.reason;
+    const [toolchain, erc, drc] = results.map((result) => result.value);
     return {
+      toolchain,
       erc: omitEphemeralReport(erc, { projectDir, validationProjectDir }),
       drc: omitEphemeralReport(drc, { projectDir, validationProjectDir })
     };
   } finally {
-    await rm(inspectionRoot, { force: true, recursive: true });
+    await rm(canonicalRoot, { force: true, recursive: true });
+    if (canonicalRoot !== inspectionRoot) {
+      await rm(inspectionRoot, { force: true, recursive: true });
+    }
   }
 }
 
 async function inspectToolchain({ projectDir, options }) {
   const getKicadVersionImpl = options.getKicadVersionImpl ?? getKicadVersion;
   try {
-    const kicadCli = await getKicadVersionImpl({ projectDir, kicadCliPath: options.kicadCliPath });
+    const kicadCli = await getKicadVersionImpl({
+      projectDir,
+      kicadCliPath: options.kicadCliPath,
+      excludeProjectDir: options.excludeProjectDir
+    });
     return kicadCli ? { kicadCli } : {};
   } catch {
     return {};
   }
 }
 
-async function getKicadVersion({ projectDir, kicadCliPath }) {
-  const result = await runKicadCli(['version'], { explicitPath: kicadCliPath, cwd: projectDir });
+async function getKicadVersion({ projectDir, kicadCliPath, excludeProjectDir }) {
+  const result = await runKicadCli(['version'], {
+    explicitPath: kicadCliPath,
+    cwd: projectDir,
+    excludeProjectDir
+  });
   if (result.exitCode !== 0 || !result.stdout.trim()) return null;
   return {
     version: result.stdout.trim(),
