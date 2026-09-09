@@ -1,4 +1,4 @@
-import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -127,12 +127,19 @@ export async function disposeSchematicPatchPlan(plan) {
 }
 
 async function buildPatchPlan({ projectDir, prompt, projectName, validateProjectImpl }) {
-  const tempDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-plan-'));
-  const candidateDir = path.join(tempDir, 'project');
+  const createdRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-plan-'));
+  let tempDir = createdRoot;
   try {
+    // Canonicalize only this internally created root so OS temp aliases
+    // (macOS /var, Windows junctions) do not fail ancestor-link checks.
+    tempDir = await realpath(createdRoot);
+    const candidateDir = path.join(tempDir, 'project');
     await cp(projectDir, candidateDir, { recursive: true });
     const proposed = await generateMcuPeripheralProject({ projectDir: candidateDir, prompt, projectName });
-    const validation = await validateProjectImpl({ projectDir: candidateDir });
+    const validation = await validateProjectImpl({
+      projectDir: candidateDir,
+      excludeProjectDir: projectDir
+    });
     const targetFiles = {};
     const proposedFiles = {};
 
@@ -192,6 +199,9 @@ async function buildPatchPlan({ projectDir, prompt, projectName, validateProject
     };
   } catch (error) {
     await rm(tempDir, { force: true, recursive: true });
+    if (tempDir !== createdRoot) {
+      await rm(createdRoot, { force: true, recursive: true });
+    }
     throw error;
   }
 }

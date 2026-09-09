@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const WINDOWS_CANDIDATES = [
@@ -12,7 +13,9 @@ export function resolveKicadCli({
   explicitPath,
   env = process.env,
   platform = process.platform,
-  exists = fs.existsSync
+  cwd = process.cwd(),
+  exists = fs.existsSync,
+  excludeProjectDir
 } = {}) {
   if (explicitPath && exists(explicitPath)) {
     return { path: explicitPath, source: 'explicit' };
@@ -34,7 +37,26 @@ export function resolveKicadCli({
     }
   }
 
-  return { path: 'kicad-cli', source: 'path' };
+  const paths = platform === 'win32' ? path.win32 : path.posix;
+  const workingDir = paths.resolve(cwd);
+  const excludedProject = excludeProjectDir ? paths.resolve(excludeProjectDir) : null;
+  const normalize = (value) => platform === 'win32' ? value.toLowerCase() : value;
+  const searchPath = env.PATH ?? env.Path ?? '';
+  for (const directory of searchPath.split(platform === 'win32' ? ';' : ':')) {
+    // Never let cwd, the original project, or a relative PATH entry select an executable.
+    if (!paths.isAbsolute(directory)) continue;
+    const absolute = paths.resolve(directory);
+    if (isInsideOrSame(paths, normalize, workingDir, absolute)) continue;
+    if (excludedProject && isInsideOrSame(paths, normalize, excludedProject, absolute)) continue;
+    const candidate = paths.join(absolute, platform === 'win32' ? 'kicad-cli.exe' : 'kicad-cli');
+    if (exists(candidate)) return { path: candidate, source: 'path' };
+  }
+  return { path: null, source: 'unavailable' };
+}
+
+function isInsideOrSame(paths, normalize, root, candidate) {
+  const relative = paths.relative(normalize(root), normalize(candidate));
+  return relative === '' || (!relative.startsWith('..' + paths.sep) && relative !== '..' && !paths.isAbsolute(relative));
 }
 
 function windowsUserCandidates(env) {
@@ -51,8 +73,13 @@ function windowsUserCandidates(env) {
   ];
 }
 
-export function runKicadCli(args, options = {}) {
+export async function runKicadCli(args, options = {}) {
   const resolved = resolveKicadCli(options);
+  if (!resolved.path) {
+    const error = new Error('No KiCad CLI found in configured installations or absolute PATH directories.');
+    error.code = 'ENOENT';
+    throw error;
+  }
   return runCommand(resolved.path, args, {
     cwd: options.cwd,
     timeoutMs: options.timeoutMs ?? 120000
@@ -61,16 +88,20 @@ export function runKicadCli(args, options = {}) {
 
 export function runCommand(command, args, { cwd = process.cwd(), timeoutMs = 120000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const stdout = [];
     const stderr = [];
     let settled = false;
+    let timedOut = false;
+    let forceKillTimer;
 
     const timer = setTimeout(() => {
       if (settled) return;
-      settled = true;
+      timedOut = true;
       child.kill('SIGTERM');
-      reject(new Error(`${command} timed out after ${timeoutMs}ms.`));
+      forceKillTimer = setTimeout(() => {
+        if (!settled) child.kill('SIGKILL');
+      }, 250);
     }, timeoutMs);
 
     child.stdout.setEncoding('utf8');
@@ -82,6 +113,7 @@ export function runCommand(command, args, { cwd = process.cwd(), timeoutMs = 120
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
       reject(error);
     });
 
@@ -89,6 +121,13 @@ export function runCommand(command, args, { cwd = process.cwd(), timeoutMs = 120
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
+      if (timedOut) {
+        const error = new Error(`${command} timed out after ${timeoutMs}ms.`);
+        error.code = 'KICAD_CLI_TIMEOUT';
+        reject(error);
+        return;
+      }
       resolve({
         exitCode,
         stdout: stdout.join(''),

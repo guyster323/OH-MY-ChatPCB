@@ -2,13 +2,14 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { runKicadCli } from '../kicad/kicad-cli.js';
+import { assertInspectionTree } from './inspection-copy.js';
 
-export async function validateBoard({ projectDir, kicadCliPath, runKicadCliImpl = runKicadCli } = {}) {
+export async function validateBoard({ projectDir, kicadCliPath, excludeProjectDir, runKicadCliImpl = runKicadCli } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
-  const resolvedProjectDir = path.resolve(projectDir);
+  const resolvedProjectDir = await assertInspectionTree(projectDir);
   const board = await findFirst(resolvedProjectDir, '.kicad_pcb');
   if (!board) {
     return skipped('NO_BOARD', `No .kicad_pcb file found in ${resolvedProjectDir}.`);
@@ -21,7 +22,8 @@ export async function validateBoard({ projectDir, kicadCliPath, runKicadCliImpl 
       ['pcb', 'drc', '--refill-zones', '--format', 'json', '--output', report, board],
       {
         explicitPath: kicadCliPath,
-        cwd: resolvedProjectDir
+        cwd: resolvedProjectDir,
+        excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
       }
     );
     const drc = await readDrcSummary(report);
