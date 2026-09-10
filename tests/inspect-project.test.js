@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
+import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
 import { analyzeProject } from '../src/analyzer/project-analyzer.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
 
@@ -271,6 +272,159 @@ test('inspectProject records an available KiCad version and omits disposable val
     assert.equal('report' in result.validation.erc, false);
     assert.equal('report' in result.validation.drc, false);
   } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+function schematicWithSelectionTargets() {
+  return `(kicad_sch (version 1)
+  (symbol (lib_id "Demo:Part") (at 10 20 0) (uuid schematic-u1)
+    (property "Reference" "U1") (property "Value" "Part") (property "Footprint" "Package:Demo"))
+  (symbol (lib_id "Demo:Part") (at 50 20 0) (uuid schematic-u2)
+    (property "Reference" "U2") (property "Value" "Part"))
+  (label "SDA" (at 20 30 0))
+  (global_label "+3V3" (at 30 10 0))
+  (hierarchical_label "SPI" (at 40 10 0)))`;
+}
+
+const selectionFixture = {
+  editor: 'schematic',
+  sheet: '/Power',
+  dirty: false,
+  hostState: 'mock',
+  items: [
+    { kind: 'symbol', kiid: 'schematic-u1', reference: 'U1', position: { x: 10, y: 20 } },
+    { kind: 'global_label', text: '+3V3', position: { x: 30, y: 10 } }
+  ]
+};
+
+test('inspectProject omits context unless selection is provided and does not change existing top-level fields', async () => {
+  const root = await makeProject();
+  await writeFile(path.join(root, 'demo.kicad_sch'), schematicWithSelectionTargets(), 'utf8');
+  const options = {
+    projectDir: root,
+    now: () => '2026-09-03T00:00:00.000Z',
+    validateProjectImpl: cleanErc,
+    validateBoardImpl: cleanDrc
+  };
+  try {
+    const without = await inspectProject(options);
+    const withSelection = await inspectProject({ ...options, selection: structuredClone(selectionFixture) });
+    const { context, ...rest } = withSelection;
+
+    assert.equal('context' in without, false);
+    assert.deepEqual(rest, without);
+    assert.equal(context.schemaVersion, 1);
+    assert.equal(context.project.canonicalPath, path.resolve(root));
+    assert.equal(context.project.evidenceDigest, without.inspection.projectDigest);
+    assert.equal(context.project.transactionDigest, (await collectTransactionInventory({ projectDir: root })).transactionDigest);
+    assert.deepEqual(context.project.manifestFreshness, without.manifest.freshness);
+    assert.equal(context.editor.hostState, 'mock');
+    assert.equal(context.editor.sheet, '/Power');
+    assert.equal(context.selection.mode, 'explicit');
+    assert.equal(context.facts.some((fact) => fact.category === 'schematic.component' && fact.value.reference === 'U1'), true);
+    assert.equal(context.facts.some((fact) => fact.category === 'schematic.global_label' && fact.value.text === '+3V3'), true);
+    assert.equal(context.facts.some((fact) => fact.category === 'schematic.net' && fact.value.name === '+3V3'), true);
+    assert.equal(context.facts.some((fact) => fact.value?.reference === 'U2'), false);
+    assert.equal(context.findings.length, 0);
+    assert.deepEqual(context.coverage, {
+      status: 'partial',
+      diagnostics: [{
+        code: 'SELECTION_CONNECTIVITY_UNPROVEN',
+        message: 'Pin-to-net connectivity is not proven by the current saved-artifact analyzer.'
+      }]
+    });
+    assert.equal('artifacts' in context.project, false);
+    assert.equal('files' in context, false);
+    assert.doesNotMatch(JSON.stringify(context), /beforeBytes|candidateRoot|chatpcb-native-proposal-/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('inspectProject discards selection context when evidence changes during inspection', async () => {
+  const root = await makeProject();
+  await writeFile(path.join(root, 'demo.kicad_sch'), schematicWithSelectionTargets(), 'utf8');
+  let releaseValidation;
+  let validationStarted;
+  const validationBarrier = new Promise((resolve) => { releaseValidation = resolve; });
+  const validationStartedBarrier = new Promise((resolve) => { validationStarted = resolve; });
+  let analysisFinished;
+  const analysisFinishedBarrier = new Promise((resolve) => { analysisFinished = resolve; });
+
+  try {
+    const inspectionPromise = inspectProject({
+      projectDir: root,
+      now: () => '2026-09-03T00:00:00.000Z',
+      selection: structuredClone(selectionFixture),
+      validateProjectImpl: async () => {
+        validationStarted();
+        await validationBarrier;
+        return { ok: true, erc: { errorCount: 0, warningCount: 0 } };
+      },
+      validateBoardImpl: cleanDrc,
+      analyzeProjectImpl: async (options) => {
+        const analysis = await analyzeProject(options);
+        analysisFinished();
+        return analysis;
+      }
+    });
+    await Promise.all([validationStartedBarrier, analysisFinishedBarrier]);
+    await writeFile(path.join(root, 'demo.kicad_sch'), `${await readFile(path.join(root, 'demo.kicad_sch'), 'utf8')}\n`, 'utf8');
+    releaseValidation();
+
+    const result = await inspectionPromise;
+    assert.deepEqual(result.inspection.facts, []);
+    assert.deepEqual(result.context.facts, []);
+    assert.deepEqual(result.context.findings, []);
+    assert.equal(result.context.diagnostics.some((diagnostic) => diagnostic.code === 'CONTEXT_INPUT_CHANGED'), true);
+    assert.equal(result.context.coverage.diagnostics.some((diagnostic) => diagnostic.code === 'SELECTION_CONNECTIVITY_UNPROVEN'), true);
+  } finally {
+    releaseValidation?.();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('inspectProject discards selection context when the transaction digest moves without changing evidence', async () => {
+  const root = await makeProject();
+  await writeFile(path.join(root, 'demo.kicad_sch'), schematicWithSelectionTargets(), 'utf8');
+  let releaseValidation;
+  let validationStarted;
+  const validationBarrier = new Promise((resolve) => { releaseValidation = resolve; });
+  const validationStartedBarrier = new Promise((resolve) => { validationStarted = resolve; });
+  let analysisFinished;
+  const analysisFinishedBarrier = new Promise((resolve) => { analysisFinished = resolve; });
+
+  try {
+    const inspectionPromise = inspectProject({
+      projectDir: root,
+      now: () => '2026-09-03T00:00:00.000Z',
+      selection: structuredClone(selectionFixture),
+      validateProjectImpl: async () => {
+        validationStarted();
+        await validationBarrier;
+        return { ok: true, erc: { errorCount: 0, warningCount: 0 } };
+      },
+      validateBoardImpl: cleanDrc,
+      analyzeProjectImpl: async (options) => {
+        const analysis = await analyzeProject(options);
+        analysisFinished();
+        return analysis;
+      }
+    });
+    await Promise.all([validationStartedBarrier, analysisFinishedBarrier]);
+    await writeFile(path.join(root, 'demo.chatpcb.json'), '{"schemaVersion":1}', 'utf8');
+    releaseValidation();
+
+    const result = await inspectionPromise;
+    assert.equal(result.inspection.facts.length > 0, true);
+    assert.deepEqual(result.context.facts, []);
+    assert.deepEqual(result.context.findings, []);
+    assert.equal(result.context.diagnostics.some((diagnostic) => diagnostic.code === 'CONTEXT_INPUT_CHANGED'), true);
+    assert.equal(result.manifest.freshness.status, 'missing');
+    assert.equal(result.context.coverage.diagnostics[0].code, 'SELECTION_CONNECTIVITY_UNPROVEN');
+  } finally {
+    releaseValidation?.();
     await rm(root, { force: true, recursive: true });
   }
 });

@@ -2,6 +2,12 @@ import { createFact, normalizeFacts, normalizeFinding } from './fact-contract.js
 import { parseSExpression, SExpressionParseError } from './sexpr.js';
 
 const EXTRACTOR = 'builtin.kicad-schematic@1';
+const LABEL_NODES = new Map([
+  ['label', 'schematic.label'],
+  ['global_label', 'schematic.global_label'],
+  ['hierarchical_label', 'schematic.hierarchical_label']
+]);
+const LABEL_CATEGORIES = new Set(LABEL_NODES.values());
 
 function children(node, name) {
   return node.filter((item) => Array.isArray(item) && item[0] === name);
@@ -42,10 +48,12 @@ function validateSchematic(root) {
     const unit = child(symbol, 'unit');
     if (unit && !isFiniteNumber(unit[1])) return 'symbol has invalid unit';
   }
-  for (const label of children(root, 'label')) {
-    if (typeof label[1] !== 'string' || label[1].trim() === '') return 'label requires non-empty text';
-    const error = validateAt(label, 'label');
-    if (error) return error;
+  for (const nodeName of LABEL_NODES.keys()) {
+    for (const label of children(root, nodeName)) {
+      if (typeof label[1] !== 'string' || label[1].trim() === '') return `${nodeName} requires non-empty text`;
+      const error = validateAt(label, nodeName);
+      if (error) return error;
+    }
   }
   for (const wire of children(root, 'wire')) {
     const points = children(child(wire, 'pts') ?? [], 'xy');
@@ -81,7 +89,21 @@ function parseFailure(error, sourceArtifact) {
 }
 
 function sortByPositionAndText(left, right) {
-  return left.position.x - right.position.x || left.position.y - right.position.y || left.text.localeCompare(right.text) || left.position.rotation - right.position.rotation;
+  return left.position.x - right.position.x
+    || left.position.y - right.position.y
+    || left.text.localeCompare(right.text)
+    || left.position.rotation - right.position.rotation
+    || left.kind.localeCompare(right.kind);
+}
+
+function extractLabels(root) {
+  const labels = [];
+  for (const [nodeName, category] of LABEL_NODES) {
+    for (const node of children(root, nodeName)) {
+      labels.push({ kind: nodeName, category, text: node[1], position: at(node) });
+    }
+  }
+  return labels;
 }
 
 export function analyzeSchematic({ source, sourceArtifact } = {}) {
@@ -96,7 +118,7 @@ export function analyzeSchematic({ source, sourceArtifact } = {}) {
   if (structureError) return parseFailure(new SExpressionParseError(structureError, sourceArtifact), sourceArtifact);
 
   const symbols = children(root, 'symbol');
-  const labels = children(root, 'label').map((node) => ({ text: node[1], position: at(node) }));
+  const labels = extractLabels(root);
   const wires = children(root, 'wire');
   const junctions = children(root, 'junction');
   const noConnects = children(root, 'no_connect');
@@ -151,11 +173,19 @@ export function analyzeSchematic({ source, sourceArtifact } = {}) {
   const sortedLabels = labels
     .filter((label) => label.position && typeof label.text === 'string')
     .sort(sortByPositionAndText);
-  for (const [index, label] of sortedLabels.entries()) {
+  const indexByCategory = new Map();
+  for (const label of sortedLabels) {
+    const index = indexByCategory.get(label.category) ?? 0;
+    indexByCategory.set(label.category, index + 1);
     facts.push(createFact({
-      id: `builtin.schematic.label:${index}`,
-      category: 'schematic.label',
-      value: { text: label.text, position: { x: label.position.x, y: label.position.y }, rotation: label.position.rotation },
+      id: `builtin.${label.category}:${index}`,
+      category: label.category,
+      value: {
+        kind: label.kind,
+        text: label.text,
+        position: { x: label.position.x, y: label.position.y },
+        rotation: label.position.rotation
+      },
       sourceArtifact,
       extractor: EXTRACTOR,
       confidence: 'deterministic'
@@ -175,7 +205,7 @@ export function analyzeSchematic({ source, sourceArtifact } = {}) {
   }
 
   const labelsByText = new Map();
-  for (const fact of facts.filter((item) => item.category === 'schematic.label')) {
+  for (const fact of facts.filter((item) => LABEL_CATEGORIES.has(item.category))) {
     const groupedLabels = labelsByText.get(fact.value.text) ?? [];
     groupedLabels.push(fact);
     labelsByText.set(fact.value.text, groupedLabels);

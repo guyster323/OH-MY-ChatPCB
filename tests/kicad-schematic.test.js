@@ -107,3 +107,74 @@ test('analyzeSchematic rejects empty labels without emitting facts', () => {
   assert.deepEqual(result.facts, []);
   assert.equal(result.diagnostics[0].code, 'ANALYZER_PARSE_ERROR');
 });
+
+test('analyzeSchematic extracts local, global, and hierarchical labels deterministically', () => {
+  const result = analyzeSchematic({
+    source: `(kicad_sch (version 20260306)
+      (hierarchical_label "SPI" (at 30 10 180))
+      (label "SDA" (at 10 20 0))
+      (global_label "+3V3" (at 20 10 90))
+      (label "SDA" (at 40 20 0))
+      (global_label "+3V3" (at 5 5 0)))`,
+    sourceArtifact: 'labels.kicad_sch'
+  });
+
+  assert.equal(result.summary.labelCount, 5);
+  assert.deepEqual(
+    result.facts.filter((fact) => fact.category === 'schematic.label').map((fact) => [fact.id, fact.value.kind, fact.value.text, fact.value.position, fact.value.rotation]),
+    [
+      ['builtin.schematic.label:0', 'label', 'SDA', { x: 10, y: 20 }, 0],
+      ['builtin.schematic.label:1', 'label', 'SDA', { x: 40, y: 20 }, 0]
+    ]
+  );
+  assert.deepEqual(
+    result.facts.filter((fact) => fact.category === 'schematic.global_label').map((fact) => [fact.id, fact.value.kind, fact.value.text, fact.value.position, fact.value.rotation]),
+    [
+      ['builtin.schematic.global_label:0', 'global_label', '+3V3', { x: 5, y: 5 }, 0],
+      ['builtin.schematic.global_label:1', 'global_label', '+3V3', { x: 20, y: 10 }, 90]
+    ]
+  );
+  assert.deepEqual(
+    result.facts.filter((fact) => fact.category === 'schematic.hierarchical_label').map((fact) => [fact.id, fact.value.kind, fact.value.text, fact.value.position, fact.value.rotation]),
+    [
+      ['builtin.schematic.hierarchical_label:0', 'hierarchical_label', 'SPI', { x: 30, y: 10 }, 180]
+    ]
+  );
+  assert.deepEqual(result.facts.find((fact) => fact.category === 'schematic.net' && fact.value.name === '+3V3').value, {
+    name: '+3V3',
+    labelFactIds: ['builtin.schematic.global_label:0', 'builtin.schematic.global_label:1']
+  });
+  assert.deepEqual(result.facts.find((fact) => fact.category === 'schematic.net' && fact.value.name === 'SDA').value, {
+    name: 'SDA',
+    labelFactIds: ['builtin.schematic.label:0', 'builtin.schematic.label:1']
+  });
+  assert.deepEqual(result.facts.find((fact) => fact.category === 'schematic.net' && fact.value.name === 'SPI').value, {
+    name: 'SPI',
+    labelFactIds: ['builtin.schematic.hierarchical_label:0']
+  });
+  assert.equal(result.facts.some((fact) => fact.category === 'schematic.pin_net' || fact.category === 'schematic.connectivity'), false);
+});
+
+test('analyzeSchematic rejects empty or malformed global and hierarchical labels without fabricating facts', () => {
+  const malformedSources = [
+    '(kicad_sch (version 1) (global_label "" (at 1 2 0)))',
+    '(kicad_sch (version 1) (global_label "  " (at 1 2 0)))',
+    '(kicad_sch (version 1) (global_label "+3V3"))',
+    '(kicad_sch (version 1) (global_label "+3V3" (at x 2 0)))',
+    '(kicad_sch (version 1) (hierarchical_label "" (at 1 2 0)))',
+    '(kicad_sch (version 1) (hierarchical_label "SPI"))',
+    '(kicad_sch (version 1) (hierarchical_label "SPI" (at 1 nope)))'
+  ];
+
+  for (const source of malformedSources) {
+    const result = analyzeSchematic({ source, sourceArtifact: 'malformed-labels.kicad_sch' });
+
+    assert.deepEqual(result.facts, [], source);
+    assert.deepEqual(result.findings, [], source);
+    assert.equal(result.diagnostics[0]?.code, 'ANALYZER_PARSE_ERROR', source);
+    assert.deepEqual(result.summary, {
+      formatVersion: undefined, symbolCount: 0, labelCount: 0, wireCount: 0,
+      junctionCount: 0, noConnectCount: 0
+    }, source);
+  }
+});

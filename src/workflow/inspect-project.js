@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { collectArtifactInventory } from '../evidence/artifact-inventory.js';
+import { collectTransactionInventory } from '../evidence/transaction-inventory.js';
 import { analyzeProject } from '../analyzer/project-analyzer.js';
+import { buildSelectionEvidence } from '../context/selection-context.js';
 import { evidenceFreshness, normalizeEvidenceManifest } from '../evidence/evidence-manifest.js';
 import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertSafeProjectDir, readChatPcbManifest } from './project-workspace.js';
@@ -15,6 +17,8 @@ export async function inspectProject(options = {}) {
   const projectDir = assertSafeProjectDir(options.projectDir);
   await assertInspectionTree(projectDir, { allowedWorkspaceRoot: options.allowedWorkspaceRoot });
   const inventory = await collectArtifactInventory({ projectDir });
+  const hasSelection = options.selection !== undefined && options.selection !== null;
+  const transactionInventory = hasSelection ? await collectTransactionInventory({ projectDir }) : null;
   const rawManifest = await readChatPcbManifest(projectDir);
   const manifest = rawManifest ? normalizeManifest(rawManifest) : null;
   const analyzeProjectImpl = options.analyzeProjectImpl ?? analyzeProject;
@@ -28,19 +32,50 @@ export async function inspectProject(options = {}) {
       ...analyzer, status: 'failed', diagnostics: [{ code: 'ANALYZER_INPUT_CHANGED', message: 'Project artifact digest changed during inspection' }]
     }))
   };
-
-  return {
+  const freshness = evidenceFreshness({ manifest, projectDigest: inventory.projectDigest });
+  const result = {
     ok: true,
     inspectedAt: (options.now ?? (() => new Date().toISOString()))(),
     inspection: { ...inventory, artifactCount: inventory.artifacts.length, toolchain, facts: boundAnalysis.facts, analyzers: boundAnalysis.analyzers },
     manifest: {
       schemaVersion: manifest?.schemaVersion ?? null,
-      freshness: evidenceFreshness({ manifest, projectDigest: inventory.projectDigest })
+      freshness
     },
     validation: { erc, drc },
     validationClean: erc.ok === true && drc.ok === true,
     findings: boundAnalysis.findings
   };
+  if (!hasSelection) return result;
+
+  const finalTransactionInventory = await collectTransactionInventory({ projectDir });
+  const context = buildSelectionEvidence({
+    selection: options.selection,
+    inspection: {
+      facts: boundAnalysis.facts,
+      findings: boundAnalysis.findings,
+      project: {
+        canonicalPath: projectDir,
+        evidenceDigest: inventory.projectDigest,
+        transactionDigest: transactionInventory.transactionDigest,
+        manifestFreshness: freshness
+      },
+      verification: { erc, drc }
+    }
+  });
+  const inputChanged = finalInventory.projectDigest !== inventory.projectDigest
+    || finalTransactionInventory.transactionDigest !== transactionInventory.transactionDigest;
+  result.context = inputChanged
+    ? {
+        ...context,
+        facts: [],
+        findings: [],
+        diagnostics: [
+          ...(context.diagnostics ?? []),
+          { code: 'CONTEXT_INPUT_CHANGED', message: 'Project evidence or transaction digest changed during inspection' }
+        ]
+      }
+    : context;
+  return result;
 }
 
 async function validateInspectionCopy({ projectDir, options }) {
