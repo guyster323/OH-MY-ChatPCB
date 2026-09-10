@@ -391,7 +391,7 @@ test('patch candidate ERC excludes the original project from KiCad discovery', a
     assert.equal(captured.length, 1);
     assert.equal(captured[0].excludeProjectDir, projectDir);
     assert.notEqual(captured[0].projectDir, projectDir);
-    assert.match(captured[0].projectDir, /chatpcb-patch-plan-/);
+    assert.match(captured[0].projectDir, /chatpcb-native-proposal-/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

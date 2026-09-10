@@ -32,3 +32,29 @@ test('simulateProject passes an absolute circuit path to ngspice', async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('simulateProject uses only ngspicePath and ignores request executable aliases', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-simulate-trusted-'));
+  await writeFile(path.join(root, 'demo.cir'), '.op\n.end\n', 'utf8');
+
+  try {
+    const commands = [];
+    const result = await simulateProject({
+      projectDir: root,
+      ngspicePath: '/trusted/ngspice',
+      requestNgspicePath: '/untrusted/ngspice',
+      ngspice: '/also-untrusted/ngspice',
+      runCommandImpl: async (command, args) => {
+        commands.push({ command, args });
+        return { exitCode: 0, stdout: 'raw stdout', stderr: '' };
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].command, '/trusted/ngspice');
+    assert.notEqual(commands[0].command, '/untrusted/ngspice');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

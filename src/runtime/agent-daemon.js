@@ -1,27 +1,27 @@
 import http from 'node:http';
 import { createHash } from 'node:crypto';
-import { cp, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
 import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
-import { generateMcuPeripheralProject } from '../workflow/generate-mcu-project.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
+import { publicProposal } from '../workflow/native-proposal-source.js';
+import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
+import { createProjectMutexRegistry } from './project-mutex-registry.js';
+import { createTransactionJournal } from './transaction-journal.js';
 import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
-import { reviewCircuitReadiness } from '../workflow/review-project.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
-export async function dispatchToolCall(
-  call,
-  {
+export async function dispatchToolCall(call, dispatchOptions = {}) {
+  const {
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
     inspectProjectImpl = inspectProject,
@@ -29,13 +29,37 @@ export async function dispatchToolCall(
     validateBoardImpl: validateBoardImplementation = validateBoard,
     providerControllers = new Map(),
     patchApprovalRegistry = createPatchApprovalRegistry(),
+    projectMutexRegistry = createProjectMutexRegistry(),
+    transactionJournal,
+    reconciledProjects = new Set(),
     allowedWorkspaceRoot,
-    kicadCliPath
-  } = {}
-) {
+    kicadCliPath,
+    ngspicePath,
+    runCommandImpl,
+    verifyAppliedProjectImpl
+  } = dispatchOptions;
   // Only server configuration selects executables. Never bind tool-call args.
   const validateProjectImpl = (options) => validateProjectImplementation({ ...options, kicadCliPath });
   const validateBoardImpl = (options) => validateBoardImplementation({ ...options, kicadCliPath });
+  const ctx = {
+    ...dispatchOptions,
+    checkProviderAvailabilityImpl,
+    runProviderProcessImpl,
+    inspectProjectImpl,
+    validateProjectImpl,
+    validateBoardImpl,
+    providerControllers,
+    patchApprovalRegistry,
+    projectMutexRegistry,
+    transactionJournal,
+    reconciledProjects,
+    allowedWorkspaceRoot,
+    kicadCliPath,
+    ngspicePath,
+    runCommandImpl,
+    verifyAppliedProjectImpl
+  };
+
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
   }
@@ -48,16 +72,18 @@ export async function dispatchToolCall(
 
   switch (call.name) {
     case 'project.create':
-      return ok(await createNamedProject({ workspaceRoot: call.args?.workspaceRoot, projectName: call.args?.projectName }));
+      return ok(await createNamedProject({
+        workspaceRoot: allowedWorkspaceRoot ?? call.args?.workspaceRoot,
+        projectName: call.args?.projectName
+      }));
 
     case 'schematic.generate':
-      return ok(
-        await generateMcuPeripheralProject({
-          projectDir: call.args?.projectDir,
-          prompt: call.args?.prompt,
-          projectName: call.args?.projectName
-        })
-      );
+      return previewNativeChange({
+        projectDir: call.args?.projectDir,
+        prompt: call.args?.prompt,
+        projectName: call.args?.projectName,
+        context: call.args?.context ?? call.args?.selection
+      }, ctx);
 
     case 'project.inspect':
       return okOrInspectionFailure(inspectProjectImpl({
@@ -68,13 +94,13 @@ export async function dispatchToolCall(
       }));
 
     case 'validate.erc':
-      return okOrInspectionFailure(validateProjectImpl({ projectDir: call.args?.projectDir }));
+      return okOrInspectionFailure(dispatchCopiedValidation('erc', call, ctx));
 
     case 'validate.drc':
-      return okOrInspectionFailure(validateBoardImpl({ projectDir: call.args?.projectDir }));
+      return okOrInspectionFailure(dispatchCopiedValidation('drc', call, ctx));
 
     case 'schematic.patch':
-      return dispatchSchematicPatch(call.args ?? {}, { validateProjectImpl, patchApprovalRegistry });
+      return dispatchSchematicPatch(call.args ?? {}, ctx);
 
     case 'provider.status':
       return ok(await checkProviderAvailabilityImpl({ provider: call.args?.provider ?? 'codex' }));
@@ -83,48 +109,43 @@ export async function dispatchToolCall(
       return ok({ providers: listProviderDefinitions() });
 
     case 'provider.invoke':
-      return ok(
-        await invokeProvider(call, {
-          runProviderProcessImpl,
-          checkProviderAvailabilityImpl,
-          inspectProjectImpl,
-          validateProjectImpl,
-          validateBoardImpl,
-          providerControllers,
-          patchApprovalRegistry,
-          allowedWorkspaceRoot,
-          kicadCliPath
-        })
-      );
+      return ok(await invokeProvider(call, ctx));
 
     case 'project.request':
-      return ok(
-        await requestProject(call, {
-          runProviderProcessImpl,
-          checkProviderAvailabilityImpl,
-          inspectProjectImpl,
-          validateProjectImpl,
-          validateBoardImpl,
-          providerControllers,
-          patchApprovalRegistry,
-          allowedWorkspaceRoot,
-          kicadCliPath
-        })
-      );
+      try {
+        return ok(await requestProject(call, ctx));
+      } catch (error) {
+        if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+        throw error;
+      }
 
     case 'provider.cancel':
       return ok(cancelProvider(call.args, providerControllers));
 
-    case 'simulate.spice':
-      return ok(await simulateProject({ projectDir: call.args?.projectDir, ngspicePath: call.args?.ngspicePath }));
+    case 'simulate.spice': {
+      const result = await simulateProject({
+        projectDir: call.args?.projectDir,
+        ngspicePath,
+        ...(runCommandImpl ? { runCommandImpl } : {})
+      });
+      return ok(publicSimulateResult(result));
+    }
+
+    case 'project.transaction.status':
+      return dispatchTransactionStatus(call.args ?? {}, ctx);
+
+    case 'project.transaction.rollback':
+      return dispatchTransactionRollback(call.args ?? {}, ctx);
 
     default:
       return failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${call.name}`);
   }
 }
 
-async function dispatchSchematicPatch(args, { validateProjectImpl, patchApprovalRegistry }) {
+async function dispatchSchematicPatch(args, ctx) {
   const projectDir = args.projectDir;
+  const { patchApprovalRegistry, projectMutexRegistry, transactionJournal, validateProjectImpl, verifyAppliedProjectImpl } = ctx;
+
   if (args.cancel === true) {
     if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to cancel a patch preview.');
     const approval = patchApprovalRegistry.consume({ patchId: args.patchId, projectDir });
@@ -134,41 +155,47 @@ async function dispatchSchematicPatch(args, { validateProjectImpl, patchApproval
   }
 
   if (args.approved !== true) {
-    const plan = await createSchematicPatchPlan({
+    return previewNativeChange({
       projectDir,
       prompt: args.prompt,
       projectName: args.projectName,
-      validateProjectImpl
-    });
-    const registration = patchApprovalRegistry.register({
-      patchId: plan.patchId,
-      projectDir,
-      plan,
-      dispose: () => disposeSchematicPatchPlan(plan)
-    });
-    const preview = await applySchematicPatch({ projectDir, approved: false, patchPlan: plan });
-    return ok({ ...preview, expiresAt: registration.expiresAt });
+      context: args.context ?? args.selection
+    }, ctx);
   }
 
   if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to approve a patch preview.');
-  const approval = patchApprovalRegistry.consume({ patchId: args.patchId, projectDir });
-  if (!approval.ok) return { ok: false, error: approval.reason };
+  const peeked = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
+  if (!peeked.ok) return { ok: false, error: peeked.reason };
+  const plan = peeked.record.plan;
   try {
-    return ok(await applySchematicPatch({
+    await ensureReconciled(projectDir, ctx);
+    return ok(sanitizeApplyResult(await applySchematicPatch({
       projectDir,
       prompt: args.prompt,
       projectName: args.projectName,
       approved: true,
       expectedPatchId: args.patchId,
-      patchPlan: approval.record.plan,
-      validateProjectImpl
-    }));
+      patchPlan: plan,
+      validateProjectImpl,
+      verifyAppliedProjectImpl,
+      approvalRegistry: patchApprovalRegistry,
+      mutexRegistry: projectMutexRegistry,
+      journal: transactionJournal
+    })));
   } finally {
-    await disposeSchematicPatchPlan(approval.record.plan);
+    const still = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
+    if (!still.ok) await disposeSchematicPatchPlan(plan);
   }
 }
 
-async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, kicadCliPath, allowGenerate = true, forceProjectDir = false }) {
+async function invokeProvider(call, ctx) {
+  const {
+    runProviderProcessImpl,
+    checkProviderAvailabilityImpl,
+    providerControllers,
+    allowGenerate = true,
+    forceProjectDir = false
+  } = ctx;
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
   const provider = args.provider ?? 'codex';
@@ -225,20 +252,20 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
     if (!allowGenerate && event.payload.name === 'schematic.generate') {
       throw new Error('schematic.generate is not allowed for an existing project.request; request a schematic.patch preview instead.');
     }
-    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, args.analyzerAdapters);
+    if (!PROVIDER_ALLOWED_TOOLS.includes(event.payload.name)) {
+      toolResults.push({
+        id: event.payload.id,
+        ...failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${event.payload.name}`)
+      });
+      continue;
+    }
+    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, {
+      analyzerAdapters: args.analyzerAdapters,
+      selection: args.selection
+    });
     toolResults.push({
       id: event.payload.id,
-      ...(await dispatchToolCall(toolCall, {
-        checkProviderAvailabilityImpl,
-        runProviderProcessImpl,
-        inspectProjectImpl,
-        validateProjectImpl,
-        validateBoardImpl,
-        providerControllers,
-        patchApprovalRegistry,
-        allowedWorkspaceRoot,
-        kicadCliPath
-      }))
+      ...(await dispatchToolCall(toolCall, ctx))
     });
   }
 
@@ -253,7 +280,7 @@ async function invokeProvider(call, { runProviderProcessImpl, checkProviderAvail
   };
 }
 
-async function requestProject(call, { runProviderProcessImpl, checkProviderAvailabilityImpl, inspectProjectImpl, validateProjectImpl, validateBoardImpl, providerControllers, patchApprovalRegistry, allowedWorkspaceRoot, kicadCliPath }) {
+async function requestProject(call, ctx) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -265,63 +292,39 @@ async function requestProject(call, { runProviderProcessImpl, checkProviderAvail
   }
 
   const hasSpec = await projectHasSpec(projectDir);
-  const snapshot = hasSpec ? await snapshotProject(projectDir) : null;
-
-  try {
-    const providerResult = await invokeProvider(call, {
-      runProviderProcessImpl,
-      checkProviderAvailabilityImpl,
-      inspectProjectImpl,
-      validateProjectImpl,
-      validateBoardImpl,
-      providerControllers,
-      patchApprovalRegistry,
-      allowedWorkspaceRoot,
-      kicadCliPath,
-      allowGenerate: !hasSpec,
-      forceProjectDir: true
-    });
-    const applied = providerResult.toolResults.length
-      ? lastMutatingResult(providerResult.toolResults)
-      : hasSpec
-        ? (await dispatchSchematicPatch({ projectDir, prompt }, { validateProjectImpl, patchApprovalRegistry })).result
-        : await generateMcuPeripheralProject({ projectDir, prompt });
-    if (applied.requiresApproval) {
-      return {
-        ...applied,
-        operation: 'patched',
-        providerEvents: providerResult.events
-      };
+  const providerResult = await invokeProvider(call, {
+    ...ctx,
+    allowGenerate: !hasSpec,
+    forceProjectDir: true
+  });
+  let preview;
+  if (providerResult.toolResults.length) {
+    preview = lastMutatingResult(providerResult.toolResults);
+  } else {
+    const generated = await previewNativeChange({
+      projectDir,
+      prompt,
+      context: args.selection
+    }, ctx);
+    if (!generated.ok) {
+      const error = new Error(generated.error.message);
+      error.code = generated.error.code;
+      throw error;
     }
-    const validation = await validateProjectImpl({ projectDir });
-    const rolledBack = hasSpec && !validation.ok;
-    if (rolledBack) {
-      await restoreProjectSnapshot(snapshot, projectDir);
-    }
-
-    const spec = rolledBack ? await readProjectSpec(projectDir) : applied.spec ?? await readProjectSpec(projectDir);
-    const review = reviewCircuitReadiness({ spec, validation });
-    return {
-      ...applied,
-      operation: hasSpec ? 'patched' : 'generated',
-      files: applied.files,
-      review,
-      validation,
-      providerEvents: providerResult.events,
-      ...(rolledBack ? { rolledBack: true } : {})
-    };
-  } catch (error) {
-    if (snapshot) await restoreProjectSnapshot(snapshot, projectDir);
-    throw error;
-  } finally {
-    if (snapshot) {
-      await rm(snapshot.root, { force: true, recursive: true });
-    }
+    preview = generated.result;
   }
+
+  return {
+    ...preview,
+    operation: hasSpec ? 'patched' : 'generated',
+    providerEvents: providerResult.events
+  };
 }
 
 function lastMutatingResult(toolResults) {
-  const result = toolResults.findLast((toolResult) => toolResult.ok && toolResult.result?.files)?.result;
+  const result = toolResults.findLast((toolResult) => (
+    toolResult.ok && (toolResult.result?.files || toolResult.result?.requiresApproval === true)
+  ))?.result;
   if (!result) {
     throw new Error('Provider transcript did not apply a schematic generation or patch.');
   }
@@ -331,32 +334,6 @@ function lastMutatingResult(toolResults) {
 async function projectHasSpec(projectDir) {
   const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
   return entries.some((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
-}
-
-async function readProjectSpec(projectDir) {
-  const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
-  const spec = entries.find((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
-  if (!spec) {
-    throw new Error('Project specification is missing after the requested operation.');
-  }
-  return JSON.parse(await readFile(path.join(projectDir, spec.name), 'utf8'));
-}
-
-async function snapshotProject(projectDir) {
-  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-snapshot-'));
-  const copy = path.join(root, 'project');
-  await cp(projectDir, copy, { recursive: true });
-  return { root, copy };
-}
-
-async function restoreProjectSnapshot(snapshot, projectDir) {
-  const currentEntries = await readdir(path.resolve(projectDir), { withFileTypes: true });
-
-  for (const entry of currentEntries) {
-    await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
-  }
-
-  await cp(snapshot.copy, projectDir, { recursive: true });
 }
 
 function guardToolProjectDir(call, allowedWorkspaceRoot) {
@@ -391,12 +368,19 @@ function cancelProvider(args = {}, providerControllers) {
   };
 }
 
-function withProjectContext(payload, projectDir, forceProjectDir = false, analyzerAdapters) {
+function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection } = {}) {
   const args = {
     ...(payload.args ?? {})
   };
   delete args.analyzerAdapters;
   delete args.kicadCliPath;
+  delete args.ngspicePath;
+  delete args.selection;
+  delete args.context;
+  delete args.requiredValidation;
+  delete args.transactionId;
+  delete args.proposalId;
+  delete args.rollback;
 
   let name = payload.name;
   if (name === 'schematic.patch') {
@@ -404,6 +388,10 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, analyz
     delete args.cancel;
     delete args.patchId;
     delete args.expectedPatchId;
+    if (selection !== undefined) args.context = selection;
+  }
+  if (name === 'schematic.generate' && selection !== undefined) {
+    args.context = selection;
   }
   if (name === 'validate.erc' || name === 'validate.drc') {
     name = 'project.inspect';
@@ -427,10 +415,18 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
   const clients = new Set();
   const providerControllers = dispatchOptions.providerControllers ?? new Map();
   const patchApprovalRegistry = dispatchOptions.patchApprovalRegistry ?? createPatchApprovalRegistry();
+  const projectMutexRegistry = dispatchOptions.projectMutexRegistry ?? createProjectMutexRegistry();
+  const transactionJournal = dispatchOptions.transactionJournal ?? createTransactionJournal({
+    stateRoot: dispatchOptions.transactionStateRoot
+  });
+  const reconciledProjects = dispatchOptions.reconciledProjects ?? new Set();
   const resolvedDispatchOptions = {
     ...dispatchOptions,
     providerControllers,
     patchApprovalRegistry,
+    projectMutexRegistry,
+    transactionJournal,
+    reconciledProjects,
     allowedWorkspaceRoot: dispatchOptions.allowedWorkspaceRoot ?? process.env.CHATPCB_WORKSPACE_ROOT
   };
 
@@ -522,6 +518,177 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
         server.close((error) => (error ? reject(error) : resolve()));
       }),
     clients
+  };
+}
+
+async function previewNativeChange({ projectDir, prompt, projectName, context }, ctx) {
+  let plan;
+  try {
+    plan = await ctx.projectMutexRegistry.runExclusive({ projectDir }, () => createSchematicPatchPlan({
+      projectDir,
+      prompt,
+      projectName,
+      context,
+      validateProjectImpl: ctx.validateProjectImpl
+    }));
+  } catch (error) {
+    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    throw error;
+  }
+
+  const registration = ctx.patchApprovalRegistry.register({
+    patchId: plan.proposalId,
+    proposalId: plan.proposalId,
+    projectDir,
+    plan,
+    ...plan,
+    dispose: () => disposeSchematicPatchPlan(plan)
+  });
+  const preview = await applySchematicPatch({ projectDir, approved: false, patchPlan: plan });
+  const published = publicProposal(plan);
+  return ok({
+    ...sanitizePreviewResult(preview),
+    requiredValidation: published.requiredValidation,
+    candidateVerification: sanitizeCandidateVerification(published.candidateVerification),
+    expiresAt: registration.expiresAt
+  });
+}
+
+async function dispatchCopiedValidation(kind, call, ctx) {
+  const inspection = await ctx.inspectProjectImpl({
+    projectDir: call.args?.projectDir,
+    kicadCliPath: ctx.kicadCliPath,
+    ...(ctx.allowedWorkspaceRoot ? { allowedWorkspaceRoot: ctx.allowedWorkspaceRoot } : {}),
+    analyzerAdapters: call.args?.analyzerAdapters,
+    validateProjectImpl: ctx.validateProjectImpl,
+    validateBoardImpl: ctx.validateBoardImpl
+  });
+  if (inspection?.validation?.[kind]) return sanitizeValidation(inspection.validation[kind]);
+  return sanitizeValidation(inspection);
+}
+
+async function ensureReconciled(projectDir, ctx) {
+  if (!projectDir || !ctx.transactionJournal) return;
+  const key = path.resolve(projectDir);
+  if (ctx.reconciledProjects.has(key)) return;
+  await ctx.transactionJournal.reconcile({ projectDir });
+  ctx.reconciledProjects.add(key);
+}
+
+async function dispatchTransactionStatus(args, ctx) {
+  if (!ctx.transactionJournal) {
+    return failure('JOURNAL_NOT_FOUND', 'Transaction journal is not configured.');
+  }
+  const projectDir = args.projectDir;
+  await ensureReconciled(projectDir, ctx);
+  const records = await ctx.transactionJournal.list({ projectDir });
+  return ok({
+    projectDir: path.resolve(projectDir),
+    transactions: records.map(publicTransaction)
+  });
+}
+
+async function dispatchTransactionRollback(args, ctx) {
+  if (!ctx.transactionJournal) {
+    return failure('JOURNAL_NOT_FOUND', 'Transaction journal is not configured.');
+  }
+  const projectDir = args.projectDir;
+  await ensureReconciled(projectDir, ctx);
+  return ok(await rollbackProjectTransaction({
+    projectDir,
+    transactionId: args.transactionId,
+    mutexRegistry: ctx.projectMutexRegistry,
+    journal: ctx.transactionJournal
+  }));
+}
+
+function publicTransaction(record) {
+  return {
+    transactionId: record.transactionId,
+    status: record.status,
+    beforeTransactionDigest: record.beforeTransactionDigest,
+    afterTransactionDigest: record.afterTransactionDigest,
+    proposal: record.proposal,
+    verification: sanitizeVerification(record.verification),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    changes: (record.changes ?? []).map((change) => ({
+      path: change.path,
+      operation: change.operation,
+      beforeHash: change.beforeHash
+    }))
+  };
+}
+
+function publicSimulateResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  const { stdout, stderr, ...rest } = result;
+  return rest;
+}
+
+function sanitizeStatus(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const out = {};
+  for (const key of ['ok', 'skipped', 'executed', 'status', 'required', 'errorCount']) {
+    if (entry[key] !== undefined) out[key] = entry[key];
+  }
+  if (entry.erc && typeof entry.erc === 'object' && typeof entry.erc.errorCount === 'number') {
+    out.erc = {
+      errorCount: entry.erc.errorCount,
+      warningCount: entry.erc.warningCount,
+      byType: entry.erc.byType
+    };
+  }
+  if (entry.drc && typeof entry.drc === 'object' && ('violationCount' in entry.drc || 'unconnectedCount' in entry.drc)) {
+    out.drc = {
+      violationCount: entry.drc.violationCount,
+      unconnectedCount: entry.drc.unconnectedCount,
+      byType: entry.drc.byType
+    };
+  }
+  if (entry.reason && typeof entry.reason === 'object') {
+    out.reason = {
+      code: entry.reason.code,
+      message: typeof entry.reason.message === 'string'
+        ? entry.reason.message.replace(/[A-Za-z]:\\[^\s"]+/g, '<redacted-path>').replace(/\/(?:tmp|temp|var)[^\s"]*/gi, '<redacted-path>')
+        : entry.reason.message
+    };
+  }
+  return out;
+}
+
+function sanitizeCandidateVerification(verification) {
+  if (!verification || typeof verification !== 'object') return verification;
+  return {
+    ...(verification.erc ? { erc: sanitizeStatus(verification.erc) } : {}),
+    ...(verification.drc ? { drc: sanitizeStatus(verification.drc) } : {})
+  };
+}
+
+function sanitizeValidation(validation) {
+  return sanitizeStatus(validation);
+}
+
+function sanitizeVerification(verification) {
+  if (!verification || typeof verification !== 'object') return verification;
+  return sanitizeCandidateVerification(verification);
+}
+
+function sanitizePreviewResult(preview) {
+  if (!preview || typeof preview !== 'object') return preview;
+  return {
+    ...preview,
+    candidateVerification: sanitizeCandidateVerification(preview.candidateVerification),
+    validation: sanitizeValidation(preview.validation)
+  };
+}
+
+function sanitizeApplyResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  return {
+    ...result,
+    validation: sanitizeValidation(result.validation),
+    verification: sanitizeVerification(result.verification)
   };
 }
 
