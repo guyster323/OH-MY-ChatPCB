@@ -1,15 +1,129 @@
-import { cp, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { collectArtifactInventory } from '../evidence/artifact-inventory.js';
-import { generateMcuPeripheralProject } from './generate-mcu-project.js';
+import { createPatchApprovalRegistry } from '../runtime/patch-approval-registry.js';
+import { createProjectMutexRegistry } from '../runtime/project-mutex-registry.js';
+import { createTransactionJournal } from '../runtime/transaction-journal.js';
+import { createNativeProposal, disposeNativeProposal, publicProposal } from './native-proposal-source.js';
+import { applyProjectTransaction } from './project-transaction.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { validateProject } from './validate-project.js';
 
-const applyLocks = new Set();
+const PATCH_REASON = {
+  PROPOSAL_STALE: 'PATCH_STALE',
+  PROPOSAL_MISSING: 'PATCH_APPROVAL_MISSING',
+  PROPOSAL_EXPIRED: 'PATCH_APPROVAL_EXPIRED'
+};
+
+function patchFailure(code, message, plan) {
+  return {
+    requiresApproval: false,
+    approved: true,
+    applied: false,
+    rolledBack: false,
+    files: plan?.targetFiles ?? {},
+    changedFiles: plan?.changedFiles ?? [],
+    diff: plan?.diff ?? '',
+    ...(plan ? { validation: plan.validation, review: plan.review } : {}),
+    reason: { code, message }
+  };
+}
+
+function candidateAllowsApply(plan) {
+  const required = plan.requiredValidation ?? {};
+  const verification = plan.candidateVerification ?? {};
+  if (required.erc && verification.erc?.status !== 'passed') return false;
+  if (required.drc && verification.drc?.status !== 'passed') return false;
+  return true;
+}
+
+function previewFrom(plan) {
+  const preview = publicProposal(plan);
+  return {
+    requiresApproval: true,
+    approved: false,
+    applied: false,
+    files: plan.targetFiles,
+    changedFiles: plan.changedFiles,
+    diff: plan.diff,
+    review: plan.review,
+    patchId: plan.proposalId,
+    proposalId: plan.proposalId,
+    why: preview.why,
+    what: preview.what,
+    components: preview.components,
+    nets: preview.nets,
+    risks: preview.risks,
+    verificationPlan: preview.verificationPlan,
+    candidateVerification: preview.candidateVerification,
+    artifactChanges: preview.artifactChanges,
+    beforeArtifacts: plan.beforeArtifacts,
+    afterArtifacts: plan.afterArtifacts,
+    beforeProjectDigest: plan.beforeProjectDigest,
+    afterProjectDigest: plan.afterProjectDigest,
+    beforeTransactionDigest: plan.baseTransactionDigest,
+    afterTransactionDigest: plan.afterTransactionDigest,
+    validation: plan.validation
+  };
+}
+
+function mapApplyResult(result, plan) {
+  if (result.applied) {
+    return {
+      requiresApproval: false,
+      approved: true,
+      applied: true,
+      rolledBack: false,
+      files: plan.targetFiles,
+      changedFiles: plan.changedFiles,
+      diff: plan.diff,
+      validation: plan.validation,
+      review: reviewCircuitReadiness({ spec: plan.proposed.spec, validation: plan.validation }),
+      transaction: result.transaction,
+      verification: result.verification
+    };
+  }
+
+  return {
+    requiresApproval: false,
+    approved: true,
+    applied: false,
+    rolledBack: result.rolledBack === true,
+    files: plan.targetFiles,
+    changedFiles: plan.changedFiles,
+    diff: plan.diff,
+    validation: plan.validation,
+    review: plan.review,
+    reason: {
+      code: PATCH_REASON[result.reason?.code] ?? result.reason?.code,
+      message: result.reason?.message
+    },
+    transaction: result.transaction,
+    verification: result.verification
+  };
+}
+
+export async function createSchematicPatchPlan({
+  projectDir,
+  prompt,
+  projectName = 'chatpcb_mcu_peripheral',
+  validateProjectImpl = validateProject,
+  context
+} = {}) {
+  return createNativeProposal({
+    projectDir: assertSafeProjectDir(projectDir),
+    request: { prompt },
+    projectName,
+    context,
+    validateCandidateImpl: validateProjectImpl
+  });
+}
+
+export async function disposeSchematicPatchPlan(plan) {
+  await disposeNativeProposal(plan);
+}
 
 export async function applySchematicPatch({
   projectDir,
@@ -19,7 +133,13 @@ export async function applySchematicPatch({
   cancel = false,
   expectedPatchId,
   patchPlan,
-  validateProjectImpl = validateProject
+  validateProjectImpl = validateProject,
+  verifyAppliedProjectImpl,
+  approvalRegistry,
+  mutexRegistry,
+  journal,
+  collectSnapshotImpl,
+  fsImpl
 } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
@@ -43,280 +163,73 @@ export async function applySchematicPatch({
     return patchFailure('PATCH_APPROVAL_REQUIRED', 'expectedPatchId is required to apply a patch preview.');
   }
 
-  const plan = patchPlan ?? await buildPatchPlan({
+  const plan = patchPlan ?? await createNativeProposal({
     projectDir: resolvedProjectDir,
-    prompt,
+    request: { prompt },
     projectName,
-    validateProjectImpl
+    validateCandidateImpl: validateProjectImpl
   });
   const ownsPlan = !patchPlan;
 
   if (!approved) {
-    const preview = {
-      requiresApproval: true,
-      approved: false,
-      applied: false,
-      files: plan.targetFiles,
-      changedFiles: plan.changedFiles,
-      diff: plan.diff,
-      review: plan.proposed.review,
-      patchId: plan.patchId,
-      beforeArtifacts: plan.beforeArtifacts,
-      afterArtifacts: plan.afterArtifacts,
-      beforeProjectDigest: plan.beforeProjectDigest,
-      afterProjectDigest: plan.afterProjectDigest,
-      validation: plan.validation
-    };
-    if (ownsPlan) await disposePatchPlan(plan);
+    const preview = previewFrom(plan);
+    if (ownsPlan) await disposeNativeProposal(plan);
     return preview;
   }
 
-  const currentInventory = await collectArtifactInventory({ projectDir: resolvedProjectDir });
-  if (
-    (expectedPatchId && expectedPatchId !== plan.patchId) ||
-    currentInventory.projectDigest !== plan.beforeProjectDigest
-  ) {
-    if (ownsPlan) await disposePatchPlan(plan);
-    return patchFailure('PATCH_STALE', 'Patch preview no longer matches the project artifacts.');
+  if (expectedPatchId && expectedPatchId !== plan.proposalId && expectedPatchId !== plan.patchId) {
+    if (ownsPlan) await disposeNativeProposal(plan);
+    return patchFailure('PATCH_STALE', 'Patch preview no longer matches the project artifacts.', plan);
   }
 
-  if (applyLocks.has(resolvedProjectDir)) {
-    throw new Error(`A schematic patch is already being applied to ${resolvedProjectDir}.`);
-  }
-
-  applyLocks.add(resolvedProjectDir);
-  try {
-    if (!plan.validation.ok) {
-      return rejectedCandidate(plan);
-    }
-
-    const snapshots = await snapshotFiles(plan.targetFiles);
-    await writePlannedFiles(plan);
-    const savedInventory = await collectArtifactInventory({ projectDir: resolvedProjectDir });
-    if (
-      savedInventory.projectDigest !== plan.afterProjectDigest ||
-      !artifactsMatch(await collectArtifacts(plan.targetFiles), plan.afterArtifacts)
-    ) {
-      await restoreSnapshots(snapshots);
-      return patchFailure('PATCH_FINAL_BYTES_MISMATCH', 'Saved project bytes did not match the approved candidate and were restored.', plan);
-    }
-
+  if (!candidateAllowsApply(plan)) {
+    if (ownsPlan) await disposeNativeProposal(plan);
     return {
       requiresApproval: false,
       approved: true,
-      applied: true,
+      applied: false,
       rolledBack: false,
       files: plan.targetFiles,
       changedFiles: plan.changedFiles,
       diff: plan.diff,
       validation: plan.validation,
-      review: reviewCircuitReadiness({ spec: plan.proposed.spec, validation: plan.validation })
-    };
-  } finally {
-    applyLocks.delete(resolvedProjectDir);
-    if (ownsPlan) await disposePatchPlan(plan);
-  }
-}
-
-export async function createSchematicPatchPlan({ projectDir, prompt, projectName = 'chatpcb_mcu_peripheral', validateProjectImpl = validateProject } = {}) {
-  return buildPatchPlan({ projectDir: assertSafeProjectDir(projectDir), prompt, projectName, validateProjectImpl });
-}
-
-export async function disposeSchematicPatchPlan(plan) {
-  await disposePatchPlan(plan);
-}
-
-async function buildPatchPlan({ projectDir, prompt, projectName, validateProjectImpl }) {
-  const createdRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-plan-'));
-  let tempDir = createdRoot;
-  try {
-    // Canonicalize only this internally created root so OS temp aliases
-    // (macOS /var, Windows junctions) do not fail ancestor-link checks.
-    tempDir = await realpath(createdRoot);
-    const candidateDir = path.join(tempDir, 'project');
-    await cp(projectDir, candidateDir, { recursive: true });
-    const proposed = await generateMcuPeripheralProject({ projectDir: candidateDir, prompt, projectName });
-    const validation = await validateProjectImpl({
-      projectDir: candidateDir,
-      excludeProjectDir: projectDir
-    });
-    const targetFiles = {};
-    const proposedFiles = {};
-
-    for (const [kind, proposedPath] of Object.entries(proposed.files)) {
-      const relativeName = path.relative(candidateDir, proposedPath);
-      targetFiles[kind] = path.join(projectDir, relativeName);
-      proposedFiles[kind] = proposedPath;
-    }
-
-    const changedFiles = [];
-    const diffSections = [];
-    const beforeArtifacts = [];
-    const afterArtifacts = [];
-
-    for (const [kind, targetPath] of Object.entries(targetFiles)) {
-      const proposedPath = proposedFiles[kind];
-      const [before, after] = await Promise.all([readOptional(targetPath), readFile(proposedPath, 'utf8')]);
-      const relativeName = path.relative(projectDir, targetPath).split(path.sep).join('/');
-      beforeArtifacts.push(artifactRecord(relativeName, before));
-      afterArtifacts.push(artifactRecord(relativeName, after));
-      if (before !== after) {
-        changedFiles.push(relativeName);
-        diffSections.push(renderUnifiedDiff(relativeName, before ?? '', after));
+      review: plan.review,
+      reason: {
+        code: 'PATCH_CANDIDATE_UNVERIFIED',
+        message: 'Required candidate ERC/DRC did not pass, so approval remains disabled.'
       }
-    }
-
-    const [beforeInventory, afterInventory] = await Promise.all([
-      collectArtifactInventory({ projectDir }),
-      collectArtifactInventory({ projectDir: candidateDir })
-    ]);
-    beforeArtifacts.sort(compareArtifacts);
-    afterArtifacts.sort(compareArtifacts);
-    changedFiles.sort();
-    const patchId = `sha256:${createHash('sha256').update(JSON.stringify({
-      projectDir,
-      beforeArtifacts,
-      afterArtifacts,
-      beforeProjectDigest: beforeInventory.projectDigest,
-      afterProjectDigest: afterInventory.projectDigest,
-      changedFiles
-    })).digest('hex')}`;
-
-    return {
-      tempDir,
-      candidateDir,
-      proposed,
-      proposedFiles,
-      targetFiles,
-      changedFiles,
-      diff: diffSections.join('\n'),
-      patchId,
-      beforeArtifacts,
-      afterArtifacts,
-      beforeProjectDigest: beforeInventory.projectDigest,
-      afterProjectDigest: afterInventory.projectDigest,
-      validation
     };
-  } catch (error) {
-    await rm(tempDir, { force: true, recursive: true });
-    if (tempDir !== createdRoot) {
-      await rm(createdRoot, { force: true, recursive: true });
-    }
-    throw error;
-  }
-}
-
-async function writePlannedFiles(plan) {
-  await mkdir(path.dirname(Object.values(plan.targetFiles)[0]), { recursive: true });
-
-  for (const [kind, targetPath] of Object.entries(plan.targetFiles)) {
-    await writeFile(targetPath, await readFile(plan.proposedFiles[kind], 'utf8'), 'utf8');
-  }
-}
-
-async function snapshotFiles(files) {
-  const snapshots = [];
-
-  for (const targetPath of Object.values(files)) {
-    snapshots.push({
-      path: targetPath,
-      content: await readOptional(targetPath)
-    });
   }
 
-  return snapshots;
-}
+  const ownsJournal = !journal;
+  const stateRoot = ownsJournal ? await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-journal-')) : null;
+  const approvals = approvalRegistry ?? createPatchApprovalRegistry();
+  const mutexes = mutexRegistry ?? createProjectMutexRegistry();
+  const txnJournal = journal ?? createTransactionJournal({ stateRoot });
 
-async function restoreSnapshots(snapshots) {
-  for (const snapshot of snapshots) {
-    if (snapshot.content === null) {
-      await rm(snapshot.path, { force: true });
-    } else {
-      await mkdir(path.dirname(snapshot.path), { recursive: true });
-      await writeFile(snapshot.path, snapshot.content, 'utf8');
-    }
-  }
-}
-
-async function readOptional(filePath) {
   try {
-    return await readFile(filePath, 'utf8');
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return null;
+    if (!approvalRegistry) {
+      approvals.register({
+        patchId: plan.proposalId,
+        projectDir: resolvedProjectDir,
+        ...plan,
+        plan
+      });
     }
-    throw error;
+
+    const result = await applyProjectTransaction({
+      projectDir: resolvedProjectDir,
+      proposalId: plan.proposalId,
+      approvalRegistry: approvals,
+      mutexRegistry: mutexes,
+      journal: txnJournal,
+      verifyAppliedProjectImpl,
+      collectSnapshotImpl,
+      fsImpl
+    });
+    return mapApplyResult(result, plan);
+  } finally {
+    if (ownsPlan) await disposeNativeProposal(plan);
+    if (ownsJournal && stateRoot) await rm(stateRoot, { force: true, recursive: true });
   }
-}
-
-async function collectArtifacts(targetFiles) {
-  const artifacts = await Promise.all(
-    Object.values(targetFiles).map(async (targetPath) => artifactRecord(path.basename(targetPath), await readOptional(targetPath)))
-  );
-  return artifacts.sort(compareArtifacts);
-}
-
-function artifactRecord(relativePath, content) {
-  return {
-    path: relativePath,
-    hash: content === null ? null : `sha256:${createHash('sha256').update(content).digest('hex')}`
-  };
-}
-
-function compareArtifacts(left, right) {
-  return left.path.localeCompare(right.path);
-}
-
-function artifactsMatch(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-async function disposePatchPlan(plan) {
-  await rm(plan.tempDir, { force: true, recursive: true });
-}
-
-function rejectedCandidate(plan) {
-  return {
-    requiresApproval: false,
-    approved: true,
-    applied: false,
-    rolledBack: true,
-    files: plan.targetFiles,
-    changedFiles: plan.changedFiles,
-    diff: plan.diff,
-    validation: plan.validation,
-    review: reviewCircuitReadiness({ spec: plan.proposed.spec, validation: plan.validation })
-  };
-}
-
-function patchFailure(code, message, plan) {
-  return {
-    requiresApproval: false,
-    approved: true,
-    applied: false,
-    rolledBack: false,
-    files: plan?.targetFiles ?? {},
-    changedFiles: plan?.changedFiles ?? [],
-    diff: plan?.diff ?? '',
-    ...(plan ? { validation: plan.validation, review: reviewCircuitReadiness({ spec: plan.proposed.spec, validation: plan.validation }) } : {}),
-    reason: { code, message }
-  };
-}
-
-function renderUnifiedDiff(relativeName, before, after) {
-  return [
-    `--- ${relativeName}`,
-    `+++ ${relativeName}`,
-    '@@',
-    ...prefixLines(before, '-'),
-    ...prefixLines(after, '+')
-  ].join('\n');
-}
-
-function prefixLines(value, prefix) {
-  const lines = value.split('\n');
-  if (lines.at(-1) === '') {
-    lines.pop();
-  }
-  return lines.map((line) => `${prefix}${line}`);
 }

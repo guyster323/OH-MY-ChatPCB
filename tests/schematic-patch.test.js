@@ -6,13 +6,25 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
+import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
+import { createNativeProposal, disposeNativeProposal } from '../src/workflow/native-proposal-source.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
+
+const passingVerify = async () => ({
+  erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
+  drc: { ok: true, skipped: true }
+});
 
 async function applyApprovedPatch(options) {
   const plan = await createSchematicPatchPlan(options);
   try {
-    return await applySchematicPatch({ ...options, approved: true, expectedPatchId: plan.patchId, patchPlan: plan });
+    return await applySchematicPatch({
+      ...options,
+      approved: true,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan,
+      verifyAppliedProjectImpl: options.verifyAppliedProjectImpl ?? passingVerify
+    });
   } finally {
     await disposeSchematicPatchPlan(plan);
   }
@@ -31,7 +43,8 @@ test('schematic patch preview returns a diff without modifying existing project 
     const preview = await applySchematicPatch({
       projectDir: root,
       prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
-      approved: false
+      approved: false,
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
     });
 
     assert.equal(preview.requiresApproval, true);
@@ -39,6 +52,8 @@ test('schematic patch preview returns a diff without modifying existing project 
     assert.ok(preview.diff.includes('--- chatpcb_mcu_peripheral.chatpcb.json'));
     assert.ok(preview.diff.includes('+++ chatpcb_mcu_peripheral.chatpcb.json'));
     assert.ok(preview.changedFiles.includes('chatpcb_mcu_peripheral.chatpcb.json'));
+    assert.equal(typeof preview.why, 'string');
+    assert.ok(preview.why.length > 0);
     assert.equal(await readFile(initial.files.spec, 'utf8'), before);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -94,7 +109,11 @@ test('approved schematic patch rejects a preview after project artifacts change'
       prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
     });
     const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
-    const plan = await createSchematicPatchPlan({ projectDir: root, prompt });
+    const plan = await createSchematicPatchPlan({
+      projectDir: root,
+      prompt,
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+    });
     await appendFile(initial.files.schematic, '\n(user edit)\n');
 
     const result = await applySchematicPatch({
@@ -103,7 +122,8 @@ test('approved schematic patch rejects a preview after project artifacts change'
       approved: true,
       expectedPatchId: plan.patchId,
       patchPlan: plan,
-      validateProjectImpl: async () => ({ ok: true })
+      validateProjectImpl: async () => ({ ok: true }),
+      verifyAppliedProjectImpl: passingVerify
     });
 
     assert.equal(result.applied, false);
@@ -124,7 +144,11 @@ test('approved schematic patch becomes stale when an unchanged tracked artifact 
       prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
     });
     const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
-    const plan = await createSchematicPatchPlan({ projectDir: root, prompt });
+    const plan = await createSchematicPatchPlan({
+      projectDir: root,
+      prompt,
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+    });
     const unrelatedSchematic = path.join(root, 'user-sheet.kicad_sch');
     await appendFile(unrelatedSchematic, '(user-authored-sheet)\n');
 
@@ -133,7 +157,8 @@ test('approved schematic patch becomes stale when an unchanged tracked artifact 
       prompt,
       approved: true,
       expectedPatchId: plan.patchId,
-      patchPlan: plan
+      patchPlan: plan,
+      verifyAppliedProjectImpl: passingVerify
     });
 
     assert.equal(result.applied, false);
@@ -169,18 +194,19 @@ test('approved schematic patch writes the KiCad-normalized candidate bytes it pr
       patchPlan: plan,
       validateProjectImpl: async () => {
         throw new Error('the authoritative project must not be revalidated after candidate approval');
-      }
+      },
+      verifyAppliedProjectImpl: passingVerify
     });
 
     assert.equal(result.applied, true);
     assert.match(await readFile(path.join(root, 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8'), /kicad-cli-normalized/);
-    const saved = await collectArtifactInventory({ projectDir: root });
+    const saved = await collectTransactionInventory({ projectDir: root });
     const finalSchematic = await readFile(path.join(root, 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8');
     assert.equal(
       preview.afterArtifacts.find((artifact) => artifact.path === 'chatpcb_mcu_peripheral.kicad_sch')?.hash,
       `sha256:${createHash('sha256').update(finalSchematic).digest('hex')}`
     );
-    assert.equal(saved.projectDigest, preview.afterProjectDigest);
+    assert.equal(saved.transactionDigest, preview.afterProjectDigest);
     await disposeSchematicPatchPlan(plan);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -212,8 +238,8 @@ test('canceled schematic patch leaves the project unchanged without building a d
   }
 });
 
-test('approved schematic patch rolls back files when validation fails', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-rollback-'));
+test('failed candidate verification disables approval without writing live files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-candidate-unverified-'));
 
   try {
     const initial = await generateMcuPeripheralProject({
@@ -229,8 +255,38 @@ test('approved schematic patch rolls back files when validation fails', async ()
     });
 
     assert.equal(result.applied, false);
-    assert.equal(result.rolledBack, true);
+    assert.equal(result.rolledBack, false);
+    assert.equal(result.reason.code, 'PATCH_CANDIDATE_UNVERIFIED');
     assert.equal(result.validation.ok, false);
+    assert.equal(await readFile(initial.files.spec, 'utf8'), before);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('transaction verification failure restores live files after a write', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-txn-restore-'));
+
+  try {
+    const initial = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
+    });
+    const before = await readFile(initial.files.spec, 'utf8');
+
+    const result = await applyApprovedPatch({
+      projectDir: root,
+      prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      verifyAppliedProjectImpl: async () => ({
+        erc: { ok: false, skipped: false, executed: true, erc: { errorCount: 1, warningCount: 0 } },
+        drc: { ok: true, skipped: true }
+      })
+    });
+
+    assert.equal(result.applied, false);
+    assert.equal(result.rolledBack, true);
+    assert.equal(result.reason.code, 'VERIFICATION_FAILED');
     assert.equal(await readFile(initial.files.spec, 'utf8'), before);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -262,6 +318,47 @@ test('approved schematic patch returns readiness review after validation reruns'
     assert.ok(result.review.findings.blockers.some((finding) => /footprint/i.test(finding.message)));
     assert.ok(result.review.findings.blockers.some((finding) => /JLCPCB/i.test(finding.message)));
     assert.ok(result.review.residualRisks.some((risk) => /not release-ready/i.test(risk)));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('last schematic delete stays fail-closed as VERIFICATION_UNAVAILABLE', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-patch-last-sch-delete-'));
+
+  try {
+    const initial = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and LED.'
+    });
+    const before = await readFile(initial.files.schematic, 'utf8');
+    const plan = await createNativeProposal({
+      projectDir: root,
+      request: { prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.' },
+      validateCandidateImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      generateProjectImpl: async (options) => {
+        const generated = await generateMcuPeripheralProject(options);
+        await rm(generated.files.schematic, { force: true });
+        delete generated.files.schematic;
+        return generated;
+      }
+    });
+
+    try {
+      const result = await applySchematicPatch({
+        projectDir: root,
+        approved: true,
+        expectedPatchId: plan.patchId,
+        patchPlan: plan
+      });
+
+      assert.equal(result.applied, false);
+      assert.equal(result.rolledBack, true);
+      assert.equal(result.reason.code, 'VERIFICATION_UNAVAILABLE');
+      assert.equal(await readFile(initial.files.schematic, 'utf8'), before);
+    } finally {
+      await disposeNativeProposal(plan);
+    }
   } finally {
     await rm(root, { force: true, recursive: true });
   }
