@@ -67,7 +67,7 @@
 
 - [ ] **Step 1: Write allowlist, ordering, and digest tests**
 
-Create a temporary project containing `.kicad_pro`, root and nested `.kicad_sch`, `.kicad_pcb`, `.kicad_sym`, `.kicad_mod`, `.kicad_dru`, `.chatpcb.json`, `.cir`, both library tables, `.kicad_prl`, and ERC/DRC reports. Assert the first ten kinds are included, transient/report files are excluded, paths use `/`, and repeated inventories are byte-identical.
+Create a temporary project containing `.kicad_pro`, root and nested `.kicad_sch`, `.kicad_pcb`, `.kicad_sym`, `.kicad_mod`, `.kicad_dru`, `.chatpcb.json`, `.cir`, both library tables, `.kicad_prl`, and ERC/DRC reports. Assert every allowlisted kind is included, transient/report files are excluded, paths use `/`, and repeated inventories are byte-identical.
 
 ```js
 const first = await collectTransactionInventory({ projectDir: root });
@@ -292,7 +292,7 @@ git commit -m "feat: persist project transaction journals"
 
 **Interfaces:**
 
-- Produces `applyProjectTransaction({ projectDir, proposalId, approvalRegistry, mutexRegistry, journal, inspectAppliedProjectImpl, fsImpl })`.
+- Produces `applyProjectTransaction({ projectDir, proposalId, approvalRegistry, mutexRegistry, journal, verifyAppliedProjectImpl, fsImpl })`.
 - Produces `rollbackProjectTransaction({ projectDir, transactionId, mutexRegistry, journal, collectSnapshotImpl, fsImpl })`.
 - Adds optional `schematicPath` to `validateProject` and `boardPath` to `validateBoard`; absence retains current first-file CLI behavior.
 
@@ -315,8 +315,9 @@ const result = await applyProjectTransaction({
   approvalRegistry,
   mutexRegistry,
   journal,
-  inspectAppliedProjectImpl: async () => ({
-    validation: { erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } }, drc: { ok: true, skipped: true } }
+  verifyAppliedProjectImpl: async () => ({
+    erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
+    drc: { ok: true, skipped: true }
   })
 });
 assert.equal(result.applied, true);
@@ -351,7 +352,7 @@ async function restoreChanges({ projectDir, changes, fsImpl }) {
 
 - [ ] **Step 6: Implement skip-aware required verification**
 
-Determine validation targets from changed artifacts. Require ERC for changed `.kicad_sch`; require DRC for changed `.kicad_pcb`. `ok: true, skipped: true` becomes `VERIFICATION_UNAVAILABLE`. Verification receives a copied applied state through `inspectAppliedProjectImpl`; it never runs upgrade/refill against the live path.
+Determine validation targets from changed artifacts. Require ERC for changed `.kicad_sch`; require DRC for changed `.kicad_pcb`. `ok: true, skipped: true` becomes `VERIFICATION_UNAVAILABLE`. The default `verifyAppliedProjectImpl` creates a canonical disposable copy with `copyInspectionTree`, invokes `validateProject`/`validateBoard` there with explicit target paths, waits for both with `Promise.allSettled`, and removes the copy in `finally`; it never runs upgrade/refill against the live path.
 
 - [ ] **Step 7: Add table-driven failure injection tests**
 
@@ -576,7 +577,7 @@ const coverage = {
 
 - [ ] **Step 6: Integrate optional selection into inspection**
 
-After bound facts/findings are finalized, attach `context: buildSelectionEvidence(...)` only when `options.selection` is present. Add `transactionDigest` from Task 1 to the context project block without changing evidence freshness calculations.
+After bound facts/findings are finalized, attach `context: buildSelectionEvidence(...)` only when `options.selection` is present. Add `transactionDigest` from Task 1 to the context project block without changing evidence freshness calculations. Compute a final transaction inventory after analysis and discard the selection context with `CONTEXT_INPUT_CHANGED` if either evidence or transaction digest moved during inspection.
 
 - [ ] **Step 7: Run focused analyzer/inspection tests**
 
@@ -688,7 +689,7 @@ Assert markup contains selection summary, coverage, proposal Why/What/Files/Comp
 
 - [ ] **Step 2: Update the mock-host E2E expectation before production code**
 
-Change the fake host to echo request IDs and return one selected `U1` plus global label `+3V3`. Change initial Send expectation from generated/applied to proposal preview with no live artifact change. Then click Approve, return a passing schematic-only transaction, assert structured proposal/diff was visible before apply, and click Rollback to restore the fixture bytes.
+Change the fake host to echo request IDs and return one selected `U1` plus global label `+3V3`. Use the schematic-only Korean request `STM32와 3.3V 전원, 상태 LED 회로를 만들어줘`. Change initial Send expectation from generated/applied to proposal preview with no live artifact change. Then click Approve, return a passing schematic-only transaction, assert structured proposal/diff was visible before apply, and click Rollback to restore the fixture bytes. Add a separate supported-profile board fixture whose incomplete DRC leaves the proposal reviewable but Approve disabled.
 
 - [ ] **Step 3: Run panel tests and confirm failure**
 
