@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -55,6 +55,61 @@ test('validateBoard runs refillable KiCad PCB DRC and parses a clean report', as
     assert.equal(calls[0].options.explicitPath, 'C:/KiCad/bin/kicad-cli.exe');
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateBoard uses an explicit boardPath instead of the first readdir file', async () => {
+  const root = await makeProject();
+  await writeFile(path.join(root, 'zzz.kicad_pcb'), '(kicad_pcb explicit)\n', 'utf8');
+
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const boards = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.kicad_pcb')).map((entry) => entry.name);
+    const firstName = boards[0];
+    const explicitName = boards.find((name) => name !== firstName);
+    const explicitPath = path.join(root, explicitName);
+    const calls = [];
+    const result = await validateBoard({
+      projectDir: root,
+      boardPath: explicitPath,
+      runKicadCliImpl: async (args, options) => {
+        calls.push({ args, options });
+        return successfulRunner({ violations: [], unconnected_items: [] })(args, options);
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, false);
+    assert.equal(calls[0].args.at(-1), explicitPath);
+    assert.notEqual(path.basename(calls[0].args.at(-1)), firstName);
+    assert.notEqual(calls[0].args.at(-1), path.join(root, firstName));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateBoard rejects an explicit boardPath that escapes the project', async () => {
+  const root = await makeProject();
+  const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-board-outside-'));
+  await writeFile(path.join(outside, 'stolen.kicad_pcb'), '(kicad_pcb)\n', 'utf8');
+
+  try {
+    await assert.rejects(
+      validateBoard({
+        projectDir: root,
+        boardPath: path.join(outside, 'stolen.kicad_pcb'),
+        runKicadCliImpl: async () => {
+          throw new Error('kicad-cli should not run');
+        }
+      }),
+      (error) => {
+        assert.equal(error.code, 'UNSAFE_VALIDATION_TARGET');
+        return true;
+      }
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+    await rm(outside, { force: true, recursive: true });
   }
 });
 

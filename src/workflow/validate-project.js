@@ -3,14 +3,23 @@ import path from 'node:path';
 
 import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertInspectionTree } from './inspection-copy.js';
+import { isInside } from './project-workspace.js';
 
-export async function validateProject({ projectDir, kicadCliPath, excludeProjectDir, runKicadCliImpl = runKicadCli } = {}) {
+export async function validateProject({
+  projectDir,
+  kicadCliPath,
+  excludeProjectDir,
+  schematicPath,
+  runKicadCliImpl = runKicadCli
+} = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
   const resolvedProjectDir = await assertInspectionTree(projectDir);
-  const schematic = await findFirst(resolvedProjectDir, '.kicad_sch');
+  const schematic = schematicPath
+    ? resolveValidationTarget(resolvedProjectDir, schematicPath)
+    : await findFirst(resolvedProjectDir, '.kicad_sch');
   if (!schematic) {
     return skipped('NO_SCHEMATIC', `No .kicad_sch file found in ${resolvedProjectDir}.`);
   }
@@ -84,6 +93,23 @@ export async function validateProject({ projectDir, kicadCliPath, excludeProject
     }
     return skipped('KICAD_CLI_UNAVAILABLE', error.message);
   }
+}
+
+function resolveValidationTarget(projectDir, targetPath) {
+  if (typeof targetPath !== 'string' || targetPath.trim().length === 0) {
+    const error = new Error('Validation target path is required.');
+    error.code = 'UNSAFE_VALIDATION_TARGET';
+    throw error;
+  }
+
+  const resolved = path.resolve(projectDir, targetPath);
+  if (resolved !== projectDir && !isInside(projectDir, resolved)) {
+    const error = new Error('Validation target must remain inside the project directory.');
+    error.code = 'UNSAFE_VALIDATION_TARGET';
+    throw error;
+  }
+
+  return resolved;
 }
 
 async function findFirst(projectDir, extension) {

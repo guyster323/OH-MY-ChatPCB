@@ -3,14 +3,23 @@ import path from 'node:path';
 
 import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertInspectionTree } from './inspection-copy.js';
+import { isInside } from './project-workspace.js';
 
-export async function validateBoard({ projectDir, kicadCliPath, excludeProjectDir, runKicadCliImpl = runKicadCli } = {}) {
+export async function validateBoard({
+  projectDir,
+  kicadCliPath,
+  excludeProjectDir,
+  boardPath,
+  runKicadCliImpl = runKicadCli
+} = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
   const resolvedProjectDir = await assertInspectionTree(projectDir);
-  const board = await findFirst(resolvedProjectDir, '.kicad_pcb');
+  const board = boardPath
+    ? resolveValidationTarget(resolvedProjectDir, boardPath)
+    : await findFirst(resolvedProjectDir, '.kicad_pcb');
   if (!board) {
     return skipped('NO_BOARD', `No .kicad_pcb file found in ${resolvedProjectDir}.`);
   }
@@ -82,6 +91,23 @@ export async function validateBoard({ projectDir, kicadCliPath, excludeProjectDi
       }
     };
   }
+}
+
+function resolveValidationTarget(projectDir, targetPath) {
+  if (typeof targetPath !== 'string' || targetPath.trim().length === 0) {
+    const error = new Error('Validation target path is required.');
+    error.code = 'UNSAFE_VALIDATION_TARGET';
+    throw error;
+  }
+
+  const resolved = path.resolve(projectDir, targetPath);
+  if (resolved !== projectDir && !isInside(projectDir, resolved)) {
+    const error = new Error('Validation target must remain inside the project directory.');
+    error.code = 'UNSAFE_VALIDATION_TARGET';
+    throw error;
+  }
+
+  return resolved;
 }
 
 async function findFirst(projectDir, extension) {

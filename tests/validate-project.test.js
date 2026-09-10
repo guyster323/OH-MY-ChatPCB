@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -138,6 +138,74 @@ test('validateProject fails when the ERC report is missing or not valid JSON', a
     assert.equal(result.erc.warningCount, 0);
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateProject uses an explicit schematicPath instead of the first readdir file', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-explicit-'));
+  await writeFile(path.join(root, 'aaa.kicad_sch'), '(kicad_sch first)\n', 'utf8');
+  await writeFile(path.join(root, 'zzz.kicad_sch'), '(kicad_sch explicit)\n', 'utf8');
+
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const schematics = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.kicad_sch')).map((entry) => entry.name);
+    const firstName = schematics[0];
+    const explicitName = schematics.find((name) => name !== firstName);
+    const explicitPath = path.join(root, explicitName);
+    const calls = [];
+    const result = await validateProject({
+      projectDir: root,
+      schematicPath: explicitPath,
+      runKicadCliImpl: async (args, options) => {
+        calls.push({ args, options });
+        if (args[1] === 'erc') {
+          const reportPath = args[args.indexOf('--output') + 1];
+          await writeFile(reportPath, JSON.stringify({ sheets: [] }), 'utf8');
+        }
+        return {
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          command: 'fake-kicad-cli',
+          source: 'test'
+        };
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, false);
+    assert.equal(calls[0].args.at(-1), explicitPath);
+    assert.equal(calls[1].args.at(-1), explicitPath);
+    assert.notEqual(path.basename(calls[0].args.at(-1)), firstName);
+    assert.notEqual(calls[0].args.at(-1), path.join(root, firstName));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateProject rejects an explicit schematicPath that escapes the project', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-escape-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-validate-outside-'));
+  await writeFile(path.join(root, 'demo.kicad_sch'), '(kicad_sch)\n', 'utf8');
+  await writeFile(path.join(outside, 'stolen.kicad_sch'), '(kicad_sch)\n', 'utf8');
+
+  try {
+    await assert.rejects(
+      validateProject({
+        projectDir: root,
+        schematicPath: path.join(outside, 'stolen.kicad_sch'),
+        runKicadCliImpl: async () => {
+          throw new Error('kicad-cli should not run');
+        }
+      }),
+      (error) => {
+        assert.equal(error.code, 'UNSAFE_VALIDATION_TARGET');
+        return true;
+      }
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+    await rm(outside, { force: true, recursive: true });
   }
 });
 
