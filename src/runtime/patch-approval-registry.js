@@ -60,6 +60,21 @@ export function createPatchApprovalRegistry({
     }
   }
 
+  function inspectActive({ patchId, projectDir }) {
+    const record = approvals.get(patchId);
+    if (!record) {
+      return { ok: false, record: null, reason: { code: 'PATCH_APPROVAL_MISSING', message: 'Patch approval was not found.' } };
+    }
+    if (record.status === 'expired' || now() >= record.expiresAt) {
+      expire(record);
+      return { ok: false, record, reason: { code: 'PATCH_APPROVAL_EXPIRED', message: 'Patch approval has expired.' } };
+    }
+    if (record.projectDir !== path.resolve(projectDir)) {
+      return { ok: false, record, reason: { code: 'PATCH_STALE', message: 'Patch approval belongs to a different project.' } };
+    }
+    return { ok: true, record };
+  }
+
   return {
     register(record) {
       purgeExpiredTombstones();
@@ -81,21 +96,21 @@ export function createPatchApprovalRegistry({
       return normalized;
     },
 
+    peek({ patchId, projectDir }) {
+      const result = inspectActive({ patchId, projectDir });
+      if (!result.ok) return { ok: false, reason: result.reason };
+      return { ok: true, record: result.record };
+    },
+
     consume({ patchId, projectDir }) {
-      const record = approvals.get(patchId);
-      if (!record) return { ok: false, reason: { code: 'PATCH_APPROVAL_MISSING', message: 'Patch approval was not found.' } };
-      if (record.status === 'expired' || now() >= record.expiresAt) {
-        expire(record);
-        remove(record);
-        return { ok: false, reason: { code: 'PATCH_APPROVAL_EXPIRED', message: 'Patch approval has expired.' } };
-      }
-      if (record.projectDir !== path.resolve(projectDir)) {
-        remove(record);
-        return { ok: false, reason: { code: 'PATCH_STALE', message: 'Patch approval belongs to a different project.' } };
+      const result = inspectActive({ patchId, projectDir });
+      if (!result.ok) {
+        if (result.reason.code === 'PATCH_APPROVAL_EXPIRED' && result.record) remove(result.record);
+        return { ok: false, reason: result.reason };
       }
       approvals.delete(patchId);
-      clearTimer(record, 'timer');
-      return { ok: true, record };
+      clearTimer(result.record, 'timer');
+      return { ok: true, record: result.record };
     },
 
     dispose({ patchId }) {

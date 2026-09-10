@@ -69,6 +69,62 @@ test('patch approval registry absorbs rejected asynchronous disposal from expiry
   assert.equal(registry.consume({ patchId: 'sha256:reject', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
 });
 
+test('patch approval registry peeks without consuming and retains a wrong-project record', () => {
+  let disposed = 0;
+  const registry = createPatchApprovalRegistry();
+  registry.register({
+    patchId: 'sha256:abc',
+    projectDir: 'C:/project',
+    dispose: () => { disposed += 1; }
+  });
+
+  const firstPeek = registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/project' });
+  const secondPeek = registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/project' });
+  assert.equal(firstPeek.ok, true);
+  assert.equal(secondPeek.ok, true);
+  assert.equal(firstPeek.record.patchId, 'sha256:abc');
+  assert.equal(secondPeek.record, firstPeek.record);
+  assert.equal(disposed, 0);
+
+  const wrongPeek = registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/other' });
+  const wrongConsume = registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/other' });
+  assert.equal(wrongPeek.ok, false);
+  assert.equal(wrongPeek.reason.code, 'PATCH_STALE');
+  assert.equal(wrongConsume.ok, false);
+  assert.equal(wrongConsume.reason.code, 'PATCH_STALE');
+  assert.equal(disposed, 0);
+
+  const consumed = registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/project' });
+  assert.equal(consumed.ok, true);
+  assert.equal(consumed.record.patchId, 'sha256:abc');
+  assert.equal(disposed, 0);
+  assert.equal(registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_MISSING');
+  assert.equal(registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_MISSING');
+});
+
+test('patch approval registry peek expires and disposes without consuming the tombstone', () => {
+  let time = 1000;
+  let disposed = 0;
+  const registry = createPatchApprovalRegistry({
+    ttlMs: 10,
+    now: () => time
+  });
+  registry.register({
+    patchId: 'sha256:abc',
+    projectDir: 'C:/project',
+    dispose: () => { disposed += 1; }
+  });
+  time = 1011;
+  assert.equal(registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
+  assert.equal(disposed, 1);
+  assert.equal(registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
+  assert.equal(disposed, 1);
+  assert.equal(registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_EXPIRED');
+  assert.equal(disposed, 1);
+  assert.equal(registry.peek({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_MISSING');
+  assert.equal(registry.consume({ patchId: 'sha256:abc', projectDir: 'C:/project' }).reason.code, 'PATCH_APPROVAL_MISSING');
+});
+
 test('patch approval registry bounds expired tombstones while preserving a short expiry result window', () => {
   let time = 1000;
   const timers = [];
