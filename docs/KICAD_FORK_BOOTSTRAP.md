@@ -21,8 +21,43 @@ The fork registers `window.chatpcbHost` as a wxWebView script-message handler. T
 - `project.open` supplies an absolute, existing `.kicad_pro` path. The host validates that normal KiCad project extension, resolves its same-basename `.kicad_sch`, and opens it through the current `SCH_EDIT_FRAME`; it does not start another KiCad executable. Every response normalizes `projectPath` to the containing project directory so it correlates with the panel's active project.
 - `project.status` asks the host to respond with `type`, the requested `projectPath`, the editor's `dirty` state, and a `linkState` of `linked` or `unlinked`.
 - `project.reload` asks the current schematic editor to reload the linked project from disk. A successful response has `type: "project.reload"`, `linkState: "reloaded"`, and `completed: true`.
+- `selection.get` asks the schematic host for the current selection. The response type is `selection.context`.
+
+Every host request may include an optional `requestId`. When that field is present and non-empty, `project.status`, `project.reload`, and `selection.context` responses echo the same `requestId`. Requests without `requestId` keep the previous response shape.
+
+A `selection.context` payload has this shape:
+
+```json
+{
+  "type": "selection.context",
+  "requestId": "selection_<uuid>",
+  "projectPath": "C:/absolute/project-directory",
+  "editor": "schematic",
+  "dirty": false,
+  "sheet": "/Power",
+  "items": [
+    {
+      "kind": "symbol",
+      "kiid": "stable-kicad-uuid",
+      "reference": "U1",
+      "position": { "x": 101.6, "y": 76.2 }
+    },
+    {
+      "kind": "global_label",
+      "kiid": "stable-kicad-uuid-if-available",
+      "text": "+3V3",
+      "position": { "x": 111.76, "y": 76.2 }
+    }
+  ],
+  "diagnostics": []
+}
+```
+
+Supported item kinds are `symbol`, `label`, `global_label`, and `hierarchical_label`. Other selected objects are omitted and reported with `KICAD_SELECTION_UNSUPPORTED`. Symbol identity uses KiCad KIID plus reference; labels use KIID plus shown text. Positions are schematic millimetres from `schIUScale.IUTomm`, not raw internal units. The host constructs `window.postMessage` by JSON dump plus string concatenation so a percent character in values cannot corrupt the script.
 
 Opening or reloading is refused when the schematic editor contains unsaved changes. The host posts a `project.status` event with `dirty: true` and `linkState: "conflict"`; it never saves, discards, or overwrites those edits. The user must save or cancel the editor changes before asking ChatPCB to update or reload the project.
+
+The source contract is verified: the C++ drop-in names the official KiCad 10 selection APIs and correlated `requestId` responses. Compiled KiCad 10 selection remains unverified until the missing fork checkout is restored. Do not treat the source contract as a compiled host or interactive result.
 
 Official KiCad builds do not contain this fork panel. In that case the standalone browser fallback remains explicit: copy the displayed `.kicad_pro` path and open it manually in KiCad. The browser must not claim that KiCad was reloaded.
 

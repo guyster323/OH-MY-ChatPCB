@@ -45,6 +45,74 @@ test('project.open responses correlate with the panel active project directory',
   assert.match(openProject, /"projectPath"\s*,\s*ToUtf8\(\s*responsePath\s*\)/);
 });
 
+test('KiCad fork host protocol echoes requestId and captures schematic selection', async () => {
+  const header = await readFile('kicad-fork/chatpcb_panel/chatpcb_panel.h', 'utf8');
+  const implementation = await readFile('kicad-fork/chatpcb_panel/chatpcb_panel.cpp', 'utf8');
+
+  assert.match(header, /BuildSelectionContext\s*\(/);
+  assert.match(header, /PostHostEvent\s*\(\s*const nlohmann::json&\s+\w+,\s*const std::string&\s+\w+/);
+  assert.match(header, /OpenProject\s*\(\s*const wxString&\s+\w+,\s*const std::string&\s+\w+/);
+  assert.match(header, /ReloadActiveProject\s*\(\s*const wxString&\s+\w+,\s*const std::string&\s+\w+/);
+
+  assert.match(implementation, /"selection\.get"/);
+  assert.match(implementation, /"selection\.context"/);
+  assert.match(implementation, /SCH_SELECTION_TOOL/);
+  assert.match(implementation, /GetSelection\s*\(\s*\)/);
+  assert.match(implementation, /GetToolManager\s*\(\s*\)\s*->\s*GetTool\s*<\s*SCH_SELECTION_TOOL\s*>\s*\(\s*\)\s*->\s*GetSelection\s*\(\s*\)/);
+  assert.match(implementation, /case\s+SCH_SYMBOL_T/);
+  assert.match(implementation, /case\s+SCH_LABEL_T/);
+  assert.match(implementation, /case\s+SCH_GLOBAL_LABEL_T/);
+  assert.match(implementation, /case\s+SCH_HIER_LABEL_T/);
+  assert.match(implementation, /m_Uuid\.AsString\s*\(\s*\)/);
+  assert.match(implementation, /GetRef\(\s*&sheet,\s*false\s*\)/);
+  assert.match(implementation, /GetShownText\(\s*&sheet,\s*false\s*\)/);
+  assert.match(implementation, /schIUScale\.IUTomm/);
+  assert.match(implementation, /GetCurrentSheet\s*\(\s*\)/);
+  assert.match(implementation, /request\.value\(\s*"requestId"/);
+  assert.match(implementation, /#include\s*<tool\/tool_manager\.h>/);
+  assert.match(implementation, /#include\s*<tools\/sch_selection_tool\.h>/);
+  assert.match(implementation, /#include\s*<sch_symbol\.h>/);
+  assert.match(implementation, /#include\s*<sch_label\.h>/);
+  assert.match(implementation, /#include\s*<base_units\.h>/);
+  assert.match(implementation, /KICAD_SELECTION_UNSUPPORTED/);
+
+  const postHostEvent = implementation.slice(
+    implementation.indexOf('void CHATPCB_PANEL::PostHostEvent'),
+    implementation.indexOf('void CHATPCB_PANEL::OpenProject')
+  );
+  assert.match(postHostEvent, /\.dump\s*\(\s*\)/);
+  assert.match(postHostEvent, /wxT\(\s*"window\.postMessage\("\s*\)\s*\+\s*payload\s*\+\s*wxT\(\s*", '\*'\);"\s*\)/);
+  assert.doesNotMatch(postHostEvent, /wxString::Format/);
+  assert.match(postHostEvent, /"requestId"/);
+
+  const onScriptMessage = implementation.slice(
+    implementation.indexOf('void CHATPCB_PANEL::OnScriptMessage'),
+    implementation.indexOf('void CHATPCB_PANEL::PostHostEvent')
+  );
+  assert.match(onScriptMessage, /"project\.status"/);
+  assert.match(onScriptMessage, /"project\.reload"/);
+  assert.match(onScriptMessage, /"selection\.get"/);
+  assert.match(onScriptMessage, /PostHostEvent\s*\([\s\S]*requestId/);
+  assert.match(onScriptMessage, /BuildSelectionContext\s*\(\s*requestId/);
+
+  const openProject = implementation.slice(
+    implementation.indexOf('void CHATPCB_PANEL::OpenProject'),
+    implementation.indexOf('bool CHATPCB_PANEL::IsEditorDirty')
+  );
+  assert.match(openProject, /PostHostEvent\s*\([\s\S]*aRequestId/);
+
+  const reload = implementation.slice(
+    implementation.indexOf('void CHATPCB_PANEL::ReloadActiveProject'),
+    implementation.indexOf('void CHATPCB_PANEL::LoadPanel')
+  );
+  assert.match(reload, /PostHostEvent\s*\([\s\S]*aRequestId/);
+
+  for (const match of implementation.matchAll(/wxString::Format\s*\(([\s\S]*?)\)\s*;/g)) {
+    assert.doesNotMatch(match[1], /\.dump\s*\(/);
+    assert.doesNotMatch(match[1], /payload/);
+  }
+});
+
 test('KiCad fork bootstrap documents project opening and dirty conflict fallback', async () => {
   const bootstrap = await readFile('docs/KICAD_FORK_BOOTSTRAP.md', 'utf8');
 
@@ -55,4 +123,20 @@ test('KiCad fork bootstrap documents project opening and dirty conflict fallback
   assert.match(bootstrap, /unsaved|dirty/i);
   assert.match(bootstrap, /official KiCad/i);
   assert.match(bootstrap, /manual|browser fallback/i);
+});
+
+test('KiCad fork bootstrap documents correlated selection without claiming a compiled host', async () => {
+  const bootstrap = await readFile('docs/KICAD_FORK_BOOTSTRAP.md', 'utf8');
+
+  assert.match(bootstrap, /selection\.get/);
+  assert.match(bootstrap, /selection\.context/);
+  assert.match(bootstrap, /requestId/);
+  assert.match(bootstrap, /symbol/);
+  assert.match(bootstrap, /label/);
+  assert.match(bootstrap, /global_label/);
+  assert.match(bootstrap, /hierarchical_label/);
+  assert.match(bootstrap, /source contract/i);
+  assert.match(bootstrap, /compiled KiCad 10 selection remains unverified/i);
+  assert.match(bootstrap, /missing fork checkout/i);
+  assert.doesNotMatch(bootstrap, /interactive selection works/i);
 });

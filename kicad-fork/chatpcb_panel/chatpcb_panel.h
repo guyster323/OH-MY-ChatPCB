@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <wx/panel.h>
 #include <wx/process.h>
 #include <wx/webview.h>
@@ -19,10 +21,11 @@ public:
 private:
     void EnsureAgentRunning();
     void OnScriptMessage( wxWebViewEvent& aEvent );
-    void PostHostEvent( const nlohmann::json& aEvent );
-    void OpenProject( const wxString& aProjectPath );
+    void PostHostEvent( const nlohmann::json& aEvent, const std::string& aRequestId );
+    void OpenProject( const wxString& aProjectPath, const std::string& aRequestId );
     bool IsEditorDirty() const;
-    void ReloadActiveProject( const wxString& aProjectPath );
+    void ReloadActiveProject( const wxString& aProjectPath, const std::string& aRequestId );
+    void BuildSelectionContext( const std::string& aRequestId, const wxString& aProjectPath );
     wxString ResolvePanelUrl() const;
 
     SCH_EDIT_FRAME* m_frame;

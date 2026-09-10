@@ -1,9 +1,14 @@
 #include "chatpcb_panel.h"
 
+#include <base_units.h>
 #include <kiway_player.h>
 #include <project.h>
 #include <sch_edit_frame.h>
+#include <sch_label.h>
+#include <sch_symbol.h>
 #include <schematic.h>
+#include <tool/tool_manager.h>
+#include <tools/sch_selection_tool.h>
 
 #include <wx/filename.h>
 #include <wx/log.h>
@@ -111,6 +116,8 @@ CHATPCB_PANEL::~CHATPCB_PANEL()
 
 void CHATPCB_PANEL::OnScriptMessage( wxWebViewEvent& aEvent )
 {
+    std::string requestId;
+
     try
     {
         const nlohmann::json request =
@@ -121,10 +128,12 @@ void CHATPCB_PANEL::OnScriptMessage( wxWebViewEvent& aEvent )
             PostHostEvent( { { "type", "project.status" },
                              { "projectPath", "" },
                              { "dirty", IsEditorDirty() },
-                             { "linkState", "invalid" } } );
+                             { "linkState", "invalid" } },
+                           requestId );
             return;
         }
 
+        requestId = request.value( "requestId", std::string() );
         const std::string type = request.value( "type", "" );
         const wxString projectPath = wxString::FromUTF8(
                 request.value( "projectPath", std::string() ) );
@@ -140,22 +149,28 @@ void CHATPCB_PANEL::OnScriptMessage( wxWebViewEvent& aEvent )
                              { "dirty", IsEditorDirty() },
                              { "linkState", RequestedProjectIsActive( m_frame, responsePath )
                                                       ? "linked"
-                                                      : "unlinked" } } );
+                                                      : "unlinked" } },
+                           requestId );
         }
         else if( type == "project.open" )
         {
-            OpenProject( projectPath );
+            OpenProject( projectPath, requestId );
         }
         else if( type == "project.reload" && IsEditorDirty() )
         {
             PostHostEvent( { { "type", "project.status" },
                              { "projectPath", ToUtf8( projectPath ) },
                              { "linkState", "conflict" },
-                             { "dirty", true } } );
+                             { "dirty", true } },
+                           requestId );
         }
         else if( type == "project.reload" )
         {
-            ReloadActiveProject( projectPath );
+            ReloadActiveProject( projectPath, requestId );
+        }
+        else if( type == "selection.get" )
+        {
+            BuildSelectionContext( requestId, projectPath );
         }
     }
     catch( const nlohmann::json::exception& error )
@@ -164,19 +179,24 @@ void CHATPCB_PANEL::OnScriptMessage( wxWebViewEvent& aEvent )
         PostHostEvent( { { "type", "project.status" },
                          { "projectPath", "" },
                          { "dirty", IsEditorDirty() },
-                         { "linkState", "invalid" } } );
+                         { "linkState", "invalid" } },
+                       requestId );
     }
 }
 
-void CHATPCB_PANEL::PostHostEvent( const nlohmann::json& aEvent )
+void CHATPCB_PANEL::PostHostEvent( const nlohmann::json& aEvent, const std::string& aRequestId )
 {
-    const wxString script = wxString::Format(
-            wxT( "window.postMessage(%s, '*');" ),
-            wxString::FromUTF8( aEvent.dump() ) );
+    nlohmann::json event = aEvent;
+
+    if( !aRequestId.empty() )
+        event[ "requestId" ] = aRequestId;
+
+    const wxString payload = wxString::FromUTF8( event.dump() );
+    const wxString script = wxT( "window.postMessage(" ) + payload + wxT( ", '*');" );
     m_webView->RunScriptAsync( script );
 }
 
-void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
+void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath, const std::string& aRequestId )
 {
     wxFileName projectFile( aProjectPath );
     const wxString responsePath = projectFile.GetPath();
@@ -188,7 +208,8 @@ void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
         PostHostEvent( { { "type", "project.status" },
                          { "projectPath", ToUtf8( responsePath ) },
                          { "dirty", IsEditorDirty() },
-                         { "linkState", "invalid" } } );
+                         { "linkState", "invalid" } },
+                       aRequestId );
         return;
     }
 
@@ -197,7 +218,8 @@ void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
         PostHostEvent( { { "type", "project.status" },
                          { "projectPath", ToUtf8( responsePath ) },
                          { "dirty", true },
-                         { "linkState", "conflict" } } );
+                         { "linkState", "conflict" } },
+                       aRequestId );
         return;
     }
 
@@ -210,14 +232,16 @@ void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath )
         PostHostEvent( { { "type", "project.status" },
                          { "projectPath", ToUtf8( responsePath ) },
                          { "dirty", IsEditorDirty() },
-                         { "linkState", "error" } } );
+                         { "linkState", "error" } },
+                       aRequestId );
         return;
     }
 
     PostHostEvent( { { "type", "project.status" },
                      { "projectPath", ToUtf8( responsePath ) },
                      { "dirty", IsEditorDirty() },
-                     { "linkState", "linked" } } );
+                     { "linkState", "linked" } },
+                   aRequestId );
 }
 
 bool CHATPCB_PANEL::IsEditorDirty() const
@@ -225,14 +249,16 @@ bool CHATPCB_PANEL::IsEditorDirty() const
     return m_frame && m_frame->IsContentModified();
 }
 
-void CHATPCB_PANEL::ReloadActiveProject( const wxString& aProjectPath )
+void CHATPCB_PANEL::ReloadActiveProject( const wxString& aProjectPath,
+                                         const std::string& aRequestId )
 {
     if( !m_frame || IsEditorDirty() || !RequestedProjectIsActive( m_frame, aProjectPath ) )
     {
         PostHostEvent( { { "type", "project.reload" },
                          { "projectPath", ToUtf8( aProjectPath ) },
                          { "linkState", IsEditorDirty() ? "conflict" : "unlinked" },
-                         { "completed", false } } );
+                         { "completed", false } },
+                       aRequestId );
         return;
     }
 
@@ -243,7 +269,8 @@ void CHATPCB_PANEL::ReloadActiveProject( const wxString& aProjectPath )
         PostHostEvent( { { "type", "project.reload" },
                          { "projectPath", ToUtf8( aProjectPath ) },
                          { "linkState", "error" },
-                         { "completed", false } } );
+                         { "completed", false } },
+                       aRequestId );
         return;
     }
 
@@ -255,15 +282,112 @@ void CHATPCB_PANEL::ReloadActiveProject( const wxString& aProjectPath )
         PostHostEvent( { { "type", "project.reload" },
                          { "projectPath", ToUtf8( aProjectPath ) },
                          { "linkState", "reloaded" },
-                         { "completed", true } } );
+                         { "completed", true } },
+                       aRequestId );
     }
     else
     {
         PostHostEvent( { { "type", "project.reload" },
                          { "projectPath", ToUtf8( aProjectPath ) },
                          { "linkState", "error" },
-                         { "completed", false } } );
+                         { "completed", false } },
+                       aRequestId );
     }
+}
+
+void CHATPCB_PANEL::BuildSelectionContext( const std::string& aRequestId,
+                                           const wxString& aProjectPath )
+{
+    nlohmann::json items = nlohmann::json::array();
+    nlohmann::json diagnostics = nlohmann::json::array();
+    wxString sheetPath;
+    bool unsupported = false;
+
+    if( m_frame )
+    {
+        SCH_SHEET_PATH& sheet = m_frame->GetCurrentSheet();
+        sheetPath = sheet.PathHumanReadable();
+
+        if( m_frame->GetToolManager()
+            && m_frame->GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
+        {
+            SCH_SELECTION& selection =
+                    m_frame->GetToolManager()->GetTool<SCH_SELECTION_TOOL>()->GetSelection();
+
+            for( EDA_ITEM* selectedItem : selection )
+            {
+                if( !selectedItem )
+                    continue;
+
+                switch( selectedItem->Type() )
+                {
+                case SCH_SYMBOL_T:
+                {
+                    SCH_SYMBOL* symbol = static_cast<SCH_SYMBOL*>( selectedItem );
+                    const VECTOR2I position = symbol->GetPosition();
+                    items.push_back( {
+                        { "kind", "symbol" },
+                        { "kiid", ToUtf8( symbol->m_Uuid.AsString() ) },
+                        { "reference", ToUtf8( symbol->GetRef( &sheet, false ) ) },
+                        { "position",
+                          { { "x", schIUScale.IUTomm( position.x ) },
+                            { "y", schIUScale.IUTomm( position.y ) } } }
+                    } );
+                    break;
+                }
+
+                case SCH_LABEL_T:
+                case SCH_GLOBAL_LABEL_T:
+                case SCH_HIER_LABEL_T:
+                {
+                    SCH_LABEL_BASE* label = static_cast<SCH_LABEL_BASE*>( selectedItem );
+                    const char* kind = selectedItem->Type() == SCH_LABEL_T
+                                               ? "label"
+                                               : selectedItem->Type() == SCH_GLOBAL_LABEL_T
+                                                         ? "global_label"
+                                                         : "hierarchical_label";
+                    const VECTOR2I position = label->GetPosition();
+                    items.push_back( {
+                        { "kind", kind },
+                        { "kiid", ToUtf8( label->m_Uuid.AsString() ) },
+                        { "text", ToUtf8( label->GetShownText( &sheet, false ) ) },
+                        { "position",
+                          { { "x", schIUScale.IUTomm( position.x ) },
+                            { "y", schIUScale.IUTomm( position.y ) } } }
+                    } );
+                    break;
+                }
+
+                default:
+                    unsupported = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if( unsupported )
+    {
+        diagnostics.push_back( {
+            { "code", "KICAD_SELECTION_UNSUPPORTED" },
+            { "message", items.empty() ? "No supported selection anchors were captured."
+                                       : "Unsupported selection items were omitted." }
+        } );
+    }
+
+    nlohmann::json response = {
+        { "type", "selection.context" },
+        { "projectPath", ToUtf8( aProjectPath ) },
+        { "editor", "schematic" },
+        { "dirty", IsEditorDirty() },
+        { "items", items },
+        { "diagnostics", diagnostics }
+    };
+
+    if( !sheetPath.IsEmpty() )
+        response[ "sheet" ] = ToUtf8( sheetPath );
+
+    PostHostEvent( response, aRequestId );
 }
 
 void CHATPCB_PANEL::LoadPanel()
