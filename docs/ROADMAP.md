@@ -59,12 +59,27 @@ Status: complete for local CLI adapters.
 
 ## Phase 4: KiCad Fork Productization
 
-Status: source-level panel integration exists; packaging and rebase are open.
+Status: schematic-editor right-side panel is the product UI; installer packaging and rebase are open.
 
 - [x] Schematic-editor `CHATPCB_PANEL` skeleton
+- [x] This repository owns the wiring patch, panel sync, configure, and `npm run launch:kicad`
 - [ ] CMake/installer packaging in this repo
 - [ ] Windows/macOS/Linux smoke tests in CI
 - [ ] KiCad upstream rebase workflow
+
+## Electrical verification (EEBench)
+
+Status: not a drop-in [EEBench](https://eebench.org/) leaderboard run; this is the quality gate between schematic/profile drafts and manufacturing exports.
+
+EEBench V1 (atopile) grades 13 analog/digital tasks through deterministic SPICE and BOM cost (65% technical + 35% cost-efficiency). Agents submit `.ato` design bundles. The harness is not a KiCad GUI test, and V1 does not cover layout, Gerbers, or board bring-up. Public self-serve submissions are not open; held-out model runs go through atopile.
+
+ChatPCB cannot sit on that leaderboard today: it writes KiCad artifacts, not `.ato`, and local `ngspice` is often missing. It can still use the same requirements → design → simulation loop as an internal bar before Phase 5 manufacturing work.
+
+- [ ] SPICE-backed requirement checks on generated analog/power blocks (gain, hold-up, ripple, thresholds, worst-case tolerance corners)
+- [ ] Datasheet-backed part models and cost vs a reference BOM, with cost credit only after the circuit works
+- [ ] Typed skip when `ngspice` or a held-out EEBench pack is unavailable; never treat a skip as a pass
+- [ ] Optional later adapter: KiCad netlist → SPICE, and/or atopile `.ato` export for an official EEBench run
+- [ ] Do not start Gerber/drill/BOM manufacturing export until this gate is defined and the supported-profile boards are DRC-clean
 
 ## Phase 5: PCB and Manufacturing
 

@@ -59,6 +59,14 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     );
   }
 
+  if (spec.boardProfile?.kind === 'isolated-dcdc') {
+    addFinding(
+      findings.warnings,
+      'isolated-dcdc-example',
+      'This isolated DC-DC schematic is a topology placeholder; magnetics, regulation, protection, and isolation creepage are not designed.'
+    );
+  }
+
   if (spec.boardProfile?.kind === 'bms') {
     addFinding(
       findings.warnings,
@@ -102,6 +110,22 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
 
   if (spec.debug?.note) {
     addFinding(findings.notes, 'debug-profile', spec.debug.note);
+  }
+
+  if (spec.power?.topology) {
+    addFinding(findings.notes, 'power-topology', `Power topology: ${spec.power.topology}`);
+  }
+
+  if (spec.power?.integration) {
+    addFinding(findings.notes, 'product-integration', `Product integration: ${spec.power.integration}`);
+  }
+
+  if (spec.mcu?.package && spec.mcu.package !== 'unspecified') {
+    addFinding(findings.notes, 'mcu-part', `MCU part from spec interview: ${spec.mcu.package}`);
+  }
+
+  for (const note of spec.product?.designNotes ?? []) {
+    addFinding(findings.notes, `design-${note.slice(0, 24)}`, note);
   }
 
   if (spec.boardProfile?.id) {

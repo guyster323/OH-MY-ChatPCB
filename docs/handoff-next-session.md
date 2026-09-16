@@ -1,5 +1,12 @@
 # Handoff: OH-MY-ChatPCB
 
+## 2026-09-16 Review, workbench merge, and EEBench gate
+
+- Reviewed the 11 unpushed workbench commits and the uncommitted productization/conversation slice before push.
+- Workbench apply now runs candidate ERC and DRC; journal reconcile takes the project mutex; `project.inspect` forwards trusted panel selection.
+- Conversation follow-ups use the new prompt after a spec exists; isolated DC-DC matching requires isolation language; sourcing does not overwrite interview MPNs.
+- [EEBench](https://eebench.org/) is documented as the analog/power quality bar between KiCad fork productization and manufacturing exports. It is not a current ChatPCB leaderboard run: V1 grades atopile `.ato` + SPICE, not KiCad artifacts.
+
 ## 2026-09-03 Evidence foundation migration
 
 - The active architectural direction is the evidence-gated runtime rebuild: KiCad files are authoritative editable state; `.chatpcb.json` is an intent/evidence manifest.

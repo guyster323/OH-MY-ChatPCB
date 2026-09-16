@@ -26,6 +26,8 @@ test('KiCad fork bridge uses the active editor APIs and protects unsaved changes
   assert.match(implementation, /GetExt\s*\(\s*\).*CmpNoCase\s*\(\s*wxT\(\s*"kicad_pro"\s*\)\s*\)/s);
   assert.match(implementation, /OpenProjectFiles\s*\(/);
   assert.match(implementation, /IsContentModified\s*\(\s*\)/);
+  assert.match(implementation, /wxEVT_IDLE/);
+  assert.match(implementation, /OnIdle/);
   assert.match(implementation, /KICTL_REVERT/);
   assert.match(implementation, /"linkState"\s*,\s*"conflict"/);
   assert.match(implementation, /"completed"\s*,\s*true/);
@@ -39,7 +41,7 @@ test('project.open responses correlate with the panel active project directory',
     implementation.indexOf('bool CHATPCB_PANEL::IsEditorDirty')
   );
 
-  assert.match(panel, /message\.projectPath\s*!==\s*activeProject\?\.projectDir/);
+  assert.match(panel, /hostPathMatchesActive\s*\(\s*message\.projectPath\s*\)/);
   assert.match(openProject, /const wxString responsePath\s*=\s*projectFile\.GetPath\(\s*\)/);
   assert.doesNotMatch(openProject, /"projectPath"\s*,\s*ToUtf8\(\s*aProjectPath\s*\)/);
   assert.match(openProject, /"projectPath"\s*,\s*ToUtf8\(\s*responsePath\s*\)/);
@@ -137,6 +139,78 @@ test('KiCad fork bootstrap documents correlated selection without claiming a com
   assert.match(bootstrap, /hierarchical_label/);
   assert.match(bootstrap, /source contract/i);
   assert.match(bootstrap, /compiled KiCad 10 selection remains unverified/i);
-  assert.match(bootstrap, /missing fork checkout/i);
+  assert.match(bootstrap, /kicad-source-mirror-chatpcb/);
   assert.doesNotMatch(bootstrap, /interactive selection works/i);
+});
+
+test('product UI is the KiCad right-side ChatPCB panel, not a standalone web app', async () => {
+  const readme = await readFile('README.md', 'utf8');
+  const architecture = await readFile('docs/ARCHITECTURE.md', 'utf8');
+  const bootstrap = await readFile('docs/KICAD_FORK_BOOTSTRAP.md', 'utf8');
+  const panelReadme = await readFile('kicad-fork/README.md', 'utf8');
+
+  assert.match(readme, /right-side ChatPCB panel/);
+  assert.match(readme, /npm run launch:kicad/);
+  assert.match(readme, /standalone browser fallback/i);
+  assert.match(architecture, /product UI is the KiCad schematic editor's right-side ChatPCB panel/i);
+  assert.match(architecture, /not a standalone web application/i);
+  assert.match(bootstrap, /npm run launch:kicad/);
+  assert.match(panelReadme, /right-side ChatPCB panel/);
+  assert.match(panelReadme, /wxWebView/);
+});
+
+test('this repository owns the schematic-editor ChatPCB wiring patch', async () => {
+  const patch = await readFile('kicad-fork/integration/wire-chatpcb-panel.patch', 'utf8');
+
+  assert.match(patch, /m_chatPcbPanel = new CHATPCB_PANEL/);
+  assert.match(patch, /ChatPcbPaneName/);
+  assert.match(patch, /Caption\(\s*wxS\(\s*"ChatPCB"\s*\)\s*\)/);
+  assert.match(patch, /plugins\/chatpcb_panel\/chatpcb_panel\.cpp/);
+  assert.match(patch, /share\/chatpcb_panel/);
+  assert.match(patch, /eeschema\/sch_edit_frame\.cpp/);
+  assert.match(patch, /eeschema\/CMakeLists\.txt/);
+});
+
+test('launch script starts the ChatPCB-enabled schematic editor, not a browser product path', async () => {
+  const launch = await readFile('scripts/launch-kicad-chatpcb.ps1', 'utf8');
+  const sync = await readFile('scripts/sync-kicad-fork-panel.ps1', 'utf8');
+  const configure = await readFile('scripts/configure-kicad-fork.ps1', 'utf8');
+  const verifyKicad = await readFile('scripts/verify-kicad-panel.ps1', 'utf8');
+  const computerUseSkill = await readFile('.grok/skills/kicad-panel-computer-use/SKILL.md', 'utf8');
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+
+  assert.match(launch, /eeschema\.exe/);
+  assert.match(launch, /CHATPCB_PANEL_URL/);
+  assert.match(launch, /\?v=/);
+  assert.match(launch, /CHATPCB_CLI_COMMAND/);
+  assert.match(launch, /kicad-source-mirror-chatpcb/);
+  assert.match(launch, /start "ChatPCB KiCad"/);
+  assert.match(launch, /vcpkg_installed/);
+  assert.doesNotMatch(launch, /Start-Process ['"]https?:\/\//);
+  assert.match(sync, /plugins\\chatpcb_panel/);
+  assert.match(sync, /apps\\panel/);
+  assert.match(configure, /build\\chatpcb-vcpkg/);
+  assert.equal(packageJson.scripts['launch:kicad'], 'powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-kicad-chatpcb.ps1');
+  assert.equal(packageJson.scripts['sync:kicad-fork'], 'powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/sync-kicad-fork-panel.ps1');
+  assert.equal(packageJson.scripts['verify:kicad'], 'powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-kicad-panel.ps1');
+  assert.match(verifyKicad, /kicad-panel-computer-use/);
+  assert.match(computerUseSkill, /set-value/);
+  assert.match(computerUseSkill, /eeschema/);
+  assert.match(computerUseSkill, /Circuit request/);
+});
+
+test('KiCad panel honors CHATPCB_PANEL_URL before packaged share assets', async () => {
+  const implementation = await readFile('kicad-fork/chatpcb_panel/chatpcb_panel.cpp', 'utf8');
+  const resolve = implementation.slice(
+    implementation.indexOf('wxString CHATPCB_PANEL::ResolvePanelUrl'),
+    implementation.length
+  );
+
+  assert.match(resolve, /wxGetEnv\s*\(\s*wxT\(\s*"CHATPCB_PANEL_URL"/);
+  assert.match(resolve, /WithFileCacheBust/);
+  assert.match(resolve, /CHATPCB_PANEL_ASSET_URL/);
+  assert.ok(
+    resolve.indexOf('CHATPCB_PANEL_URL') < resolve.indexOf('CHATPCB_PANEL_ASSET_URL'),
+    'CHATPCB_PANEL_URL must be checked before the compile-time asset URL'
+  );
 });

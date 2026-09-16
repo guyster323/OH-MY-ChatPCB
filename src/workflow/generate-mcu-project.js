@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { normalizeCircuitSpec } from '../runtime/circuit-spec.js';
 import { applyBoardProfile } from '../runtime/board-profiles.js';
+import { applyProductDraft } from '../runtime/product-catalog.js';
+import { loadCircuitConversation } from '../runtime/request-conversation.js';
 import {
   buildMcuSchematicAst,
   renderKiCadBoard,
@@ -19,7 +21,8 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
     throw new Error('projectDir is required.');
   }
 
-  const spec = applyBoardProfile(normalizeCircuitSpec(prompt));
+  const conversation = await loadCircuitConversation(projectDir).catch(() => null);
+  const spec = applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation);
   const schematic = buildMcuSchematicAst(spec);
   const baseName = sanitizeProjectName(projectName);
   const boardFileName = `${baseName}.kicad_pcb`;

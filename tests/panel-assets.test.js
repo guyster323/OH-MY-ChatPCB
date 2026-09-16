@@ -21,6 +21,9 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="inspection-drc"/);
   assert.match(html, /id="approve-patch-button"/);
   assert.match(html, /id="kicad-link"/);
+  assert.match(html, /id="recheck-kicad-button"/);
+  assert.match(html, /id="conversation-log"/);
+  assert.match(html, /id="conversation-options"/);
   assert.doesNotMatch(html, /id="generate-button"/);
   assert.match(script, /project\.create/);
   assert.match(script, /project\.request/);
@@ -36,6 +39,28 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /approved: true, patchId: patchApprovalState\.patchId/);
   assert.match(script, /cancel: true, patchId: patchApprovalState\.patchId/);
   assert.match(script, /chatpcbHost/);
+  assert.match(script, /hostPathMatchesActive/);
+  assert.match(script, /startConflictWatch/);
+  assert.match(script, /visibilitychange/);
+  assert.match(script, /Circuit request is required/);
+  assert.match(script, /operation === 'clarify'/);
+  assert.match(script, /linkState !== 'unlinked'/);
+  assert.match(script, /KiCad changes need attention/);
+  assert.match(script, /showModal/);
+  assert.match(script, /hostPathMatchesActive\(pendingHostStatus\.projectPath\)/);
+  assert.match(script, /dataset\.help/);
+  assert.match(script, /option\.help/);
+  assert.match(script, /dataset\.recommended/);
+  assert.match(html, /status-dock/);
+  assert.match(html, /chat-column/);
+  assert.match(html, /id="pro-mode"/);
+  assert.match(html, /recommended choice/);
+  assert.match(html, /id="new-project-again"/);
+  assert.match(html, /styles\.css\?v=/);
+  assert.match(html, /panel\.js\?v=/);
+  assert.match(script, /proMode/);
+  assert.match(script, /renderConversation\(result\)/);
+  assert.match(script, /new-project-again/);
 });
 
 test('KiCad fork skeleton declares a wxWebView-backed ChatPCB panel', async () => {

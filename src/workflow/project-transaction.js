@@ -202,6 +202,20 @@ async function hasNeedsInspection(journal, projectDir) {
   return records.some((record) => record.status === 'needs-inspection');
 }
 
+function attachBoardParity(verification, required) {
+  if (!required.erc || required.drc) return verification;
+  const drc = verification?.drc;
+  const unverified = drc == null || drc.skipped === true || !requiredOk(drc);
+  if (!unverified) return verification;
+  return {
+    ...verification,
+    diagnostics: [
+      ...(verification?.diagnostics ?? []),
+      { code: 'SCHEMATIC_BOARD_PARITY_UNVERIFIED' }
+    ]
+  };
+}
+
 function evaluateVerification(verification, required) {
   if (required.erc && (verification?.erc == null || verification.erc.skipped === true)) {
     const error = coded('VERIFICATION_UNAVAILABLE', 'Required ERC did not execute.');
@@ -402,16 +416,17 @@ export async function applyProjectTransaction({
         });
         const verificationError = evaluateVerification(verification, required);
         if (verificationError) throw verificationError;
+        const recordedVerification = attachBoardParity(verification, required);
 
         const applied = await journal.transition({
           transactionId: journalRecord.transactionId,
           status: 'applied',
-          patch: { verification: serializeVerification(verification) }
+          patch: { verification: serializeVerification(recordedVerification) }
         });
         return {
           applied: true,
           transaction: applied,
-          verification
+          verification: recordedVerification
         };
       } catch (error) {
         return autoRollback({

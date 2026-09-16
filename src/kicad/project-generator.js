@@ -173,6 +173,9 @@ export function buildMcuSchematicAst(spec) {
   if (spec.boardProfile?.kind === 'bms') {
     return buildBmsSchematicAst(spec);
   }
+  if (spec.boardProfile?.kind === 'isolated-dcdc' || spec.kind === 'isolated-dcdc') {
+    return buildIsolatedDcdcSchematicAst(spec);
+  }
 
   const profileMode = Boolean(spec.boardProfile?.id);
   const mcuConnectedPins = unique(['+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT']);
@@ -349,6 +352,60 @@ export function buildMcuSchematicAst(spec) {
     );
   }
 
+  const answers = spec.product?.answers ?? {};
+  const phy = String(answers['wired-comms.phy'] ?? '');
+  const companions = String(answers['datasheet-companions.include'] ?? '');
+  const pack = String(answers['energy-storage.pack'] ?? spec.sourcePrompt ?? '');
+  const skipCompanions = /core-only|핵심 부품만|no-eeprom/i.test(companions);
+
+  if (/CAN|HVD|TCAN|TJA1051|ISO1042|NCV7344/i.test(phy)) {
+    const mpn = phy.match(/[A-Z0-9][A-Z0-9./-]{4,}/i)?.[0] ?? 'CAN_PHY';
+    components.push(
+      component('U3', 'ChatPCB:CAN_TRANSCEIVER', `Sourced CAN transceiver ${mpn}; Mouser-ranked for bus voltage, unit price, and extra BOM.`, 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', {
+        value: mpn,
+        pins: ['TX', 'RX', 'CANH', 'CANL', '+3V3', 'GND'],
+        pinNets: { 1: 'CAN_TX', 2: 'CAN_RX', 3: 'CANH', 4: 'CANL', 5: '+3V3', 6: 'GND' },
+        connectedPins: ['CAN_TX', 'CAN_RX', 'CANH', 'CANL', '+3V3', 'GND']
+      })
+    );
+    if (!skipCompanions) {
+      const tvs = spec.product?.sourcing?.parts?.canTvs?.mpn ?? 'PESD1CAN';
+      components.push(
+        component('D3', 'ChatPCB:CAN_TVS', `Datasheet companion CAN TVS ${tvs}.`, 'Package_TO_SOT_SMD:SOT-23', {
+          value: tvs,
+          pins: ['CANH', 'CANL', 'GND'],
+          pinNets: { 1: 'CANH', 2: 'CANL', 3: 'GND' },
+          connectedPins: ['CANH', 'CANL', 'GND']
+        })
+      );
+    }
+  }
+
+  const usbIntent = /usb/i.test(`${answers['mcu-board.usb'] ?? ''}\n${spec.sourcePrompt ?? spec.prompt ?? ''}\n${spec.boardProfile?.id ?? ''}\n${(spec.interfaces ?? []).map((iface) => iface.kind).join(' ')}`);
+  if (!skipCompanions && usbIntent && /ESD|USBLC|PRTR|레퍼런스 연관|usb/i.test(`${companions}\n${answers['mcu-board.usb'] ?? ''}`)) {
+    const esd = spec.product?.sourcing?.parts?.usbEsd?.mpn ?? 'USBLC6-2SC6';
+    components.push(
+      component('D2', 'ChatPCB:USB_ESD', `Datasheet companion USB ESD ${esd}.`, 'Package_TO_SOT_SMD:SOT-23-6', {
+        value: esd,
+        pins: ['USB_DP', 'USB_DN', 'GND'],
+        pinNets: { 1: 'USB_DP', 2: 'USB_DN', 3: 'GND' },
+        connectedPins: ['USB_DP', 'USB_DN', 'GND']
+      })
+    );
+  }
+
+  if (/18650|tp4056|AA|건전지/i.test(pack)) {
+    const charger = spec.product?.sourcing?.parts?.charger?.mpn ?? 'TP4056';
+    components.push(
+      component('U4', 'ChatPCB:CHARGER_1S', `Sourced 1S charger ${charger}; ranked by price and extra protection parts.`, 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', {
+        value: charger,
+        pins: ['VBUS', 'VBAT', 'GND'],
+        pinNets: { 1: 'VBUS', 2: 'VBAT', 3: 'GND' },
+        connectedPins: ['VBUS', 'VBAT', 'GND']
+      })
+    );
+  }
+
   if (profileMode) {
     components.push(
       component('#FLG1', 'power:PWR_FLAG', 'ERC power source marker for the externally supplied USB-C VBUS rail.', '', {
@@ -375,10 +432,56 @@ export function buildMcuSchematicAst(spec) {
   };
 }
 
+export function buildIsolatedDcdcSchematicAst(spec) {
+  const ratings = spec.boardProfile?.ratings ?? {};
+  const vin = ratings.vin ?? 'VIN';
+  const vout = ratings.vout ?? 'VOUT';
+  const isolation = ratings.isolation ?? 'unspecified isolation';
+  const components = [
+    component('J1', 'ChatPCB:POWER_INPUT', `Isolated converter input ${vin}.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
+      value: 'VIN',
+      pins: ['VBUS', 'GND'],
+      pinNets: { 1: 'VIN_P', 2: 'VIN_N' },
+      connectedPins: ['VIN_P', 'VIN_N']
+    }),
+    component('U1', 'ChatPCB:ISOLATED_DCDC', `Isolated DC-DC module placeholder (${vin} to ${vout}, ${isolation}).`, 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', {
+      value: 'ISOLATED_DCDC',
+      pins: ['VIN_P', 'VIN_N', 'VOUT_P', 'VOUT_N'],
+      connectedPins: ['VIN_P', 'VIN_N', 'VOUT_P', 'VOUT_N']
+    }),
+    component('J2', 'ChatPCB:POWER_OUTPUT', `Isolated converter output ${vout}.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
+      value: 'VOUT',
+      pins: ['VOUT_P', 'VOUT_N'],
+      connectedPins: ['VOUT_P', 'VOUT_N']
+    })
+  ];
+  return {
+    components,
+    nets: ['VIN_P', 'VIN_N', 'VOUT_P', 'VOUT_N'].map((name) => ({
+      name,
+      explanation: name.startsWith('VIN') ? `Primary ${vin} domain.` : `Secondary ${vout} domain, galvanically isolated.`
+    }))
+  };
+}
+
+function includeBmsEeprom(spec) {
+  const companions = String(spec?.product?.answers?.['bms.companions'] ?? spec?.product?.answers?.['datasheet-companions.include'] ?? '');
+  if (!companions) return false;
+  if (/no-eeprom|모니터 IC만|core-only|핵심 부품만/i.test(companions)) return false;
+  return /eeprom|레퍼런스 연관/i.test(companions);
+}
+
 export function buildBmsSchematicAst(spec) {
   const components = [];
   const cellTaps = Array.from({ length: 17 }, (_value, index) => `PACK_B${index}`);
   const pinConnections = adbms6830PinConnections();
+  const withEeprom = includeBmsEeprom(spec);
+  if (withEeprom) {
+    for (const pin of pinConnections) {
+      if (pin.name === 'GPIO4') pin.net = 'EEPROM_SCL';
+      if (pin.name === 'GPIO3') pin.net = 'EEPROM_SDA';
+    }
+  }
 
   components.push(
     component('U1', 'ChatPCB:ADBMS6830', 'ADBMS6830 16-channel battery stack monitor example; exact package and pin revision review is required.', '', {
@@ -406,6 +509,17 @@ export function buildBmsSchematicAst(spec) {
       connectedPins: ['TEMP1', 'TEMP2', 'TEMP3', 'TEMP4', 'VREF2', 'PACK_B0']
     })
   );
+
+  if (withEeprom) {
+    components.push(
+      component('U2', 'ChatPCB:EEPROM_M24C64', 'Datasheet-typical I2C EEPROM for ADBMS6830 configuration/ID; GPIO4=SCL and GPIO3=SDA from the serial controller port.', 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', {
+        value: 'M24C64',
+        pins: ['VCC', 'GND', 'SCL', 'SDA'],
+        pinNets: { 1: 'VREG', 2: 'PACK_B0', 3: 'EEPROM_SCL', 4: 'EEPROM_SDA' },
+        connectedPins: ['VREG', 'PACK_B0', 'EEPROM_SCL', 'EEPROM_SDA']
+      })
+    );
+  }
 
   for (let index = 1; index <= 16; index += 1) {
     const previousFilterNet = index === 1 ? 'PACK_B0' : `FILTER_C${index - 1}`;
@@ -554,7 +668,15 @@ function adbms6830PinConnections() {
 
 export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchematicAst(spec) }) {
   const uuid = randomUUID();
-  const notes = spec.boardProfile?.kind === 'bms'
+  const notes = spec.boardProfile?.kind === 'isolated-dcdc'
+    ? [
+        `ChatPCB generated isolated DC-DC draft: ${spec.title}`,
+        `Input ${spec.boardProfile?.ratings?.vin ?? 'unspecified'} to output ${spec.boardProfile?.ratings?.vout ?? 'unspecified'}.`,
+        `Isolation: ${spec.boardProfile?.ratings?.isolation ?? 'unspecified'}. Power: ${spec.boardProfile?.ratings?.powerW ?? 'unspecified'}.`,
+        'Primary and secondary grounds are separate. This is a topology placeholder, not a safety-certified converter.',
+        'Select an isolated module or discrete power stage, creepage/clearance, magnetics, and protection before release.'
+      ]
+    : spec.boardProfile?.kind === 'bms'
     ? [
         `ChatPCB generated BMS example: ${spec.title}`,
         'IC: ADBMS6830 16-channel battery monitor; exact package and pin revision review is pending.',
@@ -562,16 +684,23 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
         'Cell inputs use 200R filters and 10nF differential capacitors; balancing uses 1k example resistors.',
         'The example includes four 10k NTC channels, an NPN VREG pass stage, and bidirectional isoSPI.',
         'Monitoring/balancing example only: no charger, fuse, contactor, protection FET, or safety certification is included.',
+        includeBmsEeprom(spec)
+          ? 'Datasheet companion: M24C64-class EEPROM on GPIO4 SCL and GPIO3 SDA.'
+          : 'EEPROM companion omitted by request; configuration storage is not on this draft.',
         'Review the exact Analog Devices datasheet, cell chemistry, protection strategy, isolation, thermal, and layout before energizing.'
       ]
     : [
         `ChatPCB generated MCU peripheral draft: ${spec.title}`,
         `MCU family: ${spec.mcu.family}`,
+        `MCU part: ${spec.mcu.package}`,
         `Power rails: ${spec.power.rails.map((rail) => `${rail.name}=${rail.voltage}V`).join(', ')}`,
+        spec.power?.topology ? `Power topology: ${spec.power.topology}` : null,
+        spec.power?.integration ? `Product integration: ${spec.power.integration}` : null,
         `Interfaces: ${spec.interfaces.map((iface) => iface.kind.toUpperCase()).join(', ')}`,
         `Peripherals: ${spec.peripherals.map((peripheral) => peripheral.kind).join(', ')}`,
+        ...(spec.product?.designNotes ?? []),
         'Review all symbols, footprints, net labels, and design rules before production.'
-      ];
+      ].filter(Boolean);
 
   return `(kicad_sch
   (version 20260306)
@@ -620,6 +749,14 @@ ${fixtureSymbols()
 }
 
 export function renderSpiceFixture(spec) {
+  if (spec.boardProfile?.kind === 'isolated-dcdc') {
+    return [
+      `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
+      '* Isolated DC-DC placeholder only; it does not model magnetics, regulation, isolation barrier, or faults.',
+      '.end',
+      ''
+    ].join('\n');
+  }
   if (spec.boardProfile?.kind === 'bms') {
     return [
       `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
@@ -672,6 +809,10 @@ function interfaceNetNames(spec) {
 function explainNet(name) {
   if (/^PACK_B\d+$/.test(name)) {
     return 'Battery-stack cell tap in the 16S example; verify connector order and pack polarity before connection.';
+  }
+
+  if (/^EEPROM_S(CL|DA)$/.test(name)) {
+    return 'ADBMS6830 datasheet-typical EEPROM I2C net (GPIO5 SCL / GPIO6 SDA in this example).';
   }
 
   if (/^FILTER_C\d+$/.test(name)) {
@@ -1268,9 +1409,16 @@ function officialCacheDependenciesFor(usedLibIds) {
 function fixtureSymbols() {
   return [
     ['ChatPCB:POWER_INPUT', 'J', 'POWER_INPUT'],
+    ['ChatPCB:POWER_OUTPUT', 'J', 'POWER_OUTPUT'],
+    ['ChatPCB:ISOLATED_DCDC', 'U', 'ISOLATED_DCDC'],
     ['ChatPCB:REGULATOR_3V3', 'U', 'REGULATOR_3V3'],
     ['ChatPCB:MCU_PLACEHOLDER', 'U', 'MCU_PLACEHOLDER'],
     ['ChatPCB:ADBMS6830', 'U', 'ADBMS6830'],
+    ['ChatPCB:EEPROM_M24C64', 'U', 'M24C64'],
+    ['ChatPCB:CAN_TRANSCEIVER', 'U', 'CAN_PHY'],
+    ['ChatPCB:CAN_TVS', 'D', 'PESD1CAN'],
+    ['ChatPCB:USB_ESD', 'D', 'USBLC6'],
+    ['ChatPCB:CHARGER_1S', 'U', 'TP4056'],
     ['ChatPCB:BMS_CELL_CONNECTOR', 'J', '16S_CELL_TAPS'],
     ['ChatPCB:BMS_NPN', 'Q', 'NPN_PASS'],
     ['ChatPCB:ESP32_S3_WROOM_1', 'U', 'ESP32_S3_WROOM_1_N8R2'],
@@ -1557,6 +1705,16 @@ function symbolPinsFor(libId) {
   switch (libId) {
     case 'ChatPCB:ADBMS6830':
       return adbms6830PinConnections().map((pin) => pin.name);
+    case 'ChatPCB:EEPROM_M24C64':
+      return ['VCC', 'GND', 'SCL', 'SDA'];
+    case 'ChatPCB:CAN_TRANSCEIVER':
+      return ['TX', 'RX', 'CANH', 'CANL', '+3V3', 'GND'];
+    case 'ChatPCB:CAN_TVS':
+      return ['CANH', 'CANL', 'GND'];
+    case 'ChatPCB:USB_ESD':
+      return ['USB_DP', 'USB_DN', 'GND'];
+    case 'ChatPCB:CHARGER_1S':
+      return ['VBUS', 'VBAT', 'GND'];
     case 'ChatPCB:BMS_CELL_CONNECTOR':
       return Array.from({ length: 17 }, (_value, index) => `PACK_B${index}`);
     case 'ChatPCB:BMS_NPN':
@@ -1564,6 +1722,10 @@ function symbolPinsFor(libId) {
     case 'ChatPCB:POWER_INPUT':
     case 'Connector_Generic:Conn_01x02':
       return ['VBUS', 'GND'];
+    case 'ChatPCB:POWER_OUTPUT':
+      return ['VOUT_P', 'VOUT_N'];
+    case 'ChatPCB:ISOLATED_DCDC':
+      return ['VIN_P', 'VIN_N', 'VOUT_P', 'VOUT_N'];
     case 'ChatPCB:REGULATOR_3V3':
     case 'Regulator_Linear:TC1262-33':
     case 'Regulator_Switching:TPS62177DQC':
@@ -1622,25 +1784,23 @@ function unique(values) {
 }
 
 function mcuSymbolFor(spec) {
-  switch (spec.boardProfile?.id) {
-    case 'esp32-s3-usbc-sensor':
-      return 'ChatPCB:ESP32_S3_WROOM_1';
-    case 'stm32-usbc-sensor':
-      return 'ChatPCB:STM32G0B1CBT6';
-    default:
-      return 'ChatPCB:MCU_PLACEHOLDER';
+  if (spec.boardProfile?.id === 'esp32-s3-usbc-sensor' || /ESP32-S3-WROOM/i.test(spec.mcu?.package ?? '')) {
+    return 'ChatPCB:ESP32_S3_WROOM_1';
   }
+  if (spec.boardProfile?.id === 'stm32-usbc-sensor' || /STM32G0/i.test(spec.mcu?.package ?? '')) {
+    return 'ChatPCB:STM32G0B1CBT6';
+  }
+  return 'ChatPCB:MCU_PLACEHOLDER';
 }
 
 function mcuFootprintFor(spec) {
-  switch (spec.boardProfile?.id) {
-    case 'esp32-s3-usbc-sensor':
-      return 'RF_Module:ESP32-S3-WROOM-1';
-    case 'stm32-usbc-sensor':
-      return 'Package_QFP:LQFP-48_7x7mm_P0.5mm';
-    default:
-      return 'Package_QFP:LQFP-48_7x7mm_P0.5mm';
+  if (spec.boardProfile?.id === 'esp32-s3-usbc-sensor' || /ESP32-S3-WROOM/i.test(spec.mcu?.package ?? '')) {
+    return 'RF_Module:ESP32-S3-WROOM-1';
   }
+  if (spec.boardProfile?.id === 'stm32-usbc-sensor' || /STM32G0/i.test(spec.mcu?.package ?? '')) {
+    return 'Package_QFP:LQFP-48_7x7mm_P0.5mm';
+  }
+  return 'Package_QFP:LQFP-48_7x7mm_P0.5mm';
 }
 
 function pinConnectionPoint(symbolX, symbolY, pinDef) {

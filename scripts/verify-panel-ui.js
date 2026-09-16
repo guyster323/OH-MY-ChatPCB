@@ -159,7 +159,7 @@ try {
   const providerRequestsBeforeSilentHost = providerRequestCount;
   await silentHostPage.getByLabel('Circuit request').fill(prompt);
   await silentHostPage.getByRole('button', { name: 'Send' }).click();
-  await silentHostPage.waitForTimeout(750);
+  await silentHostPage.getByRole('status', { name: 'Request status' }).filter({ hasText: /KiCad host/ }).waitFor();
   const silentHostResult = await silentHostPage.evaluate(() => ({
     requestState: document.querySelector('#request-status')?.dataset.state,
     requestStatus: document.querySelector('#request-status')?.textContent,

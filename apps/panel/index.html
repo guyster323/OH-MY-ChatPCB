@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260914-sourcing" />
   </head>
   <body>
     <main class="shell">
@@ -13,6 +13,10 @@
           <h1>ChatPCB</h1>
           <p id="connection-status">Connecting</p>
         </div>
+        <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time.">
+          <input id="pro-mode" type="checkbox" />
+          <span>Pro</span>
+        </label>
         <label class="provider-control">
           <span>Provider</span>
           <select id="provider">
@@ -43,22 +47,53 @@
         <h2>Active project</h2>
         <p id="active-project-name"></p>
         <code id="active-project-directory"></code>
+        <button type="button" id="new-project-again">New project</button>
       </section>
 
-      <section class="request-card" aria-labelledby="request-card-title">
-        <h2 id="request-card-title">Request</h2>
+      <nav class="status-dock" aria-label="Project tools">
+        <button type="button" class="dock-btn" data-open="review-dialog" data-help="Review: blockers and proposed fixes" title="Review">
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/><rect x="5" y="11" width="4" height="1" class="px-cut"/></svg>
+        </button>
+        <button type="button" class="dock-btn" data-open="erc-dialog" data-help="ERC: electrical rules check" title="ERC">
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="8" width="4" height="2"/><rect x="5" y="5" width="2" height="8"/><rect x="9" y="3" width="5" height="2"/><rect x="12" y="5" width="2" height="8"/></svg>
+        </button>
+        <button type="button" class="dock-btn" data-open="evidence-dialog" data-help="Project evidence digest and inspection" title="Evidence">
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="4" height="4" class="px-cut"/></svg>
+        </button>
+        <button type="button" class="dock-btn" data-open="patch-dialog" data-help="Patch approval" title="Patch">
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="12" height="3"/><rect x="7" y="2" width="3" height="12"/></svg>
+        </button>
+        <button type="button" class="dock-btn" data-open="kicad-dialog" data-help="Open or link the KiCad project" title="KiCad">
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="2" height="5" class="px-cut"/><rect x="8" y="6" width="3" height="2" class="px-cut"/></svg>
+        </button>
+        <button type="button" class="dock-btn" data-open="artifacts-dialog" data-help="Generated files" title="Artifacts">
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg>
+        </button>
+        <button type="button" class="dock-btn" id="conflict-dock-btn" data-open="conflict-dialog" data-help="Unsaved KiCad editor changes" title="Unsaved" hidden>
+          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="7" y="2" width="2" height="8"/><rect x="7" y="12" width="2" height="2"/></svg>
+        </button>
+      </nav>
+
+      <section id="conversation-card" class="chat-column">
         <p id="request-status" role="status" aria-label="Request status" data-state="idle">Create a project to send a circuit request.</p>
         <details id="request-technical-details" hidden>
           <summary>Technical details</summary>
           <pre id="request-technical-detail"></pre>
         </details>
+        <ol id="conversation-log" aria-label="Conversation"></ol>
+        <div id="conversation-options" class="conversation-options"></div>
+        <form id="composer" class="composer">
+          <label>
+            <span>Circuit request</span>
+            <textarea id="prompt" rows="2" spellcheck="true" disabled placeholder="Ask or reply…"></textarea>
+          </label>
+          <div class="composer-actions"><button type="submit" disabled>Send</button></div>
+        </form>
       </section>
+    </main>
 
-      <section id="conflict-card" class="status-card conflict-card" hidden>
-        <h2>KiCad changes need attention</h2>
-        <p>Unsaved KiCad changes were detected. Save or discard them in KiCad before sending this update.</p>
-      </section>
-
+    <dialog id="review-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>Review</strong><button value="close">Close</button></form>
       <section id="review-panel" class="review-panel" hidden>
         <div class="review-head">
           <h2>Review</h2>
@@ -71,13 +106,19 @@
         </div>
         <section><h3>Proposed fixes</h3><ul id="review-fixes"></ul></section>
       </section>
+    </dialog>
 
+    <dialog id="erc-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>ERC</strong><button value="close">Close</button></form>
       <section class="status-card validation-card" aria-labelledby="validation-title">
         <h2 id="validation-title">ERC validation</h2>
         <p id="validation-status" data-state="idle">Not run</p>
         <time id="validation-timestamp"></time>
       </section>
+    </dialog>
 
+    <dialog id="evidence-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>Evidence</strong><button value="close">Close</button></form>
       <section id="inspection-card" class="status-card inspection-card" aria-labelledby="inspection-title" hidden>
         <h2 id="inspection-title">Project evidence</h2>
         <p id="inspection-freshness" data-state="missing">missing</p>
@@ -86,7 +127,10 @@
         <p id="inspection-erc">ERC —</p>
         <p id="inspection-drc">DRC —</p>
       </section>
+    </dialog>
 
+    <dialog id="patch-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>Patch</strong><button value="close">Close</button></form>
       <section id="patch-approval-card" class="status-card patch-approval-card" aria-labelledby="patch-approval-title">
         <h2 id="patch-approval-title">Patch approval</h2>
         <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
@@ -95,27 +139,35 @@
           <button id="cancel-patch-button" type="button" disabled>Cancel</button>
         </div>
       </section>
+    </dialog>
 
+    <dialog id="kicad-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>KiCad</strong><button value="close">Close</button></form>
       <section id="kicad-link-card" class="status-card kicad-card" hidden>
         <h2>KiCad project</h2>
         <p id="kicad-link" data-state="available"></p>
         <button id="open-kicad-button" type="button">Open in KiCad</button>
         <p id="kicad-fallback" hidden></p>
       </section>
+    </dialog>
 
-      <form id="composer" class="composer">
-        <label>
-          <span>Circuit request</span>
-          <textarea id="prompt" rows="4" spellcheck="true" disabled></textarea>
-        </label>
-        <div class="composer-actions"><button type="submit" disabled>Send</button></div>
-      </form>
-
+    <dialog id="artifacts-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>Artifacts</strong><button value="close">Close</button></form>
       <section class="results" aria-labelledby="artifacts-title">
         <h2 id="artifacts-title">Artifacts</h2>
         <ul id="artifact-list"></ul>
       </section>
-    </main>
-    <script src="./panel.js"></script>
+    </dialog>
+
+    <dialog id="conflict-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>Unsaved</strong><button value="close">Close</button></form>
+      <section id="conflict-card" class="status-card conflict-card" hidden>
+        <h2>KiCad changes need attention</h2>
+        <p>Unsaved KiCad changes were detected. Save or discard them in KiCad before sending this update.</p>
+        <button id="recheck-kicad-button" type="button">I saved — recheck</button>
+      </section>
+    </dialog>
+
+    <script src="./panel.js?v=20260914-sourcing"></script>
   </body>
 </html>

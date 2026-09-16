@@ -4,6 +4,8 @@ OH-MY-ChatPCB is a local-first, evidence-gated KiCad agent runtime that connects
 
 ## Runtime Boundaries
 
+The product UI is the KiCad schematic editor's right-side ChatPCB panel. `apps/panel` is the WebView bundle hosted by that panel, not a standalone web application. The browser path is a fallback when the ChatPCB-enabled KiCad host is unavailable.
+
 ChatPCB is split into three local-only layers:
 
 - KiCad fork UI: a `wxWebView` side panel and a small launcher for `chatpcb-agentd`
@@ -86,6 +88,8 @@ KiCad CLI lookup order:
 4. absolute directories on `PATH` that are outside the process working directory and outside the original project tree (`excludeProjectDir`); relative entries, the working directory, and original-project descendants are ignored even when inspect or patch-candidate validation uses a disposable copy as cwd. Trusted `explicitPath` and `KICAD_CLI_PATH` are not subject to that PATH exclusion. If none exist, the tool is unavailable.
 
 If KiCad CLI or ngspice is missing, commands return `ok: true` with `skipped: true` and a typed reason.
+
+[EEBench](https://eebench.org/) is the planned analog/power quality bar between schematic drafts and manufacturing exports: requirements, design, and SPICE-backed checks with cost scored only after the circuit works. It is not a current ChatPCB leaderboard target. EEBench V1 grades atopile `.ato` bundles, not KiCad files, and does not cover layout or fabrication. A skip or missing `ngspice` is unavailable, not a pass.
 
 ERC and readiness are deliberately separate. ERC reports schematic electrical-rule errors and warnings. It does not run PCB DRC and cannot establish manufacturing readiness. The readiness review also accounts for unresolved parts, sourcing, datasheet checks, simulations, layout/DRC evidence, and other release gates; therefore `validation.erc.errorCount === 0` may coexist with warnings or a blocked review.
 

@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-import { createNativeProposal, disposeNativeProposal, publicProposal } from '../src/workflow/native-proposal-source.js';
+import { createNativeProposal, disposeNativeProposal, nativeProposalSource, publicProposal } from '../src/workflow/native-proposal-source.js';
 
 const RP2040_PROMPT = 'RP2040 board with USB-C power, I2C connector, reset button, and LED.';
 const STM32_PROMPT = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
@@ -278,6 +278,25 @@ test('deleting the last schematic stays fail-closed with required ERC', async ()
       assert.equal(plan.requiredValidation.erc, true);
     } finally {
       await disposeNativeProposal(plan);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('nativeProposalSource exposes the Copperhead-ready candidate boundary', async () => {
+  const root = await createProject();
+  try {
+    assert.equal(nativeProposalSource.id, 'native');
+    const plan = await nativeProposalSource.createCandidate({
+      projectDir: root,
+      request: { prompt: RP2040_PROMPT },
+      validateCandidateImpl: passingCandidate
+    });
+    try {
+      assert.ok(plan.proposalId);
+    } finally {
+      await nativeProposalSource.disposeCandidate(plan);
     }
   } finally {
     await rm(root, { force: true, recursive: true });

@@ -512,7 +512,10 @@ test('ADBMS6830 BMS example generates cell filters, balancing branches, thermist
     assert.match(schematic, /BAL_S16P/);
     assert.match(schematic, /ISOPA/);
     assert.match(schematic, /VREG_COLLECTOR/);
+    assert.doesNotMatch(schematic, /EEPROM_SCL/);
+    assert.doesNotMatch(schematic, /M24C64/);
     assert.match(symbols, /\(symbol "ADBMS6830"/);
+    assert.doesNotMatch(symbols, /\(symbol "EEPROM_M24C64"/);
     assert.match(symbols, /\(symbol "BMS_NPN"/);
     assert.equal(refs.has('J1'), true);
     assert.equal(refs.has('J2'), true);
@@ -528,6 +531,33 @@ test('ADBMS6830 BMS example generates cell filters, balancing branches, thermist
     assert.equal(result.files.board, undefined);
     assert.equal(metadata.boardProfile.releaseTarget, 'example-review');
     assert.equal(metadata.boardProfile.releaseEvidence.status, 'incomplete');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('ADBMS6830 EEPROM companion uses GPIO3/GPIO4 serial pins when requested', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-eeprom-'));
+
+  try {
+    const { saveCircuitConversation } = await import('../src/runtime/request-conversation.js');
+    await saveCircuitConversation(root, {
+      status: 'generate',
+      primaryKind: 'bms',
+      generateKind: 'bms',
+      answers: { 'bms.companions': 'EEPROM 포함 (M24C64급)' }
+    });
+    const result = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'ADBMS6830 16S Li-ion battery monitor with EEPROM, passive balancing, four 10k NTCs, and isoSPI.'
+    });
+    const schematic = await readFile(result.files.schematic, 'utf8');
+    const u1 = result.spec.schematic.components.find((component) => component.ref === 'U1');
+    assert.match(schematic, /EEPROM_SCL/);
+    assert.match(schematic, /M24C64/);
+    assert.equal(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO3')], 'EEPROM_SDA');
+    assert.equal(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO4')], 'EEPROM_SCL');
+    assert.notEqual(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO6')], 'EEPROM_SDA');
   } finally {
     await rm(root, { force: true, recursive: true });
   }

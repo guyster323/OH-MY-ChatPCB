@@ -1,12 +1,14 @@
-# KiCad Fork Panel Skeleton
+# ChatPCB schematic-editor panel
 
-This directory contains the C++ drop-in skeleton for the KiCad fork branch.
+This is the C++ host for the KiCad right-side ChatPCB panel. It is not a standalone web UI.
 
-Integration points:
+The schematic editor instantiates `CHATPCB_PANEL` in the right AUI pane. The panel loads `apps/panel` in `wxWebView` and talks only to `chatpcb-agentd` on `127.0.0.1:41317`.
 
-- Add this directory to the KiCad source tree near the frame that owns the right dock area.
-- Instantiate `CHATPCB_PANEL` inside the schematic and PCB editor frame side pane.
-- Package `apps/panel/*` into the KiCad install tree at `share/chatpcb_panel/`.
-- Ensure the `chatpcb` CLI is available on `PATH`, or change `EnsureAgentRunning()` to use the bundled executable path.
+Development launch from this repository:
 
-The panel intentionally loads a local WebView bundle and talks only to `chatpcb-agentd` on `127.0.0.1:41317`.
+```powershell
+npm run sync:kicad-fork
+npm run launch:kicad
+```
+
+`CHATPCB_PANEL_URL` points the WebView at this checkout's `apps/panel/index.html`. `CHATPCB_CLI_COMMAND` starts the matching local daemon when one is not already running. Packaged builds still resolve `share/chatpcb_panel/index.html` next to the schematic editor.

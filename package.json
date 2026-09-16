@@ -15,7 +15,11 @@
     "verify:sample": "npm run generate:sample && npm run validate:sample && npm run simulate:sample",
     "verify:panel": "node ./scripts/verify-panel-flow.js",
     "verify:ui": "node ./scripts/verify-panel-ui.js",
-    "daemon": "node ./bin/chatpcb-cli.js daemon"
+    "daemon": "node ./bin/chatpcb-cli.js daemon",
+    "sync:kicad-fork": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/sync-kicad-fork-panel.ps1",
+    "configure:kicad-fork": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/configure-kicad-fork.ps1",
+    "launch:kicad": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-kicad-chatpcb.ps1",
+    "verify:kicad": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-kicad-panel.ps1"
   },
   "engines": {
     "node": ">=20"

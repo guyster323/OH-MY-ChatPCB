@@ -160,6 +160,14 @@ function isLegacyErcResult(result) {
   );
 }
 
+function ercReport(result) {
+  if (result == null) return result;
+  if (result.erc && typeof result.erc === 'object' && typeof result.erc.errorCount === 'number') {
+    return result.erc;
+  }
+  return result;
+}
+
 function normalizeCandidateVerification(result, required) {
   const skipped = { ok: true, skipped: true, executed: false };
   if (result == null) {
@@ -198,23 +206,36 @@ function netsFrom(spec) {
   return (spec?.schematic?.nets ?? []).map((net) => net.name);
 }
 
-async function defaultValidateCandidate({
-  projectDir,
-  excludeProjectDir,
-  requiredValidation,
-  schematicPath,
-  boardPath
-}) {
-  const [erc, drc] = await Promise.all([
-    requiredValidation.erc
-      ? validateProject({ projectDir, schematicPath, excludeProjectDir })
-      : Promise.resolve({ ok: true, skipped: true, executed: false }),
-    requiredValidation.drc
-      ? validateBoard({ projectDir, boardPath, excludeProjectDir })
-      : Promise.resolve({ ok: true, skipped: true, executed: false })
-  ]);
-  return { erc, drc };
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw coded('PROPOSAL_CANCELLED', 'Candidate generation was cancelled.');
+  }
 }
+
+export function createCandidateValidator({
+  validateProjectImpl = validateProject,
+  validateBoardImpl = validateBoard
+} = {}) {
+  return async function validateCandidate({
+    projectDir,
+    excludeProjectDir,
+    requiredValidation,
+    schematicPath,
+    boardPath
+  }) {
+    const [erc, drc] = await Promise.all([
+      requiredValidation.erc
+        ? validateProjectImpl({ projectDir, schematicPath, excludeProjectDir })
+        : Promise.resolve({ ok: true, skipped: true, executed: false }),
+      requiredValidation.drc
+        ? validateBoardImpl({ projectDir, boardPath, excludeProjectDir })
+        : Promise.resolve({ ok: true, skipped: true, executed: false })
+    ]);
+    return { erc, drc };
+  };
+}
+
+const defaultValidateCandidate = createCandidateValidator();
 
 function buildChanges(beforeSnapshot, afterSnapshot) {
   const beforeFiles = snapshotMap(beforeSnapshot);
@@ -307,11 +328,22 @@ export async function disposeNativeProposal(plan) {
   await rm(plan.tempDir, { force: true, recursive: true });
 }
 
+export const nativeProposalSource = {
+  id: 'native',
+  createCandidate(args) {
+    return createNativeProposal(args);
+  },
+  disposeCandidate(plan) {
+    return disposeNativeProposal(plan);
+  }
+};
+
 export async function createNativeProposal({
   projectDir,
   request,
   projectName = 'chatpcb_mcu_peripheral',
   context,
+  signal,
   validateCandidateImpl,
   generateProjectImpl = generateMcuPeripheralProject
 } = {}) {
@@ -329,13 +361,16 @@ export async function createNativeProposal({
     const candidateDir = path.join(tempDir, 'project');
     await mkdir(candidateDir, { recursive: true });
     await materializeCandidate(beforeSnapshot, candidateDir);
+    throwIfAborted(signal);
 
     const proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
+    throwIfAborted(signal);
     const generatedSnapshot = await collectTransactionSnapshot({ projectDir: candidateDir });
     const candidateRequired = requiredFromArtifacts(generatedSnapshot.artifacts);
     const schematicRelative = firstArtifactPath(generatedSnapshot.artifacts, '.kicad_sch');
     const boardRelative = firstArtifactPath(generatedSnapshot.artifacts, '.kicad_pcb');
     const validateImpl = validateCandidateImpl ?? defaultValidateCandidate;
+    throwIfAborted(signal);
     const rawVerification = await validateImpl({
       projectDir: candidateDir,
       excludeProjectDir: resolvedProjectDir,
@@ -401,8 +436,8 @@ export async function createNativeProposal({
       validation: {
         ok: candidatePassed(candidateVerification, requiredValidation),
         skipped: candidateVerification.erc.skipped === true,
-        erc: rawVerification?.erc ?? rawVerification,
-        drc: rawVerification?.drc
+        erc: ercReport(isLegacyErcResult(rawVerification) ? rawVerification : rawVerification?.erc),
+        drc: isLegacyErcResult(rawVerification) ? undefined : rawVerification?.drc
       },
       review: reviewCircuitReadiness({
         spec: proposed.spec,

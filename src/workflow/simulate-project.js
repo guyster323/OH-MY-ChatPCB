@@ -7,7 +7,6 @@ export async function simulateProject(options = {}) {
   const projectDir = options.projectDir;
   const ngspicePath = options.ngspicePath ?? 'ngspice';
   const runCommandImpl = options.runCommandImpl ?? runCommand;
-  // Ignore request-supplied aliases such as requestNgspicePath; only ngspicePath is trusted.
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }

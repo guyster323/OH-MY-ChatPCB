@@ -57,7 +57,14 @@ Supported item kinds are `symbol`, `label`, `global_label`, and `hierarchical_la
 
 Opening or reloading is refused when the schematic editor contains unsaved changes. The host posts a `project.status` event with `dirty: true` and `linkState: "conflict"`; it never saves, discards, or overwrites those edits. The user must save or cancel the editor changes before asking ChatPCB to update or reload the project.
 
-The source contract is verified: the C++ drop-in names the official KiCad 10 selection APIs and correlated `requestId` responses. Compiled KiCad 10 selection remains unverified until the missing fork checkout is restored. Do not treat the source contract as a compiled host or interactive result.
+The source contract is verified: the C++ drop-in names the official KiCad 10 selection APIs and correlated `requestId` responses. Compiled KiCad 10 selection remains unverified until an interactive session in the ChatPCB-enabled schematic editor proves it. Do not treat the source contract as a compiled host or interactive result.
+
+This repository owns the panel sources and the schematic-editor wiring. Sync and launch them with:
+
+```powershell
+npm run sync:kicad-fork
+npm run launch:kicad
+```
 
 Official KiCad builds do not contain this fork panel. In that case the standalone browser fallback remains explicit: copy the displayed `.kicad_pro` path and open it manually in KiCad. The browser must not claim that KiCad was reloaded.
 

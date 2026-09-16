@@ -21,6 +21,7 @@ export function createProjectMutexRegistry({ realpathImpl = realpath } = {}) {
   }
 
   return {
+    canonicalKey,
     async isLocked({ projectDir }) {
       return locks.has(await canonicalKey(projectDir));
     },

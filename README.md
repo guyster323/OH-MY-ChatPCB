@@ -2,17 +2,19 @@
 
 OH-MY-ChatPCB is a local-first, evidence-gated KiCad agent runtime that connects user-owned AI providers to native KiCad workflows with deterministic inspection, reviewable patches, validation, rollback, and human release gates.
 
-The current implementation is the first runnable foundation of the proposed plan:
+The product UI is the KiCad schematic editor's **right-side ChatPCB panel**. `apps/panel` is the WebView bundle hosted inside that panel, not a standalone web app.
+
+The current implementation is the first runnable foundation of that plan:
 
 - local `chatpcb` CLI for MCU peripheral project generation, ERC validation, and SPICE simulation hooks
 - `chatpcb-agentd` local daemon with `/health`, `/tool`, and `/ws`
-- WebView-ready right panel bundle under `apps/panel`
-- KiCad fork C++ skeleton for a `wxWebView` side panel under `kicad-fork/chatpcb_panel`
+- WebView bundle under `apps/panel`, loaded by the KiCad `wxWebView` host
+- KiCad fork C++ host under `kicad-fork/chatpcb_panel`, wired into the schematic editor right pane
 - provider process bridge for local CLI agents such as Codex, Claude Code, and Copilot CLI
 
 ## Status
 
-This is not a full KiCad fork yet. It is the implementation scaffold that lets the fork work proceed without guessing about runtime contracts.
+This is not a packaged KiCad installer yet. The product path is still the ChatPCB-enabled schematic editor with a visible right-side ChatPCB panel; official KiCad builds do not include that host.
 
 Implemented now:
 
@@ -48,19 +50,18 @@ Not implemented yet:
 - Packaged KiCad fork installer with a visible ChatPCB side panel
 - Full SPICE model selection for MCU vendor parts
 - Live JLCPCB/LCSC sourcing and datasheet release evidence
+- EEBench-style SPICE + cost verification, and an official [EEBench](https://eebench.org/) leaderboard run (V1 grades atopile `.ato` submissions, not KiCad artifacts)
 
 ## Quick Start
 
 ```powershell
 npm install
 npm test
-npm run verify:sample
-npm run verify:panel
-npm run verify:ui
 npm run daemon
+npm run launch:kicad
 ```
 
-Open `apps/panel/index.html` in a WebView or browser while `npm run daemon` is running.
+`npm run launch:kicad` opens the ChatPCB-enabled schematic editor. Use the right-side ChatPCB panel. The standalone browser fallback is only for machines that do not yet have that fork binary.
 
 ## User Test Guide
 
@@ -100,13 +101,21 @@ npm run daemon
 
 Keep this terminal running. The daemon owns the local websocket endpoint used by the panel.
 
-4. In another browser window, open:
+4. Launch the ChatPCB-enabled schematic editor:
+
+```powershell
+npm run launch:kicad
+```
+
+The right-side ChatPCB panel is the product UI. An official KiCad build does not provide the host bridge.
+
+Standalone browser fallback, only when the fork `eeschema.exe` is not built yet:
 
 ```text
 C:\path\to\OH-MY-ChatPCB\apps\panel\index.html
 ```
 
-You can also use the same panel from a ChatPCB-enabled KiCad fork. An official KiCad build does not provide the host bridge, so the standalone panel reports the project path for you to open manually.
+In that fallback the panel reports the `.kicad_pro` path for you to open manually.
 
 5. Enter a project name such as `가스 센서 보드 01` and click **New project**. The panel creates a safe project directory under the selected workspace root and shows it as the active project.
 
@@ -149,7 +158,7 @@ It starts an isolated `chatpcb-agentd`, serves `apps/panel/index.html`, opens th
 
 ## Computer Use verification status
 
-For an interactive end-to-end check, use the ChatPCB-enabled KiCad fork when it is available; otherwise use the standalone browser panel for project creation and open the returned `.kicad_pro` manually in KiCad. Create a temporary named project, send the request above, and confirm that the success, review, ERC, and KiCad-link cards are all visible.
+The default interactive check is the ChatPCB-enabled schematic editor, not the browser fallback. After `npm run daemon` and `npm run launch:kicad`, drive the right-side panel with `orca computer` as described in `.grok/skills/kicad-panel-computer-use/SKILL.md` (`npm run verify:kicad` prints that gate). Create a named project, `set-value` the circuit request, press **Send**, and confirm the request is not `Circuit prompt is required`. Confirm **KiCad changes need attention** while the editor is `[Unsaved]`, then that it clears after a real save plus **I saved — recheck**.
 
 Use `kicad.exe` with the absolute `.kicad_pro` path to open the generated project in the official KiCad project manager. To open the schematic editor directly, use `eeschema.exe` with the matching `.kicad_sch` path. Never pass a `.kicad_pro` file to `eeschema.exe`; the schematic editor accepts schematic files, not project files.
 
@@ -210,6 +219,8 @@ The intended KiCad fork keeps KiCad UI changes small:
 5. The daemon creates or updates normal KiCad artifacts, runs ERC validation, computes a separate readiness review, and returns one structured `tool.result`.
 6. The host bridge opens or reloads the `.kicad_pro` only when the active KiCad editor is clean; unsaved edits produce a conflict instead.
 
+Launch that host from this repository with `npm run launch:kicad`.
+
 The current tool-call names are:
 
 - `schematic.generate`
@@ -226,7 +237,7 @@ The current tool-call names are:
 
 ## KiCad Fork Integration
 
-Use `kicad-fork/chatpcb_panel` as the first source drop-in. The KiCad fork branch now instantiates `CHATPCB_PANEL` in the schematic editor side area, packages `share/chatpcb_panel/`, prepares development runtime assets, and can launch the panel-backed schematic editor locally with the ChatPCB daemon connected.
+Use `kicad-fork/chatpcb_panel` as the source drop-in and `kicad-fork/integration/wire-chatpcb-panel.patch` as the schematic-editor wiring. `npm run sync:kicad-fork` copies the current panel C++ and WebView bundle into `C:\Users\windo\kicad-source-mirror-chatpcb`. `npm run launch:kicad` starts that ChatPCB-enabled `eeschema.exe` with this repository's panel URL and daemon.
 
 ## License
 

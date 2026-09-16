@@ -5,10 +5,11 @@ import path from 'node:path';
 import { createPatchApprovalRegistry } from '../runtime/patch-approval-registry.js';
 import { createProjectMutexRegistry } from '../runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../runtime/transaction-journal.js';
-import { createNativeProposal, disposeNativeProposal, publicProposal } from './native-proposal-source.js';
+import { createCandidateValidator, createNativeProposal, disposeNativeProposal, publicProposal } from './native-proposal-source.js';
 import { applyProjectTransaction } from './project-transaction.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
+import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
 
 const PATCH_REASON = {
@@ -110,14 +111,21 @@ export async function createSchematicPatchPlan({
   prompt,
   projectName = 'chatpcb_mcu_peripheral',
   validateProjectImpl = validateProject,
-  context
+  validateBoardImpl = validateBoard,
+  validateCandidateImpl,
+  context,
+  signal
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
     request: { prompt },
     projectName,
     context,
-    validateCandidateImpl: validateProjectImpl
+    signal,
+    validateCandidateImpl: validateCandidateImpl ?? createCandidateValidator({
+      validateProjectImpl,
+      validateBoardImpl
+    })
   });
 }
 
@@ -134,6 +142,8 @@ export async function applySchematicPatch({
   expectedPatchId,
   patchPlan,
   validateProjectImpl = validateProject,
+  validateBoardImpl = validateBoard,
+  validateCandidateImpl,
   verifyAppliedProjectImpl,
   approvalRegistry,
   mutexRegistry,
@@ -167,7 +177,10 @@ export async function applySchematicPatch({
     projectDir: resolvedProjectDir,
     request: { prompt },
     projectName,
-    validateCandidateImpl: validateProjectImpl
+    validateCandidateImpl: validateCandidateImpl ?? createCandidateValidator({
+      validateProjectImpl,
+      validateBoardImpl
+    })
   });
   const ownsPlan = !patchPlan;
 

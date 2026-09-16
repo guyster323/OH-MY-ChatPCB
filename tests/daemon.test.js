@@ -10,11 +10,14 @@ import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registr
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { saveCircuitConversation } from '../src/runtime/request-conversation.js';
 
 const passingVerify = async () => ({
   erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
   drc: { ok: true, skipped: true }
 });
+const passingDrc = async () => ({ ok: true, skipped: false, executed: true, violations: [], unconnectedItems: [] });
+const passingErc = async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } });
 
 async function kicadArtifacts(projectDir) {
   const names = await readdir(projectDir);
@@ -34,6 +37,7 @@ async function transactionServices(extra = {}) {
     projectMutexRegistry: extra.projectMutexRegistry ?? createProjectMutexRegistry(),
     transactionJournal: extra.transactionJournal ?? createTransactionJournal({ stateRoot }),
     verifyAppliedProjectImpl: extra.verifyAppliedProjectImpl ?? passingVerify,
+    validateBoardImpl: extra.validateBoardImpl ?? passingDrc,
     ...extra
   };
 }
@@ -357,7 +361,7 @@ test('daemon routes provider-emitted validation through disposable project inspe
 test('daemon consumes a patch preview once and rejects replay or stale artifacts', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-patch-approval-'));
   const registry = createPatchApprovalRegistry();
-  const options = { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }), verifyAppliedProjectImpl: passingVerify };
+  const options = { patchApprovalRegistry: registry, validateProjectImpl: passingErc, validateBoardImpl: passingDrc, verifyAppliedProjectImpl: passingVerify };
   const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
 
   try {
@@ -553,6 +557,44 @@ test('daemon creates a named project and runs provider generation with ERC valid
   }
 });
 
+test('project.request fills a missing provider generate prompt from the user request', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-missing-prompt-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'ESP32 Display Board' }
+    });
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_missing_prompt',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir: created.result.projectDir,
+          prompt: 'ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘'
+        }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_generated_without_prompt',
+            name: 'schematic.generate',
+            args: { projectDir: created.result.projectDir }
+          })
+        ]
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.match(result.result.files.schematic, /\.kicad_sch$/);
+    assert.doesNotMatch(result.error?.message ?? '', /Circuit prompt is required/);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test('daemon returns an approval-gated patch preview for an existing project after a provider transcript without calls', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-fallback-'));
   const registry = createPatchApprovalRegistry();
@@ -601,7 +643,7 @@ test('daemon returns an approval-gated patch preview for an existing project aft
 
     const approved = await dispatchToolCall(
       { name: 'schematic.patch', args: { projectDir: created.result.projectDir, approved: true, patchId: second.result.patchId } },
-      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }), verifyAppliedProjectImpl: passingVerify }
+      { patchApprovalRegistry: registry, validateProjectImpl: passingErc, validateBoardImpl: passingDrc, verifyAppliedProjectImpl: passingVerify }
     );
     assert.equal(approved.ok, true);
     assert.equal(approved.result.applied, true);
@@ -916,7 +958,7 @@ test('daemon returns a provider-emitted patch as a preview without writing until
 
     const approved = await dispatchToolCall(
       { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
-      { patchApprovalRegistry: registry, validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }), verifyAppliedProjectImpl: passingVerify }
+      { patchApprovalRegistry: registry, validateProjectImpl: passingErc, validateBoardImpl: passingDrc, verifyAppliedProjectImpl: passingVerify }
     );
     assert.equal(approved.ok, true);
     assert.equal(approved.result.applied, true);
@@ -1199,7 +1241,8 @@ function providerOptions({
       status: 'available'
     }),
     runProviderProcessImpl,
-    validateProjectImpl: async () => validation
+    validateProjectImpl: async () => validation,
+    validateBoardImpl: passingDrc
   };
 }
 
@@ -1542,7 +1585,7 @@ test('provider-emitted approval, rollback, nested selection, requiredValidation,
     assert.notEqual(result.result.patchId, 'provider-supplied-approval');
     assert.equal(result.result.requiredValidation?.erc, true);
     assert.equal(inspectCalls.length, 1);
-    assert.equal(inspectCalls[0].selection, undefined);
+    assert.deepEqual(inspectCalls[0].selection, { items: [{ kind: 'symbol', reference: 'U1' }] });
     assert.equal(inspectCalls[0].kicadCliPath, '/trusted/kicad-cli');
     assert.deepEqual(spiceCommands, ['/trusted/ngspice']);
   } finally {
@@ -1798,5 +1841,155 @@ test('provider requiredValidation cannot disable artifact-derived ERC', async ()
   } finally {
     registry.disposeAll();
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('board-regenerating daemon preview runs candidate DRC', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-board-drc-'));
+  const drcCalls = [];
+  try {
+    const result = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: {
+        projectDir: root,
+        prompt: 'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      }
+    }, {
+      validateProjectImpl: passingErc,
+      validateBoardImpl: async (options) => {
+        drcCalls.push(options);
+        return { ok: true, skipped: false, executed: true, violations: [], unconnectedItems: [] };
+      }
+    });
+    assert.equal(result.ok, true);
+    assert.equal(drcCalls.length, 1);
+    assert.equal(result.result.candidateVerification.drc.status, 'passed');
+    assert.equal(result.result.requiredValidation.drc, true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('direct project.inspect forwards trusted selection and keeps provider nested selection stripped', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-inspect-selection-'));
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const inspected = await dispatchToolCall({
+      name: 'project.inspect',
+      args: {
+        projectDir: root,
+        selection: {
+          items: [
+            { kind: 'symbol', reference: 'U1', kiid: 'sel-u1', position: { x: 10, y: 20 } },
+            { kind: 'global_label', text: '+3V3', kiid: 'sel-3v3', position: { x: 30, y: 40 } }
+          ]
+        }
+      }
+    });
+    assert.equal(inspected.ok, true);
+    assert.equal(inspected.result.context.coverage.status, 'partial');
+    assert.ok(inspected.result.context.coverage.diagnostics.some((item) => item.code === 'SELECTION_CONNECTIVITY_UNPROVEN'));
+
+    const inspectCalls = [];
+    await dispatchToolCall({
+      id: 'call_provider_inspect_strip',
+      name: 'provider.invoke',
+      args: {
+        provider: 'codex',
+        projectDir: root,
+        prompt: 'Inspect the board.',
+        selection: { items: [{ kind: 'symbol', reference: 'U1', kiid: 'trusted', position: { x: 1, y: 1 } }] }
+      }
+    }, {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+      runProviderProcessImpl: async () => ({
+        exitCode: 0,
+        stderr: '',
+        events: [createEnvelope('tool.call', {
+          id: 'call_nested_inspect',
+          name: 'project.inspect',
+          args: { selection: { items: [{ kind: 'nested' }] } }
+        })]
+      }),
+      inspectProjectImpl: async (args) => {
+        inspectCalls.push(args);
+        return { ok: true, inspection: { projectDigest: 'fixture' }, validation: { erc: { ok: true } } };
+      }
+    });
+    assert.equal(inspectCalls[0].selection.items[0].kiid, 'trusted');
+    assert.notEqual(inspectCalls[0].selection.items[0].kind, 'nested');
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('follow-up project.request after a spec exists uses the new prompt', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-followup-prompt-'));
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    await saveCircuitConversation(root, {
+      status: 'generate',
+      generatePrompt: 'RP2040 board with USB-C power and I2C connector.',
+      sourcePrompt: 'RP2040 board with USB-C power and I2C connector.',
+      answers: {}
+    });
+    const result = await dispatchToolCall({
+      id: 'call_followup_prompt',
+      name: 'project.request',
+      args: {
+        projectDir: root,
+        prompt: 'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.'
+      }
+    }, {
+      ...providerOptions({ events: [] }),
+      validateBoardImpl: passingDrc,
+      verifyAppliedProjectImpl: passingVerify
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.match(result.result.diff ?? JSON.stringify(result.result), /ESP32-S3|ESP32_S3/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('transaction status reconcile waits behind the project mutex', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-reconcile-lock-'));
+  const services = await transactionServices();
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    let started;
+    const startedLock = new Promise((resolve) => {
+      started = resolve;
+    });
+    const lockPromise = services.projectMutexRegistry.runExclusive({ projectDir: root }, async () => {
+      started();
+      await held;
+    });
+    await startedLock;
+    const status = await dispatchToolCall({
+      name: 'project.transaction.status',
+      args: { projectDir: root }
+    }, services);
+    assert.equal(status.ok, false);
+    assert.equal(status.error.code, 'PROJECT_BUSY');
+    release();
+    await lockPromise;
+  } finally {
+    await rm(root, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
   }
 });

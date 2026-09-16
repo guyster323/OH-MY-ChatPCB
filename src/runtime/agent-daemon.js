@@ -17,6 +17,8 @@ import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
+import { normalizeCircuitSpec } from './circuit-spec.js';
+import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
@@ -70,6 +72,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     return failure(error.code ?? 'UNSAFE_PROJECT_DIR', error.message);
   }
 
+  try {
   switch (call.name) {
     case 'project.create':
       return ok(await createNamedProject({
@@ -89,6 +92,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       return okOrInspectionFailure(inspectProjectImpl({
         projectDir: call.args?.projectDir,
         kicadCliPath,
+        ...(call.args?.selection !== undefined ? { selection: call.args.selection } : {}),
         ...(allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {}),
         analyzerAdapters: call.args?.analyzerAdapters
       }));
@@ -132,19 +136,30 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     }
 
     case 'project.transaction.status':
-      return dispatchTransactionStatus(call.args ?? {}, ctx);
+      return await dispatchTransactionStatus(call.args ?? {}, ctx);
 
     case 'project.transaction.rollback':
-      return dispatchTransactionRollback(call.args ?? {}, ctx);
+      return await dispatchTransactionRollback(call.args ?? {}, ctx);
 
     default:
       return failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${call.name}`);
+  }
+  } catch (error) {
+    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    throw error;
   }
 }
 
 async function dispatchSchematicPatch(args, ctx) {
   const projectDir = args.projectDir;
-  const { patchApprovalRegistry, projectMutexRegistry, transactionJournal, validateProjectImpl, verifyAppliedProjectImpl } = ctx;
+  const {
+    patchApprovalRegistry,
+    projectMutexRegistry,
+    transactionJournal,
+    validateProjectImpl,
+    validateBoardImpl,
+    verifyAppliedProjectImpl
+  } = ctx;
 
   if (args.cancel === true) {
     if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to cancel a patch preview.');
@@ -177,11 +192,15 @@ async function dispatchSchematicPatch(args, ctx) {
       expectedPatchId: args.patchId,
       patchPlan: plan,
       validateProjectImpl,
+      validateBoardImpl,
       verifyAppliedProjectImpl,
       approvalRegistry: patchApprovalRegistry,
       mutexRegistry: projectMutexRegistry,
       journal: transactionJournal
     })));
+  } catch (error) {
+    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    throw error;
   } finally {
     const still = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
     if (!still.ok) await disposeSchematicPatchPlan(plan);
@@ -261,7 +280,8 @@ async function invokeProvider(call, ctx) {
     }
     const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, {
       analyzerAdapters: args.analyzerAdapters,
-      selection: args.selection
+      selection: args.selection,
+      prompt
     });
     toolResults.push({
       id: event.payload.id,
@@ -291,8 +311,48 @@ async function requestProject(call, ctx) {
     throw new Error('project.request requires a prompt.');
   }
 
+  const spec = normalizeCircuitSpec(prompt);
+  const hasExistingSpec = await projectHasSpec(projectDir);
+  const existingConversation = await loadCircuitConversation(projectDir).catch(() => null);
+  const awaitingInput = existingConversation?.status === 'awaiting-input';
+  const shouldClarify = awaitingInput || !hasExistingSpec;
+  const conversation = shouldClarify
+    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true })
+    : existingConversation;
+  if (shouldClarify && conversation && !conversationWantsGenerate(conversation)) {
+    return {
+      operation: 'clarify',
+      requiresApproval: false,
+      applied: false,
+      conversation,
+      assistantMessage: conversation.assistantMessage,
+      nextQuestion: conversation.nextQuestion,
+      options: conversation.options ?? [],
+      unmatched: conversation.unmatched ?? [],
+      missingProfile: conversation.missingProfile === true,
+      review: {
+        status: 'needs-input',
+        findings: {
+          blockers: [],
+          warnings: [],
+          notes: (conversation.unmatched ?? []).map((id) => ({
+            id: `unmatched-${id}`,
+            message: `Requested capability is not in a supported profile yet: ${id}.`
+          }))
+        },
+        proposedFixes: []
+      }
+    };
+  }
+
   const hasSpec = await projectHasSpec(projectDir);
-  const providerResult = await invokeProvider(call, {
+  const generatePrompt = hasSpec && !awaitingInput
+    ? prompt
+    : (conversation?.generatePrompt ?? prompt);
+  const providerResult = await invokeProvider({
+    ...call,
+    args: { ...args, prompt: generatePrompt }
+  }, {
     ...ctx,
     allowGenerate: !hasSpec,
     forceProjectDir: true
@@ -303,7 +363,7 @@ async function requestProject(call, ctx) {
   } else {
     const generated = await previewNativeChange({
       projectDir,
-      prompt,
+      prompt: generatePrompt,
       context: args.selection
     }, ctx);
     if (!generated.ok) {
@@ -317,7 +377,8 @@ async function requestProject(call, ctx) {
   return {
     ...preview,
     operation: hasSpec ? 'patched' : 'generated',
-    providerEvents: providerResult.events
+    providerEvents: providerResult.events,
+    conversation
   };
 }
 
@@ -368,7 +429,7 @@ function cancelProvider(args = {}, providerControllers) {
   };
 }
 
-function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection } = {}) {
+function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection, prompt } = {}) {
   const args = {
     ...(payload.args ?? {})
   };
@@ -393,12 +454,20 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
   if (name === 'schematic.generate' && selection !== undefined) {
     args.context = selection;
   }
+  if (name === 'project.inspect' && selection !== undefined) {
+    args.selection = selection;
+  }
   if (name === 'validate.erc' || name === 'validate.drc') {
     name = 'project.inspect';
   }
 
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
+  }
+  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && (name === 'schematic.generate' || name === 'schematic.patch')) {
+    if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
+      args.prompt = prompt;
+    }
   }
   if (name === 'project.inspect' && analyzerAdapters !== undefined) {
     args.analyzerAdapters = analyzerAdapters;
@@ -529,7 +598,8 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       prompt,
       projectName,
       context,
-      validateProjectImpl: ctx.validateProjectImpl
+      validateProjectImpl: ctx.validateProjectImpl,
+      validateBoardImpl: ctx.validateBoardImpl
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
@@ -569,10 +639,17 @@ async function dispatchCopiedValidation(kind, call, ctx) {
 
 async function ensureReconciled(projectDir, ctx) {
   if (!projectDir || !ctx.transactionJournal) return;
-  const key = path.resolve(projectDir);
-  if (ctx.reconciledProjects.has(key)) return;
-  await ctx.transactionJournal.reconcile({ projectDir });
-  ctx.reconciledProjects.add(key);
+  const run = ctx.projectMutexRegistry?.runExclusive
+    ? (work) => ctx.projectMutexRegistry.runExclusive({ projectDir }, work)
+    : (work) => work();
+  await run(async () => {
+    const key = ctx.projectMutexRegistry?.canonicalKey
+      ? await ctx.projectMutexRegistry.canonicalKey(projectDir)
+      : path.resolve(projectDir);
+    if (ctx.reconciledProjects.has(key)) return;
+    await ctx.transactionJournal.reconcile({ projectDir });
+    ctx.reconciledProjects.add(key);
+  });
 }
 
 async function dispatchTransactionStatus(args, ctx) {
@@ -580,12 +657,17 @@ async function dispatchTransactionStatus(args, ctx) {
     return failure('JOURNAL_NOT_FOUND', 'Transaction journal is not configured.');
   }
   const projectDir = args.projectDir;
-  await ensureReconciled(projectDir, ctx);
-  const records = await ctx.transactionJournal.list({ projectDir });
-  return ok({
-    projectDir: path.resolve(projectDir),
-    transactions: records.map(publicTransaction)
-  });
+  try {
+    await ensureReconciled(projectDir, ctx);
+    const records = await ctx.transactionJournal.list({ projectDir });
+    return ok({
+      projectDir: path.resolve(projectDir),
+      transactions: records.map(publicTransaction)
+    });
+  } catch (error) {
+    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    throw error;
+  }
 }
 
 async function dispatchTransactionRollback(args, ctx) {
@@ -593,13 +675,18 @@ async function dispatchTransactionRollback(args, ctx) {
     return failure('JOURNAL_NOT_FOUND', 'Transaction journal is not configured.');
   }
   const projectDir = args.projectDir;
-  await ensureReconciled(projectDir, ctx);
-  return ok(await rollbackProjectTransaction({
-    projectDir,
-    transactionId: args.transactionId,
-    mutexRegistry: ctx.projectMutexRegistry,
-    journal: ctx.transactionJournal
-  }));
+  try {
+    await ensureReconciled(projectDir, ctx);
+    return ok(await rollbackProjectTransaction({
+      projectDir,
+      transactionId: args.transactionId,
+      mutexRegistry: ctx.projectMutexRegistry,
+      journal: ctx.transactionJournal
+    }));
+  } catch (error) {
+    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    throw error;
+  }
 }
 
 function publicTransaction(record) {

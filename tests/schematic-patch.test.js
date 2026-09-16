@@ -14,9 +14,13 @@ const passingVerify = async () => ({
   erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
   drc: { ok: true, skipped: true }
 });
+const passingDrc = async () => ({ ok: true, skipped: false, executed: true, violations: [], unconnectedItems: [] });
 
 async function applyApprovedPatch(options) {
-  const plan = await createSchematicPatchPlan(options);
+  const plan = await createSchematicPatchPlan({
+    validateBoardImpl: passingDrc,
+    ...options
+  });
   try {
     return await applySchematicPatch({
       ...options,
@@ -44,7 +48,8 @@ test('schematic patch preview returns a diff without modifying existing project 
       projectDir: root,
       prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
       approved: false,
-      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      validateBoardImpl: passingDrc
     });
 
     assert.equal(preview.requiresApproval, true);
@@ -72,7 +77,8 @@ test('approved schematic patch writes generated files and returns validation res
     const result = await applyApprovedPatch({
       projectDir: root,
       prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
-      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      validateBoardImpl: passingDrc
     });
 
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
@@ -112,7 +118,8 @@ test('approved schematic patch rejects a preview after project artifacts change'
     const plan = await createSchematicPatchPlan({
       projectDir: root,
       prompt,
-      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      validateBoardImpl: passingDrc
     });
     await appendFile(initial.files.schematic, '\n(user edit)\n');
 
@@ -147,7 +154,8 @@ test('approved schematic patch becomes stale when an unchanged tracked artifact 
     const plan = await createSchematicPatchPlan({
       projectDir: root,
       prompt,
-      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } })
+      validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      validateBoardImpl: passingDrc
     });
     const unrelatedSchematic = path.join(root, 'user-sheet.kicad_sch');
     await appendFile(unrelatedSchematic, '(user-authored-sheet)\n');
@@ -183,7 +191,12 @@ test('approved schematic patch writes the KiCad-normalized candidate bytes it pr
       await appendFile(path.join(projectDir, 'chatpcb_mcu_peripheral.kicad_sch'), '\n(kicad-cli-normalized)\n');
       return { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } };
     };
-    const plan = await createSchematicPatchPlan({ projectDir: root, prompt, validateProjectImpl: validateCandidate });
+    const plan = await createSchematicPatchPlan({
+      projectDir: root,
+      prompt,
+      validateProjectImpl: validateCandidate,
+      validateBoardImpl: passingDrc
+    });
     const preview = await applySchematicPatch({ projectDir: root, approved: false, patchPlan: plan });
 
     assert.ok(preview.afterArtifacts.some((artifact) => artifact.path === 'chatpcb_mcu_peripheral.kicad_sch'));
@@ -278,6 +291,7 @@ test('transaction verification failure restores live files after a write', async
       projectDir: root,
       prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.',
       validateProjectImpl: async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } }),
+      validateBoardImpl: passingDrc,
       verifyAppliedProjectImpl: async () => ({
         erc: { ok: false, skipped: false, executed: true, erc: { errorCount: 1, warningCount: 0 } },
         drc: { ok: true, skipped: true }

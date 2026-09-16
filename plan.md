@@ -260,6 +260,19 @@ Acceptance criteria:
 - If `ngspice` is absent, the system returns typed skip behavior.
 - Simulation results state what was verified and what was not verified.
 
+## Electrical verification (EEBench)
+
+Goal: put an EEBench-style requirements → design → test loop between schematic/profile drafts and manufacturing exports. Source: [EEBench](https://eebench.org/).
+
+This is not a claim that ChatPCB can currently post to the public EEBench leaderboard. EEBench V1 grades atopile `.ato` submissions with SPICE and BOM cost; ChatPCB produces KiCad files. Use the same verification idea internally, then consider an `.ato` adapter only if we want an official held-out run.
+
+Work items:
+
+- [ ] Map supported-profile analog/power blocks to measurable specs (hold-up, regulator ripple, LED current, I2C rise time, USB-C CC).
+- [ ] Run those specs in SPICE at nominal and worst-case tolerance corners; fail closed on skipped simulation.
+- [ ] Score cost only after the electrical checks pass, against a reference BOM.
+- [ ] Keep EEBench layout/bring-up (V2+) out of this gate; those belong with Phase 7 manufacturing after DRC `0/0`.
+
 ## Phase 7: PCB and Manufacturing Workflows
 
 Goal: expand from schematic generation to board/manufacturing workflows.
@@ -487,6 +500,8 @@ git log --oneline -1
 ```
 
 ## Next Immediate Task
+
+Insert EEBench-style electrical verification between fork productization and manufacturing exports. Do not treat https://eebench.org/ as a current ChatPCB leaderboard run: V1 is atopile `.ato` + SPICE, not KiCad GUI. Use it as the analog/power quality bar before Gerbers.
 
 Continue Phase 8 from measured PCB drafts, not from stale unconnected counts:
 

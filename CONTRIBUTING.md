@@ -48,6 +48,9 @@ Keep the fork branch rebaseable:
 
 - keep ChatPCB panel changes small and isolated
 - prefer `plugins/chatpcb_panel` and packaged `share/chatpcb_panel` assets until the final source-tree location is chosen
+- sync this repository into the fork with `npm run sync:kicad-fork` before building or launching
+- launch the product UI with `npm run launch:kicad`; do not treat the standalone browser fallback as the product
+- default interactive verification is `orca computer` against `eeschema` using `.grok/skills/kicad-panel-computer-use/SKILL.md`; `npm run verify:ui` does not replace that
 - do not add custom top-level `chatpcb_*` nodes to KiCad schematic or PCB files
 - keep ChatPCB metadata in `.chatpcb.json`
 - verify generated files with `kicad-cli` before widening the generator

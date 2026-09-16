@@ -146,6 +146,20 @@ async function assertMissing(projectDir, relativePath) {
   await assert.rejects(readFile(path.join(projectDir, ...relativePath.split('/'))), { code: 'ENOENT' });
 }
 
+test('schematic-only apply records SCHEMATIC_BOARD_PARITY_UNVERIFIED without blocking', async () => {
+  const harness = await createHarness();
+  try {
+    const plan = await buildPlan(harness.root, [
+      { path: 'demo.kicad_sch', afterBytes: 'after' }
+    ]);
+    const result = await applyWith(harness, plan);
+    assert.equal(result.applied, true);
+    assert.ok(result.verification.diagnostics.some((item) => item.code === 'SCHEMATIC_BOARD_PARITY_UNVERIFIED'));
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('applyProjectTransaction writes planned files and records an applied journal', async () => {
   const harness = await createHarness();
   try {

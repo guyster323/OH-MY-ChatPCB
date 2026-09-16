@@ -10,6 +10,8 @@
 #include <tool/tool_manager.h>
 #include <tools/sch_selection_tool.h>
 
+#include <wx/datetime.h>
+#include <wx/event.h>
 #include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/sizer.h>
@@ -44,6 +46,38 @@ bool RequestedProjectIsActive( SCH_EDIT_FRAME* aFrame, const wxString& aRequeste
 
     return wxFileName::DirName( aRequestedPath ).SameAs(
             wxFileName::DirName( activeProject.GetPath() ) );
+}
+
+wxString WithFileCacheBust( const wxString& aUrl )
+{
+    if( aUrl.Find( '?' ) != wxNOT_FOUND )
+        return aUrl;
+
+    if( !aUrl.StartsWith( wxT( "file:" ) ) )
+        return aUrl;
+
+    wxString path = aUrl;
+    path.Replace( wxT( "file:///" ), wxEmptyString );
+    path.Replace( wxT( "file://" ), wxEmptyString );
+#ifdef __WXMSW__
+    path.Replace( wxT( "/" ), wxString( wxFileName::GetPathSeparator() ) );
+#endif
+    wxFileName html( path );
+
+    if( !html.FileExists() )
+        return aUrl;
+
+    wxDateTime newest = html.GetModificationTime();
+    const wxFileName js( html.GetPath(), wxT( "panel.js" ) );
+    const wxFileName css( html.GetPath(), wxT( "styles.css" ) );
+
+    if( js.FileExists() && js.GetModificationTime().IsLaterThan( newest ) )
+        newest = js.GetModificationTime();
+
+    if( css.FileExists() && css.GetModificationTime().IsLaterThan( newest ) )
+        newest = css.GetModificationTime();
+
+    return aUrl + wxString::Format( wxT( "?v=%ld" ), static_cast<long>( newest.GetTicks() ) );
 }
 
 wxString ResolveAgentCommand()
@@ -82,13 +116,16 @@ CHATPCB_PANEL::CHATPCB_PANEL( wxWindow* parent ) :
         wxPanel( parent ),
         m_frame( dynamic_cast<SCH_EDIT_FRAME*>( parent ) ),
         m_webView( nullptr ),
-        m_agentProcess( nullptr )
+        m_agentProcess( nullptr ),
+        m_hasReportedDirty( false ),
+        m_reportedDirty( false )
 {
     auto* sizer = new wxBoxSizer( wxVERTICAL );
     m_webView = wxWebView::New( this, wxID_ANY );
     sizer->Add( m_webView, 1, wxEXPAND );
     SetSizer( sizer );
 
+    Bind( wxEVT_IDLE, &CHATPCB_PANEL::OnIdle, this );
     Bind( wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, &CHATPCB_PANEL::OnScriptMessage, this,
           m_webView->GetId() );
 
@@ -247,6 +284,43 @@ void CHATPCB_PANEL::OpenProject( const wxString& aProjectPath, const std::string
 bool CHATPCB_PANEL::IsEditorDirty() const
 {
     return m_frame && m_frame->IsContentModified();
+}
+
+void CHATPCB_PANEL::OnIdle( wxIdleEvent& aEvent )
+{
+    const bool dirty = IsEditorDirty();
+
+    if( !m_hasReportedDirty || dirty != m_reportedDirty )
+        PostEditorStatus();
+
+    aEvent.Skip();
+}
+
+wxString CHATPCB_PANEL::ActiveProjectDirectory() const
+{
+    if( !m_frame )
+        return wxEmptyString;
+
+    wxFileName projectFile( m_frame->Prj().GetProjectFullName() );
+
+    if( projectFile.GetExt().CmpNoCase( wxT( "kicad_pro" ) ) == 0 )
+        return projectFile.GetPath();
+
+    return projectFile.GetFullPath();
+}
+
+void CHATPCB_PANEL::PostEditorStatus()
+{
+    const bool dirty = IsEditorDirty();
+    const wxString projectPath = ActiveProjectDirectory();
+
+    m_hasReportedDirty = true;
+    m_reportedDirty = dirty;
+    PostHostEvent( { { "type", "project.status" },
+                     { "projectPath", ToUtf8( projectPath ) },
+                     { "dirty", dirty },
+                     { "linkState", dirty ? "conflict" : ( projectPath.IsEmpty() ? "unlinked" : "linked" ) } },
+                   std::string() );
 }
 
 void CHATPCB_PANEL::ReloadActiveProject( const wxString& aProjectPath,
@@ -414,6 +488,11 @@ void CHATPCB_PANEL::EnsureAgentRunning()
 
 wxString CHATPCB_PANEL::ResolvePanelUrl() const
 {
+    wxString explicitUrl;
+
+    if( wxGetEnv( wxT( "CHATPCB_PANEL_URL" ), &explicitUrl ) && !explicitUrl.IsEmpty() )
+        return WithFileCacheBust( explicitUrl );
+
 #ifdef CHATPCB_PANEL_ASSET_URL
     return wxString::FromUTF8( CHATPCB_PANEL_ASSET_URL );
 #else

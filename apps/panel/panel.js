@@ -1,5 +1,6 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
-const HOST_STATUS_TIMEOUT_MS = 500;
+const HOST_STATUS_TIMEOUT_MS = 2000;
+const CONFLICT_POLL_MS = 1000;
 
 const statusEl = document.querySelector('#connection-status');
 const newProjectFormEl = document.querySelector('#new-project-form');
@@ -16,7 +17,14 @@ const providerStatusEl = document.querySelector('#provider-status');
 const requestStatusEl = document.querySelector('#request-status');
 const requestTechnicalDetailsEl = document.querySelector('#request-technical-details');
 const requestTechnicalDetailEl = document.querySelector('#request-technical-detail');
+const conversationCardEl = document.querySelector('#conversation-card');
+const conversationLogEl = document.querySelector('#conversation-log');
+const conversationOptionsEl = document.querySelector('#conversation-options');
+const projectSetupEl = document.querySelector('.project-setup');
+const newProjectAgainEl = document.querySelector('#new-project-again');
 const conflictCardEl = document.querySelector('#conflict-card');
+const conflictDockBtnEl = document.querySelector('#conflict-dock-btn');
+const recheckKiCadButtonEl = document.querySelector('#recheck-kicad-button');
 const artifactListEl = document.querySelector('#artifact-list');
 const reviewPanelEl = document.querySelector('#review-panel');
 const reviewStatusEl = document.querySelector('#review-status');
@@ -46,6 +54,7 @@ let activeProjectCreateId = null;
 let activeRequestId = null;
 let activeRequestProjectDir = null;
 let pendingHostStatus = null;
+let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
 let patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
 const pendingCalls = new Map();
@@ -56,15 +65,30 @@ newProjectFormEl.addEventListener('submit', (event) => {
   event.preventDefault();
   createProject();
 });
+newProjectAgainEl?.addEventListener('click', () => {
+  if (projectSetupEl) projectSetupEl.hidden = false;
+  projectNameEl?.focus();
+});
 formEl.addEventListener('submit', (event) => {
   event.preventDefault();
   sendProjectRequest();
 });
 providerEl.addEventListener('change', refreshProviderStatus);
 openKiCadButtonEl.addEventListener('click', openInKiCad);
+recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
+for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
+  button.addEventListener('click', () => {
+    const dialog = document.getElementById(button.dataset.open);
+    if (typeof dialog?.showModal === 'function') dialog.showModal();
+  });
+}
 window.addEventListener('message', (event) => handleHostMessage(event.data));
+window.addEventListener('focus', () => refreshHostProjectStatus());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshHostProjectStatus();
+});
 
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
@@ -97,7 +121,16 @@ function createProject() {
 }
 
 async function sendProjectRequest() {
-  if (!activeProject || !promptEl.value.trim() || activeRequestId || pendingHostStatus) return;
+  if (!activeProject) {
+    renderRequestStatus({ state: 'failed', summary: 'Create a project before sending a circuit request.' });
+    return;
+  }
+  const prompt = promptEl.value.trim();
+  if (!prompt) {
+    renderRequestStatus({ state: 'failed', summary: 'Circuit request is required.' });
+    return;
+  }
+  if (activeRequestId) return;
 
   const requestProject = activeProject;
   setRequestBusy(true);
@@ -114,13 +147,17 @@ async function sendProjectRequest() {
     setRequestBusy(false);
     return;
   }
-  if (status?.dirty) {
+  if (status?.dirty && status.linkState !== 'unlinked') {
+    renderRequestStatus({
+      state: 'failed',
+      summary: 'KiCad changes need attention. Save or discard them in KiCad, then press Send again or I saved — recheck.'
+    });
     showConflict();
     setRequestBusy(false);
     return;
   }
 
-  conflictCardEl.hidden = true;
+  hideConflict();
   renderRequestStatus({ state: 'running', summary: 'Running request…' });
   const id = `project_request_${Date.now()}`;
   activeRequestId = id;
@@ -129,7 +166,12 @@ async function sendProjectRequest() {
   sendToolCall({
     id,
     name: 'project.request',
-    args: { projectDir: requestProject.projectDir, prompt: promptEl.value.trim(), provider: providerEl.value }
+    args: {
+      projectDir: requestProject.projectDir,
+      prompt,
+      provider: providerEl.value,
+      proMode: document.querySelector('#pro-mode')?.checked === true
+    }
   });
 }
 
@@ -232,6 +274,8 @@ function activateProject(project) {
   activeProjectNameEl.textContent = project.displayName;
   activeProjectDirectoryEl.textContent = project.projectDir;
   activeProjectEl.hidden = false;
+  if (projectSetupEl) projectSetupEl.hidden = true;
+  conversationCardEl.hidden = false;
   setRequestBusy(Boolean(activeRequestId));
   projectNameEl.value = '';
   renderRequestStatus({ state: 'ready', summary: 'Project ready. Describe the circuit you want to create.' });
@@ -257,7 +301,9 @@ function resetProjectResults() {
   inspectionCardEl.hidden = true;
   renderInspection({});
   clearPatchApproval();
-  conflictCardEl.hidden = true;
+  hideConflict();
+  conversationLogEl.replaceChildren();
+  conversationOptionsEl.replaceChildren();
   kiCadLinkCardEl.hidden = true;
   kiCadLinkEl.dataset.state = 'available';
   kiCadLinkEl.textContent = '';
@@ -265,7 +311,45 @@ function resetProjectResults() {
   kiCadFallbackEl.textContent = '';
 }
 
+function renderConversation(result) {
+  conversationCardEl.hidden = false;
+  conversationLogEl.replaceChildren();
+  const messages = result.conversation?.messages ?? [
+    ...(result.assistantMessage ? [{ role: 'assistant', text: result.assistantMessage }] : [])
+  ];
+  for (const message of messages) {
+    const item = document.createElement('li');
+    item.dataset.role = message.role === 'user' ? 'user' : 'assistant';
+    item.textContent = message.text;
+    conversationLogEl.append(item);
+  }
+  conversationOptionsEl.replaceChildren();
+  for (const option of result.options ?? []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = option.label;
+    if (option.recommended) button.dataset.recommended = 'true';
+    if (option.help) {
+      button.title = option.help;
+      button.dataset.help = option.help;
+    }
+    button.addEventListener('click', () => {
+      promptEl.value = option.prompt;
+      sendProjectRequest();
+    });
+    conversationOptionsEl.append(button);
+  }
+}
+
 function renderProjectRequest(result) {
+  renderConversation(result);
+  if (result?.operation === 'clarify') {
+    renderRequestStatus({
+      state: 'ready',
+      summary: result.nextQuestion ?? 'Reply in chat to continue. Missing capabilities are part of the product flow.'
+    });
+    return;
+  }
   if (result?.requiresApproval && result.patchId) {
     setPatchApproval(result);
     renderRequestStatus({ state: 'ready', summary: 'Patch preview is ready for approval.' });
@@ -521,6 +605,9 @@ function showKiCadFallback(projectFile) {
 }
 
 async function requestHostProjectStatus() {
+  if (!activeProject) return null;
+  if (pendingHostStatus?.promise) return pendingHostStatus.promise;
+
   const host = window.chatpcbHost;
   const message = { type: 'project.status', projectPath: activeProject.projectDir };
   if (typeof host?.getProjectStatus === 'function') {
@@ -532,15 +619,35 @@ async function requestHostProjectStatus() {
   }
   if (typeof host?.postMessage !== 'function' && typeof host?.send !== 'function') return null;
 
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      if (pendingHostStatus?.projectPath !== message.projectPath) return;
-      pendingHostStatus = null;
-      resolve({ unavailable: true });
-    }, HOST_STATUS_TIMEOUT_MS);
-    pendingHostStatus = { projectPath: message.projectPath, resolve, timeout };
-    postHostMessage(message);
+  let resolvePromise;
+  const promise = new Promise((resolve) => {
+    resolvePromise = resolve;
   });
+  const timeout = setTimeout(() => {
+    if (pendingHostStatus?.promise !== promise) return;
+    pendingHostStatus = null;
+    resolvePromise({ unavailable: true });
+  }, HOST_STATUS_TIMEOUT_MS);
+  pendingHostStatus = { projectPath: message.projectPath, resolve: resolvePromise, timeout, promise };
+  postHostMessage(message);
+  return promise;
+}
+
+function refreshHostProjectStatus() {
+  if (!activeProject) return;
+  requestHostProjectStatus();
+}
+
+function hostPathMatchesActive(projectPath) {
+  if (!activeProject?.projectDir || typeof projectPath !== 'string' || projectPath.length === 0) return false;
+  const requested = normalizeHostPath(projectPath);
+  const active = normalizeHostPath(activeProject.projectDir);
+  if (requested === active) return true;
+  return requested.startsWith(`${active}/`) && /\.kicad_pro$/i.test(requested);
+}
+
+function normalizeHostPath(value) {
+  return value.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
 }
 
 function postHostMessage(message) {
@@ -557,19 +664,22 @@ function postHostMessage(message) {
 }
 
 function handleHostMessage(message) {
-  if (!message || typeof message !== 'object' || message.projectPath !== activeProject?.projectDir) return;
+  if (!message || typeof message !== 'object' || !hostPathMatchesActive(message.projectPath)) return;
   if (message.type === 'project.status') {
     const dirty = message.dirty === true || message.unsavedChanges === true;
-    if (dirty || message.linkState === 'conflict') {
+    if (message.linkState === 'unlinked') {
+      hideConflict();
+      renderKiCadLink({ linkState: 'unlinked', projectPath: findProjectFileFromList() ?? activeProject.projectDir });
+    } else if (dirty || message.linkState === 'conflict') {
       clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
       showConflict();
     } else {
-      conflictCardEl.hidden = true;
+      hideConflict();
       if (typeof message.linkState === 'string') {
         renderKiCadLink({ linkState: message.linkState, projectPath: findProjectFileFromList() ?? activeProject.projectDir });
       }
     }
-    if (pendingHostStatus?.projectPath === message.projectPath) {
+    if (pendingHostStatus && hostPathMatchesActive(pendingHostStatus.projectPath)) {
       clearTimeout(pendingHostStatus.timeout);
       const { resolve } = pendingHostStatus;
       pendingHostStatus = null;
@@ -595,7 +705,34 @@ function handleHostMessage(message) {
 
 function showConflict() {
   conflictCardEl.hidden = false;
+  if (conflictDockBtnEl) conflictDockBtnEl.hidden = false;
+  document.getElementById('conflict-dialog')?.showModal?.();
   renderKiCadLink({ linkState: 'conflict', projectPath: activeProject.projectDir, dirty: true });
+  startConflictWatch();
+}
+
+function hideConflict() {
+  conflictCardEl.hidden = true;
+  if (conflictDockBtnEl) conflictDockBtnEl.hidden = true;
+  document.getElementById('conflict-dialog')?.close?.();
+  stopConflictWatch();
+}
+
+function startConflictWatch() {
+  if (conflictWatch) return;
+  conflictWatch = setInterval(() => {
+    if (!activeProject || conflictCardEl.hidden) {
+      stopConflictWatch();
+      return;
+    }
+    refreshHostProjectStatus();
+  }, CONFLICT_POLL_MS);
+}
+
+function stopConflictWatch() {
+  if (!conflictWatch) return;
+  clearInterval(conflictWatch);
+  conflictWatch = null;
 }
 
 function setRequestBusy(isBusy) {

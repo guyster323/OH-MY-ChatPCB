@@ -23,11 +23,16 @@ test('Phase 1 public development documents are present and actionable', async ()
   assert.match(readme, /User Test Guide/);
   assert.match(readme, /Codex CLI verification/);
   assert.match(readme, /npm install/);
+  assert.match(readme, /npm run launch:kicad/);
+  assert.match(readme, /right-side ChatPCB panel/);
   assert.match(readme, /npm run verify:sample/);
   assert.match(readme, /npm run verify:panel/);
   assert.match(readme, /npm run verify:ui/);
+  assert.match(readme, /npm run verify:kicad/);
   assert.match(readme, /Browser UI verification/);
   assert.match(readme, /Computer Use verification status/);
+  assert.match(readme, /kicad-panel-computer-use/);
+  assert.match(contributing, /orca computer/);
   assert.match(readme, /가스 센서 보드 01/);
   assert.match(readme, /Korean or English circuit request/);
   assert.match(readme, /press \*\*Send\*\*/);
@@ -75,6 +80,10 @@ test('Phase 1 migration documents describe the evidence-gated runtime contract',
   assert.match(architecture, /schema v1.*readable but unverified/i);
   assert.match(architecture, /schema v2.*artifact-bound/i);
   assert.match(roadmap, /evidence-gated KiCad agent runtime/i);
+  assert.match(roadmap, /eebench\.org/);
+  assert.match(roadmap, /Electrical verification \(EEBench\)/);
+  assert.match(plan, /Electrical verification \(EEBench\)/);
+  assert.match(readme, /eebench\.org/);
   assert.match(plan, /all generated artifacts participate in preview and rollback/i);
   assert.doesNotMatch(plan, /Extend patch diff handling to `\.kicad_pcb` once PCB drafts exist/);
   assert.match(handoff, /route-reset-boot.*diagnostic/i);

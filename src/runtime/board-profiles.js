@@ -473,6 +473,14 @@ function calculationEvidence() {
   ];
 }
 
+export function listSupportedProfiles() {
+  return SUPPORTED_PROFILES.map(({ id, family, part }) => ({ id, family, part }));
+}
+
+export function matchSupportedProfile(spec) {
+  return findSupportedProfile(spec) ?? null;
+}
+
 function findSupportedProfile(spec) {
   const prompt = spec.sourcePrompt ?? '';
   const explicit = /release\s+profile|supported\s+profile|release-quality|release quality/i.test(prompt);
