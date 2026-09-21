@@ -42,9 +42,15 @@ test('Pro off applies recommended choices and generates without an interview', (
 
   assert.equal(conversation.status, 'generate');
   assert.match(conversation.assistantMessage, /권장 구성/);
-  assert.match(conversation.assistantMessage, /전원 토폴로지/);
+  assert.match(conversation.assistantMessage, /적용/);
+  assert.match(conversation.assistantMessage, /전원:/);
+  assert.match(conversation.assistantMessage, /MCU:/);
   assert.match(conversation.assistantMessage, /벅부스트|스위칭/);
   assert.match(conversation.assistantMessage, /ESP32-S3-WROOM-1-N8R2/);
+  assert.match(conversation.assistantMessage, /전원: .+ \/ .+/);
+  assert.match(conversation.assistantMessage, /MCU: .+ \/ .+/);
+  assert.ok(conversation.specRows.some((row) => row.label === '전원' && row.reason));
+  assert.ok(conversation.specRows.some((row) => row.label === 'MCU' && row.reason));
   assert.equal(conversation.options.length, 0);
   assert.match(conversation.answers['power-architecture.railStrategy'], /벅부스트|18650/);
   assert.match(conversation.answers['mcu-board.mcuPart'], /ESP32-S3-WROOM-1-N8R2/);

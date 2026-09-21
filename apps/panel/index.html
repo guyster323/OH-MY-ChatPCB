@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
-    <link rel="stylesheet" href="./styles.css?v=20260914-sourcing" />
+    <link rel="stylesheet" href="./styles.css?v=20260921-workflow6" />
   </head>
   <body>
     <main class="shell">
@@ -50,29 +50,62 @@
         <button type="button" id="new-project-again">New project</button>
       </section>
 
-      <nav class="status-dock" aria-label="Project tools">
-        <button type="button" class="dock-btn" data-open="review-dialog" data-help="Review: blockers and proposed fixes" title="Review">
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/><rect x="5" y="11" width="4" height="1" class="px-cut"/></svg>
-        </button>
-        <button type="button" class="dock-btn" data-open="erc-dialog" data-help="ERC: electrical rules check" title="ERC">
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="8" width="4" height="2"/><rect x="5" y="5" width="2" height="8"/><rect x="9" y="3" width="5" height="2"/><rect x="12" y="5" width="2" height="8"/></svg>
-        </button>
-        <button type="button" class="dock-btn" data-open="evidence-dialog" data-help="Project evidence digest and inspection" title="Evidence">
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="4" height="4" class="px-cut"/></svg>
-        </button>
-        <button type="button" class="dock-btn" data-open="patch-dialog" data-help="Patch approval" title="Patch">
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="12" height="3"/><rect x="7" y="2" width="3" height="12"/></svg>
-        </button>
-        <button type="button" class="dock-btn" data-open="kicad-dialog" data-help="Open or link the KiCad project" title="KiCad">
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="2" height="5" class="px-cut"/><rect x="8" y="6" width="3" height="2" class="px-cut"/></svg>
-        </button>
-        <button type="button" class="dock-btn" data-open="artifacts-dialog" data-help="Generated files" title="Artifacts">
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg>
-        </button>
-        <button type="button" class="dock-btn" id="conflict-dock-btn" data-open="conflict-dialog" data-help="Unsaved KiCad editor changes" title="Unsaved" hidden>
-          <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="7" y="2" width="2" height="8"/><rect x="7" y="12" width="2" height="2"/></svg>
-        </button>
-      </nav>
+      <section class="workflow-board" aria-label="Design workflow">
+        <div class="workflow-lane" data-lane="circuit">
+          <h2>Circuit</h2>
+          <ol class="workflow-steps">
+            <li><button type="button" class="flow-btn" data-step="circuit.concept" data-state="idle" data-help="컨셉: 어떤 회로인지 채팅으로 설명"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="4" height="4" class="px-cut"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="circuit.parts" data-state="idle" data-help="주요 부품 선정"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="5" height="5"/><rect x="9" y="8" width="5" height="5"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="circuit.draft" data-state="idle" data-open="patch-dialog" data-help="회로 작성: 초안을 그리고 적용"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="12" height="2"/><rect x="4" y="3" width="2" height="10"/><rect x="10" y="3" width="2" height="10"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="circuit.edit" data-state="idle" data-help="수정: 회로를 고칠 내용을 채팅으로"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="11" width="8" height="2"/><rect x="9" y="3" width="4" height="8"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="circuit.review" data-state="idle" data-open="review-dialog" data-help="리뷰: ERC와 차단 항목 확인"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/><rect x="5" y="11" width="4" height="1" class="px-cut"/></svg></button></li>
+          </ol>
+        </div>
+        <div class="workflow-lane" data-lane="layout">
+          <h2>Layout</h2>
+          <ol class="workflow-steps">
+            <li><button type="button" class="flow-btn" data-step="layout.concept" data-state="idle" data-help="컨셉: 보드 크기, 형태, 층수"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12"/><rect x="4" y="4" width="8" height="8" class="px-cut"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="layout.place-major" data-state="idle" data-help="주요 부품 배치"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="11" y="11" width="2" height="2"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="layout.place-rest" data-state="idle" data-help="잔여 부품 배치"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="3" height="3"/><rect x="8" y="4" width="3" height="3"/><rect x="5" y="9" width="3" height="3"/><rect x="10" y="10" width="3" height="3"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="layout.route" data-state="idle" data-help="배선"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="8" height="2"/><rect x="8" y="3" width="2" height="7"/><rect x="8" y="10" width="6" height="2"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="layout.edit" data-state="idle" data-help="수정: 배치·배선을 고칠 내용"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="11" width="8" height="2"/><rect x="9" y="3" width="4" height="8"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="layout.review" data-state="idle" data-open="erc-dialog" data-help="리뷰: DRC와 레이아웃 확인"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/></svg></button></li>
+          </ol>
+        </div>
+        <div class="workflow-lane" data-lane="fab">
+          <h2>제품화</h2>
+          <ol class="workflow-steps">
+            <li><button type="button" class="flow-btn" data-step="fab.gerber" data-state="locked" data-open="artifacts-dialog" data-help="GERBER 등 제조 산출물"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="3"/><rect x="3" y="6" width="10" height="3"/><rect x="3" y="10" width="10" height="3"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="fab.bom" data-state="locked" data-open="artifacts-dialog" data-help="BOM·조립 파일"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg></button></li>
+            <li><button type="button" class="flow-btn" data-step="fab.submit" data-state="locked" data-help="JLCPCB 제출 패키지"><svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="8" height="2"/><rect x="8" y="4" width="2" height="8"/><rect x="10" y="6" width="4" height="4"/></svg></button></li>
+          </ol>
+        </div>
+        <p id="workflow-caption">프로젝트를 만들면 Circuit 컨셉부터 시작합니다.</p>
+        <p id="workflow-cli" class="workflow-cli" hidden></p>
+        <nav class="status-dock" aria-label="Project tools">
+          <button type="button" class="dock-btn" data-open="review-dialog" data-help="Review: blockers and proposed fixes" title="Review">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/><rect x="5" y="11" width="4" height="1" class="px-cut"/></svg>
+          </button>
+          <button type="button" class="dock-btn" data-open="erc-dialog" data-help="ERC: electrical rules check" title="ERC">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="8" width="4" height="2"/><rect x="5" y="5" width="2" height="8"/><rect x="9" y="3" width="5" height="2"/><rect x="12" y="5" width="2" height="8"/></svg>
+          </button>
+          <button type="button" class="dock-btn" data-open="evidence-dialog" data-help="Project evidence digest and inspection" title="Evidence">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="4" height="4" class="px-cut"/></svg>
+          </button>
+          <button type="button" class="dock-btn" data-open="patch-dialog" data-help="Patch approval" title="Patch">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="12" height="3"/><rect x="7" y="2" width="3" height="12"/></svg>
+          </button>
+          <button type="button" class="dock-btn" data-open="kicad-dialog" data-help="Open or link the KiCad project" title="KiCad">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="2" height="5" class="px-cut"/><rect x="8" y="6" width="3" height="2" class="px-cut"/></svg>
+          </button>
+          <button type="button" class="dock-btn" data-open="artifacts-dialog" data-help="Generated files" title="Artifacts">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg>
+          </button>
+          <button type="button" class="dock-btn" id="conflict-dock-btn" data-open="conflict-dialog" data-help="Unsaved KiCad editor changes" title="Unsaved" hidden>
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="7" y="2" width="2" height="8"/><rect x="7" y="12" width="2" height="2"/></svg>
+          </button>
+        </nav>
+      </section>
 
       <section id="conversation-card" class="chat-column">
         <p id="request-status" role="status" aria-label="Request status" data-state="idle">Create a project to send a circuit request.</p>
@@ -80,8 +113,23 @@
           <summary>Technical details</summary>
           <pre id="request-technical-detail"></pre>
         </details>
+        <ol id="request-progress" class="request-progress" aria-label="Request progress" hidden></ol>
         <ol id="conversation-log" aria-label="Conversation"></ol>
         <div id="conversation-options" class="conversation-options"></div>
+        <section id="patch-approval-card" class="status-card patch-approval-card" aria-labelledby="patch-approval-title" hidden>
+          <div class="patch-cta-hero">
+            <img src="./sprites/preview.png" alt="" width="48" height="48" class="progress-sprite" />
+            <div>
+              <h2 id="patch-approval-title">회로 초안이 준비됐어요</h2>
+              <p id="patch-approval-lead">적용을 누르기 전에는 스키매틱 파일이 바뀌지 않습니다.</p>
+            </div>
+          </div>
+          <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
+          <div class="patch-approval-actions">
+            <button id="approve-patch-button" type="button" disabled aria-label="Approve">스키매틱에 적용</button>
+            <button id="cancel-patch-button" type="button" disabled aria-label="Cancel">적용하지 않기</button>
+          </div>
+        </section>
         <form id="composer" class="composer">
           <label>
             <span>Circuit request</span>
@@ -131,14 +179,7 @@
 
     <dialog id="patch-dialog" class="panel-dialog">
       <form method="dialog" class="dialog-head"><strong>Patch</strong><button value="close">Close</button></form>
-      <section id="patch-approval-card" class="status-card patch-approval-card" aria-labelledby="patch-approval-title">
-        <h2 id="patch-approval-title">Patch approval</h2>
-        <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
-        <div class="patch-approval-actions">
-          <button id="approve-patch-button" type="button" disabled>Approve</button>
-          <button id="cancel-patch-button" type="button" disabled>Cancel</button>
-        </div>
-      </section>
+      <p class="dialog-hint">초안이 준비되면 대화창에서 “스키매틱에 적용”을 누르세요. 적용 전에는 파일이 바뀌지 않습니다.</p>
     </dialog>
 
     <dialog id="kicad-dialog" class="panel-dialog">
@@ -168,6 +209,6 @@
       </section>
     </dialog>
 
-    <script src="./panel.js?v=20260914-sourcing"></script>
+    <script src="./panel.js?v=20260921-workflow6"></script>
   </body>
 </html>

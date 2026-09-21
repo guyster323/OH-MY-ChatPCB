@@ -28,6 +28,24 @@ test('parses provider stdout into deltas and tool calls', async () => {
   assert.equal(transcript.events[1].payload.name, 'schematic.generate');
 });
 
+test('streams parsed provider events through onEvent', async () => {
+  const seen = [];
+  const script = [
+    'console.log("Drafting circuit.");',
+    'console.log(JSON.stringify({type:"tool.call", payload:{id:"1", name:"schematic.generate", args:{mcu:"STM32"}}}));'
+  ].join('');
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    timeoutMs: 2000,
+    onEvent: (event) => seen.push(event.type)
+  });
+
+  assert.deepEqual(seen, ['agent.delta', 'tool.call']);
+  assert.equal(transcript.events.length, 2);
+});
+
 test('allows providers to request read-only project inspection', async () => {
   const script = 'console.log(JSON.stringify({type:"tool.call", payload:{id:"inspect_1", name:"project.inspect", args:{projectDir:"C:/workspace/demo"}}}));';
 

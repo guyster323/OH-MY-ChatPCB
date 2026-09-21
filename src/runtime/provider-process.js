@@ -16,7 +16,8 @@ export function runProviderProcess({
   timeoutMs = 120000,
   allowedToolNames = DEFAULT_ALLOWED_TOOL_NAMES,
   traceDir,
-  signal
+  signal,
+  onEvent
 }) {
   if (!command) {
     throw new Error('Provider command is required.');
@@ -70,7 +71,7 @@ export function runProviderProcess({
       stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) {
         try {
-          addProviderLine(events, line, allowedTools);
+          appendProviderLine(events, line, allowedTools, onEvent);
         } catch (error) {
           fail(error);
         }
@@ -96,7 +97,7 @@ export function runProviderProcess({
       signal?.removeEventListener('abort', abortProvider);
       if (stdoutBuffer.trim()) {
         try {
-          addProviderLine(events, stdoutBuffer, allowedTools);
+          appendProviderLine(events, stdoutBuffer, allowedTools, onEvent);
         } catch (error) {
           reject(error);
           return;
@@ -133,6 +134,14 @@ export function redactProviderText(value) {
   return value
     .replace(/\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)=([^\s]+)/gi, '$1=[REDACTED]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]');
+}
+
+function appendProviderLine(events, line, allowedTools, onEvent) {
+  const before = events.length;
+  addProviderLine(events, line, allowedTools);
+  if (typeof onEvent === 'function') {
+    for (const event of events.slice(before)) onEvent(event);
+  }
 }
 
 function addProviderLine(events, line, allowedTools) {

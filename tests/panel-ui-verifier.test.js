@@ -41,4 +41,5 @@ test('panel browser UI verifier drives the real panel like a user', async () => 
   assert.match(source, /ERC 0\/0/);
   assert.match(source, /DRC 0\/2/);
   assert.match(source, /approve-patch-button/);
+  assert.match(source, /request-progress/);
 });

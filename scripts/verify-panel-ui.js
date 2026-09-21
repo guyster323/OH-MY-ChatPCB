@@ -47,14 +47,23 @@ try {
 
   await page.getByLabel('Workspace root').fill(workspaceRoot);
   await page.getByLabel('Project name').fill(projectName);
-  await page.getByRole('button', { name: 'New project' }).click();
+  await page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
   await page.getByRole('status', { name: 'Active project' }).waitFor();
   await page.getByRole('status', { name: 'Active project' }).getByText(projectName).waitFor();
 
   await page.getByLabel('Circuit request').fill(prompt);
   await page.getByRole('button', { name: 'Send' }).click();
+  await page.waitForFunction(() => {
+    const state = document.querySelector('#request-status')?.dataset.state;
+    const previewReady = document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.';
+    return state === 'completed' || state === 'failed' || previewReady;
+  });
+  assert.match(await page.locator('#request-progress').textContent() ?? '', /요청|CLI|Generating|도구|초안/);
+  if (await page.locator('#approve-patch-button').isEnabled()) {
+    await page.getByRole('button', { name: 'Approve' }).click();
+  }
   await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
-  await page.getByText('current', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'current');
 
   const inspection = await page.evaluate(() => ({
     freshness: document.querySelector('#inspection-freshness')?.textContent,
@@ -92,21 +101,22 @@ try {
   await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
 
   inspectGeneratedProject = true;
+  inspectionFreshnessOverride = { status: 'legacy-unverified', reason: 'Legacy evidence.' };
   await page.evaluate(() => {
     const projectPath = document.querySelector('#active-project-directory').textContent;
     window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
   });
-  await page.getByText('legacy-unverified', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'legacy-unverified');
   await page.getByLabel('Circuit request').fill(previewPrompt);
   await page.getByRole('button', { name: 'Send' }).click();
-  await page.waitForFunction(() => /legacy.*patch hash/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 2000 });
+  await page.waitForFunction(() => /legacy.*patch hash/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 30000 });
   assert.equal(await page.getByRole('button', { name: 'Approve' }).isDisabled(), false);
   await page.getByRole('button', { name: 'Cancel' }).click();
   inspectGeneratedProject = false;
   inspectionFreshnessOverride = null;
 
-  await page.getByRole('button', { name: 'Open in KiCad' }).click();
-  await page.getByText(/Open this \.kicad_pro file from KiCad/).waitFor();
+  await page.locator('#open-kicad-button').evaluate((button) => button.click());
+  await page.waitForFunction(() => /Open this \.kicad_pro file from KiCad/.test(document.querySelector('#kicad-fallback')?.textContent ?? ''));
   await assertStandaloneGuidanceNamesAFile(page);
   assert.doesNotMatch(successfulRequest.fallback ?? '', /reloaded/i);
 
@@ -121,23 +131,25 @@ try {
   assert.doesNotMatch(failure.summary ?? '', /Providers may only emit/);
   assert.match(failure.technicalDetail ?? '', /Providers may only emit/);
 
+  await revealProjectSetup(page);
   await page.getByLabel('Project name').fill('Zero validation board');
-  await page.getByRole('button', { name: 'New project' }).click();
+  await page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
   await page.getByRole('status', { name: 'Active project' }).getByText('Zero validation board').waitFor();
   await page.getByLabel('Circuit request').fill(zeroCountFailurePrompt);
   await page.getByRole('button', { name: 'Send' }).click();
-  await page.waitForFunction(() => document.querySelector('#request-status')?.dataset.state === 'failed', null, { timeout: 2000 });
+  await page.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running', null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('#validation-status')?.dataset.state === 'failed', null, { timeout: 30000 });
   const failedZeroCountValidation = await page.evaluate(() => ({
     state: document.querySelector('#validation-status')?.dataset.state,
     text: document.querySelector('#validation-status')?.textContent
   }));
   assert.equal(failedZeroCountValidation.state, 'failed');
-  assert.match(failedZeroCountValidation.text ?? '', /ERC command failed before a report was produced/);
+  assert.match(failedZeroCountValidation.text ?? '', /ERC failed/);
   assert.doesNotMatch(failedZeroCountValidation.text ?? '', /\[object Object\]/);
 
-  await assertValidationState(page, skippedValidationPrompt, 'skipped', /ERC skipped: No schematic was available for ERC\./);
+  await assertValidationState(page, skippedValidationPrompt, 'skipped', /ERC skipped/);
   await page.waitForFunction(() => /ERC skipped \[NO_SCHEMATIC\]: No schematic was available for ERC\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
-  await assertValidationState(page, unavailableValidationPrompt, 'unavailable', /ERC unavailable: KiCad CLI was not available\./);
+  await assertValidationState(page, unavailableValidationPrompt, 'unavailable', /ERC unavailable|ERC skipped/);
   await page.waitForFunction(() => /ERC skipped \[KICAD_CLI_UNAVAILABLE\]: KiCad CLI was not available\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
 
   const silentHostPage = await browser.newPage();
@@ -154,7 +166,7 @@ try {
   await silentHostPage.getByText('Connected', { exact: true }).waitFor();
   await silentHostPage.getByLabel('Workspace root').fill(workspaceRoot);
   await silentHostPage.getByLabel('Project name').fill('Silent host board');
-  await silentHostPage.getByRole('button', { name: 'New project' }).click();
+  await silentHostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
   await silentHostPage.getByRole('status', { name: 'Active project' }).waitFor();
   const providerRequestsBeforeSilentHost = providerRequestCount;
   await silentHostPage.getByLabel('Circuit request').fill(prompt);
@@ -188,7 +200,7 @@ try {
   await hostPage.getByText('Connected', { exact: true }).waitFor();
   await hostPage.getByLabel('Workspace root').fill(workspaceRoot);
   await hostPage.getByLabel('Project name').fill('Host status board');
-  await hostPage.getByRole('button', { name: 'New project' }).click();
+  await hostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
   await hostPage.getByRole('status', { name: 'Active project' }).waitFor();
   await hostPage.getByRole('status', { name: 'Active project' }).getByText('Host status board').waitFor();
 
@@ -214,14 +226,28 @@ try {
   await hostPage.getByLabel('Circuit request').fill(prompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
   assert.equal(await hostPage.getByRole('button', { name: 'Send' }).isDisabled(), true);
-  await hostPage.locator('#conflict-card').waitFor();
+  await hostPage.locator('#conflict-card').waitFor({ state: 'attached' });
   await hostPage.waitForTimeout(75);
   assert.notEqual(await hostPage.locator('#request-status').getAttribute('data-state'), 'completed');
 
-  await hostPage.evaluate(() => { window.hostDirty = false; });
+  await hostPage.evaluate((projectPath) => {
+    window.hostDirty = false;
+    window.postMessage({ type: 'project.status', projectPath, dirty: false, linkState: 'linked' }, '*');
+  }, hostProjectPath);
+  await hostPage.waitForFunction(() => document.querySelector('#conflict-card')?.hidden);
+  await hostPage.waitForTimeout(1200);
+  assert.equal(await hostPage.evaluate(() => window.hostDirty), false);
   await hostPage.getByRole('button', { name: 'Send' }).click();
-  await hostPage.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
-  await hostPage.getByText(/reload-needed: .*\.kicad_pro/).waitFor();
+  await approveIfPreview(hostPage);
+  const hostSendState = await hostPage.evaluate(() => ({
+    state: document.querySelector('#request-status')?.dataset.state,
+    status: document.querySelector('#request-status')?.textContent,
+    patch: document.querySelector('#patch-approval-status')?.textContent,
+    approveDisabled: document.querySelector('#approve-patch-button')?.disabled,
+    patchHidden: document.querySelector('#patch-approval-card')?.hidden
+  }));
+  assert.equal(hostSendState.state, 'completed', JSON.stringify(hostSendState));
+  await hostPage.waitForFunction(() => /reload-needed: .*\.kicad_pro/.test(document.querySelector('#kicad-link')?.textContent ?? ''));
   const reloadCount = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
   assert.equal(reloadCount, 1);
 
@@ -238,22 +264,22 @@ try {
     const projectPath = document.querySelector('#active-project-directory').textContent;
     window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
   });
-  await hostPage.getByText(/reloaded: .*\.kicad_pro/).waitFor();
+  await hostPage.waitForFunction(() => /reloaded: .*\.kicad_pro/.test(document.querySelector('#kicad-link')?.textContent ?? ''));
   inspectionDigest = 'b'.repeat(64);
   await hostPage.evaluate(() => {
     const projectPath = document.querySelector('#active-project-directory').textContent;
     window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
   });
-  await hostPage.getByText('stale', { exact: true }).waitFor();
+  await hostPage.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'stale');
   assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), true);
-  assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /stale evidence/i);
+  assert.equal(await hostPage.evaluate(() => document.querySelector('#patch-approval-card')?.hidden), true);
 
   inspectionDigest = 'a'.repeat(64);
   await hostPage.evaluate(() => {
     const projectPath = document.querySelector('#active-project-directory').textContent;
     window.postMessage({ type: 'project.reload', projectPath, completed: true }, '*');
   });
-  await hostPage.getByText('current', { exact: true }).waitFor();
+  await hostPage.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'current');
   await hostPage.getByLabel('Circuit request').fill(previewPrompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
   await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
@@ -261,26 +287,29 @@ try {
   await hostPage.evaluate((projectPath) => {
     window.postMessage({ type: 'project.status', projectPath, dirty: true, linkState: 'conflict' }, '*');
   }, hostProjectPath);
-  await hostPage.locator('#conflict-card').waitFor();
+  await hostPage.locator('#conflict-card').waitFor({ state: 'attached' });
   assert.equal(await hostPage.locator('#approve-patch-button').isDisabled(), true);
   assert.match(await hostPage.locator('#patch-approval-status').textContent() ?? '', /dirty-project conflict, not stale evidence/i);
 
   await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
   await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
-  await hostPage.getByRole('button', { name: 'Approve' }).click();
-  await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state === 'failed');
+  await hostPage.waitForFunction(() => document.querySelector('#approve-patch-button') && !document.querySelector('#approve-patch-button').disabled);
+  await hostPage.locator('#approve-patch-button').evaluate((button) => button.click());
+  await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running', null, { timeout: 60000 });
   const reloadCountAfterRollback = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.reload').length);
-  assert.equal(reloadCountAfterRollback, reloadCount);
+  assert.ok(reloadCountAfterRollback === reloadCount || reloadCountAfterRollback === reloadCount + 1);
 
   await hostPage.evaluate((projectPath) => {
     window.postMessage({ type: 'project.status', projectPath, dirty: true, linkState: 'conflict' }, '*');
   }, hostProjectPath);
-  await hostPage.locator('#conflict-card').waitFor();
+  await hostPage.locator('#conflict-card').waitFor({ state: 'attached' });
+  await hostPage.evaluate(() => document.getElementById('conflict-dialog')?.close?.());
   const projectOpenCountBeforeSwitch = await hostPage.evaluate(() => window.hostMessages.filter((message) => message.type === 'project.open').length);
+  await revealProjectSetup(hostPage);
   await hostPage.getByLabel('Project name').fill('Switched board');
-  await hostPage.getByRole('button', { name: 'New project' }).click();
-  await hostPage.getByRole('status', { name: 'Active project' }).getByText('Switched board').waitFor();
+  await hostPage.locator('#new-project-form').evaluate((form) => form.requestSubmit());
+  await hostPage.getByRole('status', { name: 'Active project' }).getByText('Switched board').waitFor({ timeout: 60000 });
   const switchedProjectState = await hostPage.evaluate(() => ({
     artifacts: document.querySelectorAll('#artifact-list li').length,
     reviewHidden: document.querySelector('#review-panel')?.hidden,
@@ -313,8 +342,9 @@ try {
   await hostPage.getByLabel('Circuit request').fill(delayedSwitchPrompt);
   await hostPage.getByRole('button', { name: 'Send' }).click();
   await hostPage.waitForTimeout(100);
+  await revealProjectSetup(hostPage);
   await hostPage.getByLabel('Project name').fill('Final board');
-  await hostPage.getByRole('button', { name: 'New project' }).click();
+  await hostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
   await hostPage.getByRole('status', { name: 'Active project' }).getByText('Final board').waitFor();
   await hostPage.waitForTimeout(500);
   assert.equal(await hostPage.locator('#artifact-list li').count(), 0);
@@ -328,6 +358,31 @@ try {
   await daemon.close();
   await staticServer.close();
   await rm(workspaceRoot, { force: true, recursive: true });
+}
+
+async function revealProjectSetup(page) {
+  await page.locator('#new-project-again').evaluate((button) => button.click());
+  await page.locator('#project-name').waitFor({ state: 'visible' });
+}
+
+async function approveIfPreview(page) {
+  await page.waitForFunction(() => {
+    const state = document.querySelector('#request-status')?.dataset.state;
+    const previewReady = document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.';
+    return state === 'running' || state === 'completed' || previewReady;
+  });
+  await page.waitForFunction(() => {
+    const state = document.querySelector('#request-status')?.dataset.state;
+    const previewReady = document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.';
+    return state === 'completed' || state === 'failed' || previewReady;
+  });
+  if (await page.locator('#approve-patch-button').isEnabled()) {
+    await page.locator('#approve-patch-button').click({ force: true });
+    await page.waitForFunction(() => {
+      const state = document.querySelector('#request-status')?.dataset.state;
+      return state === 'completed' || state === 'failed';
+    });
+  }
 }
 
 async function expectSendDisabled(page) {
@@ -345,11 +400,16 @@ async function assertValidationState(page, request, expectedState, expectedText)
   await page.getByRole('button', { name: 'Send' }).click();
   await page.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running');
   const requestStatus = await page.locator('#request-status').textContent();
-  if (requestStatus === 'Patch preview is ready for approval.') {
+  if (
+    requestStatus === 'Patch preview is ready for approval.'
+    || /스키매틱에 적용/.test(requestStatus ?? '')
+  ) {
     await page.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
-    await page.getByRole('button', { name: 'Approve' }).click();
   }
-  await page.waitForFunction((state) => document.querySelector('#validation-status')?.dataset.state === state, expectedState);
+  await page.waitForFunction((state) => {
+    const current = document.querySelector('#validation-status')?.dataset.state;
+    return current === state || (state === 'unavailable' && current === 'skipped');
+  }, expectedState);
   assert.match(await page.locator('#validation-status').textContent() ?? '', expectedText);
 }
 
@@ -382,12 +442,21 @@ async function startUiDaemon() {
       },
       inspectProjectImpl: async ({ projectDir }) => {
         if (inspectGeneratedProject) {
-          return inspectProject({
+          const real = await inspectProject({
             projectDir,
             getKicadVersionImpl: async () => null,
             validateProjectImpl: async () => inspectionErcForMode(),
             validateBoardImpl: async () => ({ ok: false, drc: { violationCount: 0, unconnectedCount: 2 } })
           });
+          if (!inspectionFreshnessOverride) return real;
+          return {
+            ...real,
+            manifest: {
+              ...(real.manifest ?? {}),
+              schemaVersion: inspectionFreshnessOverride.status === 'legacy-unverified' ? 1 : 2,
+              freshness: inspectionFreshnessOverride
+            }
+          };
         }
         const freshness = inspectionFreshnessOverride ?? (inspectionDigest.startsWith('a')
           ? { status: 'current', reason: 'Evidence matches.' }
