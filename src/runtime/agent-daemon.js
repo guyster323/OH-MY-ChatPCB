@@ -22,6 +22,33 @@ import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConv
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
+function emitProgress(ctx, payload) {
+  if (typeof ctx?.emit !== 'function') return;
+  ctx.emit('agent.delta', {
+    channel: 'progress',
+    requestId: ctx.progressRequestId ?? payload.requestId ?? null,
+    ...payload
+  });
+}
+
+function progressCopy(prompt, ko, en) {
+  return /[가-힣]/.test(prompt ?? '') ? ko : en;
+}
+
+function emitProviderEvent(ctx, event) {
+  if (!event || typeof event !== 'object') return;
+  if (event.type === 'agent.delta') {
+    const text = typeof event.payload?.text === 'string' ? event.payload.text.trim() : '';
+    if (!text) return;
+    emitProgress(ctx, { stage: 'provider', sprite: 'cli', text });
+    return;
+  }
+  if (event.type === 'tool.call') {
+    const name = event.payload?.name ?? 'tool.call';
+    emitProgress(ctx, { stage: 'tool', sprite: 'tool', text: name, toolName: name });
+  }
+}
+
 export async function dispatchToolCall(call, dispatchOptions = {}) {
   const {
     checkProviderAvailabilityImpl = checkProviderAvailability,
@@ -120,7 +147,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         return ok(await requestProject(call, ctx));
       } catch (error) {
         if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
-        throw error;
+        return failure(error.code ?? 'PROVIDER_FAILED', error.message, { conversation: error.conversation });
       }
 
     case 'provider.cancel':
@@ -170,6 +197,7 @@ async function dispatchSchematicPatch(args, ctx) {
   }
 
   if (args.approved !== true) {
+    emitProgress(ctx, { stage: 'preview', sprite: 'draft', text: 'Preparing a schematic patch preview.' });
     return previewNativeChange({
       projectDir,
       prompt: args.prompt,
@@ -178,6 +206,7 @@ async function dispatchSchematicPatch(args, ctx) {
     }, ctx);
   }
 
+  emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });
   if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to approve a patch preview.');
   const peeked = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
   if (!peeked.ok) return { ok: false, error: peeked.reason };
@@ -246,13 +275,26 @@ async function invokeProvider(call, ctx) {
   let transcript;
 
   try {
+    const streamed = [];
+    emitProgress(ctx, {
+      stage: 'provider',
+      sprite: 'cli',
+      text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
+    });
     transcript = await runProviderProcessImpl({
       command: definition.command,
       args: definition.args,
       input,
       allowedToolNames: PROVIDER_ALLOWED_TOOLS,
-      signal: controller.signal
+      signal: controller.signal,
+      onEvent: (event) => {
+        streamed.push(event);
+        emitProviderEvent(ctx, event);
+      }
     });
+    if (streamed.length === 0) {
+      for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
+    }
   } finally {
     providerControllers.delete(invocationId);
   }
@@ -311,6 +353,11 @@ async function requestProject(call, ctx) {
     throw new Error('project.request requires a prompt.');
   }
 
+  emitProgress(ctx, {
+    stage: 'conversation',
+    sprite: 'think',
+    text: progressCopy(prompt, '요청을 읽고 있어요.', 'Reading the circuit request.')
+  });
   const spec = normalizeCircuitSpec(prompt);
   const hasExistingSpec = await projectHasSpec(projectDir);
   const existingConversation = await loadCircuitConversation(projectDir).catch(() => null);
@@ -345,51 +392,74 @@ async function requestProject(call, ctx) {
     };
   }
 
+  if (conversation?.specRows?.length) {
+    emitProgress(ctx, {
+      stage: 'conversation',
+      sprite: 'think',
+      text: progressCopy(prompt, '권장 구성을 정리했습니다.', 'Prepared the recommended configuration.'),
+      conversation
+    });
+  }
+
   const hasSpec = await projectHasSpec(projectDir);
   const generatePrompt = hasSpec && !awaitingInput
     ? prompt
     : (conversation?.generatePrompt ?? prompt);
-  const providerResult = await invokeProvider({
-    ...call,
-    args: { ...args, prompt: generatePrompt }
-  }, {
-    ...ctx,
-    allowGenerate: !hasSpec,
-    forceProjectDir: true
-  });
-  let preview;
-  if (providerResult.toolResults.length) {
-    preview = lastMutatingResult(providerResult.toolResults);
-  } else {
-    const generated = await previewNativeChange({
-      projectDir,
-      prompt: generatePrompt,
-      context: args.selection
-    }, ctx);
-    if (!generated.ok) {
-      const error = new Error(generated.error.message);
-      error.code = generated.error.code;
-      throw error;
+  try {
+    const providerResult = await invokeProvider({
+      ...call,
+      args: { ...args, prompt: generatePrompt }
+    }, {
+      ...ctx,
+      allowGenerate: !hasSpec,
+      forceProjectDir: true
+    });
+    let preview = lastMutatingResult(providerResult.toolResults);
+    if (!preview) {
+      emitProgress(ctx, {
+        stage: 'preview',
+        sprite: 'draft',
+        text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
+      });
+      const generated = await previewNativeChange({
+        projectDir,
+        prompt: generatePrompt,
+        context: args.selection
+      }, ctx);
+      if (!generated.ok) {
+        const error = new Error(generated.error.message);
+        error.code = generated.error.code;
+        throw error;
+      }
+      preview = generated.result;
     }
-    preview = generated.result;
-  }
 
-  return {
-    ...preview,
-    operation: hasSpec ? 'patched' : 'generated',
-    providerEvents: providerResult.events,
-    conversation
-  };
+    if (preview?.requiresApproval) {
+      emitProgress(ctx, {
+        stage: 'ready',
+        sprite: 'preview',
+        text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
+      });
+    }
+    return {
+      ...preview,
+      operation: hasSpec ? 'patched' : 'generated',
+      providerEvents: providerResult.events,
+      conversation
+    };
+  } catch (error) {
+    if (error?.code === 'PROJECT_BUSY') throw error;
+    const wrapped = error instanceof Error ? error : new Error(String(error?.message ?? error));
+    wrapped.code = error?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
+    wrapped.conversation = conversation;
+    throw wrapped;
+  }
 }
 
 function lastMutatingResult(toolResults) {
-  const result = toolResults.findLast((toolResult) => (
+  return toolResults.findLast((toolResult) => (
     toolResult.ok && (toolResult.result?.files || toolResult.result?.requiresApproval === true)
-  ))?.result;
-  if (!result) {
-    throw new Error('Provider transcript did not apply a schematic generation or patch.');
-  }
-  return result;
+  ))?.result ?? null;
 }
 
 async function projectHasSpec(projectDir) {
@@ -539,11 +609,16 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
       try {
         const envelope = parseEnvelope(text);
         if (envelope.type === 'tool.call') {
+          const callCtx = {
+            ...resolvedDispatchOptions,
+            progressRequestId: envelope.payload.id,
+            emit: (type, payload) => sendWebSocketJson(socket, createEnvelope(type, payload))
+          };
           sendWebSocketJson(
             socket,
             createEnvelope('tool.result', {
               id: envelope.payload.id,
-              ...(await dispatchToolCall(envelope.payload, resolvedDispatchOptions))
+              ...(await dispatchToolCall(envelope.payload, callCtx))
             })
           );
         } else if (envelope.type === 'chat.message') {
@@ -591,6 +666,11 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
 }
 
 async function previewNativeChange({ projectDir, prompt, projectName, context }, ctx) {
+  emitProgress(ctx, {
+    stage: 'preview',
+    sprite: 'draft',
+    text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
+  });
   let plan;
   try {
     plan = await ctx.projectMutexRegistry.runExclusive({ projectDir }, () => createSchematicPatchPlan({
@@ -794,10 +874,11 @@ async function okOrInspectionFailure(work) {
   }
 }
 
-function failure(code, message) {
+function failure(code, message, extra = {}) {
   return {
     ok: false,
-    error: { code, message }
+    error: { code, message },
+    ...extra
   };
 }
 

@@ -203,29 +203,114 @@ const ANSWER_LABELS = {
   'isolated-dcdc.topology': { ko: '변환 토폴로지', en: 'Converter topology' }
 };
 
-function summarizeAnswers(answers, ko) {
-  return Object.entries(answers)
-    .filter(([, value]) => value && value !== 'deferred')
-    .map(([key, value]) => {
-      const label = ANSWER_LABELS[key];
-      const name = label ? (ko ? label.ko : label.en) : key;
-      return `- ${name}: ${value}`;
-    })
-    .join('\n');
+const SPEC_GROUPS = [
+  { id: 'power', labelKo: '전원', labelEn: 'Power', keys: ['power-architecture.railStrategy', 'isolated-dcdc.topology', 'isolated-dcdc.isolation'] },
+  { id: 'battery', labelKo: '배터리', labelEn: 'Battery', keys: ['energy-storage.pack'] },
+  { id: 'mcu', labelKo: 'MCU', labelEn: 'MCU', keys: ['mcu-board.mcuPart'] },
+  { id: 'sensors', labelKo: '센서', labelEn: 'Sensors', keys: ['sensors.type', 'sensors.spec', 'sensors.bus', 'sensors.connector'] },
+  { id: 'comms', labelKo: '통신', labelEn: 'Comms', keys: ['wired-comms.phy', 'wired-comms.deviceVoltage'] },
+  { id: 'hmi', labelKo: '디스플레이', labelEn: 'Display', keys: ['hmi.panel'] },
+  { id: 'bms', labelKo: 'BMS', labelEn: 'BMS', keys: ['bms.companions'] },
+  { id: 'integration', labelKo: '제품 연계', labelEn: 'Integration', keys: ['integration.neighbors'] },
+  { id: 'companions', labelKo: '연관 IC', labelEn: 'Companions', keys: ['datasheet-companions.include'] }
+];
+
+function compactValue(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function firstClause(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return '';
+  const clause = trimmed.split(/(?<=[.。])\s+/)[0] ?? trimmed;
+  return clause.replace(/[.。]+$/g, '').trim();
+}
+
+function oneLineReason(help, ko) {
+  const text = String(help ?? '');
+  const advantage = text.match(/장점:\s*([^\n]+)/) ?? text.match(/Pros:\s*([^\n]+)/i);
+  const feature = text.match(/특징:\s*([^\n]+)/);
+  const candidates = [
+    advantage ? firstClause(advantage[1].replace(/\s*단점:.*$/i, '')) : '',
+    feature ? firstClause(feature[1]) : '',
+    firstClause(text.split('\n').find((line) => line.trim()) ?? '')
+  ].filter(Boolean);
+  const pick = candidates.find((item) => item.length >= 8) ?? candidates[0] ?? '';
+  if (pick) return pick.slice(0, 90);
+  return ko ? '요청에 맞는 기본 권장입니다' : 'Recommended default for this request';
+}
+
+function fieldForKey(detection, key) {
+  const [kindId, fieldId] = String(key).split('.');
+  const kind = detection?.kinds?.find((item) => item.id === kindId);
+  return kind?.fields?.find((field) => field.id === fieldId) ?? null;
+}
+
+function exampleForAnswer(detection, answers, key) {
+  const field = fieldForKey(detection, key);
+  if (!field) return null;
+  const examples = examplesForField(field, detection, answers);
+  const value = answers[key];
+  return examples.find((item) => (
+    item.promptKo === value || item.promptEn === value || item.id === value || item.labelKo === value || item.labelEn === value
+  )) ?? examples.find((item) => item.recommended) ?? examples[0] ?? null;
+}
+
+function reasonForAnswer(detection, answers, key, ko) {
+  const example = exampleForAnswer(detection, answers, key);
+  return oneLineReason(ko ? example?.helpKo : example?.helpEn, ko);
+}
+
+function formatRecommendedSpec(detection, answers, ko) {
+  const used = new Set();
+  const specRows = [];
+  for (const group of SPEC_GROUPS) {
+    const present = group.keys.filter((key) => answers[key] && answers[key] !== 'deferred');
+    if (present.length === 0) continue;
+    const primaryKey = present[0];
+    used.add(primaryKey);
+    const extras = present.slice(1).map((key) => compactValue(answers[key])).filter(Boolean);
+    const value = extras.length
+      ? `${compactValue(answers[primaryKey])} · ${extras.join(' · ')}`
+      : compactValue(answers[primaryKey]);
+    specRows.push({
+      label: ko ? group.labelKo : group.labelEn,
+      value,
+      reason: reasonForAnswer(detection, answers, primaryKey, ko)
+    });
+    for (const key of present.slice(1)) used.add(key);
+  }
+  for (const [key, value] of Object.entries(answers)) {
+    if (!value || value === 'deferred' || used.has(key)) continue;
+    if (key.startsWith('mcu-board.') && key !== 'mcu-board.mcuPart') continue;
+    const label = ANSWER_LABELS[key];
+    specRows.push({
+      label: label ? (ko ? label.ko : label.en) : key,
+      value: compactValue(value),
+      reason: reasonForAnswer(detection, answers, key, ko)
+    });
+  }
+  const lines = specRows.map((row) => `${row.label}: ${row.value} / ${row.reason}`).join('\n');
+  return { specRows, lines };
 }
 
 function recommendedConversation(detection, spec, prompt) {
   const answers = recommendedAnswers(detection);
   const ko = korean(prompt);
-  const lines = summarizeAnswers(answers, ko);
-  const assistantMessage = ko
-    ? `Pro 모드가 꺼져 있어 권장 구성으로 진행합니다.\n${lines}`
-    : `Pro mode is off; continuing with recommended defaults.\n${lines}`;
+  const { specRows, lines } = formatRecommendedSpec(detection, answers, ko);
+  const intro = ko
+    ? '권장 구성으로 회로 초안을 준비합니다. 지금은 미리보기만 만들고, 적용을 누르기 전에는 스키매틱 파일이 바뀌지 않습니다.'
+    : 'Preparing a circuit draft from the recommended configuration. This is a preview; the schematic files stay unchanged until you apply it.';
+  const footer = ko
+    ? '다음 단계에서 “스키매틱에 적용”을 누르면 이 구성이 KiCad에 들어갑니다.'
+    : 'Next, press Apply to schematic to put this draft into KiCad.';
+  const assistantMessage = `${intro}\n${lines}\n${footer}`;
   const facts = Object.entries(answers).map(([key, value]) => `${key}=${value}`).join('\n');
   return {
     ...snapshot(detection, spec, prompt),
     proMode: false,
     answers,
+    specRows,
     status: 'generate',
     step: 'generate',
     forceProfileId: matchSupportedProfile(spec)?.id ?? null,
@@ -236,7 +321,7 @@ function recommendedConversation(detection, spec, prompt) {
     options: [],
     messages: [
       { role: 'user', text: prompt },
-      { role: 'assistant', text: assistantMessage }
+      { role: 'assistant', text: assistantMessage, intro, footer, specRows }
     ]
   };
 }
@@ -507,7 +592,17 @@ export async function continueCircuitConversation({ projectDir, prompt, spec, pr
     if (!proMode) {
       const detection = detectProductRequest(existing.sourcePrompt);
       next = recommendedConversation(detection, spec, existing.sourcePrompt);
-      next.messages = [...(existing.messages ?? []), { role: 'assistant', text: next.assistantMessage }];
+      next.messages = [
+        ...(existing.messages ?? []),
+        { role: 'user', text: prompt },
+        {
+          role: 'assistant',
+          text: next.assistantMessage,
+          intro: next.messages?.find((message) => message.specRows)?.intro,
+          footer: next.messages?.find((message) => message.specRows)?.footer,
+          specRows: next.specRows
+        }
+      ];
     } else {
       next = replyToCircuitConversation(existing, prompt, spec);
       next.proMode = true;

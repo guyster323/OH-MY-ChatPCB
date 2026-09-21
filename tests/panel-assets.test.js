@@ -20,6 +20,9 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="inspection-erc"/);
   assert.match(html, /id="inspection-drc"/);
   assert.match(html, /id="approve-patch-button"/);
+  assert.match(html, /id="request-progress"/);
+  assert.match(html, /스키매틱에 적용/);
+  assert.match(html, /sprites\/preview\.png/);
   assert.match(html, /id="kicad-link"/);
   assert.match(html, /id="recheck-kicad-button"/);
   assert.match(html, /id="conversation-log"/);
@@ -52,6 +55,12 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /option\.help/);
   assert.match(script, /dataset\.recommended/);
   assert.match(html, /status-dock/);
+  assert.match(html, /workflow-board/);
+  assert.match(html, /data-step="circuit.concept"/);
+  assert.match(html, /data-step="layout.route"/);
+  assert.match(html, /data-step="fab.gerber"/);
+  assert.match(script, /syncWorkflow/);
+  assert.match(script, /deriveWorkflow/);
   assert.match(html, /chat-column/);
   assert.match(html, /id="pro-mode"/);
   assert.match(html, /recommended choice/);
@@ -60,7 +69,14 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /panel\.js\?v=/);
   assert.match(script, /proMode/);
   assert.match(script, /renderConversation\(result\)/);
+  assert.match(script, /handleProgressDelta/);
+  assert.match(script, /specRows/);
+  assert.match(script, /spec-rows/);
+  assert.match(script, /appendProgress/);
   assert.match(script, /new-project-again/);
+  assert.match(script, /offerNativeDraft/);
+  assert.match(script, /이 구성으로 초안 만들기/);
+  assert.match(script, /schematic\.generate/);
 });
 
 test('KiCad fork skeleton declares a wxWebView-backed ChatPCB panel', async () => {

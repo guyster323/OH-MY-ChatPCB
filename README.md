@@ -42,6 +42,10 @@ Implemented now:
 - SPICE fixture generation for simple analog support circuits
 - Local daemon and WebView websocket surface
 - Windows KiCad CLI discovery including `C:/Program Files/KiCad/10.0` and `9.0`
+- ChatPCB panel Circuit / Layout / 제품화 workflow board with wait/run/done lighting
+- Pixel-sprite request progress while Send talks to the daemon and CLI
+- Pro-off recommended circuit rows (`전원`, `MCU`, …) plus an in-chat **스키매틱에 적용** CTA
+- Native schematic preview fallback when the provider inspects or fails to emit generate/patch, with conversation rows kept on provider errors
 
 Not implemented yet:
 
@@ -128,8 +132,13 @@ ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 
 Expected result:
 
 - the panel connects to `chatpcb-agentd`
-- pressing **Send** runs one `project.request` against the active project and reports whether it generated or updated the project
-- an ESP32-S3 + sensor + 3.3V request selects the supported `esp32-s3-usbc-sensor` profile and writes a `.kicad_pcb` draft; it is `ready-for-prototype-review`, not release-ready
+- pressing **Send** runs one `project.request` against the active project
+- while it runs, Circuit workflow icons light (done / running) and the chat shows pixel-sprite progress plus Korean CLI snippets
+- the conversation lists scannable spec rows such as `전원: … / …` and `MCU: … / …`
+- when a preview is ready, the chat shows **회로 초안이 준비됐어요** and **스키매틱에 적용**; files stay unchanged until that click
+- `#patch-approval-status` still reads `Patch preview is ready for approval.` for the automated contract
+- an ESP32-S3 + sensor + 3.3V request selects the supported `esp32-s3-usbc-sensor` profile; after apply it writes a `.kicad_pcb` draft that is `ready-for-prototype-review`, not release-ready
+- if the CLI only inspects or emits a malformed tool call, recommended rows stay on screen; inspect-only transcripts fall back to a local preview, and a failed generate offers **이 구성으로 초안 만들기**
 - request status, ERC results, readiness review, generated artifacts, and KiCad link state appear in independent cards
 - the artifacts include a normal `.kicad_pro` file; use **Open in KiCad** in the fork panel, or open that path manually from standalone browser mode
 - if the active KiCad editor has unsaved changes, the panel shows a conflict and refuses the automatic request/reload path until you save or discard those edits
@@ -207,6 +216,17 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/adbms6830-16s-bms-exam
 ```
 
 The example assumes one 16S Li-ion stack (59.2V nominal, 67.2V at 4.2V/cell), includes 16 cell-tap inputs with 200R/10nF filter networks, 1k example balance resistors, four 10k NTC channels, an NPN VREG pass stage, and two isoSPI port pairs. It intentionally does **not** generate a PCB, and the U1 fixture has no assigned footprint or verified physical pin map. Charger, fuse, contactor, protection FET, and production safety design are also excluded. The generated review remains prototype-only until the exact ADBMS6830 package/pin revision, cell chemistry, protection strategy, balance thermal limits, high-voltage layout, isolation, sourcing, and fault testing are reviewed. The component reference is the [Analog Devices ADBMS6830 product page](https://www.analog.com/en/products/ADBMS6830.html); the current full pin/application detail publicly available from ADI is the closely related [ADBMS6830B datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/adbms6830b.pdf), so the example does not treat that B-variant pinout as final evidence for the requested A-variant.
+
+## Changelog
+
+### 2026-09-21 — Panel workflow, progress sprites, and apply CTA
+
+- Circuit / Layout / 제품화 workflow icons wait (slow blink), run (fast blink + CLI snippet), and stay lit when done.
+- Send streams Korean progress with pixel sprites instead of a frozen `Running request…` line.
+- Pro-off answers render as `label: value / reason` rows (`전원`, `MCU`, sensors, comms, companions).
+- Patch-ready state is an in-chat **스키매틱에 적용** CTA; schematic files do not change until that click. `#patch-approval-status` remains `Patch preview is ready for approval.`
+- `project.request` keeps the recommended conversation on provider errors, and falls back to a local preview when the CLI only inspects. A failed generate still offers **이 구성으로 초안 만들기**.
+- Hidden panel cards no longer steal layout; the conversation stays visible beside the composer.
 
 ## Architecture
 

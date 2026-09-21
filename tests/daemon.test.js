@@ -797,25 +797,24 @@ test('daemon rejects provider-emitted project.create calls during project.reques
       args: { workspaceRoot, projectName: 'Active Board' }
     });
 
-    await assert.rejects(
-      () => dispatchToolCall(
-        {
-          id: 'call_project_request_create',
-          name: 'project.request',
-          args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Create a second board.' }
-        },
-        providerOptions({
-          events: [
-            createEnvelope('tool.call', {
-              id: 'call_provider_create',
-              name: 'project.create',
-              args: { workspaceRoot: outside, projectName: 'Escaped Board' }
-            })
-          ]
-        })
-      ),
-      /project\.create is not allowed inside project\.request/
+    const rejected = await dispatchToolCall(
+      {
+        id: 'call_project_request_create',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Create a second board.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_provider_create',
+            name: 'project.create',
+            args: { workspaceRoot: outside, projectName: 'Escaped Board' }
+          })
+        ]
+      })
     );
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error.message, /project\.create is not allowed inside project\.request/);
     await assert.rejects(() => readdir(path.join(outside, 'Escaped-Board')), { code: 'ENOENT' });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -867,21 +866,70 @@ test('daemon does not fall back after provider parse, cancellation, or non-zero 
   for (const failure of failures) {
     const root = await mkdtemp(path.join(tmpdir(), `chatpcb-project-provider-${failure.name}-`));
     try {
-      await assert.rejects(
-        () => dispatchToolCall(
-          {
-            id: `call_project_request_${failure.name}`,
-            name: 'project.request',
-            args: { provider: 'codex', projectDir: root, prompt: 'Create an RP2040 board.' }
-          },
-          providerOptions({ runProviderProcessImpl: failure.provider })
-        ),
-        failure.error
+      const result = await dispatchToolCall(
+        {
+          id: `call_project_request_${failure.name}`,
+          name: 'project.request',
+          args: { provider: 'codex', projectDir: root, prompt: 'Create an RP2040 board.' }
+        },
+        providerOptions({ runProviderProcessImpl: failure.provider })
       );
+      assert.equal(result.ok, false);
+      assert.match(result.error.message, failure.error);
+      assert.ok(result.conversation);
+      assert.equal(result.conversation.status, 'generate');
       await assert.rejects(() => readFile(path.join(root, 'chatpcb_mcu_peripheral.chatpcb.json'), 'utf8'), { code: 'ENOENT' });
     } finally {
       await rm(root, { force: true, recursive: true });
     }
+  }
+});
+
+test('project.request falls back to a native preview when the provider only inspects', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-inspect-only-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Inspect Only Board' }
+    });
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_inspect_only',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir: created.result.projectDir,
+          prompt: 'ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘.'
+        }
+      },
+      {
+        ...providerOptions({
+          events: [
+            createEnvelope('tool.call', {
+              id: 'call_inspect_only',
+              name: 'project.inspect',
+              args: {}
+            })
+          ]
+        }),
+        inspectProjectImpl: async () => ({
+          ok: true,
+          inspection: { projectDigest: 'fixture' },
+          manifest: { freshness: { status: 'missing' } },
+          validation: { erc: { ok: true } }
+        })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.applied, false);
+    assert.equal(result.result.operation, 'generated');
+    assert.ok(result.result.conversation.specRows.some((row) => row.label === 'MCU'));
+    assert.equal((await kicadArtifacts(created.result.projectDir)).length, 0);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
@@ -1022,25 +1070,24 @@ test('daemon restores an existing project snapshot after an exceptional provider
     });
     const before = await readFile(generated.files.spec, 'utf8');
 
-    await assert.rejects(
-      () => dispatchToolCall(
-        {
-          id: 'call_provider_exception_restore',
-          name: 'project.request',
-          args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
-        },
-        {
-          ...providerOptions({
-            events: [
-              createEnvelope('tool.call', { id: 'call_provider_inspect_then_fail', name: 'project.inspect', args: {} }),
-              createEnvelope('tool.call', { id: 'call_provider_forbidden_create', name: 'project.create', args: { projectName: 'forbidden' } })
-            ]
-          }),
-          inspectProjectImpl: async ({ projectDir }) => ({ ok: true, inspection: { projectDir } })
-        }
-      ),
-      /project\.create is not allowed inside project\.request/
+    const rejected = await dispatchToolCall(
+      {
+        id: 'call_provider_exception_restore',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        ...providerOptions({
+          events: [
+            createEnvelope('tool.call', { id: 'call_provider_inspect_then_fail', name: 'project.inspect', args: {} }),
+            createEnvelope('tool.call', { id: 'call_provider_forbidden_create', name: 'project.create', args: { projectName: 'forbidden' } })
+          ]
+        }),
+        inspectProjectImpl: async ({ projectDir }) => ({ ok: true, inspection: { projectDir } })
+      }
     );
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error.message, /project\.create is not allowed inside project\.request/);
 
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
   } finally {
@@ -1060,30 +1107,29 @@ test('daemon removes provider-created files when restoring after an exceptional 
       Object.values(generated.files).map(async (file) => [file, await readFile(file)])
     );
 
-    await assert.rejects(
-      () => dispatchToolCall(
-        {
-          id: 'call_provider_created_file_exception_restore',
-          name: 'project.request',
-          args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
-        },
-        providerOptions({
-          events: [
-            createEnvelope('tool.call', {
-              id: 'call_patch_then_fail',
-              name: 'schematic.patch',
-              args: { prompt: 'STM32 board with USB-C power and UART header.' }
-            }),
-            createEnvelope('tool.call', {
-              id: 'call_provider_forbidden_create',
-              name: 'project.create',
-              args: { projectName: 'forbidden' }
-            })
-          ]
-        })
-      ),
-      /project\.create is not allowed inside project\.request/
+    const rejected = await dispatchToolCall(
+      {
+        id: 'call_provider_created_file_exception_restore',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_patch_then_fail',
+            name: 'schematic.patch',
+            args: { prompt: 'STM32 board with USB-C power and UART header.' }
+          }),
+          createEnvelope('tool.call', {
+            id: 'call_provider_forbidden_create',
+            name: 'project.create',
+            args: { projectName: 'forbidden' }
+          })
+        ]
+      })
     );
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error.message, /project\.create is not allowed inside project\.request/);
 
     for (const [file, content] of originalFiles) {
       assert.deepEqual(await readFile(file), content);
@@ -1431,6 +1477,51 @@ test('initial project.request returns requiresApproval and writes no KiCad artif
     assert.equal(result.result.applied, false);
     assert.equal(result.result.operation, 'generated');
     assert.equal((await kicadArtifacts(created.result.projectDir)).length, 0);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('project.request streams progress agent.delta events', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-request-progress-'));
+  const progress = [];
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Progress Board' }
+    });
+    const result = await dispatchToolCall(
+      {
+        id: 'call_request_progress',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir: created.result.projectDir,
+          prompt: '가스 센서용 STM32 보드와 USB-C 전원을 만들어 주세요.'
+        }
+      },
+      {
+        ...providerOptions({
+          events: [
+            createEnvelope('agent.delta', { text: 'Drafting from Codex.' }),
+            createEnvelope('tool.call', {
+              id: 'call_generated_schematic',
+              name: 'schematic.generate',
+              args: { prompt: 'STM32 board with USB-C power, I2C gas sensor connector, reset button, and status LED.' }
+            })
+          ]
+        }),
+        emit: (type, payload) => progress.push({ type, ...payload })
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.ok(progress.some((item) => item.type === 'agent.delta' && item.stage === 'conversation'));
+    assert.ok(progress.some((item) => item.stage === 'conversation' && item.conversation?.specRows?.length > 0));
+    assert.ok(progress.some((item) => item.stage === 'provider' && /Drafting from Codex/.test(item.text ?? '')));
+    assert.ok(progress.some((item) => item.stage === 'tool' && item.toolName === 'schematic.generate'));
+    assert.ok(progress.some((item) => item.stage === 'ready'));
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
