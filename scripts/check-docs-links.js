@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFile, access } from 'node:fs/promises';
-import { resolve, dirname, join } from 'node:path';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const { resolve, dirname, join } = path;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..');
 
@@ -62,7 +63,7 @@ async function checkLinks(filePath) {
 }
 
 async function findMarkdownFiles(dir, baseDir = rootDir) {
-  const { readdir, stat } = await import('node:fs/promises');
+  const { readdir } = await import('node:fs/promises');
   const files = [];
   
   try {
