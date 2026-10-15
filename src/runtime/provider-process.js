@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createEnvelope } from './envelope.js';
+import { PROMPT_FILE_PLACEHOLDER } from './provider-registry.js';
 
 const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 
@@ -29,20 +30,25 @@ export async function runProviderProcess({
     throw new Error('Provider process cancelled.');
   }
 
+  let tempPromptDir = null;
   let tempPromptFile = null;
   let finalArgs = args;
 
   if (usePromptFile) {
-    tempPromptFile = path.join(tmpdir(), `chatpcb-prompt-${randomUUID()}.txt`);
-    await writeFile(tempPromptFile, input || '', 'utf8');
-    finalArgs = args.map((arg) => (arg === '<temp>' ? tempPromptFile : arg));
+    tempPromptDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-'));
+    tempPromptFile = path.join(tempPromptDir, `prompt-${randomUUID()}.txt`);
+    await writeFile(tempPromptFile, input || '', { encoding: 'utf8', mode: 0o600 });
+    finalArgs = args.map((arg) => (arg === PROMPT_FILE_PLACEHOLDER ? tempPromptFile : arg));
   }
 
   const cleanupTempFile = async () => {
-    if (tempPromptFile) {
+    if (tempPromptDir) {
       try {
-        await rm(tempPromptFile, { force: true });
-      } catch {
+        await rm(tempPromptDir, { force: true, recursive: true });
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          console.error('Failed to clean up prompt directory:', error);
+        }
       }
     }
   };

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { runProviderProcess } from '../src/runtime/provider-process.js';
+import { PROMPT_FILE_PLACEHOLDER } from '../src/runtime/provider-registry.js';
 
 test('parses provider stdout into deltas and tool calls', async () => {
   const script = [
@@ -334,7 +335,7 @@ test('usePromptFile writes temp file on all platforms and child can read it', as
 
     const transcript = await runProviderProcess({
       command: process.execPath,
-      args: [scriptPath, '--prompt-file', '<temp>'],
+      args: [scriptPath, '--prompt-file', PROMPT_FILE_PLACEHOLDER],
       input,
       usePromptFile: true,
       timeoutMs: 2000
@@ -446,7 +447,7 @@ test('usePromptFile handles empty input by writing empty temp file', async () =>
 
     const transcript = await runProviderProcess({
       command: process.execPath,
-      args: [scriptPath, '--prompt-file', '<temp>'],
+      args: [scriptPath, '--prompt-file', PROMPT_FILE_PLACEHOLDER],
       input: '',
       usePromptFile: true,
       timeoutMs: 2000

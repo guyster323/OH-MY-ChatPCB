@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+export const PROMPT_FILE_PLACEHOLDER = '__PROMPT_FILE__';
+
 const PROVIDERS = [
   {
     id: 'codex',
@@ -26,9 +28,12 @@ const PROVIDERS = [
     id: 'grok',
     label: 'Grok Build',
     command: 'grok',
-    args: ['--prompt-file', '<temp>', '--output-format', 'plain', '--disable-web-search', '--permission-mode', 'plan'],
+    args: ['--prompt-file', PROMPT_FILE_PLACEHOLDER, '--output-format', 'plain', '--disable-web-search', '--permission-mode', 'plan'],
     description: 'Uses an already-authenticated local Grok Build CLI session (grok login or XAI_API_KEY).',
-    usePromptFile: true
+    usePromptFile: true,
+    modelEnvVar: 'CHATPCB_GROK_MODEL',
+    modelFlagName: '--model',
+    modelFlagPosition: 'before-prompt-file'
   }
 ];
 
@@ -44,10 +49,17 @@ export function getProviderDefinition(provider) {
 
   const definition = { ...match, args: [...match.args] };
 
-  if (provider === 'grok' && process.env.CHATPCB_GROK_MODEL) {
-    const modelIndex = definition.args.indexOf('--prompt-file');
-    if (modelIndex !== -1) {
-      definition.args.splice(modelIndex, 0, '--model', process.env.CHATPCB_GROK_MODEL);
+  if (definition.modelEnvVar && definition.modelFlagName) {
+    const modelValue = process.env[definition.modelEnvVar];
+    if (modelValue) {
+      const insertPosition =
+        definition.modelFlagPosition === 'before-prompt-file'
+          ? definition.args.indexOf('--prompt-file')
+          : definition.args.length;
+
+      if (insertPosition !== -1) {
+        definition.args.splice(insertPosition, 0, definition.modelFlagName, modelValue);
+      }
     }
   }
 

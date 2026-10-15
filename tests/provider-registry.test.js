@@ -5,7 +5,8 @@ import {
   buildProviderPrompt,
   checkProviderAvailability,
   getProviderDefinition,
-  listProviderDefinitions
+  listProviderDefinitions,
+  PROMPT_FILE_PLACEHOLDER
 } from '../src/runtime/provider-registry.js';
 
 test('provider registry declares codex, claude, copilot, and grok adapters', () => {
@@ -52,12 +53,12 @@ test('provider prompt constrains local agents to allowed tool-call JSON', () => 
   assert.match(prompt, /Do not emit tool\.result/);
 });
 
-test('grok provider uses plain output format and prompt-file with temp placeholder', () => {
+test('grok provider uses plain output format and prompt-file with placeholder', () => {
   const definition = getProviderDefinition('grok');
 
   assert.equal(definition.command, 'grok');
   assert.ok(definition.args.includes('--prompt-file'));
-  assert.ok(definition.args.includes('<temp>'));
+  assert.ok(definition.args.includes(PROMPT_FILE_PLACEHOLDER));
   assert.ok(definition.args.includes('--output-format'));
   assert.ok(definition.args.includes('plain'));
   assert.ok(definition.args.includes('--disable-web-search'));
