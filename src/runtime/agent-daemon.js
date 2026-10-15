@@ -20,12 +20,12 @@ import { assertSafeProjectDir, createNamedProject } from '../workflow/project-wo
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
 
-const BASE_PROVIDER_ALLOWED_TOOLS = ['schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
+const ALL_PROVIDER_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
-function computeProviderAllowedTools({ allowGenerate = false, allowCreate = false } = {}) {
-  const tools = [...BASE_PROVIDER_ALLOWED_TOOLS];
-  if (allowGenerate) tools.push('schematic.generate');
-  if (allowCreate) tools.push('project.create');
+function computeAllowedToolsForContext({ allowGenerate = false, allowCreate = false } = {}) {
+  const tools = new Set(['schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice']);
+  if (allowGenerate) tools.add('schematic.generate');
+  if (allowCreate) tools.add('project.create');
   return tools;
 }
 
@@ -154,7 +154,9 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         return ok(await requestProject(call, ctx));
       } catch (error) {
         if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
-        return failure(error.code ?? 'PROVIDER_FAILED', error.message, { conversation: error.conversation });
+        const extra = { conversation: error.conversation };
+        if (error?.technicalDetail) extra.technicalDetail = error.technicalDetail;
+        return failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
       }
 
     case 'provider.cancel':
@@ -243,13 +245,15 @@ async function dispatchSchematicPatch(args, ctx) {
   }
 }
 
-async function invokeProvider(call, ctx, retryWithCorrection = false) {
+async function invokeProvider(call, ctx) {
   const {
     runProviderProcessImpl,
     checkProviderAvailabilityImpl,
+    getProviderDefinitionImpl = getProviderDefinition,
     providerControllers,
     allowGenerate = true,
-    forceProjectDir = false
+    forceProjectDir = false,
+    projectExists = false
   } = ctx;
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
@@ -265,13 +269,13 @@ async function invokeProvider(call, ctx, retryWithCorrection = false) {
     throw new Error('provider.invoke requires an invocation id.');
   }
 
-  const definition = getProviderDefinition(provider);
+  const definition = getProviderDefinitionImpl(provider);
   const availability = await checkProviderAvailabilityImpl({ provider });
   if (!availability.available) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
 
-  const allowedTools = computeProviderAllowedTools({
+  const contextAllowedTools = computeAllowedToolsForContext({
     allowGenerate,
     allowCreate: !forceProjectDir
   });
@@ -280,15 +284,16 @@ async function invokeProvider(call, ctx, retryWithCorrection = false) {
     provider,
     userMessage: prompt,
     projectDir,
-    allowedTools,
-    projectExists: forceProjectDir
+    allowedTools: Array.from(contextAllowedTools),
+    projectExists
   });
-  const controller = new AbortController();
+
+  const controller = providerControllers.get(invocationId) ?? new AbortController();
   providerControllers.set(invocationId, controller);
   let transcript;
+  let alreadyStreamed = false;
 
   try {
-    const streamed = [];
     emitProgress(ctx, {
       stage: 'provider',
       sprite: 'cli',
@@ -298,21 +303,23 @@ async function invokeProvider(call, ctx, retryWithCorrection = false) {
       command: definition.command,
       args: definition.args,
       input,
-      allowedToolNames: allowedTools,
+      allowedToolNames: ALL_PROVIDER_TOOLS,
       signal: controller.signal,
       onEvent: (event) => {
-        streamed.push(event);
+        alreadyStreamed = true;
         emitProviderEvent(ctx, event);
       }
     });
-    if (streamed.length === 0) {
+    if (!alreadyStreamed) {
       for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
     }
-  } finally {
+  } catch (error) {
     providerControllers.delete(invocationId);
+    throw error;
   }
 
   if (transcript.exitCode !== 0) {
+    providerControllers.delete(invocationId);
     throw new Error(`${definition.label} exited with code ${transcript.exitCode}.`);
   }
 
@@ -326,12 +333,11 @@ async function invokeProvider(call, ctx, retryWithCorrection = false) {
       disallowedReason = 'project.create is not allowed when a project already exists';
     } else if (!allowGenerate && event.payload.name === 'schematic.generate') {
       disallowedReason = 'schematic.generate is not allowed for an existing project; use schematic.patch instead';
-    } else if (!allowedTools.includes(event.payload.name)) {
+    } else if (!contextAllowedTools.has(event.payload.name)) {
       disallowedReason = `${event.payload.name} is not in the allowed tool list`;
     }
 
     if (disallowedReason) {
-      console.warn(`[agent-daemon] Ignoring disallowed provider tool call: ${event.payload.name} (${disallowedReason})`);
       disallowedCalls.push({ name: event.payload.name, reason: disallowedReason });
       toolResults.push({
         id: event.payload.id,
@@ -428,6 +434,7 @@ async function requestProject(call, ctx) {
     : (conversation?.generatePrompt ?? prompt);
   
   let providerResult;
+  let firstPreview = null;
   let retryAttempted = false;
   
   try {
@@ -437,17 +444,17 @@ async function requestProject(call, ctx) {
     }, {
       ...ctx,
       allowGenerate: !hasSpec,
-      forceProjectDir: true
+      forceProjectDir: true,
+      projectExists: hasSpec
     });
 
-    if (providerResult.disallowedCalls?.length > 0 && !retryAttempted) {
+    firstPreview = lastMutatingResult(providerResult.toolResults);
+
+    if (providerResult.disallowedCalls?.length > 0 && !retryAttempted && !firstPreview) {
       retryAttempted = true;
-      const disallowedNames = providerResult.disallowedCalls.map((dc) => dc.name).join(', ');
       const correctiveNote = hasSpec
         ? `The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.`
         : `Use schematic.generate for new projects (not project.create inside project.request).`;
-      
-      console.warn(`[agent-daemon] Retrying provider with corrective note after disallowed calls: ${disallowedNames}`);
       
       providerResult = await invokeProvider({
         ...call,
@@ -455,11 +462,12 @@ async function requestProject(call, ctx) {
       }, {
         ...ctx,
         allowGenerate: !hasSpec,
-        forceProjectDir: true
+        forceProjectDir: true,
+        projectExists: hasSpec
       });
     }
 
-    let preview = lastMutatingResult(providerResult.toolResults);
+    let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
     if (!preview) {
       emitProgress(ctx, {
         stage: 'preview',
@@ -472,23 +480,22 @@ async function requestProject(call, ctx) {
         context: args.selection
       }, ctx);
       if (!generated.ok) {
+        if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
+          const disallowedError = new Error(
+            /[가-힣]/.test(prompt)
+              ? 'AI가 이 단계에서 쓸 수 없는 작업(프로젝트 생성)을 시도해 요청을 마치지 못했어요. 파일은 바뀌지 않았어요. 다시 시도해 주세요.'
+              : 'The AI attempted an operation (project creation) that is not allowed at this stage. No files were changed. Please try again.'
+          );
+          disallowedError.code = 'PROVIDER_DISALLOWED_TOOL';
+          disallowedError.conversation = conversation;
+          disallowedError.technicalDetail = providerResult.disallowedCalls.map((dc) => `${dc.name}: ${dc.reason}`).join('; ');
+          throw disallowedError;
+        }
         const error = new Error(generated.error.message);
         error.code = generated.error.code;
         throw error;
       }
       preview = generated.result;
-    }
-
-    if (providerResult?.disallowedCalls?.length > 0 && retryAttempted && !preview) {
-      const disallowedError = new Error(
-        /[가-힣]/.test(prompt)
-          ? 'AI가 이 단계에서 쓸 수 없는 작업(프로젝트 생성)을 시도해 요청을 마치지 못했어요. 파일은 바뀌지 않았어요. 다시 시도해 주세요.'
-          : 'The AI attempted an operation (project creation) that is not allowed at this stage. No files were changed. Please try again.'
-      );
-      disallowedError.code = 'PROVIDER_DISALLOWED_TOOL';
-      disallowedError.conversation = conversation;
-      disallowedError.technicalDetail = providerResult.disallowedCalls.map((dc) => `${dc.name}: ${dc.reason}`).join('; ');
-      throw disallowedError;
     }
 
     if (preview?.requiresApproval) {
@@ -509,7 +516,12 @@ async function requestProject(call, ctx) {
     const wrapped = error instanceof Error ? error : new Error(String(error?.message ?? error));
     wrapped.code = error?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
     wrapped.conversation = conversation;
+    if (error?.technicalDetail) wrapped.technicalDetail = error.technicalDetail;
     throw wrapped;
+  } finally {
+    if (call.args?.invocationId) {
+      ctx.providerControllers?.delete(call.args.invocationId);
+    }
   }
 }
 

@@ -1201,7 +1201,7 @@ test('daemon ignores disallowed provider calls with inspect and succeeds via fal
   }
 });
 
-test('daemon ignores disallowed calls after patch preview and succeeds', async () => {
+test('daemon ignores disallowed calls after patch preview and succeeds without retry', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-created-file-restore-'));
 
   try {
@@ -1248,7 +1248,7 @@ test('daemon ignores disallowed calls after patch preview and succeeds', async (
     );
     assert.equal(result.ok, true);
     assert.equal(result.result.requiresApproval, true);
-    assert.equal(callCount, 2);
+    assert.equal(callCount, 1);
 
     for (const [file, content] of originalFiles) {
       assert.deepEqual(await readFile(file), content);
@@ -2201,5 +2201,49 @@ test('transaction status reconcile waits behind the project mutex', async () => 
   } finally {
     await rm(root, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('daemon ignores disallowed calls from real child process provider and retries with fallback', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-integration-disallowed-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Integration Board' }
+    });
+
+    await generateMcuPeripheralProject({
+      projectDir: created.result.projectDir,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+
+    const fakeProviderPath = path.join(import.meta.dirname, 'fixtures', 'fake-provider-disallowed.sh');
+    let callCount = 0;
+
+    const result = await dispatchToolCall(
+      {
+        id: 'call_integration_disallowed',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Add reset button.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async () => ({ provider: 'codex', command: fakeProviderPath, available: true, status: 'available' }),
+        getProviderDefinitionImpl: () => ({ id: 'codex', label: 'Codex CLI', command: fakeProviderPath, args: [], description: 'Test provider' }),
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc,
+        runProviderProcessImpl: async (options) => {
+          callCount += 1;
+          return await import('../src/runtime/provider-process.js').then((m) => m.runProviderProcess(options));
+        }
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.operation, 'patched');
+    assert.equal(callCount, 2);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
