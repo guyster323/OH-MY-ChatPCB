@@ -4,8 +4,9 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
-import { runProviderProcess } from './provider-process.js';
+import { parseProviderMessage, runProviderProcess } from './provider-process.js';
 import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
@@ -141,36 +142,36 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       return ok({ providers: listProviderDefinitions() });
 
     case 'auth.chatgpt.status':
-      if (!ctx.chatgptAuthManager) {
-        ctx.chatgptAuthManager = createChatGPTAuthManager();
-      }
-      return ok(await ctx.chatgptAuthManager.getAuthStatus());
+      return ok(await chatGptAuthManager(ctx).getAuthStatus());
 
-    case 'auth.chatgpt.start':
-      if (!ctx.chatgptAuthManager) {
-        ctx.chatgptAuthManager = createChatGPTAuthManager();
+    case 'auth.chatgpt.start': {
+      const manager = ctx.chatgptAuthManager;
+      if (!manager) return failure('NO_AUTH_SESSION', 'ChatGPT auth is not initialized');
+      try {
+        return ok(await manager.startAuth(call.args, (type, payload) => {
+          if (typeof ctx.emit === 'function') ctx.emit(type, payload);
+        }));
+      } catch (error) {
+        return failure(error.code || 'AUTH_START_FAILED', error.message);
       }
-      return ok(await ctx.chatgptAuthManager.startAuth(call.args, (type, payload) => {
-        if (ctx?.emit) ctx.emit(type, payload);
-      }));
+    }
 
-    case 'auth.chatgpt.reopen':
-      if (!ctx.chatgptAuthManager) {
-        return failure('NO_AUTH_SESSION', 'No active auth session');
-      }
-      return ok(ctx.chatgptAuthManager.reopenAuth(call.args));
+    case 'auth.chatgpt.reopen': {
+      const manager = ctx.chatgptAuthManager;
+      if (!manager) return failure('NO_AUTH_SESSION', 'No active auth session');
+      const reopened = manager.reopenAuth(call.args);
+      if (reopened?.error) return failure('NO_AUTH_SESSION', reopened.error);
+      return ok(reopened);
+    }
 
-    case 'auth.chatgpt.cancel':
-      if (!ctx.chatgptAuthManager) {
-        return ok({ state: 'signed_out' });
-      }
-      return ok(ctx.chatgptAuthManager.cancelAuth(call.args));
+    case 'auth.chatgpt.cancel': {
+      const manager = ctx.chatgptAuthManager;
+      if (!manager) return ok({ state: 'signed_out' });
+      return ok(await manager.cancelAuth(call.args));
+    }
 
     case 'auth.chatgpt.signOut':
-      if (!ctx.chatgptAuthManager) {
-        ctx.chatgptAuthManager = createChatGPTAuthManager();
-      }
-      return ok(await ctx.chatgptAuthManager.signOut());
+      return ok(await chatGptAuthManager(ctx).signOut());
 
     case 'provider.invoke':
       return ok(await invokeProvider(call, ctx));
@@ -297,62 +298,6 @@ async function invokeProvider(call, ctx) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
 
-  // Special handling for ChatGPT - direct API call instead of CLI
-  if (provider === 'chatgpt') {
-    const { callChatGPTResponses } = await import('./providers/chatgpt-provider.js');
-    const controller = new AbortController();
-    providerControllers.set(invocationId, controller);
-
-    try {
-      emitProgress(ctx, {
-        stage: 'provider',
-        sprite: 'cli',
-        text: progressCopy(prompt, `ChatGPT와 대화 중.`, `Talking to ChatGPT.`)
-      });
-
-      let responseText = '';
-      await callChatGPTResponses({
-        prompt,
-        onChunk: (chunk) => {
-          responseText += chunk;
-          emitProgress(ctx, {
-            stage: 'provider',
-            sprite: 'cli',
-            text: chunk
-          });
-        },
-        onError: (error) => {
-          emitProgress(ctx, {
-            stage: 'provider',
-            sprite: 'cli',
-            text: `Error: ${error.message}`
-          });
-        },
-        signal: controller.signal
-      });
-
-      return {
-        providerInvocation: true,
-        invocationId,
-        provider,
-        events: [
-          {
-            type: 'agent.delta',
-            payload: { text: responseText }
-          }
-        ],
-        toolResults: [],
-        stderr: '',
-        tracePath: null
-      };
-    } catch (error) {
-      throw error;
-    } finally {
-      providerControllers.delete(invocationId);
-    }
-  }
-
-  // Standard CLI provider flow
   const input = buildProviderPrompt({
     provider,
     userMessage: prompt,
@@ -364,25 +309,41 @@ async function invokeProvider(call, ctx) {
   let transcript;
 
   try {
-    const streamed = [];
-    emitProgress(ctx, {
-      stage: 'provider',
-      sprite: 'cli',
-      text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
-    });
-    transcript = await runProviderProcessImpl({
-      command: definition.command,
-      args: definition.args,
-      input,
-      allowedToolNames: PROVIDER_ALLOWED_TOOLS,
-      signal: controller.signal,
-      onEvent: (event) => {
-        streamed.push(event);
-        emitProviderEvent(ctx, event);
+    if (provider === 'chatgpt') {
+      emitProgress(ctx, {
+        stage: 'provider',
+        sprite: 'cli',
+        text: progressCopy(prompt, 'ChatGPT와 대화 중.', 'Talking to ChatGPT.')
+      });
+      const response = await callChatGPTResponses({
+        prompt: input,
+        signal: controller.signal,
+        model: args.model
+      });
+      const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
+      for (const event of events) emitProviderEvent(ctx, event);
+      transcript = { exitCode: 0, events, stderr: '', tracePath: null };
+    } else {
+      const streamed = [];
+      emitProgress(ctx, {
+        stage: 'provider',
+        sprite: 'cli',
+        text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
+      });
+      transcript = await runProviderProcessImpl({
+        command: definition.command,
+        args: definition.args,
+        input,
+        allowedToolNames: PROVIDER_ALLOWED_TOOLS,
+        signal: controller.signal,
+        onEvent: (event) => {
+          streamed.push(event);
+          emitProviderEvent(ctx, event);
+        }
+      });
+      if (streamed.length === 0) {
+        for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
       }
-    });
-    if (streamed.length === 0) {
-      for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
     }
   } finally {
     providerControllers.delete(invocationId);
@@ -556,6 +517,10 @@ async function projectHasSpec(projectDir) {
   return entries.some((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
 }
 
+function chatGptAuthManager(ctx) {
+  return ctx.chatgptAuthManager ?? createChatGPTAuthManager();
+}
+
 function guardToolProjectDir(call, allowedWorkspaceRoot) {
   const projectDir = call.args?.projectDir;
   if (typeof projectDir !== 'string' || projectDir.length === 0) {
@@ -648,8 +613,16 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     stateRoot: dispatchOptions.transactionStateRoot
   });
   const reconciledProjects = dispatchOptions.reconciledProjects ?? new Set();
+  const chatgptAuthManager = dispatchOptions.chatgptAuthManager ?? createChatGPTAuthManager({
+    clientId: dispatchOptions.chatgptClientId,
+    spawnImpl: dispatchOptions.browserSpawnImpl,
+    portStart: dispatchOptions.chatgptPortStart,
+    portAttempts: dispatchOptions.chatgptPortAttempts,
+    timeoutMs: dispatchOptions.chatgptAuthTimeoutMs
+  });
   const resolvedDispatchOptions = {
     ...dispatchOptions,
+    chatgptAuthManager,
     providerControllers,
     patchApprovalRegistry,
     projectMutexRegistry,
@@ -744,11 +717,13 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     server,
     close: () =>
       new Promise((resolve, reject) => {
-        for (const client of clients) {
-          client.destroy();
-        }
-        patchApprovalRegistry.disposeAll();
-        server.close((error) => (error ? reject(error) : resolve()));
+        Promise.resolve(chatgptAuthManager.cancelAll?.()).catch(() => {}).finally(() => {
+          for (const client of clients) {
+            client.destroy();
+          }
+          patchApprovalRegistry.disposeAll();
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
       }),
     clients
   };

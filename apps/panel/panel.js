@@ -43,6 +43,19 @@ function escapeHtml(text) {
     .replace(/'/g, '&#x27;');
 }
 
+// Only https URLs may be written into an auth href. The returned string is HTML-escaped.
+function chatgptAuthHref(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  return escapeHtml(parsed.href);
+}
+
 const PROGRESS_COPY = {
   conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
   provider: { title: 'CLI와 대화 중', sprite: 'cli' },
@@ -1258,13 +1271,17 @@ function renderChatGPTAuth() {
     `;
     setRequestBusy(true);
   } else if (state === 'waiting') {
+    const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
+    const reopenLink = authHref
+      ? `<a href="${authHref}" target="_blank" rel="noopener noreferrer">${t('auth.chatgpt.waiting.reopen')}</a>`
+      : t('auth.chatgpt.waiting.reopen');
     chatgptAuthCardEl.innerHTML = `
       <h2 id="chatgpt-auth-title" tabindex="-1">
         <span class="spinner" aria-hidden="true"></span>
         ${t('auth.chatgpt.waiting.title')}
       </h2>
       <p>
-        <a href="${chatgptAuthState.authUrl || '#'}" target="_blank">${t('auth.chatgpt.waiting.reopen')}</a>
+        ${reopenLink}
         · 
         <button class="chatgpt-secondary-btn" onclick="copyChatGPTLink()">${t('auth.chatgpt.waiting.copy')}</button>
       </p>
@@ -1306,7 +1323,8 @@ function renderChatGPTAuth() {
       actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
     } else if (code === 'open_failed') {
       title = t('auth.chatgpt.error.open-failed');
-      body = chatgptAuthState.authUrl ? `<p><a href="${chatgptAuthState.authUrl}" target="_blank">${chatgptAuthState.authUrl}</a></p>` : '';
+      const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
+      body = authHref ? `<p><a href="${authHref}" target="_blank" rel="noopener noreferrer">${authHref}</a></p>` : '';
       actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
     } else if (code === 'not_eligible') {
       title = t('auth.chatgpt.error.not-eligible.title');

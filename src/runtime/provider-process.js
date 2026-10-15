@@ -171,6 +171,13 @@ function addProviderLine(events, line, allowedTools) {
   events.push(createEnvelope('agent.delta', { text: line }));
 }
 
+export function parseProviderMessage(text, allowedToolNames = DEFAULT_ALLOWED_TOOL_NAMES) {
+  const events = [];
+  const allowedTools = allowedToolNames instanceof Set ? allowedToolNames : new Set(allowedToolNames ?? []);
+  parseProviderMessageText(events, String(text ?? ''), allowedTools);
+  return events;
+}
+
 function parseProviderMessageText(events, text, allowedTools) {
   const assistantText = [];
   const toolCalls = [];
@@ -245,7 +252,9 @@ function redactValue(value) {
   return value;
 }
 
-function validateProviderToolCall(payload, allowedTools) {
+export function validateProviderToolCall(payload, allowedTools) {
+  const allowed = allowedTools instanceof Set ? allowedTools : new Set(allowedTools ?? []);
+
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Provider tool.call payload must be an object.');
   }
@@ -254,7 +263,7 @@ function validateProviderToolCall(payload, allowedTools) {
     throw new Error('Provider tool.call payload requires an id.');
   }
 
-  if (typeof payload.name !== 'string' || !allowedTools.has(payload.name)) {
+  if (typeof payload.name !== 'string' || !allowed.has(payload.name)) {
     throw new Error(`Unsupported provider tool call: ${payload.name}`);
   }
 

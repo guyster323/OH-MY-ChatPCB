@@ -1,52 +1,72 @@
-import { randomBytes, createHash } from 'node:crypto';
-import { readFile, writeFile, mkdir, chmod, access } from 'node:fs/promises';
+import { createHash, createPublicKey, createVerify, randomBytes } from 'node:crypto';
+import { access, chmod, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import http from 'node:http';
-import { parse as parseUrl } from 'node:url';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 
 const AUTH_ENDPOINT = 'https://auth.openai.com/api/accounts/authorize';
 const TOKEN_ENDPOINT = 'https://auth.openai.com/api/accounts/oauth/token';
 const JWKS_ENDPOINT = 'https://auth.openai.com/api/accounts/.well-known/jwks.json';
+const ISSUER = 'https://auth.openai.com';
 const RESOURCE = 'https://api.openai.com/v1';
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const REDIRECT_URI_PORT_START = 41318;
 const REDIRECT_URI_PORT_MAX_ATTEMPTS = 10;
-const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const CLIENT_ID_ENV = 'CHATPCB_CHATGPT_CLIENT_ID';
+const MODEL_ENV = 'CHATPCB_CHATGPT_MODEL';
 
-function openSystemBrowser(url) {
+/**
+ * Resolve the ChatGPT client id and optional model override.
+ *
+ * Precedence for each value is: explicit option, then environment
+ * (`CHATPCB_CHATGPT_CLIENT_ID`, `CHATPCB_CHATGPT_MODEL`), then `chatgpt.json`
+ * in the ChatPCB config directory (`clientId`, `model`). The client id also
+ * falls back to `savedClientId` from the selected saved account.
+ * A client id on the browser callback query is never consulted.
+ */
+export async function resolveChatGPTSettings({ clientId, model, savedClientId } = {}) {
+  const file = await readChatGPTConfig();
+  return {
+    clientId: firstString(clientId, process.env[CLIENT_ID_ENV], file.clientId, savedClientId),
+    model: firstString(model, process.env[MODEL_ENV], file.model)
+  };
+}
+
+export function browserOpenCommand(url, platform = process.platform) {
+  if (platform === 'darwin') return { command: 'open', args: [url] };
+  if (platform === 'win32') return { command: 'rundll32', args: ['url.dll,FileProtocolHandler', url] };
+  return { command: 'xdg-open', args: [url] };
+}
+
+export function openSystemBrowser(url, { platform = process.platform, spawnImpl = spawn } = {}) {
+  const { command, args } = browserOpenCommand(url, platform);
   return new Promise((resolve) => {
-    const platform = process.platform;
-    let command;
-    let args;
-
-    if (platform === 'darwin') {
-      command = 'open';
-      args = [url];
-    } else if (platform === 'win32') {
-      // Use cmd /c start "" <url> to avoid quoting issues
-      command = 'cmd';
-      args = ['/c', 'start', '', url];
-    } else {
-      command = 'xdg-open';
-      args = [url];
+    let proc;
+    try {
+      proc = spawnImpl(command, args, {
+        stdio: 'ignore',
+        detached: true,
+        shell: false
+      });
+    } catch (error) {
+      resolve({ success: false, error });
+      return;
     }
 
-    const proc = spawn(command, args, {
-      stdio: 'ignore',
-      detached: true,
-      shell: false
-    });
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
 
-    proc.on('error', (error) => {
-      resolve({ success: false, error });
-    });
-
+    proc.on('error', (error) => finish({ success: false, error }));
     proc.on('spawn', () => {
-      proc.unref();
-      resolve({ success: true });
+      if (typeof proc.unref === 'function') proc.unref();
+      finish({ success: true });
     });
   });
 }
@@ -63,8 +83,7 @@ function getConfigDir() {
 }
 
 function getCredentialsPath(clientId = 'default') {
-  // Use client_id as filename to support multiple accounts
-  const safeName = clientId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeName = String(clientId).replace(/[^a-zA-Z0-9_-]/g, '_');
   return join(getConfigDir(), `chatgpt-credentials-${safeName}.json`);
 }
 
@@ -72,17 +91,20 @@ function getHostIdPath() {
   return join(getConfigDir(), 'chatgpt-host-id.txt');
 }
 
+function isCredentialFile(name) {
+  return name === 'chatgpt-credentials.json' || /^chatgpt-credentials-.+\.json$/.test(name);
+}
+
 async function getOrCreateHostId() {
   const path = getHostIdPath();
   try {
     await access(path);
-    const hostId = await readFile(path, 'utf-8');
+    const hostId = await readFile(path, 'utf8');
     if (hostId.trim()) return hostId.trim();
   } catch {
     // File doesn't exist or is empty
   }
-  
-  // Generate new host ID
+
   const hostId = `host_${randomBytes(16).toString('hex')}`;
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, hostId, { mode: 0o600 });
@@ -106,66 +128,98 @@ function generateNonce() {
   return randomBytes(16).toString('base64url');
 }
 
+/**
+ * Load the ChatGPT account to use.
+ *
+ * When more than one credential file exists, selection is deterministic:
+ * 1. most recently used (`last_used_at`, otherwise `issued_at`), newest first
+ * 2. email, ascending and case-insensitive
+ * 3. `client_id`, ascending
+ *
+ * Sign-in and a completed Responses call set `last_used_at`.
+ * Legacy `chatgpt-credentials.json` is included. Temporary write files are not.
+ */
 export async function loadCredentials() {
   try {
-    // Try to load default credentials (backward compatibility)
-    const defaultPath = join(getConfigDir(), 'chatgpt-credentials.json');
-    if (existsSync(defaultPath)) {
-      const raw = await readFile(defaultPath, 'utf-8');
-      const creds = JSON.parse(raw);
-      if (!creds.client_id || !creds.access_token) return null;
-      return creds;
-    }
-    
-    // Try to find any credentials file
     const configDir = getConfigDir();
     if (!existsSync(configDir)) return null;
-    
-    const { readdir } = await import('node:fs/promises');
     const files = await readdir(configDir);
-    const credFile = files.find(f => f.startsWith('chatgpt-credentials-'));
-    
-    if (credFile) {
-      const raw = await readFile(join(configDir, credFile), 'utf-8');
-      const creds = JSON.parse(raw);
-      if (!creds.client_id || !creds.access_token) return null;
-      return creds;
+    const loaded = [];
+    for (const name of files) {
+      if (!isCredentialFile(name)) continue;
+      try {
+        loaded.push(JSON.parse(await readFile(join(configDir, name), 'utf8')));
+      } catch {
+        // Skip unreadable credential files so one bad file does not hide the rest.
+      }
     }
-    
-    return null;
+    return selectSavedAccount(loaded);
   } catch {
     return null;
   }
 }
 
+/**
+ * Same ordering as loadCredentials. Invalid records (no client_id or access_token) are dropped.
+ */
+export function selectSavedAccount(candidates) {
+  const usable = [];
+  for (const creds of candidates ?? []) {
+    if (!creds || typeof creds !== 'object' || Array.isArray(creds)) continue;
+    if (!creds.client_id || !creds.access_token) continue;
+    usable.push(creds);
+  }
+  usable.sort(compareSavedAccounts);
+  return usable[0] ?? null;
+}
+
+function accountEmail(creds) {
+  return String(creds.account?.email || '').toLocaleLowerCase();
+}
+
+function accountUsedAt(creds) {
+  const used = Number(creds.last_used_at);
+  if (Number.isFinite(used) && used > 0) return used;
+  const issued = Number(creds.issued_at);
+  if (Number.isFinite(issued) && issued > 0) return issued;
+  return 0;
+}
+
+function compareSavedAccounts(a, b) {
+  const byUse = accountUsedAt(b) - accountUsedAt(a);
+  if (byUse !== 0) return byUse;
+  const byEmail = accountEmail(a).localeCompare(accountEmail(b));
+  if (byEmail !== 0) return byEmail;
+  return String(a.client_id).localeCompare(String(b.client_id));
+}
+
 export async function saveCredentials(creds) {
   const clientId = creds.client_id || 'default';
+  const stored = {
+    ...creds,
+    last_used_at: typeof creds.last_used_at === 'number' ? creds.last_used_at : Date.now()
+  };
   const path = getCredentialsPath(clientId);
   const dir = dirname(path);
-  
+
   await mkdir(dir, { recursive: true });
-  
-  // Atomic write: write to temp file first
+
   const tempPath = `${path}.tmp`;
-  await writeFile(tempPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+  await writeFile(tempPath, JSON.stringify(stored, null, 2), { mode: 0o600 });
   await chmod(tempPath, 0o600);
-  
-  // Rename to final path
-  const { rename } = await import('node:fs/promises');
   await rename(tempPath, path);
   await chmod(path, 0o600);
+  return stored;
 }
 
 export async function deleteCredentials() {
   try {
     const configDir = getConfigDir();
     if (!existsSync(configDir)) return;
-    
-    const { readdir, unlink } = await import('node:fs/promises');
+
     const files = await readdir(configDir);
-    
     for (const file of files) {
-      if (file.startsWith('chatgpt-credentials-') || file === 'chatgpt-credentials.json') {
+      if (isCredentialFile(file) || file === 'chatgpt-credentials.json') {
         await unlink(join(configDir, file)).catch(() => {});
       }
     }
@@ -203,127 +257,230 @@ async function fetchJWKS() {
   return await response.json();
 }
 
-async function verifyIdToken(idToken, expectedNonce, expectedClientId) {
-  const parts = idToken.split('.');
-  if (parts.length !== 3) {
+export async function verifyIdToken(idToken, expectedNonce, expectedClientId) {
+  const parts = String(idToken ?? '').split('.');
+  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
     throw new Error('Invalid ID token format');
   }
 
   const [headerB64, payloadB64, signatureB64] = parts;
-  const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+  let header;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, 'base64url').toString());
+  } catch {
+    throw new Error('Invalid ID token header');
+  }
 
-  // Verify nonce
+  if (header.alg !== 'RS256') {
+    throw new Error(`ID token alg must be RS256, got ${header.alg ?? 'none'}`);
+  }
+  if (typeof header.kid !== 'string' || header.kid.length === 0) {
+    throw new Error('Unknown ID token kid');
+  }
+
+  const jwks = await fetchJWKS();
+  const keys = Array.isArray(jwks?.keys) ? jwks.keys : [];
+  const jwk = keys.find((key) => key && key.kid === header.kid);
+  if (!jwk) {
+    throw new Error(`Unknown ID token kid: ${header.kid}`);
+  }
+
+  const signingInput = `${headerB64}.${payloadB64}`;
+  let signatureOk = false;
+  try {
+    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    const verifier = createVerify('RSA-SHA256');
+    verifier.update(signingInput);
+    verifier.end();
+    signatureOk = verifier.verify(key, Buffer.from(signatureB64, 'base64url'));
+  } catch (error) {
+    throw new Error(`ID token signature verification failed: ${error.message}`);
+  }
+  if (!signatureOk) {
+    throw new Error('ID token signature verification failed');
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+  } catch {
+    throw new Error('Invalid ID token payload');
+  }
+
   if (payload.nonce !== expectedNonce) {
     throw new Error('ID token nonce mismatch');
   }
-
-  // Verify issuer
-  if (payload.iss !== 'https://auth.openai.com') {
+  if (payload.iss !== ISSUER) {
     throw new Error(`Invalid issuer: ${payload.iss}`);
   }
-
-  // Verify audience
   if (payload.aud !== expectedClientId) {
     throw new Error(`Invalid audience: ${payload.aud}`);
   }
-
-  // Verify expiration
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp && payload.exp < now) {
+  if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+    throw new Error('ID token is missing exp');
+  }
+  if (payload.exp <= Math.floor(Date.now() / 1000)) {
     throw new Error('ID token has expired');
   }
 
-  // Note: Full signature verification with JWKS would require a JWT library
-  // For production, use a proper JWT verification library like 'jose'
-  // Here we do basic validation only
-  
   return payload;
 }
 
-export function startAuthFlow({ onBrowserOpen, onError } = {}) {
+export function startAuthFlow({
+  clientId,
+  onBrowserOpen,
+  onError,
+  onTimeout,
+  spawnImpl,
+  portStart,
+  portAttempts,
+  timeoutMs
+} = {}) {
+  const configuredClientId = typeof clientId === 'string' ? clientId.trim() : '';
+  const attemptId = randomBytes(8).toString('hex');
+
+  if (!configuredClientId) {
+    const error = {
+      code: 'client_id_not_configured',
+      message: 'ChatGPT client id is not configured. Set CHATPCB_CHATGPT_CLIENT_ID or chatgpt.json clientId.'
+    };
+    const promise = Promise.reject(error);
+    promise.catch(() => {});
+    return {
+      attemptId,
+      get authUrl() { return null; },
+      whenReady: promise,
+      promise,
+      cancel: async () => {},
+      reopen: () => null
+    };
+  }
+
   const state = generateState();
   const nonce = generateNonce();
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
-  
-  let server;
-  let actualPort;
-  let timeoutHandle;
+  const portBase = Number.isInteger(portStart) ? portStart : REDIRECT_URI_PORT_START;
+  const attempts = Number.isInteger(portAttempts) ? portAttempts : REDIRECT_URI_PORT_MAX_ATTEMPTS;
+  const authTimeoutMs = Number.isInteger(timeoutMs) ? timeoutMs : AUTH_TIMEOUT_MS;
+
+  let server = null;
+  let actualPort = null;
+  let timeoutHandle = null;
+  let authUrl = null;
+  let settled = false;
+  let readySettled = false;
   let resolveAuth;
   let rejectAuth;
-  let registeredClientId = null;
+  let readyResolve;
+  let readyReject;
 
   const promise = new Promise((resolve, reject) => {
     resolveAuth = resolve;
     rejectAuth = reject;
   });
+  promise.catch(() => {});
 
-  const cleanup = () => {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-    if (server) {
-      server.close();
-      server = null;
+  const whenReady = new Promise((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  whenReady.catch(() => {});
+
+  const cleanup = ({ force = false } = {}) => {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+      timeoutHandle = null;
     }
+    const closing = server;
+    server = null;
+    if (!closing) return Promise.resolve();
+    if (!force) {
+      closing.close();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, 1000);
+      if (typeof timer.unref === 'function') timer.unref();
+      closing.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+      if (typeof closing.closeAllConnections === 'function') {
+        try { closing.closeAllConnections(); } catch { /* already closed */ }
+      }
+    });
+  };
+
+  const finish = (error, { force = false } = {}) => {
+    if (settled) return Promise.resolve();
+    settled = true;
+    const closed = cleanup({ force });
+    if (!readySettled) {
+      readySettled = true;
+      readyReject(error);
+    }
+    rejectAuth(error);
+    return closed;
+  };
+
+  const succeed = (value) => {
+    if (settled) return;
+    settled = true;
+    cleanup({ force: false });
+    resolveAuth(value);
   };
 
   const handleCallback = async (req, res) => {
-    const url = parseUrl(req.url, true);
-    
+    let url;
+    try {
+      url = new URL(req.url, 'http://127.0.0.1');
+    } catch {
+      res.writeHead(400);
+      res.end('Bad request');
+      return;
+    }
+
     if (url.pathname !== '/auth/callback') {
       res.writeHead(404);
       res.end('Not found');
       return;
     }
 
-    const callbackState = url.query.state;
-    const code = url.query.code;
-    const error = url.query.error;
-    const issuedClientId = url.query.client_id; // From dynamic registration
+    const callbackState = url.searchParams.get('state');
+    const code = url.searchParams.get('code');
+    const error = url.searchParams.get('error');
+    // The callback query client_id is ignored. Token exchange uses the configured id.
 
     if (error) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(createErrorPage('Sign-in was cancelled', '로그인이 취소되었습니다'));
-      cleanup();
-      rejectAuth({ code: 'cancelled', message: 'User cancelled sign-in' });
+      await finish({ code: 'cancelled', message: 'User cancelled sign-in' });
       return;
     }
 
     if (callbackState !== state) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(createErrorPage('Sign-in error: state mismatch', '로그인 오류: 상태 불일치'));
-      cleanup();
-      rejectAuth({ code: 'state_mismatch', message: 'State parameter mismatch' });
+      await finish({ code: 'state_mismatch', message: 'State parameter mismatch' });
       return;
     }
 
     if (!code) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(createErrorPage('Sign-in error: no authorization code', '로그인 오류: 인증 코드 없음'));
-      cleanup();
-      rejectAuth({ code: 'no_code', message: 'No authorization code received' });
+      await finish({ code: 'no_code', message: 'No authorization code received' });
       return;
     }
 
-    // Store the issued client_id if provided (dynamic registration)
-    if (issuedClientId && issuedClientId.startsWith('oaiapp_')) {
-      registeredClientId = issuedClientId;
-    }
-
     try {
-      // Exchange code for tokens
       const redirectUri = `http://127.0.0.1:${actualPort}/auth/callback`;
-      
-      // Use the registered client_id from callback, fail if not provided
-      if (!registeredClientId) {
-        throw new Error('No client_id received from authorization server');
-      }
-      
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
-        client_id: registeredClientId,
+        client_id: configuredClientId,
         resource: RESOURCE
       });
 
@@ -339,29 +496,18 @@ export function startAuthFlow({ onBrowserOpen, onError } = {}) {
       }
 
       const tokens = await tokenResponse.json();
-
-      // Verify ID token
       if (!tokens.id_token) {
         throw new Error('No ID token received');
       }
 
-      const finalClientId = tokens.client_id || registeredClientId;
-      const payload = await verifyIdToken(tokens.id_token, nonce, finalClientId);
-
-      // Verify chatgpt.tokens.use.direct scope
+      const payload = await verifyIdToken(tokens.id_token, nonce, configuredClientId);
       const scope = tokens.scope || '';
       if (!scope.includes('chatgpt.tokens.use.direct')) {
         throw new Error('chatgpt.tokens.use.direct permission not granted');
       }
 
-      // Extract account info
-      const account = {
-        email: payload.email || payload.sub,
-        name: payload.name
-      };
-
       const creds = {
-        client_id: finalClientId,
+        client_id: configuredClientId,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         id_token: tokens.id_token,
@@ -369,120 +515,131 @@ export function startAuthFlow({ onBrowserOpen, onError } = {}) {
         expires_in: tokens.expires_in,
         issued_at: Date.now(),
         scope: tokens.scope,
-        account
+        account: {
+          email: payload.email || payload.sub,
+          name: payload.name
+        }
       };
 
-      // Save credentials
       await saveCredentials(creds);
-
-      // Only show success page after everything succeeded
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(createSuccessPage());
-      
-      cleanup();
-      resolveAuth(creds);
+      succeed(creds);
     } catch (err) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(createErrorPage('Sign-in error: ' + err.message, '로그인 오류: ' + err.message));
-      cleanup();
-      rejectAuth({ code: 'token_exchange_failed', message: err.message });
+      res.end(createErrorPage(`Sign-in error: ${err.message}`, `로그인 오류: ${err.message}`));
+      await finish({ code: 'token_exchange_failed', message: err.message });
     }
   };
 
-  const tryPort = async (port) => {
-    return new Promise((resolve, reject) => {
-      const testServer = http.createServer(handleCallback);
-      
-      testServer.on('error', (err) => {
-        if (err.code === 'EADDRINUSE') {
-          resolve(false);
-        } else {
-          reject(err);
+  const tryPort = (port) => new Promise((resolve, reject) => {
+    const testServer = http.createServer((req, res) => {
+      handleCallback(req, res).catch((err) => {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
         }
-      });
-
-      testServer.listen(port, '127.0.0.1', () => {
-        actualPort = port;
-        server = testServer;
-        resolve(true);
+        res.end('Sign-in error');
+        finish({ code: 'server_error', message: err.message }).catch(() => {});
       });
     });
-  };
+    let decided = false;
+    const decide = (fn, value) => {
+      if (decided) return;
+      decided = true;
+      fn(value);
+    };
+
+    testServer.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') decide(resolve, false);
+      else decide(reject, err);
+    });
+
+    testServer.listen(port, '127.0.0.1', () => {
+      actualPort = port;
+      server = testServer;
+      decide(resolve, true);
+    });
+  });
 
   const startServer = async () => {
-    // Try ports from REDIRECT_URI_PORT_START to REDIRECT_URI_PORT_START + MAX_ATTEMPTS
-    for (let i = 0; i < REDIRECT_URI_PORT_MAX_ATTEMPTS; i++) {
-      const port = REDIRECT_URI_PORT_START + i;
+    for (let i = 0; i < attempts; i += 1) {
+      const port = portBase + i;
       const success = await tryPort(port);
-      if (success) {
-        return port;
-      }
+      if (success) return port;
     }
     throw new Error('Could not find available port for callback server');
   };
 
+  const cancelError = (code) => {
+    if (code === 'superseded') {
+      return { code, message: 'Sign-in replaced by a new attempt' };
+    }
+    if (code === 'cancelled') {
+      return { code, message: 'Sign-in cancelled by user' };
+    }
+    return { code: code || 'cancelled', message: 'Sign-in cancelled by user' };
+  };
+
   startServer().then(async (port) => {
-    actualPort = port;
-    const redirectUri = `http://127.0.0.1:${actualPort}/auth/callback`;
-    const hostId = await getOrCreateHostId();
-    
-    const authParams = new URLSearchParams({
-      response_type: 'code',
-      client_id: 'dynamic_agent_client',
-      redirect_uri: redirectUri,
-      scope: SCOPES,
-      state,
-      nonce,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-      resource: RESOURCE,
-      agent_name_hint: 'ChatPCB',
-      ext_agent_host_id: hostId
-    });
+    try {
+      actualPort = port;
+      const redirectUri = `http://127.0.0.1:${actualPort}/auth/callback`;
+      const hostId = await getOrCreateHostId();
+      const authParams = new URLSearchParams({
+        response_type: 'code',
+        client_id: configuredClientId,
+        redirect_uri: redirectUri,
+        scope: SCOPES,
+        state,
+        nonce,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        resource: RESOURCE,
+        agent_name_hint: 'ChatPCB',
+        ext_agent_host_id: hostId
+      });
+      authUrl = `${AUTH_ENDPOINT}?${authParams.toString()}`;
+      timeoutHandle = setTimeout(() => {
+        if (typeof onTimeout === 'function') onTimeout();
+        finish({ code: 'timeout', message: 'Sign-in timed out after 5 minutes' }, { force: true }).catch(() => {});
+      }, authTimeoutMs);
+      if (!readySettled) {
+        readySettled = true;
+        readyResolve(authUrl);
+      }
+    } catch (error) {
+      await finish({ code: 'server_error', message: error.message }, { force: true });
+      return;
+    }
 
-    const authUrl = `${AUTH_ENDPOINT}?${authParams.toString()}`;
-
-    timeoutHandle = setTimeout(() => {
-      cleanup();
-      rejectAuth({ code: 'timeout', message: 'Sign-in timed out after 5 minutes' });
-    }, AUTH_TIMEOUT_MS);
-
-    // Try to open browser
-    const browserResult = await openSystemBrowser(authUrl);
-    
-    if (!browserResult.success) {
-      if (onError) {
+    try {
+      const browserResult = await openSystemBrowser(authUrl, { spawnImpl });
+      if (settled) return;
+      if (!browserResult.success && onError) {
         onError({ code: 'open_failed', message: 'Could not open browser', authUrl });
       }
-    }
-    
-    if (onBrowserOpen) {
-      onBrowserOpen({ 
-        authUrl, 
-        error: browserResult.success ? null : 'open_failed' 
-      });
+      if (onBrowserOpen) {
+        onBrowserOpen({
+          authUrl,
+          error: browserResult.success ? null : 'open_failed'
+        });
+      }
+    } catch (error) {
+      if (settled) return;
+      if (onError) onError({ code: 'open_failed', message: error.message, authUrl });
+      if (onBrowserOpen) onBrowserOpen({ authUrl, error: 'open_failed' });
     }
   }).catch((error) => {
-    cleanup();
-    rejectAuth({ code: 'server_error', message: error.message });
+    finish({ code: 'server_error', message: error.message }, { force: true }).catch(() => {});
   });
-
-  const attemptId = randomBytes(8).toString('hex');
 
   return {
     attemptId,
-    get authUrl() {
-      return actualPort ? `${AUTH_ENDPOINT}?...` : null;
-    },
+    get authUrl() { return authUrl; },
+    whenReady,
     promise,
-    cancel: () => {
-      cleanup();
-      rejectAuth({ code: 'cancelled', message: 'Sign-in cancelled by user' });
-    },
-    reopen: () => {
-      // Return the auth URL if available
-      return actualPort ? `${AUTH_ENDPOINT}?...` : null;
-    }
+    cancel: (code = 'cancelled') => finish(cancelError(code), { force: true }),
+    reopen: () => authUrl
   };
 }
 
@@ -521,19 +678,33 @@ function escapeHtml(text) {
     .replace(/'/g, '&#x27;');
 }
 
-// Auth state management for daemon
-export function createChatGPTAuthManager() {
+function emitAuth(emitFn, payload) {
+  if (typeof emitFn !== 'function') return;
+  try {
+    emitFn('auth.chatgpt.changed', payload);
+  } catch {
+    // The panel socket may already be gone.
+  }
+}
+
+// One manager is created for the daemon lifetime and shared by every message.
+export function createChatGPTAuthManager({
+  clientId,
+  spawnImpl,
+  portStart,
+  portAttempts,
+  timeoutMs
+} = {}) {
   const activeAuthAttempts = new Map();
+  let startQueue = Promise.resolve();
+  // The next sign-in starts after the previous callback port so a late redirect
+  // from the closed listener cannot reach the new session.
+  let nextPort = Number.isInteger(portStart) ? portStart : undefined;
 
   async function getAuthStatus() {
     const creds = await loadCredentials();
-    
-    if (!creds || !creds.access_token) {
-      return { state: 'signed_out' };
-    }
-
+    if (!creds || !creds.access_token) return { state: 'signed_out' };
     const plan = extractPlan(creds);
-    
     return {
       state: 'signed_in',
       account: creds.account,
@@ -541,113 +712,120 @@ export function createChatGPTAuthManager() {
     };
   }
 
-  async function startAuth(args, emitFn) {
-    const locale = args?.locale || 'en';
-    
+  async function closeActiveAttempts() {
+    const flows = [...activeAuthAttempts.values()];
+    activeAuthAttempts.clear();
+    await Promise.all(flows.map((flow) => Promise.resolve(flow.cancel('superseded')).catch(() => {})));
+  }
+
+  async function beginStart(args, emitFn) {
+    await closeActiveAttempts();
+    const saved = await loadCredentials();
+    const settings = await resolveChatGPTSettings({
+      clientId: args?.clientId ?? clientId,
+      savedClientId: saved?.client_id
+    });
+    if (!settings.clientId) {
+      const error = new Error('ChatGPT client id is not configured. Set CHATPCB_CHATGPT_CLIENT_ID or chatgpt.json clientId.');
+      error.code = 'client_id_not_configured';
+      throw error;
+    }
+
     const authFlow = startAuthFlow({
+      clientId: settings.clientId,
+      spawnImpl,
+      portStart: nextPort,
+      portAttempts,
+      timeoutMs,
       onBrowserOpen: ({ authUrl, error }) => {
-        if (emitFn) {
-          emitFn('auth.chatgpt.changed', {
-            state: error ? 'error' : 'waiting',
-            code: error || undefined,
-            authUrl
-          });
-        }
+        emitAuth(emitFn, {
+          state: error ? 'error' : 'waiting',
+          code: error || undefined,
+          authUrl,
+          attemptId: authFlow.attemptId
+        });
       },
       onError: ({ code, authUrl }) => {
-        if (emitFn) {
-          emitFn('auth.chatgpt.changed', {
-            state: 'error',
-            code,
-            authUrl
-          });
-        }
+        emitAuth(emitFn, { state: 'error', code, authUrl, attemptId: authFlow.attemptId });
       }
     });
 
     activeAuthAttempts.set(authFlow.attemptId, authFlow);
-
-    // Handle the auth result
     authFlow.promise.then(
-      async (creds) => {
+      (creds) => {
         activeAuthAttempts.delete(authFlow.attemptId);
-        
-        const plan = extractPlan(creds);
-        
-        if (emitFn) {
-          emitFn('auth.chatgpt.changed', {
-            state: 'signed_in',
-            account: creds.account,
-            plan: plan || undefined,
-            attemptId: authFlow.attemptId
-          });
-        }
+        emitAuth(emitFn, {
+          state: 'signed_in',
+          account: creds.account,
+          plan: extractPlan(creds) || undefined,
+          attemptId: authFlow.attemptId
+        });
       },
       (error) => {
         activeAuthAttempts.delete(authFlow.attemptId);
-        
-        if (emitFn) {
-          emitFn('auth.chatgpt.changed', {
-            state: 'error',
-            code: error.code || 'unknown',
-            attemptId: authFlow.attemptId
-          });
-        }
+        if (!error || error.code === 'superseded') return;
+        emitAuth(emitFn, {
+          state: 'error',
+          code: error.code || 'unknown',
+          attemptId: authFlow.attemptId
+        });
       }
     );
 
+    let readyUrl;
+    try {
+      readyUrl = await authFlow.whenReady;
+    } catch (error) {
+      activeAuthAttempts.delete(authFlow.attemptId);
+      const wrapped = new Error(error.message || 'Sign-in failed to start');
+      wrapped.code = error.code || 'AUTH_START_FAILED';
+      throw wrapped;
+    }
+    const usedPort = Number(new URL(new URL(readyUrl).searchParams.get('redirect_uri')).port);
+    if (Number.isInteger(usedPort) && usedPort > 0) nextPort = usedPort + 1;
+
     return {
       state: 'waiting',
-      authUrl: authFlow.authUrl || 'pending',
+      authUrl: readyUrl,
       attemptId: authFlow.attemptId
     };
   }
 
-  function reopenAuth(args) {
-    const attemptId = args?.attemptId;
-    
-    if (!attemptId) {
-      return { error: 'attemptId is required' };
-    }
-
-    const authFlow = activeAuthAttempts.get(attemptId);
-    
-    if (!authFlow) {
-      return { error: 'Auth attempt not found or expired' };
-    }
-
-    const authUrl = authFlow.reopen();
-    
-    // Reopen browser
-    openSystemBrowser(authUrl);
-
-    return {
-      state: 'waiting',
-      authUrl,
-      attemptId
-    };
+  function startAuth(args, emitFn) {
+    const run = startQueue.then(() => beginStart(args, emitFn), () => beginStart(args, emitFn));
+    startQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
-  function cancelAuth(args) {
+  function reopenAuth(args) {
     const attemptId = args?.attemptId;
-    
-    if (!attemptId) {
-      return { error: 'attemptId is required' };
-    }
-
+    if (!attemptId) return { error: 'attemptId is required' };
     const authFlow = activeAuthAttempts.get(attemptId);
-    
-    if (!authFlow) {
-      return { state: 'signed_out' };
+    if (!authFlow) return { error: 'Auth attempt not found or expired' };
+    const authUrl = authFlow.reopen();
+    if (typeof authUrl !== 'string' || !authUrl.startsWith('https://')) {
+      return { error: 'Auth attempt not found or expired' };
     }
+    openSystemBrowser(authUrl, { spawnImpl }).catch(() => {});
+    return { state: 'waiting', authUrl, attemptId };
+  }
 
-    authFlow.cancel();
+  async function cancelAuth(args) {
+    const attemptId = args?.attemptId;
+    if (!attemptId) return { error: 'attemptId is required' };
+    const authFlow = activeAuthAttempts.get(attemptId);
+    if (!authFlow) return { state: 'signed_out' };
+    await authFlow.cancel('cancelled');
     activeAuthAttempts.delete(attemptId);
-
     return { state: 'signed_out' };
   }
 
+  async function cancelAll() {
+    await closeActiveAttempts();
+  }
+
   async function signOut() {
+    await closeActiveAttempts();
     await deleteCredentials();
     return { state: 'signed_out' };
   }
@@ -657,6 +835,7 @@ export function createChatGPTAuthManager() {
     startAuth,
     reopenAuth,
     cancelAuth,
+    cancelAll,
     signOut
   };
 }
@@ -665,11 +844,11 @@ export function verifyTokenExpiry(creds) {
   if (!creds || !creds.issued_at || !creds.expires_in) {
     return { expired: true, shouldRefresh: true };
   }
-  
+
   const expiresAt = creds.issued_at + (creds.expires_in * 1000);
   const now = Date.now();
-  const bufferMs = 60 * 1000; // Refresh 1 minute before expiry
-  
+  const bufferMs = 60 * 1000;
+
   return {
     expired: now >= expiresAt,
     shouldRefresh: now >= (expiresAt - bufferMs),
@@ -678,16 +857,31 @@ export function verifyTokenExpiry(creds) {
 }
 
 export function extractPlan(creds) {
-  // Plan extraction from ID token or other source
-  // This may not be available in the standard ID token
   if (!creds || !creds.id_token) return null;
-  
+
   try {
     const [, payloadB64] = creds.id_token.split('.');
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-    // Check if plan info is in custom claims
     return payload.plan || payload['https://api.openai.com/plan'] || null;
   } catch {
     return null;
   }
+}
+
+async function readChatGPTConfig() {
+  try {
+    const raw = await readFile(join(getConfigDir(), 'chatgpt.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
 }
