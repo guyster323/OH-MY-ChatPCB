@@ -65,6 +65,14 @@ const newProjectAgainEl = document.querySelector('#new-project-again');
 const conflictCardEl = document.querySelector('#conflict-card');
 const conflictDockBtnEl = document.querySelector('#conflict-dock-btn');
 const recheckKiCadButtonEl = document.querySelector('#recheck-kicad-button');
+const stopRequestButtonEl = document.querySelector('#stop-request-button');
+const rollbackButtonEl = document.querySelector('#rollback-button');
+const transactionCardEl = document.querySelector('#transaction-card');
+const transactionStatusEl = document.querySelector('#transaction-status');
+const transactionListEl = document.querySelector('#transaction-list');
+const patchPreviewErcEl = document.querySelector('#patch-preview-erc');
+const patchPreviewErcSummaryEl = document.querySelector('#patch-preview-erc-summary');
+const patchPreviewErcWarningEl = document.querySelector('#patch-preview-erc-warning');
 const artifactListEl = document.querySelector('#artifact-list');
 const reviewPanelEl = document.querySelector('#review-panel');
 const reviewStatusEl = document.querySelector('#review-status');
@@ -94,6 +102,7 @@ let activeProject = null;
 let activeProjectCreateId = null;
 let activeRequestId = null;
 let activeRequestProjectDir = null;
+let activeProviderInvocationId = null;
 let pendingHostStatus = null;
 let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
@@ -127,6 +136,8 @@ openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
+stopRequestButtonEl.addEventListener('click', stopRequest);
+rollbackButtonEl.addEventListener('click', rollbackTransaction);
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
@@ -286,11 +297,12 @@ function handleEnvelope(envelope) {
         activeProjectCreateId = null;
       }
       if (callName === 'project.request') {
-        const requestProjectDir = activeRequestProjectDir;
-        pendingCalls.delete(activeRequestId);
-        activeRequestId = null;
-        activeRequestProjectDir = null;
-        setRequestBusy(false);
+    const requestProjectDir = activeRequestProjectDir;
+    pendingCalls.delete(activeRequestId);
+    activeRequestId = null;
+    activeRequestProjectDir = null;
+    activeProviderInvocationId = null;
+    setRequestBusy(false);
         if (requestProjectDir !== activeProject?.projectDir) return;
         const conversation = envelope.payload.conversation;
         if (conversation) {
@@ -332,6 +344,7 @@ function handleEnvelope(envelope) {
     const requestProjectDir = activeRequestProjectDir;
     activeRequestId = null;
     activeRequestProjectDir = null;
+    activeProviderInvocationId = null;
     setRequestBusy(false);
     if (requestProjectDir !== activeProject?.projectDir) return;
     renderProjectRequest(envelope.payload.result);
@@ -362,8 +375,27 @@ function handleEnvelope(envelope) {
   if (callName === 'schematic.patch.cancel') return;
   if (callName === 'provider.status') {
     const provider = envelope.payload.result;
-    providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
+    const statusText = provider.status === 'missing' && provider.hint 
+      ? `${provider.provider}: ${provider.status} — ${provider.hint}`
+      : `${provider.provider}: ${provider.status}`;
+    providerStatusEl.textContent = statusText;
     providerStatusEl.dataset.status = provider.status;
+    providerStatusEl.title = provider.hint ?? '';
+  }
+  if (callName === 'provider.cancel') {
+    activeProviderInvocationId = null;
+    setRequestBusy(false);
+    return;
+  }
+  if (callName === 'project.transaction.status') {
+    renderTransactionStatus(envelope.payload.result);
+    return;
+  }
+  if (callName === 'project.transaction.rollback') {
+    renderRequestStatus({ state: 'completed', summary: 'Transaction rolled back successfully.' });
+    inspectActiveProject();
+    refreshTransactionStatus();
+    return;
   }
 }
 
@@ -511,6 +543,7 @@ function renderProjectRequest(result) {
     renderReview(result.review);
     renderArtifacts(result.files);
     renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
+    renderPatchPreviewErc(result.validation);
     return;
   }
   renderReview(result.review);
@@ -776,6 +809,9 @@ function renderRequestStatus({ state, summary, technicalDetail = '' }) {
 
 function handleProgressDelta(payload = {}) {
   if (payload.requestId && activeRequestId && payload.requestId !== activeRequestId) return;
+  if (payload.invocationId && !activeProviderInvocationId) {
+    activeProviderInvocationId = payload.invocationId;
+  }
   if (payload.conversation) {
     const conversation = payload.conversation;
     const generateReady = conversation.status === 'generate' || Boolean(conversation.specRows?.length);
@@ -1108,6 +1144,97 @@ function stopConflictWatch() {
 function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
+  stopRequestButtonEl.disabled = !isBusy || !activeProviderInvocationId;
+  stopRequestButtonEl.title = !isBusy ? 'No active request' : !activeProviderInvocationId ? 'Request ID not available' : 'Stop the current request';
+}
+
+function stopRequest() {
+  if (!activeProviderInvocationId) return;
+  const id = `provider_cancel_${Date.now()}`;
+  pendingCalls.set(id, 'provider.cancel');
+  sendToolCall({ id, name: 'provider.cancel', args: { id: activeProviderInvocationId } });
+  appendProgress({ stage: 'fail', text: 'Stopping request...' });
+}
+
+function rollbackTransaction() {
+  if (!activeProject) return;
+  if (!confirm('Rollback은 마지막 transaction을 되돌립니다. 계속하시겠습니까?')) return;
+  
+  const id = `transaction_status_${Date.now()}`;
+  pendingCalls.set(id, 'project.transaction.status');
+  sendToolCall({ id, name: 'project.transaction.status', args: { projectDir: activeProject.projectDir } });
+}
+
+function refreshTransactionStatus() {
+  if (!activeProject) return;
+  const id = `transaction_status_${Date.now()}`;
+  pendingCalls.set(id, 'project.transaction.status');
+  sendToolCall({ id, name: 'project.transaction.status', args: { projectDir: activeProject.projectDir } });
+}
+
+function renderTransactionStatus(status) {
+  if (!status || !status.transactions) {
+    transactionStatusEl.textContent = 'No transactions';
+    transactionListEl.replaceChildren();
+    rollbackButtonEl.disabled = true;
+    rollbackButtonEl.title = 'No transactions available';
+    return;
+  }
+  
+  const transactions = status.transactions;
+  transactionStatusEl.textContent = `${transactions.length} transaction(s)`;
+  transactionListEl.replaceChildren();
+  
+  for (const txn of transactions.slice(0, 5)) {
+    const item = document.createElement('li');
+    item.textContent = `${txn.id}: ${txn.operation} (${new Date(txn.createdAt).toLocaleString()})`;
+    transactionListEl.append(item);
+  }
+  
+  const lastTxn = transactions[0];
+  rollbackButtonEl.disabled = !lastTxn;
+  rollbackButtonEl.title = lastTxn ? `Rollback transaction ${lastTxn.id}` : 'No transactions to rollback';
+  
+  if (lastTxn) {
+    rollbackButtonEl.onclick = () => {
+      if (!confirm(`Rollback transaction ${lastTxn.id}? 마지막 적용을 되돌립니다.`)) return;
+      const id = `transaction_rollback_${Date.now()}`;
+      pendingCalls.set(id, 'project.transaction.rollback');
+      sendToolCall({ id, name: 'project.transaction.rollback', args: { projectDir: activeProject.projectDir, transactionId: lastTxn.id } });
+      renderRequestStatus({ state: 'running', summary: 'Rolling back transaction...' });
+    };
+  }
+}
+
+function renderPatchPreviewErc(validation = {}) {
+  if (!validation || !validation.erc) {
+    patchPreviewErcEl.hidden = true;
+    return;
+  }
+  
+  const erc = validation.erc;
+  const errorCount = erc.errorCount ?? 0;
+  const warningCount = erc.warningCount ?? 0;
+  
+  patchPreviewErcEl.hidden = false;
+  patchPreviewErcSummaryEl.textContent = `ERC: ${errorCount} errors, ${warningCount} warnings`;
+  
+  if (errorCount > 0) {
+    patchPreviewErcWarningEl.hidden = false;
+    patchPreviewErcWarningEl.textContent = '⚠️ ERC 오류가 있습니다. 적용 시 검증 실패로 거부될 수 있습니다.';
+    
+    const topIssues = Object.entries(erc.byType ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([type, count]) => `${type} (${count})`)
+      .join(', ');
+    
+    if (topIssues) {
+      patchPreviewErcWarningEl.textContent += ` 주요 이슈: ${topIssues}`;
+    }
+  } else {
+    patchPreviewErcWarningEl.hidden = true;
+  }
 }
 
 async function awaitStatus(statusPromise) {

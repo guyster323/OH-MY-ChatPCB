@@ -41,12 +41,27 @@ export async function checkProviderAvailability({ provider, commandExistsImpl = 
   const definition = getProviderDefinition(provider);
   const available = await commandExistsImpl(definition.command);
 
+  let hint = null;
+  if (!available) {
+    hint = getProviderInstallHint(provider);
+  }
+
   return {
     provider: definition.id,
     command: definition.command,
     available,
-    status: available ? 'available' : 'missing'
+    status: available ? 'available' : 'missing',
+    hint
   };
+}
+
+function getProviderInstallHint(provider) {
+  const hints = {
+    codex: 'Install: npm install -g @openai/codex, then: codex login --device-auth. Add ~/.local/bin or global npm bin to PATH if needed.',
+    claude: 'Install: npm install -g claude-code (or follow official instructions), then: claude login. Ensure the CLI is on PATH.',
+    copilot: 'Install: gh extension install github/gh-copilot, then authenticate with: gh auth login. Requires GitHub CLI (gh).'
+  };
+  return hints[provider] ?? 'Provider CLI not found on PATH. Install and authenticate the CLI, then restart the daemon.';
 }
 
 export function buildProviderPrompt({ provider, userMessage, projectDir, allowedTools = [] } = {}) {

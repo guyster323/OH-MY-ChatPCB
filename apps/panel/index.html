@@ -101,6 +101,9 @@
           <button type="button" class="dock-btn" data-open="artifacts-dialog" data-help="Generated files" title="Artifacts">
             <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg>
           </button>
+          <button type="button" class="dock-btn" data-open="transaction-dialog" data-help="Transaction history and rollback" title="Transaction">
+            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="7" height="2"/><rect x="7" y="2" width="2" height="12"/><rect x="9" y="7" width="7" height="2" transform="rotate(180 12.5 8)"/></svg>
+          </button>
           <button type="button" class="dock-btn" id="conflict-dock-btn" data-open="conflict-dialog" data-help="Unsaved KiCad editor changes" title="Unsaved" hidden>
             <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="7" y="2" width="2" height="8"/><rect x="7" y="12" width="2" height="2"/></svg>
           </button>
@@ -109,6 +112,7 @@
 
       <section id="conversation-card" class="chat-column">
         <p id="request-status" role="status" aria-label="Request status" data-state="idle">Create a project to send a circuit request.</p>
+        <button id="stop-request-button" type="button" class="stop-button" disabled aria-label="Stop request">Stop</button>
         <details id="request-technical-details" hidden>
           <summary>Technical details</summary>
           <pre id="request-technical-detail"></pre>
@@ -123,6 +127,11 @@
               <h2 id="patch-approval-title">회로 초안이 준비됐어요</h2>
               <p id="patch-approval-lead">적용을 누르기 전에는 스키매틱 파일이 바뀌지 않습니다.</p>
             </div>
+          </div>
+          <div id="patch-preview-erc" class="patch-preview-erc" hidden>
+            <h3>ERC 미리보기</h3>
+            <p id="patch-preview-erc-summary"></p>
+            <p id="patch-preview-erc-warning" class="erc-warning" hidden></p>
           </div>
           <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
           <div class="patch-approval-actions">
@@ -206,6 +215,16 @@
         <h2>KiCad changes need attention</h2>
         <p>Unsaved KiCad changes were detected. Save or discard them in KiCad before sending this update.</p>
         <button id="recheck-kicad-button" type="button">I saved — recheck</button>
+      </section>
+    </dialog>
+
+    <dialog id="transaction-dialog" class="panel-dialog">
+      <form method="dialog" class="dialog-head"><strong>Transaction</strong><button value="close">Close</button></form>
+      <section id="transaction-card" class="status-card transaction-card">
+        <h2>Project transaction</h2>
+        <p id="transaction-status">No transactions</p>
+        <ul id="transaction-list"></ul>
+        <button id="rollback-button" type="button" disabled aria-label="Rollback last transaction">Rollback</button>
       </section>
     </dialog>
 

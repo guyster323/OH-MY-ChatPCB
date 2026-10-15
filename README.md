@@ -155,6 +155,122 @@ codex exec -C C:\path\to\OH-MY-ChatPCB --dangerously-bypass-approvals-and-sandbo
 
 The expected Codex CLI result is a concise report that confirms the sample and browser UI verifications ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
 
+## Provider setup
+
+ChatPCB supports three local CLI providers: **Codex**, **Claude Code**, and **GitHub Copilot CLI**. Each requires installation and authentication before use.
+
+### Codex CLI
+
+**Install:**
+
+```powershell
+npm install -g @openai/codex
+```
+
+If using a user-scoped npm prefix (e.g., `~/.local`), ensure `~/.local/bin` is on your `PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**Authenticate:**
+
+```powershell
+codex login --device-auth
+```
+
+Follow the device code flow and approve the login in your browser. Verify authentication:
+
+```powershell
+codex login status
+```
+
+Expected output: `Logged in using ChatGPT` (or similar).
+
+**Troubleshooting:**
+
+- If the panel shows `codex: missing`, the `codex` command is not on `PATH`. Check your npm global bin directory with `npm bin -g` and add it to `PATH`.
+- Device auth requires a ChatGPT account. Sign in with your OpenAI credentials.
+
+### Claude Code CLI
+
+**Install:**
+
+Follow the official [Claude Code CLI installation guide](https://docs.anthropic.com/claude/docs/claude-code-cli) or install via npm (if available):
+
+```powershell
+npm install -g claude-code
+```
+
+**Authenticate:**
+
+```powershell
+claude login
+```
+
+Follow the prompts to authenticate with your Anthropic account.
+
+**Verify:**
+
+```powershell
+claude --version
+```
+
+**Troubleshooting:**
+
+- If `claude: missing`, ensure the CLI is installed and on `PATH`.
+- Consult the official Anthropic documentation for the latest setup instructions.
+
+### GitHub Copilot CLI
+
+**Install:**
+
+GitHub Copilot CLI is a GitHub CLI extension. First, install the [GitHub CLI](https://cli.github.com/):
+
+```powershell
+# Windows (via winget)
+winget install --id GitHub.cli
+
+# macOS (via Homebrew)
+brew install gh
+
+# Linux (see https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
+```
+
+Then install the Copilot extension:
+
+```powershell
+gh extension install github/gh-copilot
+```
+
+**Authenticate:**
+
+```powershell
+gh auth login
+```
+
+Follow the prompts to authenticate with your GitHub account. Copilot CLI requires an active GitHub Copilot subscription.
+
+**Verify:**
+
+```powershell
+gh copilot --version
+```
+
+**Troubleshooting:**
+
+- If `copilot: missing`, ensure `gh` is installed and authenticated, and the `gh-copilot` extension is installed.
+- Check your GitHub Copilot subscription status at [github.com/settings/copilot](https://github.com/settings/copilot).
+
+### Provider status in the panel
+
+After installing and authenticating a provider, restart the daemon (`npm run daemon`) and refresh the panel. The provider selector shows the current status:
+
+- `available`: CLI is on PATH and ready
+- `missing`: CLI not found — see install/PATH hints above
+
+When a provider shows `missing`, hover over the status text for a brief installation hint. The full setup instructions are in this README section.
+
 ## Browser UI verification
 
 Run this command for the closest repeatable check to a user operating the current panel:
