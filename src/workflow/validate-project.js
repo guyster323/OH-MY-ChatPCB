@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertInspectionTree } from './inspection-copy.js';
-import { isInside } from './project-workspace.js';
+import { isInside } from '../shared/path-guard.js';
 
 export async function validateProject({
   projectDir,

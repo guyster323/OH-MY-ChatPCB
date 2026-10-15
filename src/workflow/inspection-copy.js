@@ -1,6 +1,7 @@
 import { cp, lstat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { assertSafeProjectDir, isInside } from './project-workspace.js';
+import { assertSafeProjectDir } from './project-workspace.js';
+import { isInside } from '../shared/path-guard.js';
 
 function unsafe(entry) {
   const error = new Error('Inspection cannot use a symbolic link, junction, or special file: ' + entry);

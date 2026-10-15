@@ -5,6 +5,7 @@ import { simulateProject } from '../src/workflow/simulate-project.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
 import { validateBoard } from '../src/workflow/validate-board.js';
 import { validateProject } from '../src/workflow/validate-project.js';
+import { DEFAULT_DAEMON_PORT } from '../src/shared/constants.js';
 
 const command = process.argv[2];
 const flags = parseFlags(process.argv.slice(3));
@@ -48,7 +49,7 @@ try {
   } else if (command === 'daemon') {
     const server = await startDaemon({
       host: flags.host ?? '127.0.0.1',
-      port: Number(flags.port ?? 41317)
+      port: Number(flags.port ?? DEFAULT_DAEMON_PORT)
     });
     console.log(JSON.stringify({ ok: true, url: server.url }));
   } else {
@@ -111,6 +112,6 @@ function printUsage() {
   chatpcb validate --project <dir> [--kicad-cli <path>]
   chatpcb drc --project <dir> [--kicad-cli <path>]
   chatpcb simulate --project <dir> [--ngspice <path>]
-  chatpcb daemon [--host 127.0.0.1] [--port 41317]
+  chatpcb daemon [--host 127.0.0.1] [--port ${DEFAULT_DAEMON_PORT}]
 `);
 }

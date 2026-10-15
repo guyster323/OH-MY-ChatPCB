@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { isInside } from '../shared/path-guard.js';
 
 const WINDOWS_RESERVED_BASENAMES = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/iu;
 
@@ -56,10 +57,7 @@ function slugify(displayName) {
   return slug;
 }
 
-export function isInside(workspaceRoot, candidate) {
-  const relative = path.relative(workspaceRoot, candidate);
-  return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
-}
+export { isInside };
 
 export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) {
   if (typeof projectDir !== 'string' || projectDir.trim().length === 0) {

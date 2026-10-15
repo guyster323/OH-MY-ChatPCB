@@ -5,7 +5,8 @@ import path from 'node:path';
 
 import { collectTransactionInventory, transactionArtifactKind } from '../evidence/transaction-inventory.js';
 import { assertInspectionTree, copyInspectionTree } from './inspection-copy.js';
-import { assertSafeProjectDir, isInside } from './project-workspace.js';
+import { assertSafeProjectDir } from './project-workspace.js';
+import { isInside } from '../shared/path-guard.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
 
