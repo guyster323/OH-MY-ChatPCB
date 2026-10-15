@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path';
 import http from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 
 const AUTH_ENDPOINT = 'https://auth.openai.com/api/accounts/authorize';
 const TOKEN_ENDPOINT = 'https://auth.openai.com/api/accounts/oauth/token';
@@ -14,6 +15,41 @@ const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.toke
 const REDIRECT_URI_PORT_START = 41318;
 const REDIRECT_URI_PORT_MAX_ATTEMPTS = 10;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+function openSystemBrowser(url) {
+  return new Promise((resolve) => {
+    const platform = process.platform;
+    let command;
+    let args;
+
+    if (platform === 'darwin') {
+      command = 'open';
+      args = [url];
+    } else if (platform === 'win32') {
+      // Use cmd /c start "" <url> to avoid quoting issues
+      command = 'cmd';
+      args = ['/c', 'start', '', url];
+    } else {
+      command = 'xdg-open';
+      args = [url];
+    }
+
+    const proc = spawn(command, args, {
+      stdio: 'ignore',
+      detached: true,
+      shell: false
+    });
+
+    proc.on('error', (error) => {
+      resolve({ success: false, error });
+    });
+
+    proc.on('spawn', () => {
+      proc.unref();
+      resolve({ success: true });
+    });
+  });
+}
 
 function getConfigDir() {
   const platform = process.platform;
@@ -276,14 +312,18 @@ export function startAuthFlow({ onBrowserOpen, onError } = {}) {
     try {
       // Exchange code for tokens
       const redirectUri = `http://127.0.0.1:${actualPort}/auth/callback`;
-      const clientIdForExchange = registeredClientId || 'dynamic_agent_client';
+      
+      // Use the registered client_id from callback, fail if not provided
+      if (!registeredClientId) {
+        throw new Error('No client_id received from authorization server');
+      }
       
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
-        client_id: clientIdForExchange,
+        client_id: registeredClientId,
         resource: RESOURCE
       });
 
@@ -305,7 +345,7 @@ export function startAuthFlow({ onBrowserOpen, onError } = {}) {
         throw new Error('No ID token received');
       }
 
-      const finalClientId = tokens.client_id || registeredClientId || clientIdForExchange;
+      const finalClientId = tokens.client_id || registeredClientId;
       const payload = await verifyIdToken(tokens.id_token, nonce, finalClientId);
 
       // Verify chatgpt.tokens.use.direct scope
@@ -408,25 +448,19 @@ export function startAuthFlow({ onBrowserOpen, onError } = {}) {
     }, AUTH_TIMEOUT_MS);
 
     // Try to open browser
-    import('node:child_process').then(({ exec }) => {
-      let openCommand;
-      const platform = process.platform;
-      if (platform === 'darwin') openCommand = 'open';
-      else if (platform === 'win32') openCommand = 'start';
-      else openCommand = 'xdg-open';
-
-      exec(`${openCommand} "${authUrl}"`, (error) => {
-        if (error && onError) {
-          onError({ code: 'open_failed', message: 'Could not open browser', authUrl });
-        }
-        if (onBrowserOpen) {
-          onBrowserOpen({ authUrl, error: error ? 'open_failed' : null });
-        }
+    const browserResult = await openSystemBrowser(authUrl);
+    
+    if (!browserResult.success) {
+      if (onError) {
+        onError({ code: 'open_failed', message: 'Could not open browser', authUrl });
+      }
+    }
+    
+    if (onBrowserOpen) {
+      onBrowserOpen({ 
+        authUrl, 
+        error: browserResult.success ? null : 'open_failed' 
       });
-    });
-
-    if (onBrowserOpen && !onError) {
-      onBrowserOpen({ authUrl, error: null });
     }
   }).catch((error) => {
     cleanup();
@@ -485,6 +519,146 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;');
+}
+
+// Auth state management for daemon
+export function createChatGPTAuthManager() {
+  const activeAuthAttempts = new Map();
+
+  async function getAuthStatus() {
+    const creds = await loadCredentials();
+    
+    if (!creds || !creds.access_token) {
+      return { state: 'signed_out' };
+    }
+
+    const plan = extractPlan(creds);
+    
+    return {
+      state: 'signed_in',
+      account: creds.account,
+      plan: plan || undefined
+    };
+  }
+
+  async function startAuth(args, emitFn) {
+    const locale = args?.locale || 'en';
+    
+    const authFlow = startAuthFlow({
+      onBrowserOpen: ({ authUrl, error }) => {
+        if (emitFn) {
+          emitFn('auth.chatgpt.changed', {
+            state: error ? 'error' : 'waiting',
+            code: error || undefined,
+            authUrl
+          });
+        }
+      },
+      onError: ({ code, authUrl }) => {
+        if (emitFn) {
+          emitFn('auth.chatgpt.changed', {
+            state: 'error',
+            code,
+            authUrl
+          });
+        }
+      }
+    });
+
+    activeAuthAttempts.set(authFlow.attemptId, authFlow);
+
+    // Handle the auth result
+    authFlow.promise.then(
+      async (creds) => {
+        activeAuthAttempts.delete(authFlow.attemptId);
+        
+        const plan = extractPlan(creds);
+        
+        if (emitFn) {
+          emitFn('auth.chatgpt.changed', {
+            state: 'signed_in',
+            account: creds.account,
+            plan: plan || undefined,
+            attemptId: authFlow.attemptId
+          });
+        }
+      },
+      (error) => {
+        activeAuthAttempts.delete(authFlow.attemptId);
+        
+        if (emitFn) {
+          emitFn('auth.chatgpt.changed', {
+            state: 'error',
+            code: error.code || 'unknown',
+            attemptId: authFlow.attemptId
+          });
+        }
+      }
+    );
+
+    return {
+      state: 'waiting',
+      authUrl: authFlow.authUrl || 'pending',
+      attemptId: authFlow.attemptId
+    };
+  }
+
+  function reopenAuth(args) {
+    const attemptId = args?.attemptId;
+    
+    if (!attemptId) {
+      return { error: 'attemptId is required' };
+    }
+
+    const authFlow = activeAuthAttempts.get(attemptId);
+    
+    if (!authFlow) {
+      return { error: 'Auth attempt not found or expired' };
+    }
+
+    const authUrl = authFlow.reopen();
+    
+    // Reopen browser
+    openSystemBrowser(authUrl);
+
+    return {
+      state: 'waiting',
+      authUrl,
+      attemptId
+    };
+  }
+
+  function cancelAuth(args) {
+    const attemptId = args?.attemptId;
+    
+    if (!attemptId) {
+      return { error: 'attemptId is required' };
+    }
+
+    const authFlow = activeAuthAttempts.get(attemptId);
+    
+    if (!authFlow) {
+      return { state: 'signed_out' };
+    }
+
+    authFlow.cancel();
+    activeAuthAttempts.delete(attemptId);
+
+    return { state: 'signed_out' };
+  }
+
+  async function signOut() {
+    await deleteCredentials();
+    return { state: 'signed_out' };
+  }
+
+  return {
+    getAuthStatus,
+    startAuth,
+    reopenAuth,
+    cancelAuth,
+    signOut
+  };
 }
 
 export function verifyTokenExpiry(creds) {

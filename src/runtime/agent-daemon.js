@@ -19,7 +19,7 @@ import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
-import { startAuthFlow, loadCredentials, saveCredentials, deleteCredentials, extractPlan } from './auth/chatgpt-auth.js';
+import { createChatGPTAuthManager } from './auth/chatgpt-auth.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
@@ -141,19 +141,36 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       return ok({ providers: listProviderDefinitions() });
 
     case 'auth.chatgpt.status':
-      return ok(await getChatGPTAuthStatus());
+      if (!ctx.chatgptAuthManager) {
+        ctx.chatgptAuthManager = createChatGPTAuthManager();
+      }
+      return ok(await ctx.chatgptAuthManager.getAuthStatus());
 
     case 'auth.chatgpt.start':
-      return ok(await startChatGPTAuth(call.args, ctx));
+      if (!ctx.chatgptAuthManager) {
+        ctx.chatgptAuthManager = createChatGPTAuthManager();
+      }
+      return ok(await ctx.chatgptAuthManager.startAuth(call.args, (type, payload) => {
+        if (ctx?.emit) ctx.emit(type, payload);
+      }));
 
     case 'auth.chatgpt.reopen':
-      return ok(reopenChatGPTAuth(call.args, ctx));
+      if (!ctx.chatgptAuthManager) {
+        return failure('NO_AUTH_SESSION', 'No active auth session');
+      }
+      return ok(ctx.chatgptAuthManager.reopenAuth(call.args));
 
     case 'auth.chatgpt.cancel':
-      return ok(cancelChatGPTAuth(call.args, ctx));
+      if (!ctx.chatgptAuthManager) {
+        return ok({ state: 'signed_out' });
+      }
+      return ok(ctx.chatgptAuthManager.cancelAuth(call.args));
 
     case 'auth.chatgpt.signOut':
-      return ok(await signOutChatGPT());
+      if (!ctx.chatgptAuthManager) {
+        ctx.chatgptAuthManager = createChatGPTAuthManager();
+      }
+      return ok(await ctx.chatgptAuthManager.signOut());
 
     case 'provider.invoke':
       return ok(await invokeProvider(call, ctx));
@@ -1040,143 +1057,5 @@ function decodeWebSocketText(buffer) {
   }
 
   return data.toString('utf8');
-}
-
-// ChatGPT Auth handlers
-const activeAuthAttempts = new Map();
-
-async function getChatGPTAuthStatus() {
-  const creds = await loadCredentials();
-  
-  if (!creds || !creds.access_token) {
-    return { state: 'signed_out' };
-  }
-
-  const plan = extractPlan(creds);
-  
-  return {
-    state: 'signed_in',
-    account: creds.account,
-    plan: plan || undefined // Don't default to 'Plus'
-  };
-}
-
-async function startChatGPTAuth(args, ctx) {
-  const locale = args?.locale || 'en';
-  
-  const authFlow = startAuthFlow({
-    onBrowserOpen: ({ authUrl, error }) => {
-      if (ctx?.emit) {
-        ctx.emit('auth.chatgpt.changed', {
-          state: error ? 'error' : 'waiting',
-          code: error || undefined,
-          authUrl
-        });
-      }
-    },
-    onError: ({ code, authUrl }) => {
-      if (ctx?.emit) {
-        ctx.emit('auth.chatgpt.changed', {
-          state: 'error',
-          code,
-          authUrl
-        });
-      }
-    }
-  });
-
-  activeAuthAttempts.set(authFlow.attemptId, authFlow);
-
-  // Handle the auth result
-  authFlow.promise.then(
-    async (creds) => {
-      activeAuthAttempts.delete(authFlow.attemptId);
-      
-      const plan = extractPlan(creds);
-      
-      if (ctx?.emit) {
-        ctx.emit('auth.chatgpt.changed', {
-          state: 'signed_in',
-          account: creds.account,
-          plan: plan || undefined,
-          attemptId: authFlow.attemptId
-        });
-      }
-    },
-    (error) => {
-      activeAuthAttempts.delete(authFlow.attemptId);
-      
-      if (ctx?.emit) {
-        ctx.emit('auth.chatgpt.changed', {
-          state: 'error',
-          code: error.code || 'unknown',
-          attemptId: authFlow.attemptId
-        });
-      }
-    }
-  );
-
-  return {
-    state: 'waiting',
-    authUrl: authFlow.authUrl || 'pending',
-    attemptId: authFlow.attemptId
-  };
-}
-
-function reopenChatGPTAuth(args, ctx) {
-  const attemptId = args?.attemptId;
-  
-  if (!attemptId) {
-    return { error: 'attemptId is required' };
-  }
-
-  const authFlow = activeAuthAttempts.get(attemptId);
-  
-  if (!authFlow) {
-    return { error: 'Auth attempt not found or expired' };
-  }
-
-  const authUrl = authFlow.reopen();
-  
-  // Try to reopen browser
-  import('node:child_process').then(({ exec }) => {
-    let openCommand;
-    const platform = process.platform;
-    if (platform === 'darwin') openCommand = 'open';
-    else if (platform === 'win32') openCommand = 'start';
-    else openCommand = 'xdg-open';
-
-    exec(`${openCommand} "${authUrl}"`);
-  });
-
-  return {
-    state: 'waiting',
-    authUrl,
-    attemptId
-  };
-}
-
-function cancelChatGPTAuth(args, ctx) {
-  const attemptId = args?.attemptId;
-  
-  if (!attemptId) {
-    return { error: 'attemptId is required' };
-  }
-
-  const authFlow = activeAuthAttempts.get(attemptId);
-  
-  if (!authFlow) {
-    return { state: 'signed_out' };
-  }
-
-  authFlow.cancel();
-  activeAuthAttempts.delete(attemptId);
-
-  return { state: 'signed_out' };
-}
-
-async function signOutChatGPT() {
-  await deleteCredentials();
-  return { state: 'signed_out' };
 }
 
