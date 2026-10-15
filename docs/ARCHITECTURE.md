@@ -145,7 +145,7 @@ Panel: user clicks "Apply"
 - 커스텀 `chatpcb_*` 최상위 노드 금지
 - Schema v1 manifests remain readable but unverified (`legacy-unverified`)
 - Schema v2 is artifact-bound with canonical `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, `releaseGates`
-- Rollback covers KiCad files (`.kicad_sch`, `.kicad_pcb`, `.kicad_pro`), `.chatpcb.json`, libraries (`chatpcb.kicad_sym`, `sym-lib-table`), and SPICE fixtures (`_simulation.cir`)
+- Rollback covers KiCad files (`.kicad_sch`, `.kicad_pcb`, `.kicad_pro`, `.kicad_dru`), `.chatpcb.json`, libraries (`.kicad_sym`, `.kicad_mod`, `sym-lib-table`, `fp-lib-table`), and SPICE fixtures (`.cir`)
 
 ## 보안 경계
 
