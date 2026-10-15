@@ -217,6 +217,13 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/adbms6830-16s-bms-exam
 
 The example assumes one 16S Li-ion stack (59.2V nominal, 67.2V at 4.2V/cell), includes 16 cell-tap inputs with 200R/10nF filter networks, 1k example balance resistors, four 10k NTC channels, an NPN VREG pass stage, and two isoSPI port pairs. It intentionally does **not** generate a PCB, and the U1 fixture has no assigned footprint or verified physical pin map. Charger, fuse, contactor, protection FET, and production safety design are also excluded. The generated review remains prototype-only until the exact ADBMS6830 package/pin revision, cell chemistry, protection strategy, balance thermal limits, high-voltage layout, isolation, sourcing, and fault testing are reviewed. The component reference is the [Analog Devices ADBMS6830 product page](https://www.analog.com/en/products/ADBMS6830.html); the current full pin/application detail publicly available from ADI is the closely related [ADBMS6830B datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/adbms6830b.pdf), so the example does not treat that B-variant pinout as final evidence for the requested A-variant.
 
+## Project Documentation
+
+- **[ROADMAP.md](docs/ROADMAP.md)**: Product goal, current state, and prioritized P0/P1/P2 roadmap
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Concise overview of the 3-layer architecture, data flow, and security boundaries
+- **[KICAD_FORK_BOOTSTRAP.md](docs/KICAD_FORK_BOOTSTRAP.md)**: KiCad fork integration guide
+- **Archive**: Previous session handoffs and detailed plans are in `docs/archive/`
+
 ## Changelog
 
 ### 2026-09-21 — Panel workflow, progress sprites, and apply CTA
@@ -230,7 +237,9 @@ The example assumes one 16S Li-ion stack (59.2V nominal, 67.2V at 4.2V/cell), in
 
 ## Architecture
 
-The intended KiCad fork keeps KiCad UI changes small:
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architecture overview.
+
+Quick summary:
 
 1. KiCad creates a right dock panel.
 2. The panel hosts `apps/panel` in `wxWebView`.
