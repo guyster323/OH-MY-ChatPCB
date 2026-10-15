@@ -21,6 +21,14 @@ const PROVIDERS = [
     command: 'gh',
     args: ['copilot', 'suggest'],
     description: 'Uses an already-authenticated GitHub CLI Copilot extension.'
+  },
+  {
+    id: 'chatgpt',
+    label: 'ChatGPT',
+    command: null,
+    args: [],
+    description: 'Sign in with ChatGPT to use your ChatGPT plan. Requires system browser authentication.',
+    requiresAuth: true
   }
 ];
 
@@ -39,6 +47,22 @@ export function getProviderDefinition(provider) {
 
 export async function checkProviderAvailability({ provider, commandExistsImpl = commandExists } = {}) {
   const definition = getProviderDefinition(provider);
+  
+  // Special handling for chatgpt
+  if (definition.id === 'chatgpt') {
+    const { loadCredentials } = await import('./auth/chatgpt-auth.js');
+    const creds = await loadCredentials();
+    const available = Boolean(creds && creds.access_token);
+    
+    return {
+      provider: definition.id,
+      command: null,
+      available,
+      status: available ? 'signed-in' : 'signed-out',
+      requiresAuth: true
+    };
+  }
+  
   const available = await commandExistsImpl(definition.command);
 
   return {

@@ -1,6 +1,39 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
+
+// i18n helper
+let i18nLocale = 'en';
+let i18nStrings = {};
+
+async function loadI18n(locale = 'en') {
+  i18nLocale = locale;
+  try {
+    const response = await fetch(`./locales/${locale}.json`);
+    if (response.ok) {
+      i18nStrings = await response.json();
+    }
+  } catch {
+    // Fallback to English if locale fails to load
+    if (locale !== 'en') {
+      await loadI18n('en');
+    }
+  }
+}
+
+function t(key, replacements = {}) {
+  let text = i18nStrings[key] || key;
+  for (const [placeholder, value] of Object.entries(replacements)) {
+    text = text.replace(`{${placeholder}}`, value);
+  }
+  return text;
+}
+
+// Detect locale from browser
+const browserLocale = navigator.language || navigator.userLanguage || 'en';
+const locale = browserLocale.startsWith('ko') ? 'ko' : 'en';
+loadI18n(locale);
+
 const PROGRESS_COPY = {
   conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
   provider: { title: 'CLI와 대화 중', sprite: 'cli' },
@@ -88,6 +121,8 @@ const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
 const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
 const kiCadFallbackEl = document.querySelector('#kicad-fallback');
+const chatgptAuthCardEl = document.querySelector('#chatgpt-auth-card');
+const authLiveRegionEl = document.querySelector('#auth-live-region');
 
 let socket;
 let activeProject = null;
@@ -106,6 +141,7 @@ let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutRevie
 const pendingCalls = new Map();
 const workflowCaptionEl = document.querySelector('#workflow-caption');
 const workflowCliEl = document.querySelector('#workflow-cli');
+let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 
 connect();
 syncWorkflow();
@@ -122,7 +158,10 @@ formEl.addEventListener('submit', (event) => {
   event.preventDefault();
   sendProjectRequest();
 });
-providerEl.addEventListener('change', refreshProviderStatus);
+providerEl.addEventListener('change', () => {
+  refreshProviderStatus();
+  updateChatGPTAuthVisibility();
+});
 openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
@@ -264,6 +303,10 @@ function handleEnvelope(envelope) {
     handleProgressDelta(envelope.payload);
     return;
   }
+  if (envelope.type === 'auth.chatgpt.changed') {
+    handleChatGPTAuthChanged(envelope.payload);
+    return;
+  }
   if (envelope.type !== 'tool.result') return;
   const id = envelope.payload.id;
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
@@ -364,6 +407,42 @@ function handleEnvelope(envelope) {
     const provider = envelope.payload.result;
     providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
     providerStatusEl.dataset.status = provider.status;
+    
+    // If this is chatgpt, also update auth state
+    if (provider.provider === 'chatgpt') {
+      chatgptAuthState = {
+        state: provider.status === 'signed-in' ? 'signed_in' : 'signed_out',
+        account: provider.account,
+        plan: provider.plan
+      };
+      renderChatGPTAuth();
+    }
+  }
+  if (callName === 'auth.chatgpt.status') {
+    const result = envelope.payload.result;
+    chatgptAuthState = {
+      state: result.state || 'signed_out',
+      account: result.account,
+      plan: result.plan
+    };
+    renderChatGPTAuth();
+    return;
+  }
+  if (callName === 'auth.chatgpt.start') {
+    const result = envelope.payload.result;
+    chatgptAuthState = {
+      ...chatgptAuthState,
+      state: result.state || 'waiting',
+      attemptId: result.attemptId,
+      authUrl: result.authUrl
+    };
+    renderChatGPTAuth();
+    return;
+  }
+  if (callName === 'auth.chatgpt.cancel' || callName === 'auth.chatgpt.signOut') {
+    chatgptAuthState = { state: 'signed_out' };
+    renderChatGPTAuth();
+    return;
   }
 }
 
@@ -1121,3 +1200,199 @@ async function awaitStatus(statusPromise) {
     clearTimeout(timeout);
   }
 }
+
+// ChatGPT Auth functions
+function updateChatGPTAuthVisibility() {
+  const isChatGPT = providerEl.value === 'chatgpt';
+  
+  if (isChatGPT) {
+    refreshChatGPTAuthStatus();
+  } else {
+    chatgptAuthCardEl.hidden = true;
+  }
+}
+
+function refreshChatGPTAuthStatus() {
+  const id = `auth_chatgpt_status_${Date.now()}`;
+  pendingCalls.set(id, 'auth.chatgpt.status');
+  sendToolCall({ id, name: 'auth.chatgpt.status', args: {} });
+}
+
+function handleChatGPTAuthChanged(payload) {
+  chatgptAuthState = { ...chatgptAuthState, ...payload };
+  renderChatGPTAuth();
+  updateLiveRegion(payload);
+}
+
+function renderChatGPTAuth() {
+  const isChatGPT = providerEl.value === 'chatgpt';
+  
+  if (!isChatGPT) {
+    chatgptAuthCardEl.hidden = true;
+    return;
+  }
+
+  const state = chatgptAuthState.state;
+  const code = chatgptAuthState.code;
+  
+  chatgptAuthCardEl.hidden = false;
+  chatgptAuthCardEl.className = 'chatgpt-auth-card';
+  
+  if (state === 'signed_out' || !state) {
+    chatgptAuthCardEl.innerHTML = `
+      <h2 id="chatgpt-auth-title">${t('auth.chatgpt.intro.title')}</h2>
+      <p>${t('auth.chatgpt.intro.body')}</p>
+      <button class="chatgpt-sign-in-btn" onclick="startChatGPTSignIn()" lang="en">
+        <span class="chatgpt-logo-placeholder" aria-hidden="true">LOGO?</span>
+        ${t('auth.chatgpt.button')}
+      </button>
+    `;
+    setRequestBusy(true);
+  } else if (state === 'waiting') {
+    chatgptAuthCardEl.innerHTML = `
+      <h2 id="chatgpt-auth-title" tabindex="-1">
+        <span class="spinner" aria-hidden="true"></span>
+        ${t('auth.chatgpt.waiting.title')}
+      </h2>
+      <p>
+        <a href="${chatgptAuthState.authUrl || '#'}" target="_blank">${t('auth.chatgpt.waiting.reopen')}</a>
+        · 
+        <button class="chatgpt-secondary-btn" onclick="copyChatGPTLink()">${t('auth.chatgpt.waiting.copy')}</button>
+      </p>
+      <div class="chatgpt-auth-actions">
+        <button class="chatgpt-secondary-btn" onclick="cancelChatGPTSignIn()">${t('auth.chatgpt.cancel')}</button>
+      </div>
+    `;
+    setRequestBusy(true);
+  } else if (state === 'signed_in') {
+    const account = chatgptAuthState.account || {};
+    const plan = chatgptAuthState.plan || 'Plus';
+    chatgptAuthCardEl.innerHTML = `
+      <h2 id="chatgpt-auth-title" tabindex="-1">${t('auth.chatgpt.signed-in.title')}</h2>
+      <p>${t('auth.chatgpt.signed-in.account', { email: account.email || 'Unknown', plan })}</p>
+      <p>${t('auth.chatgpt.signed-in.usage')}</p>
+      <div class="chatgpt-auth-actions">
+        <button class="chatgpt-secondary-btn" onclick="signOutChatGPT()">${t('auth.chatgpt.sign-out')}</button>
+      </div>
+    `;
+    setRequestBusy(false);
+  } else if (state === 'error') {
+    chatgptAuthCardEl.className = 'chatgpt-auth-card error';
+    
+    let title, body, actions;
+    
+    if (code === 'cancelled') {
+      title = t('auth.chatgpt.error.cancelled');
+      body = '';
+      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
+    } else if (code === 'timeout') {
+      title = t('auth.chatgpt.error.timeout');
+      body = '';
+      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
+    } else if (code === 'open_failed') {
+      title = t('auth.chatgpt.error.open-failed');
+      body = chatgptAuthState.authUrl ? `<p><a href="${chatgptAuthState.authUrl}" target="_blank">${chatgptAuthState.authUrl}</a></p>` : '';
+      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
+    } else if (code === 'not_eligible') {
+      title = t('auth.chatgpt.error.not-eligible.title');
+      body = t('auth.chatgpt.error.not-eligible.body');
+      actions = `
+        <button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.switch-account')}</button>
+        <button class="chatgpt-secondary-btn" onclick="focusProviderSelect()">${t('auth.chatgpt.switch-provider')}</button>
+      `;
+    } else if (code === 'usage_limit') {
+      title = t('auth.chatgpt.error.usage-limit.title');
+      body = t('auth.chatgpt.error.usage-limit.body');
+      actions = `<button class="chatgpt-secondary-btn" onclick="focusProviderSelect()">${t('auth.chatgpt.switch-provider')}</button>`;
+    } else {
+      title = t('auth.chatgpt.error.route');
+      body = '';
+      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
+    }
+    
+    chatgptAuthCardEl.innerHTML = `
+      <h2 id="chatgpt-auth-title" tabindex="-1">${title}</h2>
+      ${body ? `<p>${body}</p>` : ''}
+      <div class="chatgpt-auth-actions">${actions}</div>
+    `;
+    setRequestBusy(true);
+  }
+  
+  // Focus management
+  const titleEl = chatgptAuthCardEl.querySelector('h2[tabindex="-1"]');
+  if (titleEl && state !== 'signed_out') {
+    setTimeout(() => titleEl.focus(), 100);
+  }
+}
+
+function updateLiveRegion(payload) {
+  if (!authLiveRegionEl) return;
+  
+  const state = payload.state;
+  const code = payload.code;
+  
+  let message = '';
+  
+  if (state === 'waiting') {
+    message = t('auth.chatgpt.waiting.title');
+  } else if (state === 'signed_in') {
+    const plan = payload.plan || 'Plus';
+    message = `${t('auth.chatgpt.signed-in.title')}, ${plan}`;
+  } else if (state === 'signed_out') {
+    message = t('auth.chatgpt.signed-out.title');
+  } else if (state === 'error' && code) {
+    if (code === 'cancelled') message = t('auth.chatgpt.error.cancelled');
+    else if (code === 'timeout') message = t('auth.chatgpt.error.timeout');
+    else if (code === 'not_eligible') message = t('auth.chatgpt.error.not-eligible.title');
+    else if (code === 'usage_limit') message = t('auth.chatgpt.error.usage-limit.title');
+  }
+  
+  if (message) {
+    // Clear and re-set to ensure re-announcement
+    authLiveRegionEl.textContent = '';
+    setTimeout(() => {
+      authLiveRegionEl.textContent = message;
+    }, 50);
+  }
+}
+
+window.startChatGPTSignIn = function() {
+  const id = `auth_chatgpt_start_${Date.now()}`;
+  pendingCalls.set(id, 'auth.chatgpt.start');
+  sendToolCall({ id, name: 'auth.chatgpt.start', args: { locale } });
+};
+
+window.cancelChatGPTSignIn = function() {
+  if (!chatgptAuthState.attemptId) return;
+  const id = `auth_chatgpt_cancel_${Date.now()}`;
+  pendingCalls.set(id, 'auth.chatgpt.cancel');
+  sendToolCall({ id, name: 'auth.chatgpt.cancel', args: { attemptId: chatgptAuthState.attemptId } });
+};
+
+window.signOutChatGPT = function() {
+  const id = `auth_chatgpt_signout_${Date.now()}`;
+  pendingCalls.set(id, 'auth.chatgpt.signOut');
+  sendToolCall({ id, name: 'auth.chatgpt.signOut', args: {} });
+};
+
+window.copyChatGPTLink = function() {
+  if (!chatgptAuthState.authUrl) return;
+  navigator.clipboard.writeText(chatgptAuthState.authUrl).then(() => {
+    updateLiveRegion({ state: 'info', code: 'copied' });
+    if (authLiveRegionEl) {
+      authLiveRegionEl.textContent = t('auth.chatgpt.waiting.copied');
+    }
+  });
+};
+
+window.focusProviderSelect = function() {
+  if (providerEl) providerEl.focus();
+};
+
+// Handle Escape key in waiting state
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && chatgptAuthState.state === 'waiting') {
+    window.cancelChatGPTSignIn();
+  }
+});
+

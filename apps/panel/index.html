@@ -23,10 +23,17 @@
             <option value="codex">Codex CLI</option>
             <option value="claude">Claude Code</option>
             <option value="copilot">Copilot CLI</option>
+            <option value="chatgpt">ChatGPT (sign-in)</option>
           </select>
           <span id="provider-status">Provider pending</span>
         </label>
       </header>
+
+      <div id="auth-live-region" role="status" aria-live="polite" class="sr-only"></div>
+
+      <section id="chatgpt-auth-card" class="chatgpt-auth-card" hidden aria-labelledby="chatgpt-auth-title">
+        <!-- Auth card content will be dynamically rendered by panel.js -->
+      </section>
 
       <section class="project-setup" aria-labelledby="project-setup-title">
         <h2 id="project-setup-title">Start a project</h2>

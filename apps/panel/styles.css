@@ -197,3 +197,76 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
   .request-progress p, #patch-approval-lead, .dialog-hint { color: #cbd6e2; }
   #cancel-patch-button { background: #1c242c; color: #e8edf3; border-color: #465563; }
 }
+
+/* ChatGPT Auth Card */
+.chatgpt-auth-card { 
+  border: 1px solid #d9dee7; 
+  border-radius: 8px; 
+  background: #fff; 
+  padding: 14px; 
+  max-width: 480px; 
+  margin: 0 auto;
+}
+.chatgpt-auth-card[hidden] { display: none; }
+.chatgpt-auth-card h2 { font-size: 15px; margin-bottom: 6px; }
+.chatgpt-auth-card p { font-size: 13px; line-height: 1.4; color: #4a5668; margin: 6px 0; }
+.chatgpt-auth-card.error { border-color: #b42318; }
+.chatgpt-auth-card.error h2 { color: #b42318; }
+.chatgpt-sign-in-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 14px;
+  border-radius: 6px;
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.chatgpt-sign-in-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+.chatgpt-logo-placeholder {
+  width: 18px;
+  height: 18px;
+  border: 1px dashed #fff;
+  font-size: 8px;
+  display: grid;
+  place-items: center;
+}
+.chatgpt-auth-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.chatgpt-auth-actions button { min-height: 32px; padding: 0 12px; }
+.chatgpt-secondary-btn {
+  background: #fff;
+  color: #4a5668;
+  border: 1px solid #4a5668;
+}
+.chatgpt-auth-card .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #4a5668;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .chatgpt-auth-card { background: #1c242c; border-color: #34414d; }
+  .chatgpt-auth-card p { color: #cbd6e2; }
+  .chatgpt-secondary-btn { background: #1c242c; color: #e8edf3; border-color: #465563; }
+}
+
