@@ -1,5 +1,7 @@
 # OH-MY-ChatPCB Roadmap
 
+OH-MY-ChatPCB는 evidence-gated KiCad agent runtime입니다.
+
 ## Product Goal
 
 KiCad 회로도 편집기 오른쪽에 **ChatPCB 채팅 패널**을 통합하여, 사용자가 한국어나 영어로 "ESP32-S3 센서 보드 만들어줘"처럼 요청하면 로컬 AI CLI(Codex, Claude Code, Copilot)가 KiCad 프로젝트(회로도와 PCB)를 만들거나 수정합니다. 모든 변경사항은 **미리보기 → 사용자 승인 → 적용 → ERC/DRC 검증 → 필요시 롤백** 순서를 거칩니다.
@@ -127,6 +129,16 @@ KiCad 회로도 편집기 오른쪽에 **ChatPCB 채팅 패널**을 통합하여
    - sleep 기반 검증을 이벤트 대기로 전환
    - 재연결에 지수 백오프 적용
    - 수용 기준: 타임아웃 기반 테스트 제거
+
+### Electrical verification (EEBench)
+
+[EEBench](https://eebench.org/)는 회로도/프로필 초안과 제조 출력 사이의 아날로그/전원 품질 기준입니다. 현재 ChatPCB는 EEBench 리더보드 실행이 아닙니다: V1은 atopile `.ato` + SPICE를 평가하며, KiCad artifacts는 평가하지 않습니다.
+
+EEBench는 요구사항 → 설계 → 시뮬레이션 루프를 내부 품질 기준으로 사용할 수 있습니다:
+- SPICE 기반 요구사항 검증 (gain, hold-up, ripple, thresholds, tolerance corners)
+- 데이터시트 기반 부품 모델과 비용 (회로가 작동한 후에만 비용 크레딧)
+- `ngspice` 미사용 가능 시 typed skip (skip을 pass로 취급하지 않음)
+- Gerber/drill/BOM 제조 출력 전 이 게이트 정의 필요
 
 ### P2: 구조 분리와 제품화
 

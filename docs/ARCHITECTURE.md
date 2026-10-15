@@ -81,21 +81,30 @@ Panel: user clicks "Apply"
 - Provider 프로세스 브리지 (Codex, Claude Code, Copilot CLI)
 
 ### Workflow (`src/workflow/`)
-- `project-generator.js`: MCU 주변장치 회로도/PCB 생성
+- `generate-mcu-project.js`: MCU 주변장치 회로도/PCB 생성
 - `project-transaction.js`: 트랜잭션 저널과 롤백
 - `schematic-patch.js`: 승인 게이트, diff, apply
-- `project-validator.js`: ERC/DRC 파싱과 상태 보고
+- `validate-project.js`: ERC 파싱과 상태 보고
+- `validate-board.js`: DRC 파싱과 미연결 항목 추출
+- `inspect-project.js`: artifact 인벤토리와 다이제스트
 
 ### Analyzer (`src/analyzer/`)
-- `kicad-parser.js`: S-expression 파서
-- `schematic-analyzer.js`: 구조 사실 추출 (deterministic)
-- `board-analyzer.js`: PCB 구조 사실 추출 (deterministic)
+- `sexpr.js`: S-expression 파서
+- `kicad-schematic.js`: 회로도 구조 사실 추출 (deterministic)
+- `kicad-pcb.js`: PCB 구조 사실 추출 (deterministic)
+- `project-analyzer.js`: analyzer 오케스트레이션
 - confidence 라벨: `deterministic`, `heuristic`, `datasheet-backed`
 
+### Evidence (`src/evidence/`)
+- `evidence-manifest.js`: artifact-bound 증거 매니페스트
+- `artifact-inventory.js`: 저장된 파일 해싱과 인벤토리
+- `transaction-inventory.js`: 트랜잭션 기록
+
 ### KiCad Integration (`src/kicad/`)
-- `kicad-cli.js`: KiCad CLI 경로 탐색 (Windows 10/9/8/7, PATH)
+- `kicad-cli.js`: KiCad CLI 경로 탐색과 wrapper
 - `project-generator.js`: 심볼, 풋프린트, 넷, 트레이스 생성
 - `board-route-planner.js`: 보수적 라우팅 알고리즘
+- `pad-geometry.js`: 패드 지오메트리 계산
 
 ## 메시지 프로토콜
 
@@ -125,13 +134,16 @@ Panel: user clicks "Apply"
 - `.kicad_pro`, `.kicad_sch`, `.kicad_pcb`
 - `chatpcb.kicad_sym` (프로젝트 로컬 심볼 라이브러리)
 - `sym-lib-table`
-- `.chatpcb.json` (증거 매니페스트, schema v2)
+- `.chatpcb.json` (intent/evidence manifest, schema v2)
 - `_simulation.cir` (SPICE)
 
 ### 규칙
-- KiCad 파일이 **authoritative editable state**
-- `.chatpcb.json`은 의도/증거 기록, KiCad 파일 대체 아님
+- **KiCad files are the authoritative editable state**
+- `.chatpcb.json` is an intent/evidence manifest, not a replacement for KiCad files
 - 커스텀 `chatpcb_*` 최상위 노드 금지
+- Schema v1 manifests remain readable but unverified (`legacy-unverified`)
+- Schema v2 is artifact-bound with canonical `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, `releaseGates`
+- All generated artifacts participate in preview and rollback
 
 ## 보안 경계
 
@@ -186,20 +198,29 @@ OH-MY-ChatPCB/
 ├── src/
 │   ├── runtime/
 │   │   ├── agent-daemon.js            # WebSocket/HTTP 서버
-│   │   └── provider-*.js              # AI CLI 어댑터
+│   │   ├── provider-process.js        # AI CLI 프로세스 브리지
+│   │   └── provider-registry.js       # provider 탐색과 상태
 │   ├── workflow/
-│   │   ├── project-generator.js       # 회로도/PCB 생성
+│   │   ├── generate-mcu-project.js    # 회로도/PCB 생성
 │   │   ├── schematic-patch.js         # 패치 승인 게이트
-│   │   └── project-transaction.js     # 롤백 저널
+│   │   ├── project-transaction.js     # 롤백 저널
+│   │   ├── validate-project.js        # ERC 검증
+│   │   ├── validate-board.js          # DRC 검증
+│   │   └── inspect-project.js         # artifact 인벤토리
 │   ├── analyzer/
-│   │   ├── kicad-parser.js            # S-expr 파서
-│   │   ├── schematic-analyzer.js      # 회로도 사실 추출
-│   │   └── board-analyzer.js          # PCB 사실 추출
+│   │   ├── sexpr.js                   # S-expr 파서
+│   │   ├── kicad-schematic.js         # 회로도 사실 추출
+│   │   ├── kicad-pcb.js               # PCB 사실 추출
+│   │   └── project-analyzer.js        # analyzer 오케스트레이션
 │   ├── evidence/
-│   │   └── manifest.js                # artifact-bound 증거
+│   │   ├── evidence-manifest.js       # artifact-bound 증거
+│   │   ├── artifact-inventory.js      # 파일 해싱
+│   │   └── transaction-inventory.js   # 트랜잭션 기록
 │   └── kicad/
 │       ├── kicad-cli.js               # KiCad CLI wrapper
-│       └── board-route-planner.js     # 라우팅 알고리즘
+│       ├── project-generator.js       # 심볼/풋프린트 생성
+│       ├── board-route-planner.js     # 라우팅 알고리즘
+│       └── pad-geometry.js            # 패드 지오메트리
 ├── apps/panel/                         # WebView UI
 ├── kicad-fork/chatpcb_panel/          # C++ wxWebView 호스트
 └── tests/                              # 340 테스트 (41 파일)
