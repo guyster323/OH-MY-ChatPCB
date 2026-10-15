@@ -37,6 +37,7 @@ async function transactionServices(extra = {}) {
     projectMutexRegistry: extra.projectMutexRegistry ?? createProjectMutexRegistry(),
     transactionJournal: extra.transactionJournal ?? createTransactionJournal({ stateRoot }),
     verifyAppliedProjectImpl: extra.verifyAppliedProjectImpl ?? passingVerify,
+    validateProjectImpl: extra.validateProjectImpl ?? passingErc,
     validateBoardImpl: extra.validateBoardImpl ?? passingDrc,
     ...extra
   };
@@ -787,7 +788,7 @@ test('daemon confines provider-emitted project paths to the active project.reque
   }
 });
 
-test('daemon rejects provider-emitted project.create calls during project.request', async () => {
+test('daemon ignores disallowed provider-emitted project.create calls and falls back to native preview during project.request', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-request-'));
   const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-outside-'));
 
@@ -797,11 +798,16 @@ test('daemon rejects provider-emitted project.create calls during project.reques
       args: { workspaceRoot, projectName: 'Active Board' }
     });
 
-    const rejected = await dispatchToolCall(
+    await generateMcuPeripheralProject({
+      projectDir: created.result.projectDir,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+
+    const result = await dispatchToolCall(
       {
         id: 'call_project_request_create',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Create a second board.' }
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Add a reset button.' }
       },
       providerOptions({
         events: [
@@ -813,12 +819,102 @@ test('daemon rejects provider-emitted project.create calls during project.reques
         ]
       })
     );
-    assert.equal(rejected.ok, false);
-    assert.match(rejected.error.message, /project\.create is not allowed inside project\.request/);
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.operation, 'patched');
     await assert.rejects(() => readdir(path.join(outside, 'Escaped-Board')), { code: 'ENOENT' });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(outside, { force: true, recursive: true });
+  }
+});
+
+test('daemon retries with corrective note when provider emits only disallowed calls', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-disallowed-retry-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Retry Board' }
+    });
+
+    await generateMcuPeripheralProject({
+      projectDir: created.result.projectDir,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+
+    let callCount = 0;
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_persistent_disallow',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: '회로를 수정해 주세요.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async () => {
+          callCount += 1;
+          return {
+            exitCode: 0,
+            stderr: '',
+            events: [
+              createEnvelope('tool.call', {
+                id: `call_provider_create_${callCount}`,
+                name: 'project.create',
+                args: { workspaceRoot, projectName: `Board ${callCount}` }
+              })
+            ]
+          };
+        },
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(callCount, 2);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('daemon ignores disallowed schematic.generate on existing project and falls back', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-generate-disallowed-'));
+
+  try {
+    const created = await dispatchToolCall({
+      name: 'project.create',
+      args: { workspaceRoot, projectName: 'Existing Board' }
+    });
+
+    await generateMcuPeripheralProject({
+      projectDir: created.result.projectDir,
+      prompt: 'STM32 board with USB-C power.'
+    });
+
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_generate_existing',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Add reset button.' }
+      },
+      providerOptions({
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_provider_generate',
+            name: 'schematic.generate',
+            args: { prompt: 'New board' }
+          })
+        ]
+      })
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.operation, 'patched');
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
@@ -1060,7 +1156,7 @@ test('daemon normalizes provider patch controls to an approval-gated preview', a
   }
 });
 
-test('daemon restores an existing project snapshot after an exceptional provider exit', async () => {
+test('daemon ignores disallowed provider calls with inspect and succeeds via fallback', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-exception-restore-'));
 
   try {
@@ -1070,24 +1166,34 @@ test('daemon restores an existing project snapshot after an exceptional provider
     });
     const before = await readFile(generated.files.spec, 'utf8');
 
-    const rejected = await dispatchToolCall(
+    let callCount = 0;
+    const result = await dispatchToolCall(
       {
         id: 'call_provider_exception_restore',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+        args: { provider: 'codex', projectDir: root, prompt: 'Add reset button.' }
       },
       {
-        ...providerOptions({
-          events: [
-            createEnvelope('tool.call', { id: 'call_provider_inspect_then_fail', name: 'project.inspect', args: {} }),
-            createEnvelope('tool.call', { id: 'call_provider_forbidden_create', name: 'project.create', args: { projectName: 'forbidden' } })
-          ]
-        }),
-        inspectProjectImpl: async ({ projectDir }) => ({ ok: true, inspection: { projectDir } })
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async () => {
+          callCount += 1;
+          return {
+            exitCode: 0,
+            stderr: '',
+            events: [
+              createEnvelope('tool.call', { id: 'call_provider_inspect_then_fail', name: 'project.inspect', args: {} }),
+              createEnvelope('tool.call', { id: 'call_provider_forbidden_create', name: 'project.create', args: { projectName: 'forbidden' } })
+            ]
+          };
+        },
+        inspectProjectImpl: async ({ projectDir }) => ({ ok: true, inspection: { projectDir }, validation: { erc: { ok: true } } }),
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc
       }
     );
-    assert.equal(rejected.ok, false);
-    assert.match(rejected.error.message, /project\.create is not allowed inside project\.request/);
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(callCount, 2);
 
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
   } finally {
@@ -1095,7 +1201,7 @@ test('daemon restores an existing project snapshot after an exceptional provider
   }
 });
 
-test('daemon removes provider-created files when restoring after an exceptional project request', async () => {
+test('daemon ignores disallowed calls after patch preview and succeeds', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-created-file-restore-'));
 
   try {
@@ -1107,29 +1213,42 @@ test('daemon removes provider-created files when restoring after an exceptional 
       Object.values(generated.files).map(async (file) => [file, await readFile(file)])
     );
 
-    const rejected = await dispatchToolCall(
+    let callCount = 0;
+    const result = await dispatchToolCall(
       {
         id: 'call_provider_created_file_exception_restore',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+        args: { provider: 'codex', projectDir: root, prompt: 'Add reset button.' }
       },
-      providerOptions({
-        events: [
-          createEnvelope('tool.call', {
-            id: 'call_patch_then_fail',
-            name: 'schematic.patch',
-            args: { prompt: 'STM32 board with USB-C power and UART header.' }
-          }),
-          createEnvelope('tool.call', {
-            id: 'call_provider_forbidden_create',
-            name: 'project.create',
-            args: { projectName: 'forbidden' }
-          })
-        ]
-      })
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async () => {
+          callCount += 1;
+          return {
+            exitCode: 0,
+            stderr: '',
+            events: [
+              createEnvelope('tool.call', {
+                id: 'call_patch_then_fail',
+                name: 'schematic.patch',
+                args: { prompt: 'STM32 board with USB-C power and UART header.' }
+              }),
+              createEnvelope('tool.call', {
+                id: 'call_provider_forbidden_create',
+                name: 'project.create',
+                args: { projectName: 'forbidden' }
+              })
+            ]
+          };
+        },
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc,
+        patchApprovalRegistry: createPatchApprovalRegistry()
+      }
     );
-    assert.equal(rejected.ok, false);
-    assert.match(rejected.error.message, /project\.create is not allowed inside project\.request/);
+    assert.equal(result.ok, true);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(callCount, 2);
 
     for (const [file, content] of originalFiles) {
       assert.deepEqual(await readFile(file), content);

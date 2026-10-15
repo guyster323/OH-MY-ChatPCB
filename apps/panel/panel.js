@@ -305,12 +305,25 @@ function handleEnvelope(envelope) {
           }
         }
       }
-      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? 'Tool call failed.' });
-      renderRequestStatus({
-        state: 'failed',
-        summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
-        technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
-      });
+      const errorCode = envelope.payload.error?.code;
+      const errorMessage = envelope.payload.error?.message ?? 'Tool call failed.';
+      const technicalDetail = envelope.payload.technicalDetail ?? errorMessage;
+      
+      appendProgress({ stage: 'fail', text: errorMessage });
+      
+      if (errorCode === 'PROVIDER_DISALLOWED_TOOL') {
+        renderRequestStatus({
+          state: 'failed',
+          summary: errorMessage,
+          technicalDetail
+        });
+      } else {
+        renderRequestStatus({
+          state: 'failed',
+          summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+          technicalDetail
+        });
+      }
     }
     if (callName === 'project.inspect') {
       if (inspectionState.requestId === id) renderInspectionFailure();
