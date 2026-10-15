@@ -454,6 +454,42 @@ test('supported profile generic segments avoid J3/J7 no-net pads and cross-net i
   }
 });
 
+test('unresolved footprints skip routing with warnings in profile mode', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-unresolved-footprint-'));
+  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+
+  try {
+    // Set to empty directory to simulate missing footprints
+    const emptyLib = path.join(root, 'empty-lib');
+    await mkdir(emptyLib, { recursive: true });
+    process.env.KICAD_FOOTPRINT_DIR = emptyLib;
+    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
+
+    const result = await generateMcuPeripheralProject({
+      projectDir: path.join(root, 'project'),
+      prompt: 'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator.'
+    });
+
+    const board = await readFile(result.files.board, 'utf8');
+    
+    // Should have nets but no segments (routing skipped)
+    assert.match(board, /\(net \d+ "GND"\)/);
+    assert.match(board, /\(net \d+ "VBUS"\)/);
+    
+    // Should not have any segments (routing was skipped)
+    const segmentCount = (board.match(/\(segment/g) || []).length;
+    assert.equal(segmentCount, 0, 'Profile mode should skip all routing when footprints are unresolved');
+    
+    // Should still have footprint placeholders (without pads)
+    assert.match(board, /\(footprint /);
+  } finally {
+    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
+    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('maps no-net pad centers through their containing footprint transform', () => {
   const board = `  (footprint "Connector_Generic:Conn_01x01"
     (at 100 200 90)
