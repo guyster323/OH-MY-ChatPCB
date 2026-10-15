@@ -1310,6 +1310,215 @@ test('daemon cancels an in-flight provider invocation', async () => {
   assert.equal(controllers.has('call_provider_slow'), false);
 });
 
+test('daemon does not retry or preview when provider.cancel lands before the disallowed-tool retry', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-cancel-before-retry-'));
+  const controllers = new Map();
+  const invocationId = 'call_cancel_before_retry';
+  let providerCalls = 0;
+
+  try {
+    const result = await dispatchToolCall(
+      {
+        id: invocationId,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Create an RP2040 board.' }
+      },
+      {
+        providerControllers: controllers,
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          providerCalls += 1;
+          if (providerCalls === 1) {
+            const cancelResult = await dispatchToolCall(
+              { name: 'provider.cancel', args: { id: invocationId } },
+              { providerControllers: controllers }
+            );
+            assert.equal(cancelResult.ok, true);
+            assert.equal(cancelResult.result.cancelled, true);
+            assert.equal(controllers.has(invocationId), false);
+            return {
+              exitCode: 0,
+              stderr: '',
+              events: [
+                createEnvelope('tool.call', {
+                  id: 'call_disallowed_create',
+                  name: 'project.create',
+                  args: { projectName: 'Should Not Retry' }
+                })
+              ]
+            };
+          }
+          return {
+            exitCode: 0,
+            stderr: '',
+            events: [
+              createEnvelope('tool.call', {
+                id: 'call_retry_generate',
+                name: 'schematic.generate',
+                args: { prompt: 'RP2040 board with USB-C power and a status LED.' }
+              })
+            ]
+          };
+        },
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc
+      }
+    );
+
+    assert.equal(providerCalls, 1);
+    assert.equal(result.ok, false);
+    assert.match(result.error.message, /cancelled/);
+    assert.equal(result.result, undefined);
+    assert.equal(controllers.size, 0);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon releases provider controllers after success and does not reuse an aborted one', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-controller-release-'));
+  const controllers = new Map();
+  const prompt = 'Create an STM32 board.';
+  const events = [
+    createEnvelope('tool.call', {
+      id: 'call_generate_release',
+      name: 'schematic.generate',
+      args: { prompt: 'STM32 board with USB-C power, I2C connector, reset button, and status LED.' }
+    })
+  ];
+
+  function seedAborted(id) {
+    const aborted = new AbortController();
+    aborted.abort();
+    controllers.set(id, aborted);
+    return aborted;
+  }
+
+  async function requestOnce({ id, invocationId, key }) {
+    const registrationId = key ?? id;
+    const seeded = seedAborted(registrationId);
+    let observedAbort = null;
+    let observedSignal = null;
+    const result = await dispatchToolCall(
+      {
+        id,
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir: root,
+          prompt,
+          ...(invocationId ? { invocationId } : {})
+        }
+      },
+      {
+        ...providerOptions({
+          events,
+          runProviderProcessImpl: async ({ signal }) => {
+            observedAbort = signal.aborted;
+            observedSignal = signal;
+            return { exitCode: 0, stderr: '', events };
+          }
+        }),
+        providerControllers: controllers
+      }
+    );
+    assert.equal(result.ok, true, result.error?.message);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(observedAbort, false);
+    assert.notEqual(observedSignal, seeded.signal);
+    assert.equal(controllers.has(registrationId), false);
+    assert.equal(controllers.has(id), false);
+    assert.equal(controllers.size, 0);
+    return result;
+  }
+
+  try {
+    await requestOnce({ id: 'call_release_plain' });
+    await requestOnce({ id: 'call_release_plain' });
+    await requestOnce({ id: 'call_release_explicit', invocationId: 'explicit-invocation', key: 'explicit-invocation' });
+    await requestOnce({ id: 'call_release_explicit', invocationId: 'explicit-invocation', key: 'explicit-invocation' });
+
+    const invokeId = 'call_invoke_release';
+    const seededInvoke = seedAborted(invokeId);
+    let invokeAbort = null;
+    let invokeSignal = null;
+    const invoked = await dispatchToolCall(
+      {
+        id: invokeId,
+        name: 'provider.invoke',
+        args: { provider: 'codex', prompt: 'Say hello.' }
+      },
+      {
+        providerControllers: controllers,
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async ({ signal }) => {
+          invokeAbort = signal.aborted;
+          invokeSignal = signal;
+          return { exitCode: 0, stderr: '', events: [] };
+        }
+      }
+    );
+    assert.equal(invoked.ok, true, invoked.error?.message);
+    assert.equal(invokeAbort, false);
+    assert.notEqual(invokeSignal, seededInvoke.signal);
+    assert.equal(controllers.size, 0);
+
+    const explicitInvoke = 'explicit-invoke-id';
+    const seededExplicit = seedAborted(explicitInvoke);
+    let explicitAbort = null;
+    let explicitSignal = null;
+    const invokedExplicit = await dispatchToolCall(
+      {
+        id: 'call_invoke_explicit',
+        name: 'provider.invoke',
+        args: { provider: 'codex', prompt: 'Say hello again.', invocationId: explicitInvoke }
+      },
+      {
+        providerControllers: controllers,
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async ({ signal }) => {
+          explicitAbort = signal.aborted;
+          explicitSignal = signal;
+          return { exitCode: 0, stderr: '', events: [] };
+        }
+      }
+    );
+    assert.equal(invokedExplicit.ok, true, invokedExplicit.error?.message);
+    assert.equal(explicitAbort, false);
+    assert.notEqual(explicitSignal, seededExplicit.signal);
+    assert.equal(controllers.has(explicitInvoke), false);
+    assert.equal(controllers.has('call_invoke_explicit'), false);
+    assert.equal(controllers.size, 0);
+
+    let reusedAbort = null;
+    const reused = await dispatchToolCall(
+      {
+        id: 'call_invoke_explicit',
+        name: 'provider.invoke',
+        args: { provider: 'codex', prompt: 'Say hello again.', invocationId: explicitInvoke }
+      },
+      {
+        providerControllers: controllers,
+        checkProviderAvailabilityImpl: async ({ provider }) => ({ provider, command: 'codex', available: true, status: 'available' }),
+        runProviderProcessImpl: async ({ signal }) => {
+          reusedAbort = signal.aborted;
+          return { exitCode: 0, stderr: '', events: [] };
+        }
+      }
+    );
+    assert.equal(reused.ok, true, reused.error?.message);
+    assert.equal(reusedAbort, false);
+    assert.equal(controllers.size, 0);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon websocket cancels an in-flight provider invocation by id', async () => {
   let observedAbort = false;
   let providerStarted;

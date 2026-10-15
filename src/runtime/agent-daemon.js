@@ -146,8 +146,14 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     case 'provider.list':
       return ok({ providers: listProviderDefinitions() });
 
-    case 'provider.invoke':
-      return ok(await invokeProvider(call, ctx));
+    case 'provider.invoke': {
+      const invocationId = call.args?.invocationId ?? call.id;
+      try {
+        return ok(await invokeProvider(call, ctx));
+      } finally {
+        releaseProviderInvocation(providerControllers, invocationId);
+      }
+    }
 
     case 'project.request':
       try {
@@ -271,6 +277,8 @@ async function invokeProvider(call, ctx) {
 
   const definition = getProviderDefinitionImpl(provider);
   const availability = await checkProviderAvailabilityImpl({ provider });
+  // Cancel can land during availability, after the previous attempt kept its controller.
+  throwIfProviderCancelled(providerControllers, invocationId);
   if (!availability.available) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
@@ -288,18 +296,25 @@ async function invokeProvider(call, ctx) {
     projectExists
   });
 
-  const controller = providerControllers.get(invocationId) ?? new AbortController();
-  providerControllers.set(invocationId, controller);
-  let transcript;
-  let alreadyStreamed = false;
-
+  let controller;
   try {
+    throwIfProviderCancelled(providerControllers, invocationId);
+    const existing = providerControllers.get(invocationId);
+    // A reused id must not inherit an already-aborted controller from an earlier request.
+    if (existing && !existing.signal.aborted) {
+      controller = existing;
+    } else {
+      controller = new AbortController();
+      providerControllers.set(invocationId, controller);
+    }
+
     emitProgress(ctx, {
       stage: 'provider',
       sprite: 'cli',
       text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
     });
-    transcript = await runProviderProcessImpl({
+    let alreadyStreamed = false;
+    const transcript = await runProviderProcessImpl({
       command: definition.command,
       args: definition.args,
       input,
@@ -310,63 +325,68 @@ async function invokeProvider(call, ctx) {
         emitProviderEvent(ctx, event);
       }
     });
+    throwIfProviderRunAborted(providerControllers, invocationId, controller);
     if (!alreadyStreamed) {
       for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
     }
-  } catch (error) {
-    providerControllers.delete(invocationId);
-    throw error;
-  }
 
-  if (transcript.exitCode !== 0) {
-    providerControllers.delete(invocationId);
-    throw new Error(`${definition.label} exited with code ${transcript.exitCode}.`);
-  }
-
-  const toolResults = [];
-  const disallowedCalls = [];
-  for (const event of transcript.events) {
-    if (event.type !== 'tool.call') continue;
-
-    let disallowedReason = null;
-    if (forceProjectDir && event.payload.name === 'project.create') {
-      disallowedReason = 'project.create is not allowed when a project already exists';
-    } else if (!allowGenerate && event.payload.name === 'schematic.generate') {
-      disallowedReason = 'schematic.generate is not allowed for an existing project; use schematic.patch instead';
-    } else if (!contextAllowedTools.has(event.payload.name)) {
-      disallowedReason = `${event.payload.name} is not in the allowed tool list`;
+    if (transcript.exitCode !== 0) {
+      throw new Error(`${definition.label} exited with code ${transcript.exitCode}.`);
     }
 
-    if (disallowedReason) {
-      disallowedCalls.push({ name: event.payload.name, reason: disallowedReason });
+    const toolResults = [];
+    const disallowedCalls = [];
+    for (const event of transcript.events) {
+      throwIfProviderRunAborted(providerControllers, invocationId, controller);
+      if (event.type !== 'tool.call') continue;
+
+      let disallowedReason = null;
+      if (forceProjectDir && event.payload.name === 'project.create') {
+        disallowedReason = 'project.create is not allowed when a project already exists';
+      } else if (!allowGenerate && event.payload.name === 'schematic.generate') {
+        disallowedReason = 'schematic.generate is not allowed for an existing project; use schematic.patch instead';
+      } else if (!contextAllowedTools.has(event.payload.name)) {
+        disallowedReason = `${event.payload.name} is not in the allowed tool list`;
+      }
+
+      if (disallowedReason) {
+        disallowedCalls.push({ name: event.payload.name, reason: disallowedReason });
+        toolResults.push({
+          id: event.payload.id,
+          ...failure('DISALLOWED_TOOL', disallowedReason)
+        });
+        continue;
+      }
+
+      const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, {
+        analyzerAdapters: args.analyzerAdapters,
+        selection: args.selection,
+        prompt
+      });
       toolResults.push({
         id: event.payload.id,
-        ...failure('DISALLOWED_TOOL', disallowedReason)
+        ...(await dispatchToolCall(toolCall, ctx))
       });
-      continue;
     }
+    throwIfProviderRunAborted(providerControllers, invocationId, controller);
 
-    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, {
-      analyzerAdapters: args.analyzerAdapters,
-      selection: args.selection,
-      prompt
-    });
-    toolResults.push({
-      id: event.payload.id,
-      ...(await dispatchToolCall(toolCall, ctx))
-    });
+    return {
+      providerInvocation: true,
+      invocationId,
+      provider,
+      events: transcript.events,
+      toolResults,
+      disallowedCalls,
+      stderr: transcript.stderr,
+      tracePath: transcript.tracePath
+    };
+  } finally {
+    // project.request keeps the controller until the whole request finishes so
+    // cancel between attempts still finds it. Every other caller releases here.
+    if (!ctx.retainProviderController && controller && providerControllers.get(invocationId) === controller) {
+      providerControllers.delete(invocationId);
+    }
   }
-
-  return {
-    providerInvocation: true,
-    invocationId,
-    provider,
-    events: transcript.events,
-    toolResults,
-    disallowedCalls,
-    stderr: transcript.stderr,
-    tracePath: transcript.tracePath
-  };
 }
 
 async function requestProject(call, ctx) {
@@ -436,21 +456,27 @@ async function requestProject(call, ctx) {
   let providerResult;
   let firstPreview = null;
   let retryAttempted = false;
+  const invocationId = args.invocationId ?? call.id;
+  const providerCtx = {
+    ...ctx,
+    allowGenerate: !hasSpec,
+    forceProjectDir: true,
+    projectExists: hasSpec,
+    retainProviderController: true
+  };
   
   try {
+    throwIfProviderCancelled(ctx.providerControllers, invocationId);
     providerResult = await invokeProvider({
       ...call,
       args: { ...args, prompt: generatePrompt }
-    }, {
-      ...ctx,
-      allowGenerate: !hasSpec,
-      forceProjectDir: true,
-      projectExists: hasSpec
-    });
+    }, providerCtx);
 
+    throwIfProviderCancelled(ctx.providerControllers, invocationId);
     firstPreview = lastMutatingResult(providerResult.toolResults);
 
     if (providerResult.disallowedCalls?.length > 0 && !retryAttempted && !firstPreview) {
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
       retryAttempted = true;
       const correctiveNote = hasSpec
         ? `The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.`
@@ -459,16 +485,14 @@ async function requestProject(call, ctx) {
       providerResult = await invokeProvider({
         ...call,
         args: { ...args, prompt: `${generatePrompt}\n\nNote: ${correctiveNote}` }
-      }, {
-        ...ctx,
-        allowGenerate: !hasSpec,
-        forceProjectDir: true,
-        projectExists: hasSpec
-      });
+      }, providerCtx);
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
     }
 
+    throwIfProviderCancelled(ctx.providerControllers, invocationId);
     let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
     if (!preview) {
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
       emitProgress(ctx, {
         stage: 'preview',
         sprite: 'draft',
@@ -498,6 +522,7 @@ async function requestProject(call, ctx) {
       preview = generated.result;
     }
 
+    throwIfProviderCancelled(ctx.providerControllers, invocationId);
     if (preview?.requiresApproval) {
       emitProgress(ctx, {
         stage: 'ready',
@@ -519,9 +544,7 @@ async function requestProject(call, ctx) {
     if (error?.technicalDetail) wrapped.technicalDetail = error.technicalDetail;
     throw wrapped;
   } finally {
-    if (call.args?.invocationId) {
-      ctx.providerControllers?.delete(call.args.invocationId);
-    }
+    releaseProviderInvocation(ctx.providerControllers, invocationId);
   }
 }
 
@@ -545,6 +568,47 @@ function guardToolProjectDir(call, allowedWorkspaceRoot) {
   assertSafeProjectDir(projectDir, { allowedWorkspaceRoot });
 }
 
+// provider.cancel removes the controller as soon as it aborts. The id stays
+// cancelled until the request finishes, so a retry cannot open a fresh controller.
+const cancelledProviderInvocations = new WeakMap();
+
+function cancelledProviderIds(providerControllers) {
+  if (!providerControllers) return null;
+  let ids = cancelledProviderInvocations.get(providerControllers);
+  if (!ids) {
+    ids = new Set();
+    cancelledProviderInvocations.set(providerControllers, ids);
+  }
+  return ids;
+}
+
+function providerInvocationWasCancelled(providerControllers, invocationId) {
+  if (!invocationId || !providerControllers) return false;
+  return cancelledProviderInvocations.get(providerControllers)?.has(invocationId) === true;
+}
+
+function throwIfProviderCancelled(providerControllers, invocationId) {
+  if (providerInvocationWasCancelled(providerControllers, invocationId)) {
+    throw providerCancelledError();
+  }
+}
+
+function throwIfProviderRunAborted(providerControllers, invocationId, controller) {
+  if (providerInvocationWasCancelled(providerControllers, invocationId) || controller?.signal.aborted) {
+    throw providerCancelledError();
+  }
+}
+
+function providerCancelledError() {
+  return new Error('Provider process cancelled.');
+}
+
+function releaseProviderInvocation(providerControllers, invocationId) {
+  if (!providerControllers || !invocationId) return;
+  providerControllers.delete(invocationId);
+  cancelledProviderInvocations.get(providerControllers)?.delete(invocationId);
+}
+
 function cancelProvider(args = {}, providerControllers) {
   const invocationId = args.id ?? args.invocationId;
   if (!invocationId) {
@@ -561,6 +625,7 @@ function cancelProvider(args = {}, providerControllers) {
   }
 
   controller.abort();
+  cancelledProviderIds(providerControllers).add(invocationId);
   providerControllers.delete(invocationId);
   return {
     cancelled: true,
