@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { runKicadCli } from '../kicad/kicad-cli.js';
 import { assertInspectionTree } from './inspection-copy.js';
-import { assertInside } from '../shared/path-guard.js';
+import { resolveValidationTarget } from './validation-target.js';
 
 export async function validateBoard({
   projectDir,
@@ -91,24 +91,6 @@ export async function validateBoard({
       }
     };
   }
-}
-
-function resolveValidationTarget(projectDir, targetPath) {
-  if (typeof targetPath !== 'string' || targetPath.trim().length === 0) {
-    const error = new Error('Validation target path is required.');
-    error.code = 'UNSAFE_VALIDATION_TARGET';
-    throw error;
-  }
-
-  const resolved = path.resolve(projectDir, targetPath);
-  if (resolved !== projectDir) {
-    assertInside(projectDir, resolved, {
-      message: 'Validation target must remain inside the project directory.',
-      code: 'UNSAFE_VALIDATION_TARGET'
-    });
-  }
-
-  return resolved;
 }
 
 async function findFirst(projectDir, extension) {

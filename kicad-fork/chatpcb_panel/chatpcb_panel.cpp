@@ -77,7 +77,7 @@ wxString WithFileCacheBust( const wxString& aUrl )
 
     if( css.FileExists() && css.GetModificationTime().IsLaterThan( newest ) )
         newest = css.GetModificationTime();
-    
+
     if( constants.FileExists() && constants.GetModificationTime().IsLaterThan( newest ) )
         newest = constants.GetModificationTime();
 
