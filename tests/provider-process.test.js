@@ -283,3 +283,58 @@ test('cancels provider processes with an abort signal', async () => {
 
   await assert.rejects(promise, /cancelled/);
 });
+
+test('grok provider emits text output as agent deltas', async () => {
+  const script = [
+    'console.log("Analyzing the circuit requirements.");',
+    'console.log("Based on your specifications, I will generate a schematic for an ESP32-S3 board.");',
+    'console.log(JSON.stringify({type:"tool.call", payload:{id:"grok_1", name:"schematic.generate", args:{prompt:"ESP32-S3 board"}}}));',
+    'console.log("The schematic has been generated. Please review it before applying.");'
+  ].join('');
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    input: 'Generate an ESP32-S3 board.',
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.deepEqual(
+    transcript.events.map((event) => event.type),
+    ['agent.delta', 'agent.delta', 'tool.call', 'agent.delta']
+  );
+  assert.match(transcript.events[0].payload.text, /Analyzing/);
+  assert.equal(transcript.events[2].payload.name, 'schematic.generate');
+});
+
+test('usePromptFile creates temp file on Windows and cleans up', { skip: process.platform !== 'win32' }, async () => {
+  const script = 'console.log("CHATPCB_GROK_PROVIDER_TEST_OK");';
+  const input = 'Test prompt for Grok on Windows.';
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    input,
+    usePromptFile: true,
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.equal(transcript.events[0].payload.text, 'CHATPCB_GROK_PROVIDER_TEST_OK');
+});
+
+test('usePromptFile uses /dev/stdin on POSIX systems', { skip: process.platform === 'win32' }, async () => {
+  const script = 'console.log("CHATPCB_GROK_POSIX_TEST_OK");';
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    input: 'Test prompt from stdin on POSIX.',
+    usePromptFile: true,
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.equal(transcript.events[0].payload.text, 'CHATPCB_GROK_POSIX_TEST_OK');
+});

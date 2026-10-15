@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createEnvelope } from './envelope.js';
@@ -17,14 +18,38 @@ export function runProviderProcess({
   allowedToolNames = DEFAULT_ALLOWED_TOOL_NAMES,
   traceDir,
   signal,
-  onEvent
+  onEvent,
+  usePromptFile = false
 }) {
   if (!command) {
     throw new Error('Provider command is required.');
   }
 
-  return new Promise((resolve, reject) => {
-    const providerProcess = providerProcessCommand(command, args);
+  return new Promise(async (resolve, reject) => {
+    let tempPromptFile = null;
+    let finalArgs = args;
+
+    if (usePromptFile && process.platform === 'win32' && input) {
+      try {
+        tempPromptFile = path.join(tmpdir(), `chatpcb-prompt-${randomUUID()}.txt`);
+        await writeFile(tempPromptFile, input, 'utf8');
+        finalArgs = args.map((arg) => (arg === '/dev/stdin' ? tempPromptFile : arg));
+      } catch (error) {
+        reject(error);
+        return;
+      }
+    }
+
+    const cleanupTempFile = async () => {
+      if (tempPromptFile) {
+        try {
+          await rm(tempPromptFile, { force: true });
+        } catch {
+        }
+      }
+    };
+
+    const providerProcess = providerProcessCommand(command, finalArgs);
     const child = spawn(providerProcess.command, providerProcess.args, {
       cwd,
       env: { ...process.env, ...env },
@@ -46,12 +71,13 @@ export function runProviderProcess({
       reject(new Error(`Provider process timed out after ${timeoutMs}ms.`));
     }, timeoutMs);
 
-    const fail = (error) => {
+    const fail = async (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', abortProvider);
       child.kill('SIGTERM');
+      await cleanupTempFile();
       reject(error);
     };
 
@@ -82,11 +108,12 @@ export function runProviderProcess({
       stderr.push(chunk);
     });
 
-    child.on('error', (error) => {
+    child.on('error', async (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', abortProvider);
+      await cleanupTempFile();
       reject(error);
     });
 
@@ -99,6 +126,7 @@ export function runProviderProcess({
         try {
           appendProviderLine(events, stdoutBuffer, allowedTools, onEvent);
         } catch (error) {
+          await cleanupTempFile();
           reject(error);
           return;
         }
@@ -113,17 +141,18 @@ export function runProviderProcess({
         transcript.tracePath = await writeProviderTrace({
           traceDir,
           command,
-          args,
+          args: finalArgs,
           cwd,
           input,
           transcript
         });
       }
 
+      await cleanupTempFile();
       resolve(transcript);
     });
 
-    if (input) {
+    if (input && (!usePromptFile || !tempPromptFile)) {
       child.stdin.write(input);
     }
     child.stdin.end();

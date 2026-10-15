@@ -287,6 +287,7 @@ async function invokeProvider(call, ctx) {
       input,
       allowedToolNames: PROVIDER_ALLOWED_TOOLS,
       signal: controller.signal,
+      usePromptFile: definition.usePromptFile === true,
       onEvent: (event) => {
         streamed.push(event);
         emitProviderEvent(ctx, event);

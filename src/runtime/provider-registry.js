@@ -21,6 +21,14 @@ const PROVIDERS = [
     command: 'gh',
     args: ['copilot', 'suggest'],
     description: 'Uses an already-authenticated GitHub CLI Copilot extension.'
+  },
+  {
+    id: 'grok',
+    label: 'Grok Build',
+    command: 'grok',
+    args: ['--prompt-file', '/dev/stdin', '--output-format', 'text', '--disable-web-search', '--permission-mode', 'plan'],
+    description: 'Uses an already-authenticated local Grok Build CLI session (grok login or XAI_API_KEY).',
+    usePromptFile: true
   }
 ];
 
@@ -34,7 +42,16 @@ export function getProviderDefinition(provider) {
     throw new Error(`Unknown provider: ${provider}`);
   }
 
-  return { ...match, args: [...match.args] };
+  const definition = { ...match, args: [...match.args] };
+
+  if (provider === 'grok' && process.env.CHATPCB_GROK_MODEL) {
+    const modelIndex = definition.args.indexOf('--prompt-file');
+    if (modelIndex !== -1) {
+      definition.args.splice(modelIndex, 0, '--model', process.env.CHATPCB_GROK_MODEL);
+    }
+  }
+
+  return definition;
 }
 
 export async function checkProviderAvailability({ provider, commandExistsImpl = commandExists } = {}) {
