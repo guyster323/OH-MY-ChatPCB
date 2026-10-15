@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
+import { resolveKicadCli } from './kicad-cli.js';
 
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
@@ -906,8 +908,7 @@ function renderLibSymbols(usedLibIds) {
     .filter(([id]) => used.has(id))
     .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id)));
   const officialBlocks = officialCacheDependenciesFor([...used])
-    .map((libId) => renderOfficialCachedSymbol(libId))
-    .filter(Boolean);
+    .map((libId) => renderOfficialCachedSymbol(libId));
 
   return `  (lib_symbols
 ${[...fixtureBlocks, ...officialBlocks].join('\n')}
@@ -968,16 +969,26 @@ function kicadLibraryCandidatePaths(libraryType) {
     ? ['KICAD10_FOOTPRINT_DIR', 'KICAD_FOOTPRINT_DIR']
     : ['KICAD10_SYMBOL_DIR', 'KICAD_SYMBOL_DIR'];
   
+  const kicadCliResult = resolveKicadCli();
+  const kicadCliPath = kicadCliResult?.path;
+  const relativeToKicadCli = kicadCliPath ? [
+    path.join(path.dirname(kicadCliPath), '..', 'share', 'kicad', libraryType),
+    path.join(path.dirname(kicadCliPath), '..', '..', 'share', 'kicad', libraryType)
+  ] : [];
+  
   return [
     ...envVars.map((key) => process.env[key]),
+    ...relativeToKicadCli,
     ...(process.platform === 'darwin' ? [
       `/Applications/KiCad/KiCad.app/Contents/SharedSupport/${libraryType}`,
       `/Applications/KiCad 10.0/KiCad.app/Contents/SharedSupport/${libraryType}`
     ] : []),
     ...(process.platform === 'linux' ? [
       `/usr/share/kicad/${libraryType}`,
-      `/usr/local/share/kicad/${libraryType}`
-    ] : []),
+      `/usr/local/share/kicad/${libraryType}`,
+      `/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`,
+      `${process.env.HOME}/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`
+    ].filter(Boolean) : []),
     ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
       `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/${libraryType}`,
       `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/${libraryType}`
