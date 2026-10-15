@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
-import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
@@ -282,9 +282,10 @@ async function invokeProvider(call, ctx) {
       text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
     });
     transcript = await runProviderProcessImpl({
-      command: definition.command,
-      args: definition.args,
+      command: availability.resolvedPath || availability.command || definition.command,
+      args: buildProviderLaunchArgs(definition, projectDir),
       input,
+      timeoutMs: definition.timeoutMs,
       allowedToolNames: PROVIDER_ALLOWED_TOOLS,
       signal: controller.signal,
       usePromptFile: definition.usePromptFile === true,

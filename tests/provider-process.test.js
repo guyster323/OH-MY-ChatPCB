@@ -488,3 +488,87 @@ test('rejects immediately with cleanup when abort signal is already aborted', as
 
   assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
 });
+
+test('trace write failure still settles with the provider result and removes the temp dir', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-trace-fail-'));
+  const blocker = path.join(root, 'not-a-directory');
+  await writeFile(blocker, 'blocked');
+  const traceDir = path.join(blocker, 'traces');
+  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  const errors = [];
+  const warnings = [];
+  console.error = (...args) => {
+    errors.push(args);
+  };
+  console.warn = (...args) => {
+    warnings.push(args);
+  };
+
+  try {
+    const transcript = await runProviderProcess({
+      command: process.execPath,
+      args: ['-e', 'console.log("TRACE_FAIL_OK");'],
+      input: 'prompt that must be cleaned up',
+      usePromptFile: true,
+      traceDir,
+      timeoutMs: 2000
+    });
+
+    assert.equal(transcript.exitCode, 0);
+    assert.equal(transcript.events[0].payload.text, 'TRACE_FAIL_OK');
+    assert.equal(transcript.tracePath, undefined);
+    assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+    assert.ok(errors.some((args) => String(args[0]).includes('Failed to write provider trace')));
+    assert.ok(errors.some((args) => args[1] instanceof Error));
+    assert.equal(warnings.length, 0);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('a provider output error still rejects when the trace directory cannot be written', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-trace-reject-'));
+  const blocker = path.join(root, 'not-a-directory');
+  await writeFile(blocker, 'blocked');
+  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+
+  try {
+    await assert.rejects(
+      () => runProviderProcess({
+        command: process.execPath,
+        args: ['-e', 'console.log(JSON.stringify({type:"tool.call", payload:{id:"bad", name:"unknown.tool", args:{}}}));'],
+        input: 'bad output',
+        usePromptFile: true,
+        traceDir: path.join(blocker, 'traces'),
+        timeoutMs: 2000
+      }),
+      /Unsupported provider tool call/
+    );
+
+    assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('usePromptFile cleans up temp file on cancel', async () => {
+  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+  const controller = new AbortController();
+  const promise = runProviderProcess({
+    command: process.execPath,
+    args: ['-e', 'setTimeout(() => {}, 10000)'],
+    input: 'Cancel this prompt.',
+    usePromptFile: true,
+    signal: controller.signal,
+    timeoutMs: 5000
+  });
+
+  setTimeout(() => controller.abort(), 20);
+
+  await assert.rejects(promise, /cancelled/);
+  assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+});

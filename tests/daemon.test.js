@@ -9,6 +9,7 @@ import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-regis
 import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
+import { getProviderDefinition } from '../src/runtime/provider-registry.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { saveCircuitConversation } from '../src/runtime/request-conversation.js';
 
@@ -498,6 +499,9 @@ test('daemon invokes a selected provider and executes emitted tool calls', async
     assert.equal(result.result.providerInvocation, true);
     assert.equal(result.result.provider, 'codex');
     assert.equal(providerCalls[0].command, 'codex');
+    assert.deepEqual(providerCalls[0].args, getProviderDefinition('codex').args);
+    assert.equal(providerCalls[0].timeoutMs, getProviderDefinition('codex').timeoutMs);
+    assert.equal(providerCalls[0].args.includes('--cwd'), false);
     assert.match(providerCalls[0].input, /Generate an STM32 board from chat\./);
     assert.match(providerCalls[0].input, /Project directory:/);
     assert.deepEqual(
@@ -508,6 +512,51 @@ test('daemon invokes a selected provider and executes emitted tool calls', async
     assert.equal(result.result.toolResults[0].ok, true);
     assert.equal(result.result.toolResults[0].result.requiresApproval, true);
     assert.match(result.result.toolResults[0].result.files.schematic, /\.kicad_sch$/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon spawns grok at the resolved path with --cwd and the grok timeout', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-invoke-'));
+  const resolvedPath = path.join(root, 'grok');
+  const providerCalls = [];
+
+  try {
+    const result = await dispatchToolCall(
+      {
+        id: 'call_grok_cwd',
+        name: 'provider.invoke',
+        args: {
+          provider: 'grok',
+          projectDir: root,
+          prompt: 'Generate an ESP32-S3 sensor board.'
+        }
+      },
+      {
+        checkProviderAvailabilityImpl: async () => ({
+          provider: 'grok',
+          command: resolvedPath,
+          resolvedPath,
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async (options) => {
+          providerCalls.push(options);
+          return { exitCode: 0, stderr: '', events: [] };
+        }
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(providerCalls.length, 1);
+    assert.equal(providerCalls[0].command, resolvedPath);
+    assert.equal(providerCalls[0].args[0], '--cwd');
+    assert.equal(providerCalls[0].args[1], root);
+    assert.ok(providerCalls[0].args.includes('--prompt-file'));
+    assert.equal(providerCalls[0].usePromptFile, true);
+    assert.equal(providerCalls[0].timeoutMs, getProviderDefinition('grok').timeoutMs);
+    assert.ok(getProviderDefinition('grok', {}).timeoutMs >= 300000);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

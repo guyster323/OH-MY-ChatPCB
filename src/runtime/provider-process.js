@@ -9,6 +9,21 @@ import { PROMPT_FILE_PLACEHOLDER } from './provider-registry.js';
 
 const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 
+function reportProviderDiagnostic(message, error) {
+  console.error(message, error);
+}
+
+async function removeTempPromptDir(directory) {
+  if (!directory) return;
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      reportProviderDiagnostic('Failed to clean up prompt directory:', error);
+    }
+  }
+}
+
 export async function runProviderProcess({
   command,
   args = [],
@@ -20,7 +35,8 @@ export async function runProviderProcess({
   traceDir,
   signal,
   onEvent,
-  usePromptFile = false
+  usePromptFile = false,
+  reportDiagnostic = reportProviderDiagnostic
 }) {
   if (!command) {
     throw new Error('Provider command is required.');
@@ -31,134 +47,127 @@ export async function runProviderProcess({
   }
 
   let tempPromptDir = null;
-  let tempPromptFile = null;
-  let finalArgs = args;
 
-  if (usePromptFile) {
-    tempPromptDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-'));
-    tempPromptFile = path.join(tempPromptDir, `prompt-${randomUUID()}.txt`);
-    await writeFile(tempPromptFile, input || '', { encoding: 'utf8', mode: 0o600 });
-    finalArgs = args.map((arg) => (arg === PROMPT_FILE_PLACEHOLDER ? tempPromptFile : arg));
-  }
+  try {
+    let finalArgs = args;
 
-  const cleanupTempFile = async () => {
-    if (tempPromptDir) {
-      try {
-        await rm(tempPromptDir, { force: true, recursive: true });
-      } catch (error) {
-        if (error.code !== 'ENOENT') {
-          console.error('Failed to clean up prompt directory:', error);
-        }
-      }
+    if (usePromptFile) {
+      tempPromptDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-'));
+      const tempPromptFile = path.join(tempPromptDir, `prompt-${randomUUID()}.txt`);
+      await writeFile(tempPromptFile, input || '', { encoding: 'utf8', mode: 0o600 });
+      finalArgs = args.map((arg) => (arg === PROMPT_FILE_PLACEHOLDER ? tempPromptFile : arg));
     }
-  };
 
-  return new Promise((resolve, reject) => {
-    const providerProcess = providerProcessCommand(command, finalArgs);
-    const child = spawn(providerProcess.command, providerProcess.args, {
-      cwd,
-      env: { ...process.env, ...env },
-      windowsVerbatimArguments: providerProcess.windowsVerbatimArguments === true,
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+    return await new Promise((resolve, reject) => {
+      const providerProcess = providerProcessCommand(command, finalArgs);
+      const child = spawn(providerProcess.command, providerProcess.args, {
+        cwd,
+        env: { ...process.env, ...env },
+        windowsVerbatimArguments: providerProcess.windowsVerbatimArguments === true,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
 
-    const events = [];
-    const stderr = [];
-    let stdoutBuffer = '';
-    let settled = false;
+      const events = [];
+      const stderr = [];
+      let stdoutBuffer = '';
+      let settled = false;
 
-    const allowedTools = new Set(allowedToolNames);
+      const allowedTools = new Set(allowedToolNames);
 
-    const timer = setTimeout(async () => {
-      if (settled) return;
-      settled = true;
-      child.kill('SIGTERM');
-      await cleanupTempFile();
-      reject(new Error(`Provider process timed out after ${timeoutMs}ms.`));
-    }, timeoutMs);
-
-    const fail = async (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', abortProvider);
-      child.kill('SIGTERM');
-      await cleanupTempFile();
-      reject(error);
-    };
-
-    const abortProvider = () => fail(new Error('Provider process cancelled.'));
-    signal?.addEventListener('abort', abortProvider, { once: true });
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk) => {
-      stdoutBuffer += chunk;
-      const lines = stdoutBuffer.split(/\r?\n/);
-      stdoutBuffer = lines.pop() ?? '';
-      for (const line of lines) {
-        try {
-          appendProviderLine(events, line, allowedTools, onEvent);
-        } catch (error) {
-          fail(error);
-        }
-      }
-    });
-
-    child.stderr.on('data', (chunk) => {
-      stderr.push(chunk);
-    });
-
-    child.on('error', async (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', abortProvider);
-      await cleanupTempFile();
-      reject(error);
-    });
-
-    child.on('close', async (exitCode) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', abortProvider);
-      if (stdoutBuffer.trim()) {
-        try {
-          appendProviderLine(events, stdoutBuffer, allowedTools, onEvent);
-        } catch (error) {
-          await cleanupTempFile();
-          reject(error);
-          return;
-        }
-      }
-      const transcript = {
-        exitCode,
-        events,
-        stderr: redactProviderText(stderr.join(''))
+      const finish = () => {
+        if (settled) return false;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abortProvider);
+        return true;
       };
 
-      if (traceDir) {
-        transcript.tracePath = await writeProviderTrace({
-          traceDir,
-          command,
-          args: finalArgs,
-          cwd,
-          input,
-          transcript
-        });
+      const timer = setTimeout(() => {
+        if (!finish()) return;
+        child.kill('SIGTERM');
+        reject(new Error(`Provider process timed out after ${timeoutMs}ms.`));
+      }, timeoutMs);
+
+      const fail = (error) => {
+        if (!finish()) return;
+        child.kill('SIGTERM');
+        reject(error);
+      };
+
+      const abortProvider = () => fail(new Error('Provider process cancelled.'));
+      signal?.addEventListener('abort', abortProvider, { once: true });
+
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+
+      child.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk;
+        const lines = stdoutBuffer.split(/\r?\n/);
+        stdoutBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          try {
+            appendProviderLine(events, line, allowedTools, onEvent);
+          } catch (error) {
+            fail(error);
+          }
+        }
+      });
+
+      child.stderr.on('data', (chunk) => {
+        stderr.push(chunk);
+      });
+
+      child.on('error', (error) => {
+        if (!finish()) return;
+        reject(error);
+      });
+
+      child.on('close', async (exitCode) => {
+        if (!finish()) return;
+        try {
+          if (stdoutBuffer.trim()) {
+            appendProviderLine(events, stdoutBuffer, allowedTools, onEvent);
+          }
+          const transcript = {
+            exitCode,
+            events,
+            stderr: redactProviderText(stderr.join(''))
+          };
+
+          if (traceDir) {
+            try {
+              transcript.tracePath = await writeProviderTrace({
+                traceDir,
+                command,
+                args: finalArgs,
+                cwd,
+                input,
+                transcript
+              });
+            } catch (error) {
+              try {
+                reportDiagnostic('Failed to write provider trace:', error);
+              } catch (reportError) {
+                console.error('Failed to write provider trace:', error);
+                console.error('Failed to report provider diagnostic:', reportError);
+              }
+            }
+          }
+
+          resolve(transcript);
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      if (input && !usePromptFile) {
+        child.stdin.write(input);
       }
-
-      await cleanupTempFile();
-      resolve(transcript);
+      child.stdin.end();
     });
-
-    if (input && !usePromptFile) {
-      child.stdin.write(input);
-    }
-    child.stdin.end();
-  });
+  } finally {
+    await removeTempPromptDir(tempPromptDir);
+  }
 }
 
 export function redactProviderText(value) {
