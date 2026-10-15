@@ -91,7 +91,10 @@ export async function validateProject({
     if (error.code === 'KICAD_CLI_TIMEOUT') {
       return { ok: false, skipped: false, reason: { code: error.code, message: error.message } };
     }
-    return skipped('KICAD_CLI_UNAVAILABLE', error.message);
+    const message = error.code === 'ENOENT' 
+      ? 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.'
+      : error.message;
+    return skipped('KICAD_CLI_UNAVAILABLE', message);
   }
 }
 
