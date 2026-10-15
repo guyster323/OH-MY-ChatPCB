@@ -70,7 +70,7 @@ Official KiCad builds do not contain this fork panel. In that case the standalon
 
 ## Windows Build Configuration
 
-`cmake` is typically bundled with Visual Studio:
+The local kicad-source-mirror-chatpcb checkout uses Visual Studio's bundled CMake:
 
 ```powershell
 C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe

@@ -130,15 +130,15 @@ KiCad 회로도 편집기 오른쪽에 **ChatPCB 채팅 패널**을 통합하여
    - 재연결에 지수 백오프 적용
    - 수용 기준: 타임아웃 기반 테스트 제거
 
-### Electrical verification (EEBench)
+### Electrical verification (EEBench) — 계획
 
 [EEBench](https://eebench.org/)는 회로도/프로필 초안과 제조 출력 사이의 아날로그/전원 품질 기준입니다. 현재 ChatPCB는 EEBench 리더보드 실행이 아닙니다: V1은 atopile `.ato` + SPICE를 평가하며, KiCad artifacts는 평가하지 않습니다.
 
-EEBench는 요구사항 → 설계 → 시뮬레이션 루프를 내부 품질 기준으로 사용할 수 있습니다:
-- SPICE 기반 요구사항 검증 (gain, hold-up, ripple, thresholds, tolerance corners)
-- 데이터시트 기반 부품 모델과 비용 (회로가 작동한 후에만 비용 크레딧)
-- `ngspice` 미사용 가능 시 typed skip (skip을 pass로 취급하지 않음)
-- Gerber/drill/BOM 제조 출력 전 이 게이트 정의 필요
+EEBench를 요구사항 → 설계 → 시뮬레이션 루프의 내부 품질 기준으로 사용하는 것을 계획 중입니다:
+- **계획**: SPICE 기반 요구사항 검증 (gain, hold-up, ripple, thresholds, tolerance corners) — 현재는 `ngspice -b` exit code만 확인
+- **계획**: 데이터시트 기반 부품 모델과 비용 (회로가 작동한 후에만 비용 크레딧) — 현재 미구현
+- **현재**: `ngspice` 사용 불가 시 typed skip 반환 (현재 skip은 `ok: true`로 통과 처리되는 알려진 갭)
+- **계획**: Gerber/drill/BOM 제조 출력 전 이 게이트 정의 필요
 
 ### P2: 구조 분리와 제품화
 

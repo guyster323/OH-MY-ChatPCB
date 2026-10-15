@@ -31,25 +31,48 @@ async function checkLinks(filePath) {
   return { links, issues };
 }
 
+async function findMarkdownFiles(dir, baseDir = rootDir) {
+  const { readdir, stat } = await import('node:fs/promises');
+  const files = [];
+  
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await findMarkdownFiles(fullPath, baseDir));
+      } else if (entry.name.endsWith('.md')) {
+        files.push(fullPath);
+      }
+    }
+  } catch (err) {
+    // Skip inaccessible directories
+  }
+  
+  return files;
+}
+
 async function main() {
+  const docsDir = join(rootDir, 'docs');
   const docFiles = [
-    'README.md',
-    'docs/ROADMAP.md',
-    'docs/ARCHITECTURE.md',
-    'docs/KICAD_FORK_BOOTSTRAP.md'
-  ];
+    join(rootDir, 'README.md'),
+    join(rootDir, 'plan.md'),
+    ...(await findMarkdownFiles(docsDir))
+  ].filter((f, i, a) => a.indexOf(f) === i); // deduplicate
   
   let totalLinks = 0;
   let totalIssues = 0;
+  let totalFiles = 0;
   
-  for (const file of docFiles) {
-    const filePath = join(rootDir, file);
+  for (const filePath of docFiles) {
     try {
       const { links, issues } = await checkLinks(filePath);
       totalLinks += links.length;
       totalIssues += issues.length;
+      totalFiles++;
       
-      console.log(`${file}: ${links.length} links, ${issues.length} issues`);
+      const relPath = filePath.replace(rootDir + '/', '');
+      console.log(`${relPath}: ${links.length} links, ${issues.length} issues`);
       
       if (issues.length > 0) {
         for (const issue of issues) {
@@ -57,11 +80,11 @@ async function main() {
         }
       }
     } catch (err) {
-      console.error(`Error checking ${file}:`, err.message);
+      console.error(`Error checking ${filePath}:`, err.message);
     }
   }
   
-  console.log(`\nTotal: ${totalLinks} links checked, ${totalIssues} broken links`);
+  console.log(`\nTotal: ${totalFiles} files, ${totalLinks} links checked, ${totalIssues} broken links`);
   
   if (totalIssues > 0) {
     process.exit(1);

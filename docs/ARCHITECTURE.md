@@ -4,6 +4,8 @@
 
 OH-MY-ChatPCB는 로컬 우선(local-first), 증거 기반(evidence-gated) KiCad 에이전트 런타임으로, 사용자 소유 AI 제공자를 네이티브 KiCad 워크플로에 연결합니다.
 
+The product UI is the KiCad schematic editor's right-side ChatPCB panel, not a standalone web application.
+
 ## 3계층 구조
 
 ```
@@ -143,7 +145,7 @@ Panel: user clicks "Apply"
 - 커스텀 `chatpcb_*` 최상위 노드 금지
 - Schema v1 manifests remain readable but unverified (`legacy-unverified`)
 - Schema v2 is artifact-bound with canonical `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, `releaseGates`
-- All generated artifacts participate in preview and rollback
+- Rollback covers KiCad files (`.kicad_sch`, `.kicad_pcb`, `.kicad_pro`), `.chatpcb.json`, libraries (`chatpcb.kicad_sym`, `sym-lib-table`), and SPICE fixtures (`_simulation.cir`)
 
 ## 보안 경계
 
