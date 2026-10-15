@@ -736,7 +736,7 @@ function syncWorkflow() {
     const id = button.dataset.step;
     const index = workflowIndex(id);
     const lane = id.split('.')[0];
-    let state = 'idle';
+    let state = 'idle'; // eslint-disable-line no-useless-assignment
     if (lane === 'fab' && !fabUnlocked) state = 'locked';
     else if (lane === 'layout' && !layoutUnlocked) state = 'locked';
     else if (done.has(id) && id !== active) state = 'done';
