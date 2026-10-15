@@ -1,0 +1,71 @@
+(kicad_symbol_lib
+  (version 20231120)
+  (generator "test-fixture")
+  (generator_version "1.0")
+  
+  (symbol "TPS62177DQC"
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "U"
+      (at 0 12.7 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "TPS62177DQC"
+      (at 0 10.16 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "Package_SON:WSON-10-1EP_2x3mm_P0.5mm_EP0.84x2.4mm_ThermalVias"
+      (at 0 -12.7 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" ""
+      (at 0 0 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Description" "500mA Step-Down Converter with Sleep Mode, fixed 3.3V Output Voltage, 4.75-28V input voltage, WSON-10"
+      (at 0 0 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (symbol "TPS62177DQC_0_1"
+      (rectangle
+        (start -7.62 8.89)
+        (end 7.62 -8.89)
+        (stroke (width 0.254) (type default))
+        (fill (type background))
+      )
+    )
+    (symbol "TPS62177DQC_1_1"
+      (pin power_in line
+        (at -10.16 6.35 0)
+        (length 2.54)
+        (name "VIN" (effects (font (size 1.27 1.27))))
+        (number "1" (effects (font (size 1.27 1.27))))
+      )
+      (pin power_in line
+        (at 0 -11.43 90)
+        (length 2.54)
+        (name "GND" (effects (font (size 1.27 1.27))))
+        (number "2" (effects (font (size 1.27 1.27))))
+      )
+      (pin input line
+        (at -10.16 0 0)
+        (length 2.54)
+        (name "EN" (effects (font (size 1.27 1.27))))
+        (number "3" (effects (font (size 1.27 1.27))))
+      )
+      (pin output line
+        (at 10.16 6.35 180)
+        (length 2.54)
+        (name "SW" (effects (font (size 1.27 1.27))))
+        (number "4" (effects (font (size 1.27 1.27))))
+      )
+      (pin power_out line
+        (at 10.16 3.81 180)
+        (length 2.54)
+        (name "VOUT" (effects (font (size 1.27 1.27))))
+        (number "5" (effects (font (size 1.27 1.27))))
+      )
+    )
+  )
+)
