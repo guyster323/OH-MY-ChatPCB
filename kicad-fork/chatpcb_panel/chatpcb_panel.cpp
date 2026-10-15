@@ -70,12 +70,16 @@ wxString WithFileCacheBust( const wxString& aUrl )
     wxDateTime newest = html.GetModificationTime();
     const wxFileName js( html.GetPath(), wxT( "panel.js" ) );
     const wxFileName css( html.GetPath(), wxT( "styles.css" ) );
+    const wxFileName constants( html.GetPath(), wxT( "constants.js" ) );
 
     if( js.FileExists() && js.GetModificationTime().IsLaterThan( newest ) )
         newest = js.GetModificationTime();
 
     if( css.FileExists() && css.GetModificationTime().IsLaterThan( newest ) )
         newest = css.GetModificationTime();
+    
+    if( constants.FileExists() && constants.GetModificationTime().IsLaterThan( newest ) )
+        newest = constants.GetModificationTime();
 
     return aUrl + wxString::Format( wxT( "?v=%ld" ), static_cast<long>( newest.GetTicks() ) );
 }

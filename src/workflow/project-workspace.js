@@ -11,7 +11,9 @@ export async function createNamedProject({ workspaceRoot, projectName } = {}) {
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot ?? '');
   const projectDir = path.resolve(resolvedWorkspaceRoot, slug);
 
-  assertInside(resolvedWorkspaceRoot, projectDir, 'Project directory must be inside the workspace root.');
+  if (!isInside(resolvedWorkspaceRoot, projectDir)) {
+    throw typedError('INVALID_PROJECT_NAME', 'Project directory must be inside the workspace root.');
+  }
 
   await mkdir(resolvedWorkspaceRoot, { recursive: true });
 
@@ -70,7 +72,10 @@ export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) 
   if (allowedWorkspaceRoot) {
     const resolvedWorkspaceRoot = path.resolve(allowedWorkspaceRoot);
     if (resolvedProjectDir !== resolvedWorkspaceRoot) {
-      assertInside(resolvedWorkspaceRoot, resolvedProjectDir, 'Project directory must stay inside the allowed workspace root.');
+      assertInside(resolvedWorkspaceRoot, resolvedProjectDir, {
+        message: 'Project directory must stay inside the allowed workspace root.',
+        code: 'UNSAFE_PROJECT_DIR'
+      });
     }
   }
 

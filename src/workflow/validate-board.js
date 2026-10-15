@@ -102,13 +102,10 @@ function resolveValidationTarget(projectDir, targetPath) {
 
   const resolved = path.resolve(projectDir, targetPath);
   if (resolved !== projectDir) {
-    try {
-      assertInside(projectDir, resolved, 'Validation target must remain inside the project directory.');
-    } catch (error) {
-      const validationError = new Error(error.message);
-      validationError.code = 'UNSAFE_VALIDATION_TARGET';
-      throw validationError;
-    }
+    assertInside(projectDir, resolved, {
+      message: 'Validation target must remain inside the project directory.',
+      code: 'UNSAFE_VALIDATION_TARGET'
+    });
   }
 
   return resolved;

@@ -5,10 +5,20 @@ export function isInside(workspaceRoot, candidate) {
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
 }
 
-export function assertInside(workspaceRoot, candidate, errorMessage) {
+export function assertInside(workspaceRoot, candidate, errorMessageOrOptions) {
+  let errorMessage;
+  let errorCode = 'UNSAFE_PROJECT_DIR';
+  
+  if (typeof errorMessageOrOptions === 'string') {
+    errorMessage = errorMessageOrOptions;
+  } else if (errorMessageOrOptions && typeof errorMessageOrOptions === 'object') {
+    errorMessage = errorMessageOrOptions.message;
+    errorCode = errorMessageOrOptions.code ?? errorCode;
+  }
+  
   if (!isInside(workspaceRoot, candidate)) {
     const error = new Error(errorMessage ?? `Path must remain inside the workspace root: ${candidate}`);
-    error.code = 'UNSAFE_PROJECT_DIR';
+    error.code = errorCode;
     throw error;
   }
   return candidate;

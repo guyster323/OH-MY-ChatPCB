@@ -5,6 +5,8 @@ import test from 'node:test';
 test('WebView panel provides named-project creation and Send-only request controls', async () => {
   const html = await readFile('apps/panel/index.html', 'utf8');
   const script = await readFile('apps/panel/panel.js', 'utf8');
+  const constants = await readFile('apps/panel/constants.js', 'utf8');
+  const panelCode = script + '\n' + constants;
 
   assert.match(html, /id="workspace-root"/);
   assert.match(html, /id="project-name"/);
@@ -28,12 +30,12 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="conversation-log"/);
   assert.match(html, /id="conversation-options"/);
   assert.doesNotMatch(html, /id="generate-button"/);
-  assert.match(script, /project\.create/);
-  assert.match(script, /project\.request/);
+  assert.match(panelCode, /project\.create/);
+  assert.match(panelCode, /project\.request/);
   assert.match(script, /renderRequestStatus/);
   assert.match(script, /renderValidation/);
   assert.match(script, /renderKiCadLink/);
-  assert.match(script, /project\.inspect/);
+  assert.match(panelCode, /project\.inspect/);
   assert.match(script, /inspectionState/);
   assert.match(script, /renderInspection/);
   assert.match(script, /patchId/);
@@ -76,7 +78,7 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /new-project-again/);
   assert.match(script, /offerNativeDraft/);
   assert.match(script, /이 구성으로 초안 만들기/);
-  assert.match(script, /schematic\.generate/);
+  assert.match(panelCode, /schematic\.generate/);
 });
 
 test('KiCad fork skeleton declares a wxWebView-backed ChatPCB panel', async () => {
