@@ -299,8 +299,12 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
 
 test('supported profile PCB power intent rejects unsafe endpoint-pad routes', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-power-routing-'));
+  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
 
   try {
+    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
+    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -341,8 +345,12 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
 
 test('supported profiles emit safe CC escape routes outside the USB-C pad field', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-usbc-cc-escape-'));
+  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
 
   try {
+    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
+    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -372,8 +380,12 @@ test('supported profiles emit safe CC escape routes outside the USB-C pad field'
 
 test('supported profiles route I2C pull-up nets through bounded multi-leg chains', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-i2c-routing-'));
+  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
 
   try {
+    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
+    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -395,15 +407,21 @@ test('supported profiles route I2C pull-up nets through bounded multi-leg chains
       assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
     }
   } finally {
+    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
+    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profile generic segments avoid J3/J7 no-net pads and cross-net intersections', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pad-safe-generic-routing-'));
+  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
   let noNetPadCount = 0;
 
   try {
+    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
+    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -450,6 +468,8 @@ test('supported profile generic segments avoid J3/J7 no-net pads and cross-net i
 
     assert.ok(noNetPadCount > 0, 'supported profile boards should contain J3/J7 no-net pads');
   } finally {
+    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
+    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
     await rm(root, { force: true, recursive: true });
   }
 });
