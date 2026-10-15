@@ -102,7 +102,6 @@ let activeProject = null;
 let activeProjectCreateId = null;
 let activeRequestId = null;
 let activeRequestProjectDir = null;
-let activeProviderInvocationId = null;
 let pendingHostStatus = null;
 let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
@@ -137,11 +136,15 @@ recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus())
 approvePatchButtonEl.addEventListener('click', approvePatch);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
 stopRequestButtonEl.addEventListener('click', stopRequest);
-rollbackButtonEl.addEventListener('click', rollbackTransaction);
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
-    if (typeof dialog?.showModal === 'function') dialog.showModal();
+    if (typeof dialog?.showModal === 'function') {
+      if (button.dataset.open === 'transaction-dialog') {
+        refreshTransactionStatus();
+      }
+      dialog.showModal();
+    }
   });
 }
 for (const button of document.querySelectorAll('.flow-btn')) {
@@ -200,6 +203,7 @@ async function sendProjectRequest() {
   }
   if (activeRequestId) return;
 
+  clearPatchPreviewErc();
   const requestProject = activeProject;
   setRequestBusy(true);
   const status = await requestHostProjectStatus();
@@ -301,7 +305,6 @@ function handleEnvelope(envelope) {
     pendingCalls.delete(activeRequestId);
     activeRequestId = null;
     activeRequestProjectDir = null;
-    activeProviderInvocationId = null;
     setRequestBusy(false);
         if (requestProjectDir !== activeProject?.projectDir) return;
         const conversation = envelope.payload.conversation;
@@ -344,7 +347,6 @@ function handleEnvelope(envelope) {
     const requestProjectDir = activeRequestProjectDir;
     activeRequestId = null;
     activeRequestProjectDir = null;
-    activeProviderInvocationId = null;
     setRequestBusy(false);
     if (requestProjectDir !== activeProject?.projectDir) return;
     renderProjectRequest(envelope.payload.result);
@@ -383,7 +385,6 @@ function handleEnvelope(envelope) {
     providerStatusEl.title = provider.hint ?? '';
   }
   if (callName === 'provider.cancel') {
-    activeProviderInvocationId = null;
     setRequestBusy(false);
     return;
   }
@@ -392,7 +393,16 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'project.transaction.rollback') {
-    renderRequestStatus({ state: 'completed', summary: 'Transaction rolled back successfully.' });
+    const result = envelope.payload.result;
+    if (result?.rolledBack === false || !result?.rolledBack) {
+      renderRequestStatus({ 
+        state: 'failed', 
+        summary: 'Rollback failed or was not performed.', 
+        technicalDetail: result?.reason?.message ?? 'The transaction could not be rolled back.'
+      });
+    } else {
+      renderRequestStatus({ state: 'completed', summary: 'Transaction rolled back successfully.' });
+    }
     inspectActiveProject();
     refreshTransactionStatus();
     return;
@@ -677,6 +687,7 @@ function renderPatchApproval() {
 
 function approvePatch() {
   if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
+  clearPatchPreviewErc();
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
   const id = `patch_approve_${Date.now()}`;
@@ -690,6 +701,7 @@ function cancelPatch() {
   pendingCalls.set(id, 'schematic.patch.cancel');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
   clearPatchApproval('Patch preview cancelled.');
+  clearPatchPreviewErc();
 }
 
 function workflowIndex(id) {
@@ -809,9 +821,6 @@ function renderRequestStatus({ state, summary, technicalDetail = '' }) {
 
 function handleProgressDelta(payload = {}) {
   if (payload.requestId && activeRequestId && payload.requestId !== activeRequestId) return;
-  if (payload.invocationId && !activeProviderInvocationId) {
-    activeProviderInvocationId = payload.invocationId;
-  }
   if (payload.conversation) {
     const conversation = payload.conversation;
     const generateReady = conversation.status === 'generate' || Boolean(conversation.specRows?.length);
@@ -1144,25 +1153,25 @@ function stopConflictWatch() {
 function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
-  stopRequestButtonEl.disabled = !isBusy || !activeProviderInvocationId;
-  stopRequestButtonEl.title = !isBusy ? 'No active request' : !activeProviderInvocationId ? 'Request ID not available' : 'Stop the current request';
+  stopRequestButtonEl.disabled = !isBusy || !activeRequestId;
+  stopRequestButtonEl.title = !isBusy ? 'No active request' : !activeRequestId ? 'Request ID not available' : 'Stop the current request';
 }
 
 function stopRequest() {
-  if (!activeProviderInvocationId) return;
+  if (!activeRequestId) return;
   const id = `provider_cancel_${Date.now()}`;
   pendingCalls.set(id, 'provider.cancel');
-  sendToolCall({ id, name: 'provider.cancel', args: { id: activeProviderInvocationId } });
+  sendToolCall({ id, name: 'provider.cancel', args: { id: activeRequestId } });
   appendProgress({ stage: 'fail', text: 'Stopping request...' });
 }
 
 function rollbackTransaction() {
   if (!activeProject) return;
-  if (!confirm('Rollback은 마지막 transaction을 되돌립니다. 계속하시겠습니까?')) return;
-  
-  const id = `transaction_status_${Date.now()}`;
-  pendingCalls.set(id, 'project.transaction.status');
-  sendToolCall({ id, name: 'project.transaction.status', args: { projectDir: activeProject.projectDir } });
+  refreshTransactionStatus();
+  const dialog = document.getElementById('transaction-dialog');
+  if (typeof dialog?.showModal === 'function') {
+    dialog.showModal();
+  }
 }
 
 function refreshTransactionStatus() {
@@ -1185,30 +1194,26 @@ function renderTransactionStatus(status) {
   transactionStatusEl.textContent = `${transactions.length} transaction(s)`;
   transactionListEl.replaceChildren();
   
-  for (const txn of transactions.slice(0, 5)) {
+  for (const txn of transactions.slice(-5).reverse()) {
     const item = document.createElement('li');
-    item.textContent = `${txn.id}: ${txn.operation} (${new Date(txn.createdAt).toLocaleString()})`;
+    item.textContent = `${txn.transactionId}: ${txn.operation} (${new Date(txn.createdAt).toLocaleString()})`;
     transactionListEl.append(item);
   }
   
-  const lastTxn = transactions[0];
+  const lastTxn = transactions[transactions.length - 1];
   rollbackButtonEl.disabled = !lastTxn;
-  rollbackButtonEl.title = lastTxn ? `Rollback transaction ${lastTxn.id}` : 'No transactions to rollback';
+  rollbackButtonEl.title = lastTxn ? `Rollback transaction ${lastTxn.transactionId}` : 'No transactions to rollback';
   
   if (lastTxn) {
     rollbackButtonEl.onclick = () => {
-      if (!confirm(`Rollback transaction ${lastTxn.id}? 마지막 적용을 되돌립니다.`)) return;
-      const id = `transaction_rollback_${Date.now()}`;
-      pendingCalls.set(id, 'project.transaction.rollback');
-      sendToolCall({ id, name: 'project.transaction.rollback', args: { projectDir: activeProject.projectDir, transactionId: lastTxn.id } });
-      renderRequestStatus({ state: 'running', summary: 'Rolling back transaction...' });
+      showRollbackConfirmation(lastTxn.transactionId);
     };
   }
 }
 
 function renderPatchPreviewErc(validation = {}) {
   if (!validation || !validation.erc) {
-    patchPreviewErcEl.hidden = true;
+    clearPatchPreviewErc();
     return;
   }
   
@@ -1234,6 +1239,38 @@ function renderPatchPreviewErc(validation = {}) {
     }
   } else {
     patchPreviewErcWarningEl.hidden = true;
+  }
+}
+
+function clearPatchPreviewErc() {
+  patchPreviewErcEl.hidden = true;
+  patchPreviewErcSummaryEl.textContent = '';
+  patchPreviewErcWarningEl.textContent = '';
+  patchPreviewErcWarningEl.hidden = true;
+}
+
+function showRollbackConfirmation(transactionId) {
+  const confirmDialog = document.getElementById('rollback-confirm-dialog');
+  const confirmMessage = document.getElementById('rollback-confirm-message');
+  const confirmYes = document.getElementById('rollback-confirm-yes');
+  const confirmNo = document.getElementById('rollback-confirm-no');
+  
+  confirmMessage.textContent = `Transaction ${transactionId}를 되돌리시겠습니까? 마지막 적용이 취소됩니다.`;
+  
+  confirmYes.onclick = () => {
+    confirmDialog.close();
+    const id = `transaction_rollback_${Date.now()}`;
+    pendingCalls.set(id, 'project.transaction.rollback');
+    sendToolCall({ id, name: 'project.transaction.rollback', args: { projectDir: activeProject.projectDir, transactionId } });
+    renderRequestStatus({ state: 'running', summary: 'Rolling back transaction...' });
+  };
+  
+  confirmNo.onclick = () => {
+    confirmDialog.close();
+  };
+  
+  if (typeof confirmDialog?.showModal === 'function') {
+    confirmDialog.showModal();
   }
 }
 

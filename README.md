@@ -167,9 +167,13 @@ ChatPCB supports three local CLI providers: **Codex**, **Claude Code**, and **Gi
 npm install -g @openai/codex
 ```
 
-If using a user-scoped npm prefix (e.g., `~/.local`), ensure `~/.local/bin` is on your `PATH`:
+If using a user-scoped npm prefix (e.g., `~/.local`), ensure that directory is on your `PATH`:
 
 ```bash
+# Check global npm prefix
+npm prefix -g
+
+# Add to PATH (example for ~/.local)
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -189,17 +193,17 @@ Expected output: `Logged in using ChatGPT` (or similar).
 
 **Troubleshooting:**
 
-- If the panel shows `codex: missing`, the `codex` command is not on `PATH`. Check your npm global bin directory with `npm bin -g` and add it to `PATH`.
+- If the panel shows `codex: missing`, the `codex` command is not on `PATH`. Check your npm global prefix with `npm prefix -g` and ensure its `bin` subdirectory is on `PATH`.
 - Device auth requires a ChatGPT account. Sign in with your OpenAI credentials.
 
 ### Claude Code CLI
 
 **Install:**
 
-Follow the official [Claude Code CLI installation guide](https://docs.anthropic.com/claude/docs/claude-code-cli) or install via npm (if available):
+Follow the official [Anthropic Claude Code CLI installation guide](https://docs.anthropic.com/claude/docs/claude-code-cli) or install via npm:
 
 ```powershell
-npm install -g claude-code
+npm install -g @anthropic-ai/claude-code
 ```
 
 **Authenticate:**
@@ -218,7 +222,7 @@ claude --version
 
 **Troubleshooting:**
 
-- If `claude: missing`, ensure the CLI is installed and on `PATH`.
+- If `claude: missing`, ensure the CLI is installed and on `PATH`. Use `npm prefix -g` to check your global npm directory.
 - Consult the official Anthropic documentation for the latest setup instructions.
 
 ### GitHub Copilot CLI
@@ -259,8 +263,25 @@ gh copilot --version
 
 **Troubleshooting:**
 
-- If `copilot: missing`, ensure `gh` is installed and authenticated, and the `gh-copilot` extension is installed.
+- If `copilot: missing`, ensure `gh` is installed and authenticated, and the `gh-copilot` extension is installed. Use `gh auth status` to verify authentication.
 - Check your GitHub Copilot subscription status at [github.com/settings/copilot](https://github.com/settings/copilot).
+
+### Grok (xAI)
+
+**Note:** Grok support is experimental. Check the provider registry for current status.
+
+**Install:**
+
+Follow xAI's official Grok CLI installation instructions when available.
+
+**Authenticate:**
+
+Follow xAI's authentication flow for the Grok CLI.
+
+**Troubleshooting:**
+
+- If `grok: missing`, ensure the Grok CLI is installed and on `PATH`.
+- Consult xAI documentation for setup details.
 
 ### Provider status in the panel
 

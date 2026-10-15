@@ -57,9 +57,10 @@ export async function checkProviderAvailability({ provider, commandExistsImpl = 
 
 function getProviderInstallHint(provider) {
   const hints = {
-    codex: 'Install: npm install -g @openai/codex, then: codex login --device-auth. Add ~/.local/bin or global npm bin to PATH if needed.',
-    claude: 'Install: npm install -g claude-code (or follow official instructions), then: claude login. Ensure the CLI is on PATH.',
-    copilot: 'Install: gh extension install github/gh-copilot, then authenticate with: gh auth login. Requires GitHub CLI (gh).'
+    codex: 'Install: npm install -g @openai/codex, then: codex login --device-auth. Add global npm bin to PATH if needed (check with: npm prefix -g).',
+    claude: 'Install: npm install -g @anthropic-ai/claude-code (or follow official instructions), then: claude login. Ensure the CLI is on PATH.',
+    copilot: 'Install: gh extension install github/gh-copilot, then authenticate with: gh auth login. Requires GitHub CLI (gh).',
+    grok: 'Install Grok CLI following xAI official instructions, then authenticate. Ensure the CLI is on PATH.'
   };
   return hints[provider] ?? 'Provider CLI not found on PATH. Install and authenticate the CLI, then restart the daemon.';
 }

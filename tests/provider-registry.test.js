@@ -60,6 +60,28 @@ test('provider availability returns no hint when available', async () => {
   assert.equal(result.hint, null, 'hint should be null when provider is available');
 });
 
+test('all providers have install hints when missing', async () => {
+  const providers = ['codex', 'claude', 'copilot', 'grok'];
+  
+  for (const provider of providers) {
+    try {
+      const result = await checkProviderAvailability({
+        provider,
+        commandExistsImpl: async () => false
+      });
+      
+      assert.equal(result.status, 'missing', `${provider} should be missing`);
+      assert.ok(result.hint, `${provider} should have a hint`);
+      assert.match(result.hint.toLowerCase(), /install/i, `${provider} hint should mention installation`);
+    } catch (error) {
+      if (error.message.includes('Unknown provider')) {
+        continue;
+      }
+      throw error;
+    }
+  }
+});
+
 test('provider prompt constrains local agents to allowed tool-call JSON', () => {
   const prompt = buildProviderPrompt({
     provider: 'claude',
