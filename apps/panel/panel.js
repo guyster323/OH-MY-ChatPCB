@@ -34,6 +34,15 @@ const browserLocale = navigator.language || navigator.userLanguage || 'en';
 const locale = browserLocale.startsWith('ko') ? 'ko' : 'en';
 loadI18n(locale);
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
 const PROGRESS_COPY = {
   conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
   provider: { title: 'CLI와 대화 중', sprite: 'cli' },
@@ -1266,10 +1275,16 @@ function renderChatGPTAuth() {
     setRequestBusy(true);
   } else if (state === 'signed_in') {
     const account = chatgptAuthState.account || {};
-    const plan = chatgptAuthState.plan || 'Plus';
+    const plan = chatgptAuthState.plan;
+    const email = escapeHtml(account.email || 'Unknown');
+    const planText = plan ? escapeHtml(plan) : '';
+    const accountText = planText 
+      ? t('auth.chatgpt.signed-in.account', { email, plan: planText })
+      : email;
+    
     chatgptAuthCardEl.innerHTML = `
       <h2 id="chatgpt-auth-title" tabindex="-1">${t('auth.chatgpt.signed-in.title')}</h2>
-      <p>${t('auth.chatgpt.signed-in.account', { email: account.email || 'Unknown', plan })}</p>
+      <p translate="no">${accountText}</p>
       <p>${t('auth.chatgpt.signed-in.usage')}</p>
       <div class="chatgpt-auth-actions">
         <button class="chatgpt-secondary-btn" onclick="signOutChatGPT()">${t('auth.chatgpt.sign-out')}</button>
@@ -1336,8 +1351,12 @@ function updateLiveRegion(payload) {
   if (state === 'waiting') {
     message = t('auth.chatgpt.waiting.title');
   } else if (state === 'signed_in') {
-    const plan = payload.plan || 'Plus';
-    message = `${t('auth.chatgpt.signed-in.title')}, ${plan}`;
+    const plan = payload.plan;
+    if (plan) {
+      message = `${t('auth.chatgpt.signed-in.title')}, ${plan}`;
+    } else {
+      message = t('auth.chatgpt.signed-in.title');
+    }
   } else if (state === 'signed_out') {
     message = t('auth.chatgpt.signed-out.title');
   } else if (state === 'error' && code) {

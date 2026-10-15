@@ -2,7 +2,7 @@ import { loadCredentials, refreshAccessToken, saveCredentials, verifyTokenExpiry
 
 const RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 
-export async function callChatGPTResponses({ prompt, onChunk, signal }) {
+export async function callChatGPTResponses({ prompt, onChunk, onError, signal }) {
   const creds = await loadCredentials();
   
   if (!creds || !creds.access_token) {
@@ -27,15 +27,17 @@ export async function callChatGPTResponses({ prompt, onChunk, signal }) {
       accessToken = refreshed.access_token;
     } catch (error) {
       // If refresh fails, try with existing token
-      console.error('Token refresh failed:', error.message);
+      if (onError) onError({ code: 'refresh_failed', message: error.message });
     }
   }
 
+  // Get account models - for now use a default model
+  // In production, should fetch from account.models endpoint
+  const model = 'chatgpt-4o-latest';
+
   const body = {
-    model: 'auto',
-    messages: [
-      { role: 'user', content: prompt }
-    ],
+    model,
+    input: prompt, // Use 'input' not 'messages'
     store: false,
     stream: true
   };
@@ -70,24 +72,38 @@ export async function callChatGPTResponses({ prompt, onChunk, signal }) {
     // Handle specific error codes from the docs
     if (response.status === 403) {
       if (errorCode === 'subscription_sharing_user_not_eligible') {
-        throw new Error('NOT_ELIGIBLE: This account is not eligible to use ChatGPT plan sharing');
+        const err = new Error('NOT_ELIGIBLE: This account is not eligible to use ChatGPT plan sharing');
+        err.code = 'not_eligible';
+        throw err;
       }
       if (errorCode === 'subscription_sharing_route_not_supported') {
-        throw new Error('ROUTE_NOT_SUPPORTED: This request cannot use your ChatGPT plan');
+        const err = new Error('ROUTE_NOT_SUPPORTED: This request cannot use your ChatGPT plan');
+        err.code = 'route_not_supported';
+        throw err;
+      }
+      if (errorCode === 'subscription_sharing_usage_unavailable') {
+        const err = new Error('USAGE_UNAVAILABLE: ChatGPT usage is temporarily unavailable');
+        err.code = 'usage_unavailable';
+        throw err;
       }
     }
 
     if (response.status === 429 && errorCode === 'subscription_sharing_usage_limit_exceeded') {
-      throw new Error('USAGE_LIMIT_EXCEEDED: You have reached your ChatGPT usage limit');
+      const err = new Error('USAGE_LIMIT_EXCEEDED: You have reached your ChatGPT usage limit');
+      err.code = 'usage_limit';
+      throw err;
     }
 
-    throw new Error(errorMessage);
+    const err = new Error(errorMessage);
+    err.code = errorCode;
+    throw err;
   }
 
   // Stream the response
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let completed = false;
 
   try {
     while (true) {
@@ -100,32 +116,55 @@ export async function callChatGPTResponses({ prompt, onChunk, signal }) {
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed === 'data: [DONE]') continue;
+        if (!trimmed || trimmed === 'data: [DONE]') {
+          if (trimmed === 'data: [DONE]') completed = true;
+          continue;
+        }
         
         if (trimmed.startsWith('data: ')) {
           try {
             const data = JSON.parse(trimmed.slice(6));
-            if (data.choices?.[0]?.delta?.content) {
+            
+            // Handle response.completed event
+            if (data.type === 'response.completed') {
+              completed = true;
+              continue;
+            }
+            
+            // Handle delta events with content
+            if (data.type === 'response.output_text.delta' && data.delta) {
+              if (onChunk) onChunk(data.delta);
+            } else if (data.choices?.[0]?.delta?.content) {
+              // Fallback to standard format
               const content = data.choices[0].delta.content;
               if (onChunk) onChunk(content);
             }
-          } catch {
+          } catch (parseError) {
             // Skip malformed chunks
+            if (onError) onError({ code: 'parse_error', message: parseError.message });
           }
         }
       }
     }
+  } catch (streamError) {
+    // Handle mid-stream failures
+    if (onError) onError({ code: 'stream_error', message: streamError.message });
+    throw streamError;
   } finally {
     reader.releaseLock();
   }
+
+  return { completed };
 }
 
 export function mapChatGPTErrorToCode(error) {
   const message = error?.message || String(error);
+  const code = error?.code;
   
-  if (message.includes('NOT_ELIGIBLE')) return 'not_eligible';
-  if (message.includes('USAGE_LIMIT_EXCEEDED')) return 'usage_limit';
-  if (message.includes('ROUTE_NOT_SUPPORTED')) return 'route_not_supported';
+  if (code === 'not_eligible' || message.includes('NOT_ELIGIBLE')) return 'not_eligible';
+  if (code === 'usage_limit' || message.includes('USAGE_LIMIT_EXCEEDED')) return 'usage_limit';
+  if (code === 'route_not_supported' || message.includes('ROUTE_NOT_SUPPORTED')) return 'route_not_supported';
+  if (code === 'usage_unavailable' || message.includes('USAGE_UNAVAILABLE')) return 'usage_unavailable';
   if (message.includes('Not signed in')) return 'not_signed_in';
   
   return 'network';

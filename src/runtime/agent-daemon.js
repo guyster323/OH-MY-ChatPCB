@@ -19,7 +19,7 @@ import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
-import { startAuthFlow, loadCredentials, deleteCredentials, extractPlan } from './auth/chatgpt-auth.js';
+import { startAuthFlow, loadCredentials, saveCredentials, deleteCredentials, extractPlan } from './auth/chatgpt-auth.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
@@ -280,6 +280,62 @@ async function invokeProvider(call, ctx) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
 
+  // Special handling for ChatGPT - direct API call instead of CLI
+  if (provider === 'chatgpt') {
+    const { callChatGPTResponses } = await import('./providers/chatgpt-provider.js');
+    const controller = new AbortController();
+    providerControllers.set(invocationId, controller);
+
+    try {
+      emitProgress(ctx, {
+        stage: 'provider',
+        sprite: 'cli',
+        text: progressCopy(prompt, `ChatGPT와 대화 중.`, `Talking to ChatGPT.`)
+      });
+
+      let responseText = '';
+      await callChatGPTResponses({
+        prompt,
+        onChunk: (chunk) => {
+          responseText += chunk;
+          emitProgress(ctx, {
+            stage: 'provider',
+            sprite: 'cli',
+            text: chunk
+          });
+        },
+        onError: (error) => {
+          emitProgress(ctx, {
+            stage: 'provider',
+            sprite: 'cli',
+            text: `Error: ${error.message}`
+          });
+        },
+        signal: controller.signal
+      });
+
+      return {
+        providerInvocation: true,
+        invocationId,
+        provider,
+        events: [
+          {
+            type: 'agent.delta',
+            payload: { text: responseText }
+          }
+        ],
+        toolResults: [],
+        stderr: '',
+        tracePath: null
+      };
+    } catch (error) {
+      throw error;
+    } finally {
+      providerControllers.delete(invocationId);
+    }
+  }
+
+  // Standard CLI provider flow
   const input = buildProviderPrompt({
     provider,
     userMessage: prompt,
@@ -996,12 +1052,12 @@ async function getChatGPTAuthStatus() {
     return { state: 'signed_out' };
   }
 
-  const plan = extractPlan(creds) || 'Plus';
+  const plan = extractPlan(creds);
   
   return {
     state: 'signed_in',
     account: creds.account,
-    plan
+    plan: plan || undefined // Don't default to 'Plus'
   };
 }
 
@@ -1012,7 +1068,7 @@ async function startChatGPTAuth(args, ctx) {
     onBrowserOpen: ({ authUrl, error }) => {
       if (ctx?.emit) {
         ctx.emit('auth.chatgpt.changed', {
-          state: error ? 'waiting' : 'waiting',
+          state: error ? 'error' : 'waiting',
           code: error || undefined,
           authUrl
         });
@@ -1034,16 +1090,15 @@ async function startChatGPTAuth(args, ctx) {
   // Handle the auth result
   authFlow.promise.then(
     async (creds) => {
-      await saveCredentials(creds);
       activeAuthAttempts.delete(authFlow.attemptId);
       
-      const plan = extractPlan(creds) || 'Plus';
+      const plan = extractPlan(creds);
       
       if (ctx?.emit) {
         ctx.emit('auth.chatgpt.changed', {
           state: 'signed_in',
           account: creds.account,
-          plan,
+          plan: plan || undefined,
           attemptId: authFlow.attemptId
         });
       }
@@ -1063,7 +1118,7 @@ async function startChatGPTAuth(args, ctx) {
 
   return {
     state: 'waiting',
-    authUrl: authFlow.authUrl,
+    authUrl: authFlow.authUrl || 'pending',
     attemptId: authFlow.attemptId
   };
 }

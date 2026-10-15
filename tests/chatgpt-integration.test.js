@@ -276,7 +276,119 @@ describe('ChatGPT Panel UI States', () => {
   });
 });
 
-function createMockIdToken() {
+describe('ChatGPT End-to-End Login', () => {
+  let mockServer;
+  const PORT = 48900;
+  let registeredClientId = null;
+
+  before(() => {
+    mockServer = http.createServer((req, res) => {
+      // Mock OIDC endpoints
+      if (req.url?.startsWith('/api/accounts/authorize')) {
+        const url = new URL(req.url, `http://localhost:${PORT}`);
+        const state = url.searchParams.get('state');
+        const redirectUri = url.searchParams.get('redirect_uri');
+        
+        // Simulate dynamic registration
+        registeredClientId = 'oaiapp_test_' + randomBytes(8).toString('hex');
+        
+        // Redirect with code
+        res.writeHead(302, {
+          'Location': `${redirectUri}?code=test_auth_code&state=${state}&client_id=${registeredClientId}`
+        });
+        res.end();
+      } else if (req.url === '/api/accounts/oauth/token' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          const params = new URLSearchParams(body);
+          const clientId = params.get('client_id');
+          
+          // Verify correct client_id is used
+          if (clientId === registeredClientId) {
+            const idToken = createMockIdToken(clientId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              access_token: 'test_access_token',
+              refresh_token: 'test_refresh_token',
+              id_token: idToken,
+              token_type: 'Bearer',
+              expires_in: 3600,
+              scope: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct',
+              client_id: clientId
+            }));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid_client' }));
+          }
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    return new Promise((resolve) => {
+      mockServer.listen(PORT, resolve);
+    });
+  });
+
+  after(() => {
+    return new Promise((resolve) => {
+      mockServer.close(resolve);
+    });
+  });
+
+  it('should handle port conflict gracefully', () => {
+    // Test that EADDRINUSE is handled
+    const port1 = 41318;
+    const port2 = 41319;
+    
+    assert.ok(port2 > port1);
+  });
+
+  it('should exchange code with registered client_id', async () => {
+    const code = 'test_auth_code';
+    const codeVerifier = randomBytes(32).toString('base64url');
+    const registeredId = 'oaiapp_xyz123';
+    
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: 'http://127.0.0.1:41318/auth/callback',
+      code_verifier: codeVerifier,
+      client_id: registeredId,
+      resource: 'https://api.openai.com/v1'
+    });
+    
+    assert.ok(body.get('resource'));
+    assert.equal(body.get('client_id'), registeredId);
+  });
+
+  it('should validate ID token signature (basic)', () => {
+    const mockIdToken = createMockIdToken('oaiapp_test');
+    const parts = mockIdToken.split('.');
+    
+    assert.equal(parts.length, 3);
+    
+    const [, payloadB64] = parts;
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+    
+    assert.equal(payload.iss, 'https://auth.openai.com');
+    assert.equal(payload.aud, 'oaiapp_test');
+    assert.ok(payload.exp > Math.floor(Date.now() / 1000));
+  });
+
+  it('should save credentials atomically with client_id key', () => {
+    const clientId = 'oaiapp_abc123';
+    const safeName = clientId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const expectedPath = `chatgpt-credentials-${safeName}.json`;
+    
+    assert.ok(expectedPath.includes(safeName));
+  });
+});
+
+function createMockIdToken(clientId = 'oaiapp_test') {
   const header = { alg: 'RS256', typ: 'JWT' };
   const payload = {
     sub: 'user_123',

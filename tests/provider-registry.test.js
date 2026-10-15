@@ -8,16 +8,18 @@ import {
   listProviderDefinitions
 } from '../src/runtime/provider-registry.js';
 
-test('provider registry declares codex, claude, and copilot adapters', () => {
+test('provider registry declares codex, claude, copilot, and chatgpt adapters', () => {
   const providers = listProviderDefinitions();
 
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ['codex', 'claude', 'copilot']
+    ['codex', 'claude', 'copilot', 'chatgpt']
   );
   assert.equal(getProviderDefinition('codex').command, 'codex');
   assert.equal(getProviderDefinition('claude').command, 'claude');
   assert.equal(getProviderDefinition('copilot').command, 'gh');
+  assert.equal(getProviderDefinition('chatgpt').command, null);
+  assert.equal(getProviderDefinition('chatgpt').requiresAuth, true);
 });
 
 test('provider availability uses injectable command probing', async () => {
