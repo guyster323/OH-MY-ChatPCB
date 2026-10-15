@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
-import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, getProviderInstallHint, listProviderDefinitions } from './provider-registry.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
@@ -281,17 +281,21 @@ async function invokeProvider(call, ctx) {
       sprite: 'cli',
       text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
     });
-    transcript = await runProviderProcessImpl({
-      command: definition.command,
-      args: definition.args,
-      input,
-      allowedToolNames: PROVIDER_ALLOWED_TOOLS,
-      signal: controller.signal,
-      onEvent: (event) => {
-        streamed.push(event);
-        emitProviderEvent(ctx, event);
-      }
-    });
+    try {
+      transcript = await runProviderProcessImpl({
+        command: definition.command,
+        args: definition.args,
+        input,
+        allowedToolNames: PROVIDER_ALLOWED_TOOLS,
+        signal: controller.signal,
+        onEvent: (event) => {
+          streamed.push(event);
+          emitProviderEvent(ctx, event);
+        }
+      });
+    } catch (error) {
+      throw providerSpawnFailure(error, definition);
+    }
     if (streamed.length === 0) {
       for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
     }
@@ -474,6 +478,15 @@ function guardToolProjectDir(call, allowedWorkspaceRoot) {
   }
 
   assertSafeProjectDir(projectDir, { allowedWorkspaceRoot });
+}
+
+function providerSpawnFailure(error, definition) {
+  const missing = error?.code === 'ENOENT' || /\bENOENT\b/i.test(error?.message ?? '');
+  if (!missing) throw error;
+  const hint = getProviderInstallHint(definition.id);
+  const wrapped = new Error(`${definition.label} was not found on the daemon PATH (spawn ${definition.command} ENOENT). ${hint}`);
+  wrapped.code = 'ENOENT';
+  throw wrapped;
 }
 
 function cancelProvider(args = {}, providerControllers) {

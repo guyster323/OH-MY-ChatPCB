@@ -37,9 +37,10 @@ export function getProviderDefinition(provider) {
   return { ...match, args: [...match.args] };
 }
 
-export async function checkProviderAvailability({ provider, commandExistsImpl = commandExists } = {}) {
+export async function checkProviderAvailability({ provider, commandExistsImpl = commandExists, env = process.env } = {}) {
   const definition = getProviderDefinition(provider);
-  const available = await commandExistsImpl(definition.command);
+  const probeEnv = { ...process.env, ...env };
+  const available = await commandExistsImpl(definition.command, probeEnv);
 
   let hint = null;
   if (!available) {
@@ -55,14 +56,15 @@ export async function checkProviderAvailability({ provider, commandExistsImpl = 
   };
 }
 
-function getProviderInstallHint(provider) {
+const GENERIC_INSTALL_HINT = 'Provider CLI not found on PATH. Install and authenticate the CLI, then restart the daemon.';
+
+export function getProviderInstallHint(provider) {
   const hints = {
     codex: 'Install: npm install -g @openai/codex, then: codex login --device-auth. Add global npm bin to PATH if needed (check with: npm prefix -g).',
     claude: 'Install: npm install -g @anthropic-ai/claude-code (or follow official instructions), then: claude login. Ensure the CLI is on PATH.',
-    copilot: 'Install: gh extension install github/gh-copilot, then authenticate with: gh auth login. Requires GitHub CLI (gh).',
-    grok: 'Install Grok CLI following xAI official instructions, then authenticate. Ensure the CLI is on PATH.'
+    copilot: 'Install GitHub CLI so the gh executable is on the daemon PATH. The status check only looks for gh. Copilot requests also need: gh extension install github/gh-copilot, then gh auth login.'
   };
-  return hints[provider] ?? 'Provider CLI not found on PATH. Install and authenticate the CLI, then restart the daemon.';
+  return hints[provider] ?? GENERIC_INSTALL_HINT;
 }
 
 export function buildProviderPrompt({ provider, userMessage, projectDir, allowedTools = [] } = {}) {
@@ -86,20 +88,25 @@ export function buildProviderPrompt({ provider, userMessage, projectDir, allowed
   ].join('\n');
 }
 
-async function commandExists(command) {
-  const probe =
-    process.platform === 'win32'
-      ? {
-          command: 'powershell.exe',
-          args: ['-NoProfile', '-Command', `if (Get-Command -Name '${escapePowerShellSingleQuoted(command)}' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }`]
-        }
-      : {
-          command: 'sh',
-          args: ['-lc', `command -v ${shellQuote(command)} >/dev/null 2>&1`]
-        };
+function presenceProbe(command) {
+  if (process.platform === 'win32') {
+    return {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-Command', `if (Get-Command -Name '${escapePowerShellSingleQuoted(command)}' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }`]
+    };
+  }
+
+  return {
+    command: 'sh',
+    args: ['-c', `command -v ${shellQuote(command)} >/dev/null 2>&1`]
+  };
+}
+
+async function commandExists(command, env = process.env) {
+  const probe = presenceProbe(command);
 
   return new Promise((resolve) => {
-    const child = spawn(probe.command, probe.args, { stdio: 'ignore' });
+    const child = spawn(probe.command, probe.args, { stdio: 'ignore', env });
     child.on('error', () => resolve(false));
     child.on('close', (exitCode) => resolve(exitCode === 0));
   });
