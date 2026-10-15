@@ -228,45 +228,19 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
   }
 });
 
+const FIXTURE_LIBS = {
+  symbols: path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/symbols'),
+  footprints: path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/footprints')
+};
+
 test('supported release profiles embed resolved KiCad footprint bodies in PCB drafts', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-footprints-'));
-  const footprintRoot = path.join(root, 'footprints');
-  const resistorLibrary = path.join(footprintRoot, 'Resistor_SMD.pretty');
   const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
 
   try {
-    await mkdir(resistorLibrary, { recursive: true });
-    await writeFile(
-      path.join(resistorLibrary, 'R_0603_1608Metric.kicad_mod'),
-      `(footprint "R_0603_1608Metric"
-  (version 20260206)
-  (generator "test")
-  (layer "F.Cu")
-  (property "Reference" "REF**"
-    (at 0 -1.43 0)
-    (layer "F.SilkS")
-    (effects (font (size 1 1) (thickness 0.15)))
-  )
-  (property "Value" "R_0603_1608Metric"
-    (at 0 1.43 0)
-    (layer "F.Fab")
-    (effects (font (size 1 1) (thickness 0.15)))
-  )
-  (pad "1" smd rect
-    (at -0.8 0)
-    (size 0.8 0.9)
-    (layers "F.Cu" "F.Paste" "F.Mask")
-  )
-  (pad "2" smd rect
-    (at 0.8 0)
-    (size 0.8 0.9)
-    (layers "F.Cu" "F.Paste" "F.Mask")
-  )
-)
-`,
-      'utf8'
-    );
-    process.env.KICAD_FOOTPRINT_DIR = footprintRoot;
+    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
+    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
 
     for (const [profile, prompt] of [
       [

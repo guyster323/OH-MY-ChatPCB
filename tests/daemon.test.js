@@ -1687,13 +1687,18 @@ test('provider-emitted approval, rollback, nested selection, requiredValidation,
 
 test('rollback and status are unavailable through provider allowed tools', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-txn-tools-'));
-  const services = await transactionServices();
+  const services = await transactionServices({
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
   let allowedToolNames;
 
   try {
     await generateMcuPeripheralProject({
       projectDir: root,
-      prompt: 'RP2040 board with USB-C power and I2C connector.'
+      prompt: 'RP2040 board with USB-C power and I2C connector.',
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc
     });
     const preview = await dispatchToolCall({
       name: 'schematic.generate',
@@ -1819,12 +1824,17 @@ test('public daemon preview omits absolute candidate paths, live validator paths
 
 test('direct approval applies through ProjectTransaction and rollback restores the journaled project', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-txn-apply-'));
-  const services = await transactionServices();
+  const services = await transactionServices({
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
 
   try {
     const before = await generateMcuPeripheralProject({
       projectDir: root,
-      prompt: 'RP2040 board with USB-C power and I2C connector.'
+      prompt: 'RP2040 board with USB-C power and I2C connector.',
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc
     });
     const originalSpec = await readFile(before.files.spec, 'utf8');
     const preview = await dispatchToolCall({
