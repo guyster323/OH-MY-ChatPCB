@@ -8,7 +8,7 @@ import { createEnvelope } from './envelope.js';
 
 const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 
-export function runProviderProcess({
+export async function runProviderProcess({
   command,
   args = [],
   input = '',
@@ -25,30 +25,25 @@ export function runProviderProcess({
     throw new Error('Provider command is required.');
   }
 
-  return new Promise(async (resolve, reject) => {
-    let tempPromptFile = null;
-    let finalArgs = args;
+  let tempPromptFile = null;
+  let finalArgs = args;
 
-    if (usePromptFile && process.platform === 'win32' && input) {
+  if (usePromptFile && input) {
+    tempPromptFile = path.join(tmpdir(), `chatpcb-prompt-${randomUUID()}.txt`);
+    await writeFile(tempPromptFile, input, 'utf8');
+    finalArgs = args.map((arg) => (arg === '<temp>' ? tempPromptFile : arg));
+  }
+
+  const cleanupTempFile = async () => {
+    if (tempPromptFile) {
       try {
-        tempPromptFile = path.join(tmpdir(), `chatpcb-prompt-${randomUUID()}.txt`);
-        await writeFile(tempPromptFile, input, 'utf8');
-        finalArgs = args.map((arg) => (arg === '/dev/stdin' ? tempPromptFile : arg));
-      } catch (error) {
-        reject(error);
-        return;
+        await rm(tempPromptFile, { force: true });
+      } catch {
       }
     }
+  };
 
-    const cleanupTempFile = async () => {
-      if (tempPromptFile) {
-        try {
-          await rm(tempPromptFile, { force: true });
-        } catch {
-        }
-      }
-    };
-
+  return new Promise((resolve, reject) => {
     const providerProcess = providerProcessCommand(command, finalArgs);
     const child = spawn(providerProcess.command, providerProcess.args, {
       cwd,
@@ -64,10 +59,11 @@ export function runProviderProcess({
 
     const allowedTools = new Set(allowedToolNames);
 
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       if (settled) return;
       settled = true;
       child.kill('SIGTERM');
+      await cleanupTempFile();
       reject(new Error(`Provider process timed out after ${timeoutMs}ms.`));
     }, timeoutMs);
 
@@ -83,7 +79,7 @@ export function runProviderProcess({
 
     const abortProvider = () => fail(new Error('Provider process cancelled.'));
     if (signal?.aborted) {
-      abortProvider();
+      cleanupTempFile().then(() => abortProvider());
       return;
     }
     signal?.addEventListener('abort', abortProvider, { once: true });
@@ -152,7 +148,7 @@ export function runProviderProcess({
       resolve(transcript);
     });
 
-    if (input && (!usePromptFile || !tempPromptFile)) {
+    if (input && !usePromptFile) {
       child.stdin.write(input);
     }
     child.stdin.end();

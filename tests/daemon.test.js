@@ -448,7 +448,7 @@ test('daemon lists provider definitions through provider.list', async () => {
   assert.equal(result.ok, true);
   assert.deepEqual(
     result.result.providers.map((provider) => provider.id),
-    ['codex', 'claude', 'copilot']
+    ['codex', 'claude', 'copilot', 'grok']
   );
 });
 

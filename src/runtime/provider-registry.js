@@ -26,7 +26,7 @@ const PROVIDERS = [
     id: 'grok',
     label: 'Grok Build',
     command: 'grok',
-    args: ['--prompt-file', '/dev/stdin', '--output-format', 'text', '--disable-web-search', '--permission-mode', 'plan'],
+    args: ['--prompt-file', '<temp>', '--output-format', 'plain', '--disable-web-search', '--permission-mode', 'plan'],
     description: 'Uses an already-authenticated local Grok Build CLI session (grok login or XAI_API_KEY).',
     usePromptFile: true
   }

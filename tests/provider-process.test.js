@@ -308,33 +308,120 @@ test('grok provider emits text output as agent deltas', async () => {
   assert.equal(transcript.events[2].payload.name, 'schematic.generate');
 });
 
-test('usePromptFile creates temp file on Windows and cleans up', { skip: process.platform !== 'win32' }, async () => {
-  const script = 'console.log("CHATPCB_GROK_PROVIDER_TEST_OK");';
-  const input = 'Test prompt for Grok on Windows.';
+test('usePromptFile writes temp file on all platforms and child can read it', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-test-'));
+  const scriptPath = path.join(root, 'fake-grok.js');
 
-  const transcript = await runProviderProcess({
-    command: process.execPath,
-    args: ['-e', script],
-    input,
-    usePromptFile: true,
-    timeoutMs: 2000
-  });
+  try {
+    await writeFile(
+      scriptPath,
+      [
+        'const fs = require("fs");',
+        'const args = process.argv.slice(2);',
+        'const promptFileIndex = args.indexOf("--prompt-file");',
+        'if (promptFileIndex === -1 || !args[promptFileIndex + 1]) {',
+        '  console.error("Missing --prompt-file argument");',
+        '  process.exit(1);',
+        '}',
+        'const promptPath = args[promptFileIndex + 1];',
+        'const content = fs.readFileSync(promptPath, "utf8");',
+        'console.log("Prompt received:", content);'
+      ].join('\n'),
+      'utf8'
+    );
 
-  assert.equal(transcript.exitCode, 0);
-  assert.equal(transcript.events[0].payload.text, 'CHATPCB_GROK_PROVIDER_TEST_OK');
+    const input = 'Test prompt for Grok from temp file.';
+
+    const transcript = await runProviderProcess({
+      command: process.execPath,
+      args: [scriptPath, '--prompt-file', '<temp>'],
+      input,
+      usePromptFile: true,
+      timeoutMs: 2000
+    });
+
+    assert.equal(transcript.exitCode, 0);
+    assert.match(transcript.events[0].payload.text, /Test prompt for Grok from temp file/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });
 
-test('usePromptFile uses /dev/stdin on POSIX systems', { skip: process.platform === 'win32' }, async () => {
-  const script = 'console.log("CHATPCB_GROK_POSIX_TEST_OK");';
+test('usePromptFile cleans up temp file on success', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
 
-  const transcript = await runProviderProcess({
+  const beforeFiles = await readdir(tmpdir());
+  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  const script = 'console.log("CHATPCB_CLEANUP_TEST");';
+
+  await runProviderProcess({
     command: process.execPath,
     args: ['-e', script],
-    input: 'Test prompt from stdin on POSIX.',
+    input: 'Cleanup test prompt.',
     usePromptFile: true,
     timeoutMs: 2000
   });
 
-  assert.equal(transcript.exitCode, 0);
-  assert.equal(transcript.events[0].payload.text, 'CHATPCB_GROK_POSIX_TEST_OK');
+  const afterFiles = await readdir(tmpdir());
+  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+});
+
+test('usePromptFile cleans up temp file on error', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+
+  const beforeFiles = await readdir(tmpdir());
+  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  const script = 'console.log(JSON.stringify({type:"tool.call", payload:{id:"bad", name:"unknown.tool", args:{}}}));';
+
+  await assert.rejects(
+    () =>
+      runProviderProcess({
+        command: process.execPath,
+        args: ['-e', script],
+        input: 'Error test prompt.',
+        usePromptFile: true,
+        timeoutMs: 2000
+      }),
+    /Unsupported provider tool call/
+  );
+
+  const afterFiles = await readdir(tmpdir());
+  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+});
+
+test('usePromptFile cleans up temp file on timeout', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+
+  const beforeFiles = await readdir(tmpdir());
+  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  const script = 'setTimeout(() => {}, 10000);';
+
+  await assert.rejects(
+    () =>
+      runProviderProcess({
+        command: process.execPath,
+        args: ['-e', script],
+        input: 'Timeout test prompt.',
+        usePromptFile: true,
+        timeoutMs: 50
+      }),
+    /timed out/
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const afterFiles = await readdir(tmpdir());
+  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
 });
