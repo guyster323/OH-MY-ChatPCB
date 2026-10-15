@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { isInside } from '../shared/path-guard.js';
+import { isInside, assertInside } from '../shared/path-guard.js';
 
 const WINDOWS_RESERVED_BASENAMES = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/iu;
 
@@ -11,9 +11,7 @@ export async function createNamedProject({ workspaceRoot, projectName } = {}) {
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot ?? '');
   const projectDir = path.resolve(resolvedWorkspaceRoot, slug);
 
-  if (!isInside(resolvedWorkspaceRoot, projectDir)) {
-    throw typedError('INVALID_PROJECT_NAME', 'Project directory must be inside the workspace root.');
-  }
+  assertInside(resolvedWorkspaceRoot, projectDir, 'Project directory must be inside the workspace root.');
 
   await mkdir(resolvedWorkspaceRoot, { recursive: true });
 
@@ -57,7 +55,7 @@ function slugify(displayName) {
   return slug;
 }
 
-export { isInside };
+export { isInside, assertInside };
 
 export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) {
   if (typeof projectDir !== 'string' || projectDir.trim().length === 0) {
@@ -71,8 +69,8 @@ export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) 
 
   if (allowedWorkspaceRoot) {
     const resolvedWorkspaceRoot = path.resolve(allowedWorkspaceRoot);
-    if (resolvedProjectDir !== resolvedWorkspaceRoot && !isInside(resolvedWorkspaceRoot, resolvedProjectDir)) {
-      throw typedError('UNSAFE_PROJECT_DIR', 'Project directory must stay inside the allowed workspace root.');
+    if (resolvedProjectDir !== resolvedWorkspaceRoot) {
+      assertInside(resolvedWorkspaceRoot, resolvedProjectDir, 'Project directory must stay inside the allowed workspace root.');
     }
   }
 

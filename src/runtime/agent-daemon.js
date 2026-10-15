@@ -884,7 +884,7 @@ function failure(code, message, extra = {}) {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
-    'access-control-allow-origin': `http://127.0.0.1:${response.socket.server.address().port}`
+    'access-control-allow-origin': 'http://127.0.0.1'
   });
   response.end(`${JSON.stringify(payload, null, 2)}\n`);
 }

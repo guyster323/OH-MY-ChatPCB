@@ -1,25 +1,4 @@
-const DEFAULT_DAEMON_PORT = 41317;
-const ProtocolMessageType = {
-  SYSTEM_STATUS: 'system.status',
-  TOOL_CALL: 'tool.call',
-  TOOL_RESULT: 'tool.result',
-  CHAT_MESSAGE: 'chat.message',
-  AGENT_DELTA: 'agent.delta'
-};
-const ToolName = {
-  PROJECT_CREATE: 'project.create',
-  PROJECT_INSPECT: 'project.inspect',
-  PROJECT_REQUEST: 'project.request',
-  SCHEMATIC_GENERATE: 'schematic.generate',
-  SCHEMATIC_PATCH: 'schematic.patch',
-  VALIDATE_ERC: 'validate.erc',
-  VALIDATE_DRC: 'validate.drc',
-  SIMULATE_SPICE: 'simulate.spice',
-  PROVIDER_STATUS: 'provider.status',
-  PROVIDER_LIST: 'provider.list',
-  PROVIDER_INVOKE: 'provider.invoke',
-  PROVIDER_CANCEL: 'provider.cancel'
-};
+const { DEFAULT_DAEMON_PORT, ProtocolMessageType, ToolName, PatchAction } = window.ChatPCB;
 
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? `ws://127.0.0.1:${DEFAULT_DAEMON_PORT}/ws`;
 const HOST_STATUS_TIMEOUT_MS = 2000;
@@ -339,7 +318,7 @@ function handleEnvelope(envelope) {
       if (inspectionState.requestId === id) renderInspectionFailure();
       return;
     }
-    if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
+    if (callName === PatchAction.APPROVE || callName === PatchAction.CANCEL) {
       clearPatchApproval();
       renderRequestStatus({ state: 'failed', summary: 'Patch approval could not be completed.', technicalDetail: envelope.payload.error?.message ?? 'Patch tool call failed.' });
     }
@@ -376,13 +355,13 @@ function handleEnvelope(envelope) {
     if (inspectionState.projectDir === activeProject?.projectDir && inspectionState.requestId === id) renderInspection(envelope.payload.result);
     return;
   }
-  if (callName === 'schematic.patch.approve') {
+  if (callName === PatchAction.APPROVE) {
     clearPatchApproval();
     renderProjectRequest(envelope.payload.result);
     inspectActiveProject();
     return;
   }
-  if (callName === 'schematic.patch.cancel') return;
+  if (callName === PatchAction.CANCEL) return;
   if (callName === ToolName.PROVIDER_STATUS) {
     const provider = envelope.payload.result;
     providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
@@ -670,14 +649,14 @@ function approvePatch() {
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
   const id = `patch_approve_${Date.now()}`;
-  pendingCalls.set(id, 'schematic.patch.approve');
+  pendingCalls.set(id, PatchAction.APPROVE);
   sendToolCall({ id, name: ToolName.SCHEMATIC_PATCH, args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
 }
 
 function cancelPatch() {
   if (!activeProject || cancelPatchButtonEl.disabled || !patchApprovalState.patchId) return;
   const id = `patch_cancel_${Date.now()}`;
-  pendingCalls.set(id, 'schematic.patch.cancel');
+  pendingCalls.set(id, PatchAction.CANCEL);
   sendToolCall({ id, name: ToolName.SCHEMATIC_PATCH, args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
   clearPatchApproval('Patch preview cancelled.');
 }
