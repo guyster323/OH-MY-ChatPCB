@@ -1727,6 +1727,38 @@ function officialPinDefinitionsFor(libId) {
         pinDef('B12', 0, -22.86, 90),
         pinDef('SH', -7.62, -22.86, 90)
       ];
+    case 'Connector_Generic:Conn_01x04':
+      return [pinDef('1', -2.54, 5.08, 0), pinDef('2', -2.54, 2.54, 0), pinDef('3', -2.54, 0, 0), pinDef('4', -2.54, -2.54, 0)];
+    case 'Connector_Generic:Conn_01x05':
+      return [pinDef('1', -2.54, 7.62, 0), pinDef('2', -2.54, 5.08, 0), pinDef('3', -2.54, 2.54, 0), pinDef('4', -2.54, 0, 0), pinDef('5', -2.54, -2.54, 0)];
+    case 'Connector_Generic:Conn_01x06':
+      return [pinDef('1', -2.54, 10.16, 0), pinDef('2', -2.54, 7.62, 0), pinDef('3', -2.54, 5.08, 0), pinDef('4', -2.54, 2.54, 0), pinDef('5', -2.54, 0, 0), pinDef('6', -2.54, -2.54, 0)];
+    case 'Connector_Generic:Conn_02x05_Odd_Even':
+      return [
+        pinDef('1', -5.08, 7.62, 0),
+        pinDef('2', 5.08, 7.62, 180),
+        pinDef('3', -5.08, 5.08, 0),
+        pinDef('4', 5.08, 5.08, 180),
+        pinDef('5', -5.08, 2.54, 0),
+        pinDef('6', 5.08, 2.54, 180),
+        pinDef('7', -5.08, 0, 0),
+        pinDef('8', 5.08, 0, 180),
+        pinDef('9', -5.08, -2.54, 0),
+        pinDef('10', 5.08, -2.54, 180)
+      ];
+    case 'Regulator_Switching:TPS62177DQC':
+      return [
+        pinDef('1', -7.62, 5.08, 0),
+        pinDef('2', -7.62, 2.54, 0),
+        pinDef('3', -7.62, 0, 0),
+        pinDef('4', -7.62, -2.54, 0),
+        pinDef('5', -7.62, -5.08, 0),
+        pinDef('6', 7.62, -5.08, 180),
+        pinDef('7', 7.62, -2.54, 180),
+        pinDef('8', 7.62, 0, 180),
+        pinDef('9', 7.62, 2.54, 180),
+        pinDef('10', 7.62, 5.08, 180)
+      ];
     default:
       return [];
   }
