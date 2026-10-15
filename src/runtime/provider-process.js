@@ -25,12 +25,16 @@ export async function runProviderProcess({
     throw new Error('Provider command is required.');
   }
 
+  if (signal?.aborted) {
+    throw new Error('Provider process cancelled.');
+  }
+
   let tempPromptFile = null;
   let finalArgs = args;
 
-  if (usePromptFile && input) {
+  if (usePromptFile) {
     tempPromptFile = path.join(tmpdir(), `chatpcb-prompt-${randomUUID()}.txt`);
-    await writeFile(tempPromptFile, input, 'utf8');
+    await writeFile(tempPromptFile, input || '', 'utf8');
     finalArgs = args.map((arg) => (arg === '<temp>' ? tempPromptFile : arg));
   }
 
@@ -78,10 +82,6 @@ export async function runProviderProcess({
     };
 
     const abortProvider = () => fail(new Error('Provider process cancelled.'));
-    if (signal?.aborted) {
-      cleanupTempFile().then(() => abortProvider());
-      return;
-    }
     signal?.addEventListener('abort', abortProvider, { once: true });
 
     child.stdout.setEncoding('utf8');

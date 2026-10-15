@@ -425,3 +425,65 @@ test('usePromptFile cleans up temp file on timeout', async () => {
 
   assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
 });
+
+test('usePromptFile handles empty input by writing empty temp file', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-empty-prompt-'));
+  const scriptPath = path.join(root, 'fake-grok-empty.js');
+
+  try {
+    await writeFile(
+      scriptPath,
+      [
+        'const fs = require("fs");',
+        'const args = process.argv.slice(2);',
+        'const promptFileIndex = args.indexOf("--prompt-file");',
+        'const promptPath = args[promptFileIndex + 1];',
+        'const content = fs.readFileSync(promptPath, "utf8");',
+        'console.log("Prompt length:", content.length);'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const transcript = await runProviderProcess({
+      command: process.execPath,
+      args: [scriptPath, '--prompt-file', '<temp>'],
+      input: '',
+      usePromptFile: true,
+      timeoutMs: 2000
+    });
+
+    assert.equal(transcript.exitCode, 0);
+    assert.match(transcript.events[0].payload.text, /Prompt length: 0/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('rejects immediately with cleanup when abort signal is already aborted', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+
+  const beforeFiles = await readdir(tmpdir());
+  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  const controller = new AbortController();
+  controller.abort();
+
+  await assert.rejects(
+    () =>
+      runProviderProcess({
+        command: process.execPath,
+        args: ['-e', 'console.log("should not run");'],
+        input: 'Pre-aborted test prompt.',
+        usePromptFile: true,
+        signal: controller.signal,
+        timeoutMs: 2000
+      }),
+    /cancelled/
+  );
+
+  const afterFiles = await readdir(tmpdir());
+  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+
+  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+});
