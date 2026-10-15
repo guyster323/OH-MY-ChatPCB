@@ -749,7 +749,7 @@ git commit -m "feat: review and roll back changes in panel"
 - Modify: `README.md`
 - Modify: `docs/ARCHITECTURE.md`
 - Modify: `docs/ROADMAP.md`
-- Modify: `docs/handoff-next-session.md` only with a concise new dated entry
+- Modify: `docs/archive/handoff-next-session.md` only with a concise new dated entry
 - Modify: `tests/phase1-docs.test.js`
 
 **Interfaces:**
@@ -827,7 +827,7 @@ if ($LASTEXITCODE -ne 0) { git commit -m "fix: address workbench adversarial rev
 - [ ] **Step 10: Commit final documentation**
 
 ```powershell
-git add README.md docs/ARCHITECTURE.md docs/ROADMAP.md docs/handoff-next-session.md tests/phase1-docs.test.js
+git add README.md docs/ARCHITECTURE.md docs/ROADMAP.md docs/archive/handoff-next-session.md tests/phase1-docs.test.js
 git commit -m "docs: describe KiCad-native workbench core"
 ```
 

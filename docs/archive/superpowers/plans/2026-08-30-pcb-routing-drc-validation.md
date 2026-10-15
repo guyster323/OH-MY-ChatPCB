@@ -184,7 +184,7 @@
 - [ ] **Step 8: Commit the routing milestone**
 
   ```powershell
-  git add tests/project-generator.test.js src/kicad/project-generator.js src/workflow/generate-mcu-project.js docs/handoff-next-session.md plan.md
+  git add tests/project-generator.test.js src/kicad/project-generator.js src/workflow/generate-mcu-project.js docs/archive/handoff-next-session.md plan.md
   git commit -m "feat: add measured safe profile routing increment"
   ```
 

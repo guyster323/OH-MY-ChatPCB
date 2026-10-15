@@ -17,7 +17,7 @@ KiCad 회로도 편집기 오른쪽에 **ChatPCB 채팅 패널**을 통합하여
 - 런타임 의존성 없음, devDep은 Playwright만
 - KiCad 포크용 C++ 패널 (wxWebView)
 - PowerShell 스크립트 (Windows 전용)
-- 테스트: `node --test`, 41개 파일, 340개 테스트
+- 테스트: `node --test`, 42개 파일, 344개 테스트
 
 ### 구조
 - `bin/chatpcb-cli.js` → `src/workflow/*` (생성, 검증, 패치, 트랜잭션)
@@ -58,7 +58,7 @@ KiCad 회로도 편집기 오른쪽에 **ChatPCB 채팅 패널**을 통합하여
 ### 핵심 문제
 
 **버그 (Linux, Node 20.19.2 재현)**
-- `npm test`: 340개 중 325 통과, **13 실패**, 2 skip
+- `npm test`: Node 20.19.2에서 340개 중 325 통과, **13 실패**, 2 skip. 이후 링크 체커 테스트 4개가 추가되었다.
 - `WebSocket is not defined` (3건+): Node 20에서 전역 WebSocket 미지원, engines는 `>=20` 선언
 - 프로필/생성기 테스트 실패 (4, 5, 205~209): Windows 라이브러리 경로 의존, `Device:R`, `ESP32-S3-WROOM-1` 누락
 - 트랜잭션 승인/롤백 테스트 실패 (61, 64)
@@ -67,7 +67,7 @@ KiCad 회로도 편집기 오른쪽에 **ChatPCB 채팅 패널**을 통합하여
 - CI 없음 (`.github` 없음)
 - 거대 파일: `project-generator.js` 1874줄, `agent-daemon.js` 971줄, `daemon.test.js` 2086줄
 - 프로토콜 메시지 타입이 panel.js와 데몬 양쪽에 문자열 리터럴로 중복
-- 포트 41317이 6개 파일에 하드코딩
+- 포트 41317이 7개 파일에 하드코딩
 - CORS가 포트 없이 `http://127.0.0.1`로 고정
 - 경로 탐색 방지 가드가 5곳에 중복
 

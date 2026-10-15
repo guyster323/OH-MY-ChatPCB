@@ -90,7 +90,7 @@ git commit -m "fix: recover safe supported profile routing"
 ### Task 2: Verify KiCad recovery and record evidence
 
 **Files:**
-- Modify: `docs/handoff-next-session.md`
+- Modify: `docs/archive/handoff-next-session.md`
 
 **Interfaces:**
 - Consumes: the implementation commit, two fresh profile projects, and `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
@@ -128,7 +128,7 @@ Expected: all commands exit zero; the typed NGSPICE_UNAVAILABLE sample skip is a
 Append a dated handoff entry with the recovery commit, KiCad 10.0.3, DRC counts, unconnected counts, and remaining routing/release blockers. Keep readiness below release-ready.
 
 ```powershell
-git add docs/handoff-next-session.md
+git add docs/archive/handoff-next-session.md
 git commit -m "docs: record safe routing recovery"
 ```
 

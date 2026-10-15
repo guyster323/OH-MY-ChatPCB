@@ -21,7 +21,7 @@
 - [x] Added typed skip behavior for unavailable `ngspice`.
 - [x] Added WebView-ready right panel bundle in `apps/panel`.
 - [x] Added KiCad `wxWebView` panel C++ skeleton in `kicad-fork/chatpcb_panel`.
-- [x] Added project docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/KICAD_FORK_BOOTSTRAP.md`, `docs/ROADMAP.md`, `docs/handoff-next-session.md`.
+- [x] Added project docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/KICAD_FORK_BOOTSTRAP.md`, `docs/ROADMAP.md`, `docs/archive/handoff-next-session.md`.
 - [x] Added `CONTRIBUTING.md` with TDD, credential, and KiCad fork workflow rules.
 - [x] Replaced placeholder license pointer with the full GPL-3.0 license text.
 - [x] Added `npm run verify:sample` for one-command sample generation, ERC validation, and SPICE hook verification.
@@ -462,7 +462,7 @@ Acceptance criteria:
 - Supported profiles must not return `ready-for-release` while PCB DRC has any violation or any unconnected item; both supported profiles currently have zero PCB DRC violations, but STM32 still has `22` unconnected items and ESP32-S3 still has `24` unconnected items.
 - PCB trace scaffolding must not reduce unconnected items by introducing new KiCad DRC violations; unsafe global or high-density centerline traces should remain review-loop findings instead of generated board copper.
 - `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` pass before completion unless a blocker is documented.
-- `docs/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
+- `docs/archive/handoff-next-session.md` records exact KiCad versions, install paths, GUI findings, validation results, and next steps.
 
 ## Development Rules
 

@@ -515,7 +515,7 @@ git commit -m "feat: show project evidence freshness in panel"
 - Modify: `docs/ARCHITECTURE.md`
 - Modify: `docs/ROADMAP.md`
 - Modify: `plan.md`
-- Modify: `docs/handoff-next-session.md`
+- Modify: `docs/archive/handoff-next-session.md`
 - Test: `tests/phase1-docs.test.js`
 
 **Interfaces:**
@@ -562,7 +562,7 @@ Expected: all tests and verification scripts PASS; inspection reports a valid di
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add README.md docs/ARCHITECTURE.md docs/ROADMAP.md plan.md docs/handoff-next-session.md tests/phase1-docs.test.js
+git add README.md docs/ARCHITECTURE.md docs/ROADMAP.md plan.md docs/archive/handoff-next-session.md tests/phase1-docs.test.js
 git commit -m "docs: adopt evidence-gated runtime architecture"
 ```
 

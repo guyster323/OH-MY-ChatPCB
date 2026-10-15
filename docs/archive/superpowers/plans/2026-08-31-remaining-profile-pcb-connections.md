@@ -290,7 +290,7 @@ git commit -m "feat: route profile usb data escape"
 
 **Files:**
 - Modify: `plan.md`
-- Modify: `docs/handoff-next-session.md`
+- Modify: `docs/archive/handoff-next-session.md`
 - Modify: `README.md` only if the documented DRC status changes
 - Test: `tests/project-generator.test.js`
 
@@ -326,6 +326,6 @@ Record KiCad version, exact DRC counts, route limitations, and the remaining rel
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add plan.md docs/handoff-next-session.md README.md tests/project-generator.test.js
+git add plan.md docs/archive/handoff-next-session.md README.md tests/project-generator.test.js
 git commit -m "docs: record zero-unconnected board gate"
 ```

@@ -23,7 +23,7 @@
 
 - Modify `src/kicad/project-generator.js` to resolve placements, render profile power segments, and render a GND zone.
 - Modify `tests/project-generator.test.js` to assert placements, power routing, zone structure, and bounded segments.
-- Modify `docs/handoff-next-session.md` only after live DRC measurements succeed.
+- Modify `docs/archive/handoff-next-session.md` only after live DRC measurements succeed.
 
 ### Task 1: Specify supported-profile board output
 
@@ -142,7 +142,7 @@ git commit -m "feat: route supported profile power paths"
 ### Task 3: Verify KiCad evidence and update the handoff
 
 **Files:**
-- Modify: `docs/handoff-next-session.md`
+- Modify: `docs/archive/handoff-next-session.md`
 
 **Interfaces:**
 - Consumes: the two generated profile projects and `C:\Users\windo\AppData\Local\Programs\KiCad\10.0\bin\kicad-cli.exe`.
@@ -181,7 +181,7 @@ Expected: all Node checks pass; `verify:sample` may return the typed `NGSPICE_UN
 Add a dated handoff entry with the implementation commit, KiCad version, both DRC counts, both unconnected counts, and remaining signal-routing/release-evidence blockers. Do not change readiness to release-ready. Then run:
 
 ```powershell
-git add docs/handoff-next-session.md
+git add docs/archive/handoff-next-session.md
 git commit -m "docs: record supported profile power routing verification"
 ```
 
