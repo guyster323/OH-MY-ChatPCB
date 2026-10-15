@@ -1,6 +1,63 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
+
+const UI_STRINGS = {
+  connectionStatus: {
+    connecting: 'Connecting',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    connectionError: 'Connection error'
+  },
+  requestStatus: {
+    idle: 'Create a project to send a circuit request.',
+    ready: 'Project ready. Describe the circuit you want to create.',
+    running: 'Running request…',
+    applying: 'Applying the circuit draft…',
+    completed: 'Completed',
+    failed: 'Request failed. Check technical details or try again.',
+    rollingBack: 'Rolling back transaction...',
+    rolledBack: 'Transaction rolled back successfully.',
+    rollbackFailed: 'Rollback failed.',
+    stopping: 'Stopping request...'
+  },
+  project: {
+    createPrompt: 'Create a project before sending a circuit request.',
+    promptRequired: 'Circuit request is required.',
+    creating: 'Creating project…'
+  },
+  patch: {
+    previewReady: 'Circuit draft is ready. Apply it to the schematic?',
+    previewLead: 'Files will not change until you apply.',
+    approvalReady: 'Patch preview is ready for approval.',
+    approvalCleared: 'Patch preview cancelled.',
+    approvalStale: 'Approval unavailable: stale evidence. Inspect the project again before approving.'
+  },
+  erc: {
+    previewTitle: 'ERC Preview',
+    summary: (errors, warnings) => `ERC: ${errors} errors, ${warnings} warnings`,
+    warning: 'ERC errors detected. Apply may be rejected due to validation failures.',
+    topIssues: (issues) => ` Top issues: ${issues}`
+  },
+  transaction: {
+    noTransactions: 'No transactions',
+    confirmRollback: (id) => `Roll back transaction ${id}? This will restore the previous project state.`,
+    rollbackButton: 'Rollback',
+    transactionButton: 'Rollback last transaction'
+  },
+  stop: {
+    button: 'Stop',
+    noActiveRequest: 'No active request',
+    requestIdNotAvailable: 'Request ID not available',
+    stopTheRequest: 'Stop the current request'
+  },
+  kicad: {
+    conflictTitle: 'KiCad changes need attention',
+    conflictMessage: 'Unsaved KiCad changes were detected. Save or discard them in KiCad before sending this update.',
+    recheckButton: 'I saved — recheck'
+  }
+};
+
 const PROGRESS_COPY = {
   conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
   provider: { title: 'CLI와 대화 중', sprite: 'cli' },
@@ -372,6 +429,7 @@ function handleEnvelope(envelope) {
     clearPatchApproval();
     renderProjectRequest(envelope.payload.result);
     inspectActiveProject();
+    refreshTransactionStatus();
     return;
   }
   if (callName === 'schematic.patch.cancel') return;
@@ -394,11 +452,12 @@ function handleEnvelope(envelope) {
   }
   if (callName === 'project.transaction.rollback') {
     const result = envelope.payload.result;
-    if (result?.rolledBack === false || !result?.rolledBack) {
+    if (!result || result?.rolledBack === false) {
+      const reason = result?.reason?.message ?? result?.reason?.code ?? 'The transaction could not be rolled back.';
       renderRequestStatus({ 
         state: 'failed', 
-        summary: 'Rollback failed or was not performed.', 
-        technicalDetail: result?.reason?.message ?? 'The transaction could not be rolled back.'
+        summary: 'Rollback failed.', 
+        technicalDetail: reason
       });
     } else {
       renderRequestStatus({ state: 'completed', summary: 'Transaction rolled back successfully.' });
@@ -1196,19 +1255,14 @@ function renderTransactionStatus(status) {
   
   for (const txn of transactions.slice(-5).reverse()) {
     const item = document.createElement('li');
-    item.textContent = `${txn.transactionId}: ${txn.operation} (${new Date(txn.createdAt).toLocaleString()})`;
+    item.textContent = `${txn.transactionId}: ${txn.status} (${new Date(txn.createdAt).toLocaleString()})`;
     transactionListEl.append(item);
   }
   
   const lastTxn = transactions[transactions.length - 1];
   rollbackButtonEl.disabled = !lastTxn;
   rollbackButtonEl.title = lastTxn ? `Rollback transaction ${lastTxn.transactionId}` : 'No transactions to rollback';
-  
-  if (lastTxn) {
-    rollbackButtonEl.onclick = () => {
-      showRollbackConfirmation(lastTxn.transactionId);
-    };
-  }
+  rollbackButtonEl.onclick = lastTxn ? () => showRollbackConfirmation(lastTxn.transactionId) : null;
 }
 
 function renderPatchPreviewErc(validation = {}) {
@@ -1251,25 +1305,36 @@ function clearPatchPreviewErc() {
 
 function showRollbackConfirmation(transactionId) {
   const confirmDialog = document.getElementById('rollback-confirm-dialog');
+  if (!confirmDialog) return;
+  
   const confirmMessage = document.getElementById('rollback-confirm-message');
   const confirmYes = document.getElementById('rollback-confirm-yes');
   const confirmNo = document.getElementById('rollback-confirm-no');
   
-  confirmMessage.textContent = `Transaction ${transactionId}를 되돌리시겠습니까? 마지막 적용이 취소됩니다.`;
+  if (!confirmMessage || !confirmYes || !confirmNo) return;
   
-  confirmYes.onclick = () => {
+  confirmMessage.textContent = `Roll back transaction ${transactionId}? This will restore the previous project state.`;
+  
+  const handleYes = () => {
     confirmDialog.close();
+    confirmYes.removeEventListener('click', handleYes);
+    confirmNo.removeEventListener('click', handleNo);
     const id = `transaction_rollback_${Date.now()}`;
     pendingCalls.set(id, 'project.transaction.rollback');
     sendToolCall({ id, name: 'project.transaction.rollback', args: { projectDir: activeProject.projectDir, transactionId } });
     renderRequestStatus({ state: 'running', summary: 'Rolling back transaction...' });
   };
   
-  confirmNo.onclick = () => {
+  const handleNo = () => {
     confirmDialog.close();
+    confirmYes.removeEventListener('click', handleYes);
+    confirmNo.removeEventListener('click', handleNo);
   };
   
-  if (typeof confirmDialog?.showModal === 'function') {
+  confirmYes.addEventListener('click', handleYes);
+  confirmNo.addEventListener('click', handleNo);
+  
+  if (typeof confirmDialog.showModal === 'function') {
     confirmDialog.showModal();
   }
 }

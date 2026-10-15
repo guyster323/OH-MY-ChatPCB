@@ -16,6 +16,11 @@ The current implementation is the first runnable foundation of that plan:
 
 This is not a packaged KiCad installer yet. The product path is still the ChatPCB-enabled schematic editor with a visible right-side ChatPCB panel; official KiCad builds do not include that host.
 
+**Requirements:**
+- Node.js 22 or later
+- KiCad 10.0 CLI (optional for validation)
+- One of the supported provider CLIs (Codex, Claude, or Copilot)
+
 Implemented now:
 
 - Natural-language MCU peripheral prompt normalization (English regex plus Korean ESP32-S3 sensor-board matching for the supported profile)
@@ -58,7 +63,7 @@ Not implemented yet:
 
 ## Quick Start
 
-```powershell
+```bash
 npm install
 npm test
 npm run daemon
@@ -67,19 +72,29 @@ npm run launch:kicad
 
 `npm run launch:kicad` opens the ChatPCB-enabled schematic editor. Use the right-side ChatPCB panel. The standalone browser fallback is only for machines that do not yet have that fork binary.
 
+**Important**: The daemon runs with the same PATH and environment as your shell. If a provider CLI is not on PATH when you start the daemon, the panel will show it as "missing". Add the provider's binary directory to PATH before starting the daemon:
+
+```bash
+# Example: Add npm global bin to PATH
+export PATH="$(npm prefix -g)/bin:$PATH"
+
+# Then start the daemon
+npm run daemon
+```
+
 ## User Test Guide
 
 Use this flow to create a named KiCad project from a Korean or English request.
 
 1. Start in the repository root:
 
-```powershell
-cd C:\path\to\OH-MY-ChatPCB
+```bash
+cd /path/to/OH-MY-ChatPCB
 ```
 
 2. Install dependencies and run the full local verification:
 
-```powershell
+```bash
 npm install
 npm test
 npm run verify:sample
@@ -99,15 +114,17 @@ Expected result:
 
 3. Start the local daemon:
 
-```powershell
+```bash
 npm run daemon
 ```
 
 Keep this terminal running. The daemon owns the local websocket endpoint used by the panel.
 
+**Important**: Ensure provider CLIs are on PATH before starting the daemon. The daemon inherits your shell's PATH environment.
+
 4. Launch the ChatPCB-enabled schematic editor:
 
-```powershell
+```bash
 npm run launch:kicad
 ```
 
