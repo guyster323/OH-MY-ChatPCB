@@ -67,30 +67,28 @@ export function renderKiCadProject(baseName) {
   )}\n`;
 }
 
-export function renderKiCadBoard({ baseName, schematic, boardProfile }) {
+export function renderKiCadBoard({ baseName, schematic, boardProfile, warnings = [] }) {
   const profileMode = Boolean(boardProfile?.id);
   const components = schematic.components.filter((component) => component.footprint);
   const netIds = boardNetIdsFor(components);
   const padCentersByNet = new Map();
   const unresolvedFootprints = new Set();
-  const warnings = [];
   const netDeclarations = [...netIds.entries()].map(([name, id]) => `  (net ${id} "${escapeSchText(name)}")`).join('\n');
   const footprints = components
     .map((component, index) => {
       const placement = boardPlacementFor(component, index, profileMode);
       const result = renderBoardFootprint(component, placement.x, placement.y, placement.rotation, netIds, padCentersByNet);
-      
+
       if (result === null) {
         unresolvedFootprints.add(component.footprint);
         warnings.push(`Skipping routing for component ${component.ref} due to unresolved footprint: ${component.footprint}`);
         return renderFallbackFootprint(component, placement.x, placement.y, placement.rotation);
       }
-      
+
       return result;
     })
     .join('\n');
-  
-  // Skip profile routing if any critical footprints are unresolved
+
   const shouldSkipRouting = profileMode && unresolvedFootprints.size > 0;
   const segments = shouldSkipRouting ? '' : renderBoardSegments(padCentersByNet, netIds, profileMode);
   const groundZone = renderGroundZone(netIds, profileMode);
@@ -908,7 +906,8 @@ function renderLibSymbols(usedLibIds) {
     .filter(([id]) => used.has(id))
     .map(([id, referencePrefix, value]) => renderLibSymbol(id, referencePrefix, value, symbolPinsFor(id)));
   const officialBlocks = officialCacheDependenciesFor([...used])
-    .map((libId) => renderOfficialCachedSymbol(libId));
+    .map((libId) => renderOfficialCachedSymbol(libId))
+    .filter(Boolean);
 
   return `  (lib_symbols
 ${[...fixtureBlocks, ...officialBlocks].join('\n')}
@@ -916,11 +915,10 @@ ${[...fixtureBlocks, ...officialBlocks].join('\n')}
 }
 
 function renderBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet = null) {
-  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet);
-  if (embedded) {
-    return embedded;
-  }
+  return renderEmbeddedBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet);
+}
 
+function renderFallbackFootprint(componentModel, x, y, rotation) {
   const uuid = randomUUID();
 
   return `  (footprint "${escapeSchText(componentModel.footprint)}"
@@ -964,20 +962,28 @@ function boardNetIdsFor(components) {
   return new Map(netNames.map((name, index) => [name, index + 1]));
 }
 
-function kicadLibraryCandidatePaths(libraryType) {
-  const envVars = libraryType === 'footprints' 
+function kicadLibraryEnvPaths(libraryType) {
+  const envVars = libraryType === 'footprints'
     ? ['KICAD10_FOOTPRINT_DIR', 'KICAD_FOOTPRINT_DIR']
     : ['KICAD10_SYMBOL_DIR', 'KICAD_SYMBOL_DIR'];
-  
+
+  return unique(envVars.map((key) => process.env[key]).filter((value) => typeof value === 'string' && value.length > 0));
+}
+
+function kicadLibraryCandidatePaths(libraryType) {
+  const envPaths = kicadLibraryEnvPaths(libraryType);
+  if (envPaths.length > 0) {
+    return envPaths;
+  }
+
   const kicadCliResult = resolveKicadCli();
   const kicadCliPath = kicadCliResult?.path;
   const relativeToKicadCli = kicadCliPath ? [
     path.join(path.dirname(kicadCliPath), '..', 'share', 'kicad', libraryType),
     path.join(path.dirname(kicadCliPath), '..', '..', 'share', 'kicad', libraryType)
   ] : [];
-  
+
   return [
-    ...envVars.map((key) => process.env[key]),
     ...relativeToKicadCli,
     ...(process.platform === 'darwin' ? [
       `/Applications/KiCad/KiCad.app/Contents/SharedSupport/${libraryType}`,
@@ -1493,6 +1499,7 @@ function renderOfficialCachedSymbol(libId) {
 
   const libraryPath = officialSymbolLibraryPath(library);
   if (!libraryPath) {
+    throwIfRequiredSymbolLibraryMissing(library);
     return null;
   }
 
@@ -1500,9 +1507,23 @@ function renderOfficialCachedSymbol(libId) {
     const source = readFileSync(libraryPath, 'utf8');
     const block = extractSymbolBlock(source, symbolName);
     return indentOfficialSymbolBlock(transformOfficialSymbolBlock(block, library, symbolName));
-  } catch {
+  } catch (error) {
+    if (error?.code === 'KICAD_LIBRARY_MISSING') {
+      throw error;
+    }
+    throwIfRequiredSymbolLibraryMissing(library);
     return null;
   }
+}
+
+function throwIfRequiredSymbolLibraryMissing(library) {
+  if (kicadLibraryEnvPaths('symbols').length === 0) {
+    return;
+  }
+
+  const error = new Error(`KICAD_LIBRARY_MISSING: required Symbol library "${library}" was not found`);
+  error.code = 'KICAD_LIBRARY_MISSING';
+  throw error;
 }
 
 function officialSymbolLibraryPath(library) {
@@ -1725,39 +1746,7 @@ function officialPinDefinitionsFor(libId) {
         pinDef('B8', 15.24, -15.24, 180),
         pinDef('B9', 15.24, 15.24, 180),
         pinDef('B12', 0, -22.86, 90),
-        pinDef('SH', -7.62, -22.86, 90)
-      ];
-    case 'Connector_Generic:Conn_01x04':
-      return [pinDef('1', -2.54, 5.08, 0), pinDef('2', -2.54, 2.54, 0), pinDef('3', -2.54, 0, 0), pinDef('4', -2.54, -2.54, 0)];
-    case 'Connector_Generic:Conn_01x05':
-      return [pinDef('1', -2.54, 7.62, 0), pinDef('2', -2.54, 5.08, 0), pinDef('3', -2.54, 2.54, 0), pinDef('4', -2.54, 0, 0), pinDef('5', -2.54, -2.54, 0)];
-    case 'Connector_Generic:Conn_01x06':
-      return [pinDef('1', -2.54, 10.16, 0), pinDef('2', -2.54, 7.62, 0), pinDef('3', -2.54, 5.08, 0), pinDef('4', -2.54, 2.54, 0), pinDef('5', -2.54, 0, 0), pinDef('6', -2.54, -2.54, 0)];
-    case 'Connector_Generic:Conn_02x05_Odd_Even':
-      return [
-        pinDef('1', -5.08, 7.62, 0),
-        pinDef('2', 5.08, 7.62, 180),
-        pinDef('3', -5.08, 5.08, 0),
-        pinDef('4', 5.08, 5.08, 180),
-        pinDef('5', -5.08, 2.54, 0),
-        pinDef('6', 5.08, 2.54, 180),
-        pinDef('7', -5.08, 0, 0),
-        pinDef('8', 5.08, 0, 180),
-        pinDef('9', -5.08, -2.54, 0),
-        pinDef('10', 5.08, -2.54, 180)
-      ];
-    case 'Regulator_Switching:TPS62177DQC':
-      return [
-        pinDef('1', -7.62, 5.08, 0),
-        pinDef('2', -7.62, 2.54, 0),
-        pinDef('3', -7.62, 0, 0),
-        pinDef('4', -7.62, -2.54, 0),
-        pinDef('5', -7.62, -5.08, 0),
-        pinDef('6', 7.62, -5.08, 180),
-        pinDef('7', 7.62, -2.54, 180),
-        pinDef('8', 7.62, 0, 180),
-        pinDef('9', 7.62, 2.54, 180),
-        pinDef('10', 7.62, 5.08, 180)
+        pinDef('S1', -7.62, -22.86, 90)
       ];
     default:
       return [];

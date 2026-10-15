@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 test('generates a reviewable KiCad project and SPICE fixture for an MCU peripheral prompt', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-'));
@@ -228,19 +229,14 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
   }
 });
 
-const FIXTURE_LIBS = {
-  symbols: path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/symbols'),
-  footprints: path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/footprints')
-};
-
 test('supported release profiles embed resolved KiCad footprint bodies in PCB drafts', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-footprints-'));
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
 
     for (const [profile, prompt] of [
       [
@@ -288,23 +284,19 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
       assert.doesNotMatch(board, /\(property "Reference" "REF\*\*"/);
     }
   } finally {
-    if (previousFootprintDir === undefined) {
-      delete process.env.KICAD_FOOTPRINT_DIR;
-    } else {
-      process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-    }
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profile PCB power intent rejects unsafe endpoint-pad routes', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-power-routing-'));
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -339,18 +331,19 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
       assert.match(board, /\(at 36 82 0\)/);
     }
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profiles emit safe CC escape routes outside the USB-C pad field', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-usbc-cc-escape-'));
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -374,18 +367,19 @@ test('supported profiles emit safe CC escape routes outside the USB-C pad field'
       assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
     }
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profiles route I2C pull-up nets through bounded multi-leg chains', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-i2c-routing-'));
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -407,21 +401,20 @@ test('supported profiles route I2C pull-up nets through bounded multi-leg chains
       assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
     }
   } finally {
-    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profile generic segments avoid J3/J7 no-net pads and cross-net intersections', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pad-safe-generic-routing-'));
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
   let noNetPadCount = 0;
 
   try {
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
     for (const [profile, prompt] of [
       [
         'esp32',
@@ -468,23 +461,21 @@ test('supported profile generic segments avoid J3/J7 no-net pads and cross-net i
 
     assert.ok(noNetPadCount > 0, 'supported profile boards should contain J3/J7 no-net pads');
   } finally {
-    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('unresolved footprints skip routing with warnings in profile mode', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-unresolved-footprint-'));
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
+  const emptyLib = path.join(root, 'empty-lib');
+  await mkdir(emptyLib, { recursive: true });
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: emptyLib
+  });
 
   try {
-    // Set to empty directory to simulate missing footprints
-    const emptyLib = path.join(root, 'empty-lib');
-    await mkdir(emptyLib, { recursive: true });
-    process.env.KICAD_FOOTPRINT_DIR = emptyLib;
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
 
     const result = await generateMcuPeripheralProject({
       projectDir: path.join(root, 'project'),
@@ -504,8 +495,7 @@ test('unresolved footprints skip routing with warnings in profile mode', async (
     // Should still have footprint placeholders (without pads)
     assert.match(board, /\(footprint /);
   } finally {
-    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });

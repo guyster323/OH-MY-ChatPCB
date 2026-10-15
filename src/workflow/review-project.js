@@ -84,6 +84,14 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     );
   }
 
+  if ((spec.boardProfile?.boardDraftWarnings ?? []).length > 0) {
+    addFinding(
+      findings.warnings,
+      'unresolved-footprints',
+      spec.boardProfile.boardDraftWarnings.join(' ')
+    );
+  }
+
   if (/jlcpcb|order|manufactur/i.test(spec.sourcePrompt ?? '')) {
     addFinding(
       findings.blockers,

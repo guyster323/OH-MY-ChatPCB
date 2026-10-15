@@ -5,20 +5,16 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-
-const FIXTURE_LIBS = {
-  symbols: path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/symbols'),
-  footprints: path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/footprints')
-};
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug nets and full interfaces', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-esp32-profile-'));
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
     const result = await generateMcuPeripheralProject({
       projectDir: root,
       prompt:
@@ -119,28 +115,19 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
   } finally {
-    if (previousSymbolDir === undefined) {
-      delete process.env.KICAD_SYMBOL_DIR;
-    } else {
-      process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
-    }
-    if (previousFootprintDir === undefined) {
-      delete process.env.KICAD_FOOTPRINT_DIR;
-    } else {
-      process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-    }
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('STM32 supported sensor profile keeps the same board structure but implements SWD directly', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-stm32-profile-'));
-  const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
-    process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
     const result = await generateMcuPeripheralProject({
       projectDir: root,
       prompt:
@@ -227,8 +214,7 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.ok(result.review.findings.notes.some((finding) => /supported STM32 USB-C sensor profile/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code.startsWith('missing-')));
   } finally {
-    process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
-    process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });

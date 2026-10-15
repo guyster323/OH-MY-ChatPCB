@@ -4,22 +4,17 @@ import { tmpdir } from 'node:os';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-
-const FIXTURE_LIBS = {
-  symbols: path.join(process.cwd(), 'tests', 'fixtures', 'kicad-libraries', 'symbols'),
-  footprints: path.join(process.cwd(), 'tests', 'fixtures', 'kicad-libraries', 'footprints')
-};
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 describe('README ESP32-S3 example', () => {
   test('Korean README ESP32-S3 gas sensor example renders without dropped symbols', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-readme-esp32-'));
-    const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
-    const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+    const previous = setKicadLibraryEnv({
+      symbols: FIXTURE_LIBS.symbols,
+      footprints: FIXTURE_LIBS.footprints
+    });
 
     try {
-      process.env.KICAD_SYMBOL_DIR = FIXTURE_LIBS.symbols;
-      process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
-
       const result = await generateMcuPeripheralProject({
         projectDir: root,
         prompt: 'ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘.'
@@ -64,7 +59,9 @@ describe('README ESP32-S3 example', () => {
       ];
 
       for (const symbolId of requiredOfficialSymbols) {
-        const symbolPattern = new RegExp(`\\(lib_id "${symbolId.replace(/:/g, '\\:')}"\\)`);
+        // KiCad caches library symbols in lib_symbols as (symbol "Library:Name" ...)
+        const escapedId = symbolId.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+        const symbolPattern = new RegExp(`\\(symbol "${escapedId}"`);
         assert.ok(
           symbolPattern.test(libSymbolsContent),
           `lib_symbols should contain ${symbolId}`
@@ -73,7 +70,7 @@ describe('README ESP32-S3 example', () => {
 
       // Should not have dangling labels (labels without connected wires/pins)
       const labelCount = (schematic.match(/\(label "/g) || []).length;
-      const wireCount = (schematic.match(/\(wire /g) || []).length;
+      const wireCount = (schematic.match(/\(wire\b/g) || []).length;
       const junctionCount = (schematic.match(/\(junction /g) || []).length;
       
       assert.ok(labelCount > 0, 'Should have labels');
@@ -85,30 +82,20 @@ describe('README ESP32-S3 example', () => {
         `Wire count (${wireCount}) should be reasonable relative to label count (${labelCount})`
       );
     } finally {
-      if (previousSymbolDir === undefined) {
-        delete process.env.KICAD_SYMBOL_DIR;
-      } else {
-        process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
-      }
-      if (previousFootprintDir === undefined) {
-        delete process.env.KICAD_FOOTPRINT_DIR;
-      } else {
-        process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-      }
+      restoreKicadLibraryEnv(previous);
       await rm(root, { force: true, recursive: true });
     }
   });
 
   test('Missing required symbol library fails fast with KICAD_LIBRARY_MISSING', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-missing-lib-'));
-    const previousSymbolDir = process.env.KICAD_SYMBOL_DIR;
-    const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+    const emptyLib = path.join(root, 'empty-lib');
+    const previous = setKicadLibraryEnv({
+      symbols: emptyLib,
+      footprints: FIXTURE_LIBS.footprints
+    });
 
     try {
-      // Set to empty directory to simulate missing libraries
-      const emptyLib = path.join(root, 'empty-lib');
-      process.env.KICAD_SYMBOL_DIR = emptyLib;
-      process.env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
 
       await assert.rejects(
         async () => {
@@ -130,16 +117,7 @@ describe('README ESP32-S3 example', () => {
         }
       );
     } finally {
-      if (previousSymbolDir === undefined) {
-        delete process.env.KICAD_SYMBOL_DIR;
-      } else {
-        process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
-      }
-      if (previousFootprintDir === undefined) {
-        delete process.env.KICAD_FOOTPRINT_DIR;
-      } else {
-        process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-      }
+      restoreKicadLibraryEnv(previous);
       await rm(root, { force: true, recursive: true });
     }
   });
