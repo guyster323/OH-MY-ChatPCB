@@ -119,6 +119,16 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
   } finally {
+    if (previousSymbolDir === undefined) {
+      delete process.env.KICAD_SYMBOL_DIR;
+    } else {
+      process.env.KICAD_SYMBOL_DIR = previousSymbolDir;
+    }
+    if (previousFootprintDir === undefined) {
+      delete process.env.KICAD_FOOTPRINT_DIR;
+    } else {
+      process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
+    }
     await rm(root, { force: true, recursive: true });
   }
 });

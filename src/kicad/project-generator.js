@@ -71,19 +71,17 @@ export function renderKiCadBoard({ baseName, schematic, boardProfile }) {
   const netIds = boardNetIdsFor(components);
   const padCentersByNet = new Map();
   const unresolvedFootprints = new Set();
+  const warnings = [];
   const netDeclarations = [...netIds.entries()].map(([name, id]) => `  (net ${id} "${escapeSchText(name)}")`).join('\n');
   const footprints = components
     .map((component, index) => {
       const placement = boardPlacementFor(component, index, profileMode);
       const result = renderBoardFootprint(component, placement.x, placement.y, placement.rotation, netIds, padCentersByNet);
       
-      // Track unresolved footprints
-      if (!result || result.includes('(footprint "') && !result.includes('(pad ')) {
-        const [library, footprintName] = (component.footprint || '').split(':');
-        if (library && footprintName) {
-          unresolvedFootprints.add(`${library}:${footprintName}`);
-          console.warn(`Skipping routing for component ${component.ref} due to unresolved footprint: ${component.footprint}`);
-        }
+      if (result === null) {
+        unresolvedFootprints.add(component.footprint);
+        warnings.push(`Skipping routing for component ${component.ref} due to unresolved footprint: ${component.footprint}`);
+        return renderFallbackFootprint(component, placement.x, placement.y, placement.rotation);
       }
       
       return result;
@@ -965,34 +963,35 @@ function boardNetIdsFor(components) {
   return new Map(netNames.map((name, index) => [name, index + 1]));
 }
 
-function officialFootprintPath(library, footprintName) {
-  const candidates = [
-    process.env.KICAD10_FOOTPRINT_DIR,
-    process.env.KICAD_FOOTPRINT_DIR,
+function kicadLibraryCandidatePaths(libraryType) {
+  const envVars = libraryType === 'footprints' 
+    ? ['KICAD10_FOOTPRINT_DIR', 'KICAD_FOOTPRINT_DIR']
+    : ['KICAD10_SYMBOL_DIR', 'KICAD_SYMBOL_DIR'];
+  
+  return [
+    ...envVars.map((key) => process.env[key]),
     ...(process.platform === 'darwin' ? [
-      '/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints',
-      '/Applications/KiCad 10.0/KiCad.app/Contents/SharedSupport/footprints'
+      `/Applications/KiCad/KiCad.app/Contents/SharedSupport/${libraryType}`,
+      `/Applications/KiCad 10.0/KiCad.app/Contents/SharedSupport/${libraryType}`
     ] : []),
     ...(process.platform === 'linux' ? [
-      '/usr/share/kicad/footprints',
-      '/usr/local/share/kicad/footprints'
+      `/usr/share/kicad/${libraryType}`,
+      `/usr/local/share/kicad/${libraryType}`
     ] : []),
     ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
-      `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/footprints`,
-      `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/footprints`
+      `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/${libraryType}`,
+      `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/${libraryType}`
     ] : []),
     ...(process.platform === 'win32' ? [
-      'C:/Program Files/KiCad/10.0/share/kicad/footprints',
-      'C:/Program Files/KiCad/9.0/share/kicad/footprints'
+      `C:/Program Files/KiCad/10.0/share/kicad/${libraryType}`,
+      `C:/Program Files/KiCad/9.0/share/kicad/${libraryType}`
     ] : [])
   ].filter(Boolean);
+}
 
+function officialFootprintPath(library, footprintName) {
+  const candidates = kicadLibraryCandidatePaths('footprints');
   const footprintPath = candidates.map((dir) => `${dir}/${library}.pretty/${footprintName}.kicad_mod`).find((file) => existsSync(file));
-  
-  if (!footprintPath) {
-    console.warn(`Warning: Could not resolve official footprint ${library}:${footprintName}. Searched paths:`, candidates);
-  }
-  
   return footprintPath ?? null;
 }
 
@@ -1496,33 +1495,8 @@ function renderOfficialCachedSymbol(libId) {
 }
 
 function officialSymbolLibraryPath(library) {
-  const candidates = [
-    process.env.KICAD10_SYMBOL_DIR,
-    process.env.KICAD_SYMBOL_DIR,
-    ...(process.platform === 'darwin' ? [
-      '/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols',
-      '/Applications/KiCad 10.0/KiCad.app/Contents/SharedSupport/symbols'
-    ] : []),
-    ...(process.platform === 'linux' ? [
-      '/usr/share/kicad/symbols',
-      '/usr/local/share/kicad/symbols'
-    ] : []),
-    ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
-      `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/symbols`,
-      `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/symbols`
-    ] : []),
-    ...(process.platform === 'win32' ? [
-      'C:/Program Files/KiCad/10.0/share/kicad/symbols',
-      'C:/Program Files/KiCad/9.0/share/kicad/symbols'
-    ] : [])
-  ].filter(Boolean);
-
+  const candidates = kicadLibraryCandidatePaths('symbols');
   const symbolPath = candidates.map((dir) => `${dir}/${library}.kicad_sym`).find((file) => existsSync(file));
-  
-  if (!symbolPath) {
-    console.warn(`Warning: Could not resolve official symbol library ${library}. Searched paths:`, candidates);
-  }
-
   return symbolPath ?? null;
 }
 
