@@ -472,7 +472,8 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 }
 .erc-info p, .erc-info ul { margin: 0; }
 .erc-info ul { display: grid; gap: 2px; padding: 0; list-style: none; }
-.erc-h { display: flex; justify-content: space-between; font-weight: 700; font-size: var(--fs-xs); }
+.erc-h { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); font-weight: 700; font-size: var(--fs-xs); }
+.erc-details { min-height: 28px; padding: 0 var(--sp-3); font-size: var(--fs-xs); background: var(--surface); color: var(--text); }
 .erc ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .erc li { font-size: var(--fs-xs); display: flex; gap: 6px; }
 .erc:not(.erc-pass) li::before { content: "✕"; font-weight: 700; }

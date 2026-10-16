@@ -287,7 +287,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.equal(copy.request, locale['request.idle'], `${theme}/${lang} request status`);
         assert.equal(copy.provider, locale['provider.pending'], `${theme}/${lang} provider status`);
         assert.equal(copy.connection, locale['connection.connecting'], `${theme}/${lang} connecting`);
-        assert.equal(copy.patch, locale['patch.ready'], `${theme}/${lang} patch ready`);
+        assert.equal(copy.patch, locale['patch.blocked'], `${theme}/${lang} patch blocked while ERC fails`);
+        assert.notEqual(copy.patch, locale['patch.ready'], `${theme}/${lang} ready while ERC blocks`);
         if (lang === 'ko') {
           assert.notEqual(copy.request, en['request.idle'], `${theme}/${lang} request still English`);
           assert.notEqual(copy.provider, en['provider.pending'], `${theme}/${lang} provider still English`);

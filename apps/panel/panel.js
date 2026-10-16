@@ -67,6 +67,7 @@ const inspectionArtifactCountEl = document.querySelector('#inspection-artifact-c
 const inspectionErcEl = document.querySelector('#inspection-erc');
 const inspectionDrcEl = document.querySelector('#inspection-drc');
 const patchApprovalCardEl = document.querySelector('#patch-approval-card');
+const patchApprovalTitleEl = document.querySelector('#patch-approval-title');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const approveWithoutErcButtonEl = document.querySelector('#approve-patch-without-erc');
@@ -87,6 +88,7 @@ let activeRequestProjectDir = null;
 let pendingHostStatus = null;
 let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
+let patchRejectionCode = null;
 let patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
 let lastRequestResult = null;
 let lastProgressStage = null;
@@ -391,6 +393,12 @@ function handleEnvelope(envelope) {
       return;
     }
     if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
+      const code = envelope.payload.error?.code;
+      if (callName === 'schematic.patch.approve' && notePatchRejection(code)) {
+        renderRequestStatus({ state: 'failed', summaryKey: 'patch.unverified.body' });
+        renderPatchApproval();
+        return;
+      }
       clearPatchApproval();
       renderRequestStatus({ state: 'failed', summaryKey: 'request.patch-failed', technicalDetail: envelope.payload.error?.message ?? t('request.patch-tool-failed') });
     }
@@ -428,8 +436,21 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'schematic.patch.approve') {
+    const result = envelope.payload.result ?? {};
+    if (result.applied === false && notePatchRejection(result.reason?.code)) {
+      if (result.validation && lastRequestResult) {
+        lastRequestResult = {
+          ...lastRequestResult,
+          validation: result.validation,
+          candidateVerification: result.candidateVerification ?? lastRequestResult.candidateVerification ?? null
+        };
+      }
+      renderRequestStatus({ state: 'failed', summaryKey: 'patch.unverified.body' });
+      renderPatchApproval();
+      return;
+    }
     clearPatchApproval();
-    renderProjectRequest(envelope.payload.result);
+    renderProjectRequest(result);
     inspectActiveProject();
     return;
   }
@@ -703,6 +724,11 @@ function setPatchApproval(preview) {
 function clearPatchApproval(messageKey = 'patch.idle') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
+  patchRejectionCode = null;
+  fixPatchButtonEl?.classList.remove('btn-primary');
+  document.querySelector('#patch-erc-details')?.remove();
+  if (patchApprovalStatusEl) patchApprovalStatusEl.hidden = false;
+  setPatchTitle('patch.title');
   patchApprovalStatusEl.dataset.state = 'idle';
   setPatchStatus(messageKey);
   approvePatchButtonEl.disabled = true;
@@ -849,8 +875,54 @@ function renderCurrentFileErc(candidate, active) {
   info.append(list);
 }
 
+function notePatchRejection(code) {
+  if (code !== 'PATCH_CANDIDATE_UNVERIFIED' && code !== 'ERC_BLOCKED') return false;
+  patchRejectionCode = code;
+  return true;
+}
+
+function setPatchTitle(key) {
+  if (!patchApprovalTitleEl) return;
+  patchApprovalTitleEl.dataset.i18n = key;
+  patchApprovalTitleEl.textContent = t(key);
+}
+
+function revealErcDetails() {
+  const erc = ercBlockState();
+  const message = erc.messages.length ? erc.messages.join('\n') : t('patch.unverified.body');
+  renderValidation({
+    ok: false,
+    skipped: erc.skipped === true,
+    erc: { errorCount: erc.count, warningCount: 0, ok: false },
+    reason: { message }
+  });
+  const dialog = document.getElementById('erc-dialog');
+  if (typeof dialog?.showModal === 'function' && !dialog.open) dialog.showModal();
+}
+
+function placeErcDetailsButton(parent) {
+  if (!parent) return;
+  let button = document.querySelector('#patch-erc-details');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'patch-erc-details';
+    button.className = 'erc-details';
+    button.setAttribute('aria-controls', 'erc-dialog');
+    button.addEventListener('click', revealErcDetails);
+  }
+  button.textContent = t('patch.erc-details');
+  parent.append(button);
+}
+
 function renderErcBox(erc, active) {
   if (!patchErcEl) return;
+  if (patchRejectionCode && !erc?.failed) {
+    patchErcEl.hidden = true;
+    patchErcEl.removeAttribute('role');
+    patchErcEl.replaceChildren();
+    return;
+  }
   if (!active || !erc || (!erc.failed && !erc.passed && !erc.skipped)) {
     patchErcEl.hidden = true;
     patchErcEl.removeAttribute('role');
@@ -871,6 +943,7 @@ function renderErcBox(erc, active) {
       ? t('erc.skipped')
       : t('erc.passed');
   head.append(title, summary);
+  if (erc.failed) placeErcDetailsButton(head);
   patchErcEl.append(head);
   if (!erc.failed) {
     patchErcEl.removeAttribute('role');
@@ -894,7 +967,7 @@ function renderPatchApproval() {
   const active = Boolean(patchApprovalState.patchId) && unexpired;
   const erc = ercBlockState();
   const evidenceBlocked = !active || !approvedEvidence;
-  const canApply = active && !evidenceBlocked && erc.passed === true;
+  const canApply = active && !evidenceBlocked && erc.passed === true && !patchRejectionCode;
   const canOverride = active && !evidenceBlocked && erc.skipped === true && !erc.failed && !erc.passed;
   approvePatchButtonEl.disabled = evidenceBlocked;
   cancelPatchButtonEl.disabled = !active;
@@ -904,11 +977,13 @@ function renderPatchApproval() {
     approveWithoutErcButtonEl.disabled = !canOverride;
   }
   if (active && !evidenceBlocked && !canApply) {
-    const reason = erc.failed
-      ? t('patch.apply.blocked-erc', { count: erc.count })
-      : erc.skipped
-        ? t('patch.apply.skipped')
-        : t('patch.apply.blocked-missing');
+    const reason = patchRejectionCode
+      ? t('patch.unverified.body')
+      : erc.failed
+        ? t('patch.apply.blocked-erc', { count: erc.count })
+        : erc.skipped
+          ? t('patch.apply.skipped')
+          : t('patch.apply.blocked-missing');
     approvePatchButtonEl.setAttribute('aria-disabled', 'true');
     approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
     if (applyWhyEl) {
@@ -925,25 +1000,59 @@ function renderPatchApproval() {
   }
   renderErcBox(erc, active);
   renderCurrentFileErc(erc, active);
+  const showDetails = Boolean(active) && (erc.failed || patchRejectionCode != null);
+  if (showDetails && !document.querySelector('#patch-erc-details')) {
+    placeErcDetailsButton(document.querySelector('.patch-approval-actions'));
+  }
+  if (!showDetails) document.querySelector('#patch-erc-details')?.remove();
+  fixPatchButtonEl?.classList.toggle('btn-primary', showDetails && (erc.failed || patchRejectionCode != null));
   scrollConversationToLatest();
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+    patchApprovalStatusEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
+    setPatchTitle('patch.title');
     setPatchStatus('patch.stale');
     return;
   }
   if (!active) return;
   if (freshness === 'legacy-unverified') {
+    patchApprovalStatusEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'warning';
+    setPatchTitle('patch.title');
     setPatchStatus('patch.legacy');
     return;
   }
   if (freshness === 'missing' || !freshness) {
+    patchApprovalStatusEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'warning';
+    setPatchTitle('patch.title');
     setPatchStatus('patch.missing-evidence');
     return;
   }
+  if (patchRejectionCode) {
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = 'blocked';
+    setPatchTitle('patch.unverified.title');
+    setPatchStatus('patch.unverified.body');
+    return;
+  }
+  if (!erc.passed) {
+    patchApprovalStatusEl.dataset.state = 'blocked';
+    setPatchTitle('patch.title');
+    if (erc.failed) {
+      // The ERC alert and apply reason already say why. Do not call this ready.
+      patchApprovalStatusEl.hidden = true;
+      setPatchStatus('patch.blocked');
+      return;
+    }
+    patchApprovalStatusEl.hidden = false;
+    setPatchStatus(erc.skipped ? 'patch.apply.skipped' : 'patch.apply.blocked-missing');
+    return;
+  }
+  patchApprovalStatusEl.hidden = false;
   patchApprovalStatusEl.dataset.state = 'ready';
+  setPatchTitle('patch.title');
   setPatchStatus('patch.ready');
 }
 
@@ -1680,6 +1789,7 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
         }
       };
       if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
+      patchRejectionCode = null;
       patchApprovalState = {
         patchId: state.patchId ?? 'patch_test',
         expiresAt: state.expiresAt ?? (Date.now() + 600000),
