@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -22,11 +22,12 @@ function childEnvWithFixtureSymbols() {
   return env;
 }
 
-function childEnvWithoutSymbolDirs() {
+function childEnvWithoutSymbolDirs(librarySearchRoot) {
   const env = { ...process.env };
   delete env.KICAD_SYMBOL_DIR;
   delete env.KICAD10_SYMBOL_DIR;
   delete env.FORCE_COLOR;
+  env.CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS = librarySearchRoot;
   return env;
 }
 
@@ -54,26 +55,25 @@ test('panel user-flow verifier completes the daemon websocket project request', 
   assert.equal('dirtyHost' in result, false);
 });
 
-test('panel user-flow verifier exits before running when no symbol library is configured', async (t) => {
-  const message = unconfiguredSymbolLibraryError({});
-  if (message === null) {
-    t.skip('an installed KiCad symbol library is already on the generator candidate paths');
-    return;
-  }
+test('panel user-flow verifier exits before running when no symbol library is configured', async () => {
+  const librarySearchRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-no-symbol-libs-'));
 
-  await assert.rejects(
-    () => execFileAsync(process.execPath, ['./scripts/verify-panel-flow.js'], {
-      timeout: 60_000,
-      env: childEnvWithoutSymbolDirs()
-    }),
-    (error) => {
-      assert.equal(error.code, 1);
-      assert.equal(error.stdout, '');
-      assert.equal(error.stderr.trim(), message);
-      assert.equal(message, UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE);
-      return true;
-    }
-  );
+  try {
+    await assert.rejects(
+      () => execFileAsync(process.execPath, ['./scripts/verify-panel-flow.js'], {
+        timeout: 60_000,
+        env: childEnvWithoutSymbolDirs(librarySearchRoot)
+      }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.equal(error.stdout, '');
+        assert.equal(error.stderr.trim(), UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE);
+        return true;
+      }
+    );
+  } finally {
+    await rm(librarySearchRoot, { force: true, recursive: true });
+  }
 });
 
 test('symbol library startup error names the env var and the offline fixture', () => {

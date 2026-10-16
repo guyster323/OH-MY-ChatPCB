@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { kicadInstallLibraryCandidatePaths, setFlatpakLibraryRootsForTests } from '../src/kicad/project-generator.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
@@ -585,6 +587,65 @@ test('ADBMS6830 EEPROM companion uses GPIO3/GPIO4 serial pins when requested', a
     assert.notEqual(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO6')], 'EEPROM_SDA');
   } finally {
     restoreKicadLibraryEnv(previous);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('flatpak runtime libraries resolve through arch/branch/active/files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-flatpak-libs-'));
+  const systemRoot = path.join(root, 'system');
+  const userRoot = path.join(root, 'user');
+  const commit = 'a060212d400aa3fdc1813b92b423868f4d7da841eb463ea063f0adbb7082638e';
+  const systemSymbols = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', 'active', 'files', 'symbols');
+  const systemSymbolCommit = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', commit, 'files', 'symbols');
+  const userSymbols = path.join(userRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', 'active', 'files', 'symbols');
+  const systemFootprints = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Footprints', 'x86_64', 'stable', 'active', 'files', 'footprints');
+  const systemFootprintCommit = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Footprints', 'x86_64', 'stable', commit, 'files', 'footprints', 'Device.pretty');
+  const previous = setFlatpakLibraryRootsForTests([systemRoot, userRoot]);
+
+  try {
+    await mkdir(systemSymbolCommit, { recursive: true });
+    await mkdir(userSymbols, { recursive: true });
+    await mkdir(systemFootprintCommit, { recursive: true });
+    await writeFile(path.join(systemSymbolCommit, 'Device.kicad_sym'), '(kicad_symbol_lib (version 20211014))\n');
+    await writeFile(path.join(systemSymbolCommit, 'ChatPCBFlatpakProbe.kicad_sym'), '(kicad_symbol_lib (version 20211014))\n');
+    await writeFile(path.join(userSymbols, 'ChatPCBFlatpakUserProbe.kicad_sym'), '(kicad_symbol_lib (version 20211014))\n');
+    await writeFile(path.join(systemFootprintCommit, 'ChatPCBFlatpakProbe.kicad_mod'), '(footprint "ChatPCBFlatpakProbe")\n');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await symlink(commit, path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', 'active'), linkType);
+    await symlink(commit, path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Footprints', 'x86_64', 'stable', 'active'), linkType);
+
+    const symbols = kicadInstallLibraryCandidatePaths('symbols');
+    const footprints = kicadInstallLibraryCandidatePaths('footprints');
+    assert.ok(symbols.indexOf(systemSymbols) >= 0);
+    assert.ok(symbols.indexOf(userSymbols) > symbols.indexOf(systemSymbols));
+    assert.equal(symbols.includes(systemSymbolCommit), false);
+    if (process.platform === 'linux') {
+      const systemLibrary = '/usr/share/kicad/symbols';
+      const flatpakApp = '/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/symbols';
+      assert.ok(symbols.indexOf(systemLibrary) < symbols.indexOf(systemSymbols));
+      assert.ok(symbols.indexOf(flatpakApp) < symbols.indexOf(systemSymbols));
+    }
+
+    const device = path.join(systemSymbols, 'Device.kicad_sym');
+    assert.equal(existsSync(device), true);
+    assert.equal(
+      symbols.map((dir) => path.join(dir, 'Device.kicad_sym')).includes(device),
+      true
+    );
+    const probe = symbols.map((dir) => path.join(dir, 'ChatPCBFlatpakProbe.kicad_sym')).find((file) => existsSync(file));
+    assert.equal(probe, path.join(systemSymbols, 'ChatPCBFlatpakProbe.kicad_sym'));
+    const userProbe = symbols.map((dir) => path.join(dir, 'ChatPCBFlatpakUserProbe.kicad_sym')).find((file) => existsSync(file));
+    assert.equal(userProbe, path.join(userSymbols, 'ChatPCBFlatpakUserProbe.kicad_sym'));
+
+    assert.ok(footprints.includes(systemFootprints));
+    assert.equal(footprints.includes(path.dirname(systemFootprintCommit)), false);
+    const footprint = footprints
+      .map((dir) => path.join(dir, 'Device.pretty', 'ChatPCBFlatpakProbe.kicad_mod'))
+      .find((file) => existsSync(file));
+    assert.equal(footprint, path.join(systemFootprints, 'Device.pretty', 'ChatPCBFlatpakProbe.kicad_mod'));
+  } finally {
+    setFlatpakLibraryRootsForTests(previous);
     await rm(root, { force: true, recursive: true });
   }
 });

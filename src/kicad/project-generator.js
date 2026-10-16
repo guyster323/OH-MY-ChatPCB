@@ -993,7 +993,100 @@ function kicadLibraryCandidatePaths(libraryType) {
   return kicadInstallLibraryCandidatePaths(libraryType);
 }
 
-function kicadInstallLibraryCandidatePaths(libraryType) {
+let flatpakLibraryRootOverride = null;
+
+// Tests point runtime discovery at a fake tree with the Flatpak layout.
+// Null restores /var/lib/flatpak and ~/.local/share/flatpak.
+export function setFlatpakLibraryRootsForTests(roots) {
+  const previous = flatpakLibraryRootOverride;
+  flatpakLibraryRootOverride = Array.isArray(roots) ? [...roots] : null;
+  return previous;
+}
+
+function flatpakLibraryRoots() {
+  if (Array.isArray(flatpakLibraryRootOverride)) {
+    return flatpakLibraryRootOverride;
+  }
+  if (process.platform !== 'linux') {
+    return [];
+  }
+
+  const roots = ['/var/lib/flatpak'];
+  if (typeof process.env.HOME === 'string' && process.env.HOME.length > 0) {
+    roots.push(path.join(process.env.HOME, '.local', 'share', 'flatpak'));
+  }
+  return roots.map((candidate) => underLibrarySearchRoot(candidate));
+}
+
+// Test-only. CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS is a filesystem root: system
+// paths and Flatpak roots are resolved under it. Unset keeps host paths.
+function librarySearchRoot() {
+  const value = process.env.CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS;
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return null;
+  }
+  return value.trim();
+}
+
+function underLibrarySearchRoot(candidate) {
+  const root = librarySearchRoot();
+  if (!root) {
+    return candidate;
+  }
+  if (!path.isAbsolute(candidate)) {
+    return path.join(root, candidate);
+  }
+
+  const resolved = path.resolve(candidate);
+  return path.join(root, path.relative(path.parse(resolved).root, resolved));
+}
+
+function flatpakRuntimeName(libraryType) {
+  if (libraryType === 'symbols') {
+    return 'org.kicad.KiCad.Library.Symbols';
+  }
+  if (libraryType === 'footprints') {
+    return 'org.kicad.KiCad.Library.Footprints';
+  }
+  return null;
+}
+
+function readFlatpakPathEntries(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+// KiCad Flatpak stores symbols and footprints in runtime extensions, not in the app tree.
+// <root>/runtime/org.kicad.KiCad.Library.<Kind>/<arch>/<branch>/active/files/<symbols|footprints>
+function flatpakRuntimeLibraryCandidatePaths(libraryType) {
+  const runtimeName = flatpakRuntimeName(libraryType);
+  if (!runtimeName) {
+    return [];
+  }
+
+  const candidates = [];
+  for (const root of flatpakLibraryRoots()) {
+    const runtimeRoot = path.join(root, 'runtime', runtimeName);
+    for (const arch of readFlatpakPathEntries(runtimeRoot)) {
+      const archDir = path.join(runtimeRoot, arch);
+      for (const branch of readFlatpakPathEntries(archDir)) {
+        const libraryDir = path.join(archDir, branch, 'active', 'files', libraryType);
+        if (existsSync(libraryDir)) {
+          candidates.push(libraryDir);
+        }
+      }
+    }
+  }
+  return candidates;
+}
+
+export function kicadInstallLibraryCandidatePaths(libraryType) {
   const kicadCliResult = resolveKicadCli();
   const kicadCliPath = kicadCliResult?.path;
   const relativeToKicadCli = kicadCliPath ? [
@@ -1002,25 +1095,26 @@ function kicadInstallLibraryCandidatePaths(libraryType) {
   ] : [];
 
   return [
-    ...relativeToKicadCli,
+    ...relativeToKicadCli.map((candidate) => underLibrarySearchRoot(candidate)),
     ...(process.platform === 'darwin' ? [
       `/Applications/KiCad/KiCad.app/Contents/SharedSupport/${libraryType}`,
       `/Applications/KiCad 10.0/KiCad.app/Contents/SharedSupport/${libraryType}`
-    ] : []),
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
     ...(process.platform === 'linux' ? [
       `/usr/share/kicad/${libraryType}`,
       `/usr/local/share/kicad/${libraryType}`,
       `/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`,
       `${process.env.HOME}/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`
-    ].filter(Boolean) : []),
+    ].filter(Boolean).map((candidate) => underLibrarySearchRoot(candidate)) : []),
+    ...flatpakRuntimeLibraryCandidatePaths(libraryType),
     ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
       `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/${libraryType}`,
       `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/${libraryType}`
-    ] : []),
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
     ...(process.platform === 'win32' ? [
       `C:/Program Files/KiCad/10.0/share/kicad/${libraryType}`,
       `C:/Program Files/KiCad/9.0/share/kicad/${libraryType}`
-    ] : [])
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : [])
   ].filter(Boolean);
 }
 
