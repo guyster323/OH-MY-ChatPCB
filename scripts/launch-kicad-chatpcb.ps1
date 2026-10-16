@@ -34,7 +34,8 @@ $panelPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'apps\panel\inde
 $panelAssets = @(
     $panelPath,
     (Join-Path $repoRoot 'apps\panel\panel.js'),
-    (Join-Path $repoRoot 'apps\panel\styles.css')
+    (Join-Path $repoRoot 'apps\panel\styles.css'),
+    (Join-Path $repoRoot 'apps\panel\constants.js')
 ) | Where-Object { Test-Path -LiteralPath $_ }
 $panelStamp = ($panelAssets | ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc.Ticks } | Measure-Object -Maximum).Maximum
 $panelUrl = 'file:///' + ($panelPath -replace '\\', '/') + "?v=$panelStamp"

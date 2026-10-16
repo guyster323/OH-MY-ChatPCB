@@ -19,12 +19,11 @@ import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
-
-const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
+import { ProtocolMessageType, ToolName, PROVIDER_ALLOWED_TOOLS } from '../shared/constants.js';
 
 function emitProgress(ctx, payload) {
   if (typeof ctx?.emit !== 'function') return;
-  ctx.emit('agent.delta', {
+  ctx.emit(ProtocolMessageType.AGENT_DELTA, {
     channel: 'progress',
     requestId: ctx.progressRequestId ?? payload.requestId ?? null,
     ...payload
@@ -37,14 +36,14 @@ function progressCopy(prompt, ko, en) {
 
 function emitProviderEvent(ctx, event) {
   if (!event || typeof event !== 'object') return;
-  if (event.type === 'agent.delta') {
+  if (event.type === ProtocolMessageType.AGENT_DELTA) {
     const text = typeof event.payload?.text === 'string' ? event.payload.text.trim() : '';
     if (!text) return;
     emitProgress(ctx, { stage: 'provider', sprite: 'cli', text });
     return;
   }
-  if (event.type === 'tool.call') {
-    const name = event.payload?.name ?? 'tool.call';
+  if (event.type === ProtocolMessageType.TOOL_CALL) {
+    const name = event.payload?.name ?? ToolName.TOOL_CALL;
     emitProgress(ctx, { stage: 'tool', sprite: 'tool', text: name, toolName: name });
   }
 }
@@ -101,13 +100,13 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
 
   try {
   switch (call.name) {
-    case 'project.create':
+    case ToolName.PROJECT_CREATE:
       return ok(await createNamedProject({
         workspaceRoot: allowedWorkspaceRoot ?? call.args?.workspaceRoot,
         projectName: call.args?.projectName
       }));
 
-    case 'schematic.generate':
+    case ToolName.SCHEMATIC_GENERATE:
       return previewNativeChange({
         projectDir: call.args?.projectDir,
         prompt: call.args?.prompt,
@@ -115,7 +114,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         context: call.args?.context ?? call.args?.selection
       }, ctx);
 
-    case 'project.inspect':
+    case ToolName.PROJECT_INSPECT:
       return okOrInspectionFailure(inspectProjectImpl({
         projectDir: call.args?.projectDir,
         kicadCliPath,
@@ -124,25 +123,25 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         analyzerAdapters: call.args?.analyzerAdapters
       }));
 
-    case 'validate.erc':
+    case ToolName.VALIDATE_ERC:
       return okOrInspectionFailure(dispatchCopiedValidation('erc', call, ctx));
 
-    case 'validate.drc':
+    case ToolName.VALIDATE_DRC:
       return okOrInspectionFailure(dispatchCopiedValidation('drc', call, ctx));
 
-    case 'schematic.patch':
+    case ToolName.SCHEMATIC_PATCH:
       return dispatchSchematicPatch(call.args ?? {}, ctx);
 
-    case 'provider.status':
+    case ToolName.PROVIDER_STATUS:
       return ok(await checkProviderAvailabilityImpl({ provider: call.args?.provider ?? 'codex' }));
 
-    case 'provider.list':
+    case ToolName.PROVIDER_LIST:
       return ok({ providers: listProviderDefinitions() });
 
-    case 'provider.invoke':
+    case ToolName.PROVIDER_INVOKE:
       return ok(await invokeProvider(call, ctx));
 
-    case 'project.request':
+    case ToolName.PROJECT_REQUEST:
       try {
         return ok(await requestProject(call, ctx));
       } catch (error) {
@@ -150,10 +149,10 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         return failure(error.code ?? 'PROVIDER_FAILED', error.message, { conversation: error.conversation });
       }
 
-    case 'provider.cancel':
+    case ToolName.PROVIDER_CANCEL:
       return ok(cancelProvider(call.args, providerControllers));
 
-    case 'simulate.spice': {
+    case ToolName.SIMULATE_SPICE: {
       const result = await simulateProject({
         projectDir: call.args?.projectDir,
         ngspicePath,
@@ -307,10 +306,10 @@ async function invokeProvider(call, ctx) {
   for (const event of transcript.events) {
     if (event.type !== 'tool.call') continue;
 
-    if (forceProjectDir && event.payload.name === 'project.create') {
+    if (forceProjectDir && event.payload.name === ToolName.PROJECT_CREATE) {
       throw new Error('project.create is not allowed inside project.request.');
     }
-    if (!allowGenerate && event.payload.name === 'schematic.generate') {
+    if (!allowGenerate && event.payload.name === ToolName.SCHEMATIC_GENERATE) {
       throw new Error('schematic.generate is not allowed for an existing project.request; request a schematic.patch preview instead.');
     }
     if (!PROVIDER_ALLOWED_TOOLS.includes(event.payload.name)) {
@@ -521,25 +520,25 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
     delete args.expectedPatchId;
     if (selection !== undefined) args.context = selection;
   }
-  if (name === 'schematic.generate' && selection !== undefined) {
+  if (name === ToolName.SCHEMATIC_GENERATE && selection !== undefined) {
     args.context = selection;
   }
-  if (name === 'project.inspect' && selection !== undefined) {
+  if (name === ToolName.PROJECT_INSPECT && selection !== undefined) {
     args.selection = selection;
   }
-  if (name === 'validate.erc' || name === 'validate.drc') {
-    name = 'project.inspect';
+  if (name === ToolName.VALIDATE_ERC || name === ToolName.VALIDATE_DRC) {
+    name = ToolName.PROJECT_INSPECT;
   }
 
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
-  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && (name === 'schematic.generate' || name === 'schematic.patch')) {
+  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && (name === ToolName.SCHEMATIC_GENERATE || name === ToolName.SCHEMATIC_PATCH)) {
     if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
       args.prompt = prompt;
     }
   }
-  if (name === 'project.inspect' && analyzerAdapters !== undefined) {
+  if (name === ToolName.PROJECT_INSPECT && analyzerAdapters !== undefined) {
     args.analyzerAdapters = analyzerAdapters;
   }
 
@@ -600,7 +599,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
 
     acceptWebSocket(request, socket);
     clients.add(socket);
-    sendWebSocketJson(socket, createEnvelope('system.status', { ok: true, service: 'chatpcb-agentd' }));
+    sendWebSocketJson(socket, createEnvelope(ProtocolMessageType.SYSTEM_STATUS, { ok: true, service: 'chatpcb-agentd' }));
 
     socket.on('data', async (buffer) => {
       const text = decodeWebSocketText(buffer);
@@ -608,7 +607,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
 
       try {
         const envelope = parseEnvelope(text);
-        if (envelope.type === 'tool.call') {
+        if (envelope.type === ProtocolMessageType.TOOL_CALL) {
           const callCtx = {
             ...resolvedDispatchOptions,
             progressRequestId: envelope.payload.id,
@@ -616,21 +615,21 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
           };
           sendWebSocketJson(
             socket,
-            createEnvelope('tool.result', {
+            createEnvelope(ProtocolMessageType.TOOL_RESULT, {
               id: envelope.payload.id,
               ...(await dispatchToolCall(envelope.payload, callCtx))
             })
           );
-        } else if (envelope.type === 'chat.message') {
+        } else if (envelope.type === ProtocolMessageType.CHAT_MESSAGE) {
           sendWebSocketJson(
             socket,
-            createEnvelope('agent.delta', {
+            createEnvelope(ProtocolMessageType.AGENT_DELTA, {
               text: 'ChatPCB daemon is online. Send a tool.call envelope to generate, validate, or simulate.'
             })
           );
         }
       } catch (error) {
-        sendWebSocketJson(socket, createEnvelope('tool.result', failure('BAD_ENVELOPE', error.message)));
+        sendWebSocketJson(socket, createEnvelope(ProtocolMessageType.TOOL_RESULT, failure('BAD_ENVELOPE', error.message)));
       }
     });
 

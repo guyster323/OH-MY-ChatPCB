@@ -1,4 +1,6 @@
-const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
+const { DEFAULT_DAEMON_PORT, ProtocolMessageType, ToolName, PatchAction } = window.ChatPCB;
+
+const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? `ws://127.0.0.1:${DEFAULT_DAEMON_PORT}/ws`;
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
 const PROGRESS_COPY = {
@@ -173,8 +175,8 @@ function createProject() {
   renderRequestStatus({ state: 'running', summary: 'Creating project…' });
   const id = `project_create_${Date.now()}`;
   activeProjectCreateId = id;
-  pendingCalls.set(id, 'project.create');
-  sendToolCall({ id, name: 'project.create', args: { workspaceRoot, projectName } });
+  pendingCalls.set(id, ToolName.PROJECT_CREATE);
+  sendToolCall({ id, name: ToolName.PROJECT_CREATE, args: { workspaceRoot, projectName } });
 }
 
 async function sendProjectRequest() {
@@ -223,10 +225,10 @@ async function sendProjectRequest() {
   const id = `project_request_${Date.now()}`;
   activeRequestId = id;
   activeRequestProjectDir = requestProject.projectDir;
-  pendingCalls.set(id, 'project.request');
+  pendingCalls.set(id, ToolName.PROJECT_REQUEST);
   sendToolCall({
     id,
-    name: 'project.request',
+    name: ToolName.PROJECT_REQUEST,
     args: {
       projectDir: requestProject.projectDir,
       prompt,
@@ -238,15 +240,15 @@ async function sendProjectRequest() {
 
 function refreshProviderStatus() {
   const id = `provider_status_${Date.now()}`;
-  pendingCalls.set(id, 'provider.status');
-  sendToolCall({ id, name: 'provider.status', args: { provider: providerEl.value } });
+  pendingCalls.set(id, ToolName.PROVIDER_STATUS);
+  sendToolCall({ id, name: ToolName.PROVIDER_STATUS, args: { provider: providerEl.value } });
 }
 
 function sendToolCall(payload) {
   const envelope = {
     version: 1,
     id: `evt_${crypto.randomUUID()}`,
-    type: 'tool.call',
+    type: ProtocolMessageType.TOOL_CALL,
     createdAt: new Date().toISOString(),
     payload
   };
@@ -255,22 +257,22 @@ function sendToolCall(payload) {
   } else {
     pendingCalls.delete(payload.id);
     renderRequestStatus({ state: 'failed', summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.', technicalDetail: 'chatpcb-agentd is not connected.' });
-    if (payload.name === 'project.request') setRequestBusy(false);
+    if (payload.name === ToolName.PROJECT_REQUEST) setRequestBusy(false);
   }
 }
 
 function handleEnvelope(envelope) {
-  if (envelope.type === 'agent.delta') {
+  if (envelope.type === ProtocolMessageType.AGENT_DELTA) {
     handleProgressDelta(envelope.payload);
     return;
   }
-  if (envelope.type !== 'tool.result') return;
+  if (envelope.type !== ProtocolMessageType.TOOL_RESULT) return;
   const id = envelope.payload.id;
-  const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
+  const callName = pendingCalls.get(id) ?? (activeRequestId ? ToolName.PROJECT_REQUEST : activeProjectCreateId ? ToolName.PROJECT_CREATE : undefined);
   pendingCalls.delete(id);
 
   if (!envelope.payload.ok) {
-    if (callName === 'schematic.generate') {
+    if (callName === ToolName.SCHEMATIC_GENERATE) {
       setRequestBusy(false);
       appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? 'Tool call failed.' });
       renderRequestStatus({
@@ -280,12 +282,12 @@ function handleEnvelope(envelope) {
       });
       return;
     }
-    if (callName === 'project.create' || callName === 'project.request') {
-      if (callName === 'project.create') {
+    if (callName === ToolName.PROJECT_CREATE || callName === ToolName.PROJECT_REQUEST) {
+      if (callName === ToolName.PROJECT_CREATE) {
         pendingCalls.delete(activeProjectCreateId);
         activeProjectCreateId = null;
       }
-      if (callName === 'project.request') {
+      if (callName === ToolName.PROJECT_REQUEST) {
         const requestProjectDir = activeRequestProjectDir;
         pendingCalls.delete(activeRequestId);
         activeRequestId = null;
@@ -312,23 +314,23 @@ function handleEnvelope(envelope) {
         technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
       });
     }
-    if (callName === 'project.inspect') {
+    if (callName === ToolName.PROJECT_INSPECT) {
       if (inspectionState.requestId === id) renderInspectionFailure();
       return;
     }
-    if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
+    if (callName === PatchAction.APPROVE || callName === PatchAction.CANCEL) {
       clearPatchApproval();
       renderRequestStatus({ state: 'failed', summary: 'Patch approval could not be completed.', technicalDetail: envelope.payload.error?.message ?? 'Patch tool call failed.' });
     }
     return;
   }
 
-  if (callName === 'project.create') {
+  if (callName === ToolName.PROJECT_CREATE) {
     activeProjectCreateId = null;
     activateProject(envelope.payload.result);
     return;
   }
-  if (callName === 'project.request') {
+  if (callName === ToolName.PROJECT_REQUEST) {
     const requestProjectDir = activeRequestProjectDir;
     activeRequestId = null;
     activeRequestProjectDir = null;
@@ -338,7 +340,7 @@ function handleEnvelope(envelope) {
     inspectActiveProject();
     return;
   }
-  if (callName === 'schematic.generate') {
+  if (callName === ToolName.SCHEMATIC_GENERATE) {
     setRequestBusy(false);
     const conversation = lastRequestResult?.conversation ?? lastRequestResult;
     renderProjectRequest({
@@ -349,18 +351,18 @@ function handleEnvelope(envelope) {
     inspectActiveProject();
     return;
   }
-  if (callName === 'project.inspect') {
+  if (callName === ToolName.PROJECT_INSPECT) {
     if (inspectionState.projectDir === activeProject?.projectDir && inspectionState.requestId === id) renderInspection(envelope.payload.result);
     return;
   }
-  if (callName === 'schematic.patch.approve') {
+  if (callName === PatchAction.APPROVE) {
     clearPatchApproval();
     renderProjectRequest(envelope.payload.result);
     inspectActiveProject();
     return;
   }
-  if (callName === 'schematic.patch.cancel') return;
-  if (callName === 'provider.status') {
+  if (callName === PatchAction.CANCEL) return;
+  if (callName === ToolName.PROVIDER_STATUS) {
     const provider = envelope.payload.result;
     providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
     providerStatusEl.dataset.status = provider.status;
@@ -550,8 +552,8 @@ function inspectActiveProject() {
   inspectionState = { projectDir, requestId: id, result: null };
   inspectionCardEl.hidden = false;
   renderInspection({});
-  pendingCalls.set(id, 'project.inspect');
-  sendToolCall({ id, name: 'project.inspect', args: { projectDir } });
+  pendingCalls.set(id, ToolName.PROJECT_INSPECT);
+  sendToolCall({ id, name: ToolName.PROJECT_INSPECT, args: { projectDir } });
 }
 
 function renderInspection(result = {}) {
@@ -647,15 +649,15 @@ function approvePatch() {
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
   const id = `patch_approve_${Date.now()}`;
-  pendingCalls.set(id, 'schematic.patch.approve');
-  sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
+  pendingCalls.set(id, PatchAction.APPROVE);
+  sendToolCall({ id, name: ToolName.SCHEMATIC_PATCH, args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
 }
 
 function cancelPatch() {
   if (!activeProject || cancelPatchButtonEl.disabled || !patchApprovalState.patchId) return;
   const id = `patch_cancel_${Date.now()}`;
-  pendingCalls.set(id, 'schematic.patch.cancel');
-  sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
+  pendingCalls.set(id, PatchAction.CANCEL);
+  sendToolCall({ id, name: ToolName.SCHEMATIC_PATCH, args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
   clearPatchApproval('Patch preview cancelled.');
 }
 
@@ -848,10 +850,10 @@ function requestNativeDraft() {
   renderRequestStatus({ state: 'running', summary: 'Running request…' });
   appendProgress({ stage: 'preview', text: '로컬에서 회로 초안을 그리는 중.' });
   const id = `schematic_generate_${Date.now()}`;
-  pendingCalls.set(id, 'schematic.generate');
+  pendingCalls.set(id, ToolName.SCHEMATIC_GENERATE);
   sendToolCall({
     id,
-    name: 'schematic.generate',
+    name: ToolName.SCHEMATIC_GENERATE,
     args: {
       projectDir: activeProject.projectDir,
       prompt: lastRequestResult?.generatePrompt ?? lastRequestResult?.sourcePrompt ?? promptEl.value
