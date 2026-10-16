@@ -82,8 +82,8 @@ export async function findChrome({
     listDir
   });
   if (shell.path) {
-    // Callers may pass this path as executablePath. Omitting executablePath is
-    // also fine: headless chromium.launch() selects the shell itself.
+    // Launch this exact binary. chromium.launch() without executablePath can
+    // select a different revision, or a browser that is not installed.
     return { path: shell.path, source: 'playwright-headless-shell' };
   }
 
@@ -97,10 +97,29 @@ export async function findChrome({
   };
 }
 
-// undefined lets Playwright pick chromium-headless-shell for a headless launch.
+// CHATPCB_UI_HEADLESS=0 asks verify:ui for a visible window. Any other value stays headless.
+export function isUiHeadless(env = process.env) {
+  return env.CHATPCB_UI_HEADLESS !== '0';
+}
+
 export function executablePathForLaunch(found) {
-  if (!found?.path || found.source === 'playwright-headless-shell') return undefined;
+  if (!found?.path) return undefined;
   return found.path;
+}
+
+const HEADED_SHELL_ERROR = 'headed mode needs full Chromium or Chrome: run npx playwright install chromium or set CHATPCB_CHROME_PATH';
+
+// Options passed to chromium.launch. The headless shell has no window, so a
+// headed request fails here instead of launching a different or missing browser.
+export function chromeLaunchOptions(found, { headless = true } = {}) {
+  if (headless === false && found?.source === 'playwright-headless-shell') {
+    throw new Error(HEADED_SHELL_ERROR);
+  }
+  const executablePath = executablePathForLaunch(found);
+  return {
+    headless,
+    ...(executablePath ? { executablePath } : {})
+  };
 }
 
 function envOverride(env) {

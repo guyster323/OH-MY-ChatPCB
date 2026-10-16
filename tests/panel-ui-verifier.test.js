@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
-import { executablePathForLaunch, findChrome } from '../scripts/lib/find-chrome.js';
+import { chromeLaunchOptions, findChrome } from '../scripts/lib/find-chrome.js';
 import { resolveVerifyUiTimeoutMs, waitForCompletedOrFailFast } from '../scripts/verify-panel-ui.js';
 
 test('panel browser UI verification script is exposed through npm', async () => {
@@ -201,10 +201,8 @@ async function launchChrome(t) {
     t.skip(found.reason);
     return null;
   }
-  const executablePath = executablePathForLaunch(found);
   return chromium.launch({
-    headless: true,
-    ...(executablePath ? { executablePath } : {}),
+    ...chromeLaunchOptions(found, { headless: true }),
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   });
 }

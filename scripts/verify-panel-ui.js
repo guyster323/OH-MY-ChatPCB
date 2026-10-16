@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
-import { executablePathForLaunch, findChrome } from './lib/find-chrome.js';
+import { chromeLaunchOptions, findChrome, isUiHeadless } from './lib/find-chrome.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -43,10 +43,12 @@ async function main() {
     return;
   }
   const requestTimeoutMs = resolveVerifyUiTimeoutMs();
+  // Reject a headed headless-shell launch before the workspace, server, or daemon start.
+  const browserLaunch = await resolveBrowserLaunch();
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
   const staticServer = await startStaticServer(panelRoot);
   const daemon = await startUiDaemon();
-  const browser = await launchBrowser();
+  const browser = await chromium.launch(browserLaunch);
 
   try {
     const page = await browser.newPage();
@@ -540,16 +542,12 @@ async function fakeProviderTranscript({ input }) {
   };
 }
 
-async function launchBrowser() {
+async function resolveBrowserLaunch() {
   const found = await findChrome();
   if (!found.path) {
     throw new Error(found.reason);
   }
-  const executablePath = executablePathForLaunch(found);
-  return chromium.launch({
-    headless: process.env.CHATPCB_UI_HEADLESS !== '0',
-    ...(executablePath ? { executablePath } : {})
-  });
+  return chromeLaunchOptions(found, { headless: isUiHeadless() });
 }
 
 async function startStaticServer(rootDir) {

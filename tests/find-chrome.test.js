@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { executablePathForLaunch, findChrome } from '../scripts/lib/find-chrome.js';
+import { chromeLaunchOptions, executablePathForLaunch, findChrome, isUiHeadless } from '../scripts/lib/find-chrome.js';
 
 function finder(overrides = {}) {
   return findChrome({
@@ -226,20 +226,41 @@ test('a directory is not an executable Chrome path', async () => {
   }
 });
 
-test('headless shell launch omits executablePath so Playwright can select it', () => {
-  assert.equal(
-    executablePathForLaunch({ path: '/cache/chrome-headless-shell', source: 'playwright-headless-shell' }),
-    undefined
-  );
+test('headless shell launch passes that shell path as executablePath', () => {
+  const shell = { path: '/cache/chrome-headless-shell', source: 'playwright-headless-shell' };
+  assert.equal(executablePathForLaunch(shell), '/cache/chrome-headless-shell');
+  assert.deepEqual(chromeLaunchOptions(shell, { headless: true }), {
+    headless: true,
+    executablePath: '/cache/chrome-headless-shell'
+  });
   assert.equal(
     executablePathForLaunch({ path: '/usr/bin/google-chrome', source: 'linux' }),
     '/usr/bin/google-chrome'
+  );
+  assert.deepEqual(
+    chromeLaunchOptions({ path: '/usr/bin/google-chrome', source: 'linux' }, { headless: false }),
+    { headless: false, executablePath: '/usr/bin/google-chrome' }
   );
   assert.equal(
     executablePathForLaunch({ path: '/cache/chromium/chrome', source: 'playwright' }),
     '/cache/chromium/chrome'
   );
+  assert.deepEqual(
+    chromeLaunchOptions({ path: '/cache/chromium/chrome', source: 'playwright' }, { headless: false }),
+    { headless: false, executablePath: '/cache/chromium/chrome' }
+  );
   assert.equal(executablePathForLaunch({ path: null, source: 'unavailable' }), undefined);
+  assert.deepEqual(chromeLaunchOptions({ path: null, source: 'unavailable' }, { headless: false }), {
+    headless: false
+  });
+});
+
+test('CHATPCB_UI_HEADLESS=0 is headed and every other value stays headless', () => {
+  assert.equal(isUiHeadless({}), true);
+  assert.equal(isUiHeadless({ CHATPCB_UI_HEADLESS: '' }), true);
+  assert.equal(isUiHeadless({ CHATPCB_UI_HEADLESS: '1' }), true);
+  assert.equal(isUiHeadless({ CHATPCB_UI_HEADLESS: 'false' }), true);
+  assert.equal(isUiHeadless({ CHATPCB_UI_HEADLESS: '0' }), false);
 });
 
 test('Playwright registry headless shell is used before the browsers directory is scanned', async () => {
@@ -256,7 +277,8 @@ test('Playwright registry headless shell is used before the browsers directory i
   assert.equal(listed, false);
   assert.equal(found.path, '/opt/pw/chrome-headless-shell');
   assert.equal(found.source, 'playwright-headless-shell');
-  assert.equal(executablePathForLaunch(found), undefined);
+  assert.equal(executablePathForLaunch(found), '/opt/pw/chrome-headless-shell');
+  assert.equal(chromeLaunchOptions(found, { headless: true }).executablePath, found.path);
 });
 
 test('system Chrome wins over a Playwright headless shell', async () => {
@@ -302,10 +324,39 @@ test('a browsers directory that contains only the headless shell is used', async
 
     assert.equal(found.path, shell);
     assert.equal(found.source, 'playwright-headless-shell');
-    assert.equal(executablePathForLaunch(found), undefined);
+    const options = chromeLaunchOptions(found, { headless: isUiHeadless({}) });
+    assert.equal(options.headless, true);
+    assert.equal(options.executablePath, shell);
+    assert.equal(executablePathForLaunch(found), shell);
     assert.ok(seen.includes('/usr/bin/google-chrome'));
     assert.ok(seen.includes(shell));
     assert.equal(seen.includes(decoy), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('headed mode fails when a browsers directory contains only the headless shell', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-headed-shell-'));
+  const shell = headlessShell(root, '1223');
+  try {
+    await writeExecutable(shell);
+    const found = await findChrome({
+      env: { PLAYWRIGHT_BROWSERS_PATH: root, CHATPCB_UI_HEADLESS: '0' },
+      platform: 'linux',
+      arch: 'x64',
+      playwrightExecutablePath: '',
+      playwrightHeadlessShellPath: '',
+      exists: async (candidate) => candidate === shell && await isExecutableFile(candidate)
+    });
+
+    assert.equal(found.path, shell);
+    assert.equal(found.source, 'playwright-headless-shell');
+    assert.equal(isUiHeadless({ CHATPCB_UI_HEADLESS: '0' }), false);
+    assert.throws(
+      () => chromeLaunchOptions(found, { headless: isUiHeadless({ CHATPCB_UI_HEADLESS: '0' }) }),
+      { message: 'headed mode needs full Chromium or Chrome: run npx playwright install chromium or set CHATPCB_CHROME_PATH' }
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -433,6 +484,7 @@ test('the Playwright registry headless shell is used when full Chromium and syst
 
   assert.equal(found.path, shellPath);
   assert.equal(found.source, 'playwright-headless-shell');
+  assert.equal(chromeLaunchOptions(found, { headless: true }).executablePath, shellPath);
   assert.equal(listed, false);
   assert.ok(seen.indexOf('/usr/bin/google-chrome') < seen.indexOf(shellPath));
 });
@@ -498,6 +550,10 @@ test('verify:ui docs tell users how to install Chromium or the headless shell', 
   assert.match(section, /--only-shell/);
   assert.match(section, /headless shell/);
   assert.match(section, /PLAYWRIGHT_BROWSERS_PATH/);
+  assert.match(section, /CHATPCB_UI_HEADLESS=0/);
+  assert.match(section, /executablePath/);
+  assert.match(section, /Headed mode/);
+  assert.doesNotMatch(section, /no `executablePath`/);
 });
 
 test('browser launchers resolve Chrome through the shared helper', async () => {
@@ -511,8 +567,13 @@ test('browser launchers resolve Chrome through the shared helper', async () => {
   assert.doesNotMatch(verifier, /\/usr\/bin\/google-chrome/);
   assert.doesNotMatch(uiTest, /\/usr\/bin\/google-chrome/);
   assert.doesNotMatch(verifier, /findBrowserExecutable/);
-  assert.match(verifier, /executablePathForLaunch\(/);
-  assert.match(uiTest, /executablePathForLaunch\(/);
+  assert.match(verifier, /chromeLaunchOptions\(/);
+  assert.match(uiTest, /chromeLaunchOptions\(/);
+  assert.match(finderSource, /chromeLaunchOptions\(/);
+  assert.match(finderSource, /const executablePath = executablePathForLaunch\(found\)/);
+  assert.match(verifier, /isUiHeadless\(\)/);
+  assert.match(finderSource, /CHATPCB_UI_HEADLESS !== '0'/);
+  assert.match(finderSource, /headed mode needs full Chromium or Chrome: run npx playwright install chromium or set CHATPCB_CHROME_PATH/);
 });
 
 function headlessShell(root, revision) {
