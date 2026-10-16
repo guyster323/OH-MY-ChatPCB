@@ -143,36 +143,6 @@ const MAX_DISCRETE_LEDS = 8;
 const MAX_DISCRETE_LED_PROMPT_CHARS = 4000;
 const TYPICAL_LED_CURRENT_MA = 10;
 const E24_MANTISSA = [1, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2, 2.2, 2.4, 2.7, 3, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1];
-const ENGLISH_LED_COUNTS = {
-  one: 1,
-  two: 2,
-  three: 3,
-  four: 4,
-  five: 5,
-  six: 6,
-  seven: 7,
-  eight: 8,
-  nine: 9,
-  ten: 10,
-  eleven: 11,
-  twelve: 12
-};
-const KOREAN_LED_COUNTS = [
-  ['하나', 1],
-  ['한', 1],
-  ['둘', 2],
-  ['두', 2],
-  ['셋', 3],
-  ['세', 3],
-  ['넷', 4],
-  ['네', 4],
-  ['다섯', 5],
-  ['여섯', 6],
-  ['일곱', 7],
-  ['여덟', 8],
-  ['아홉', 9],
-  ['열', 10]
-];
 const LED_COLOR_SPECS = [
   { id: 'red', label: 'Red', prose: 'red', vf: 2, patterns: [/빨간/, /빨강/, /적색/, /붉은/, /\bred\b/i] },
   { id: 'yellow', label: 'Yellow', prose: 'yellow', vf: 2.1, patterns: [/노란/, /노랑/, /황색/, /옐로/, /\byellow\b/i] },
@@ -548,25 +518,21 @@ function isFractionalCountTail(prompt, start) {
 }
 
 function parseLedCount(prompt, tokens) {
+  // Number words ("three LEDs", "two pcs", "세 개") are count tokens. A digit
+  // count still wins when both are present.
   const claimed = tokens.filter((token) => CLAIMED_QUANTITY_ROLES.has(token.role));
+  const usable = [];
   for (const token of tokens) {
     if (token.kind !== 'count' || token.role !== 'count') continue;
     if (token.validCount !== true) continue;
     if (!Number.isInteger(token.value) || token.value < 1) continue;
     if (isFractionalCountTail(prompt, token.start)) continue;
     if (claimed.some((other) => spansOverlap(token, other))) continue;
-    return token.value;
+    usable.push(token);
   }
-  const englishWord = prompt.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?:\s+\w+){0,3}\s+leds?\b/i);
-  if (englishWord) return ENGLISH_LED_COUNTS[englishWord[1].toLowerCase()];
-  const words = [...KOREAN_LED_COUNTS].sort((left, right) => right[0].length - left[0].length);
-  for (const [word, count] of words) {
-    const after = new RegExp(`(?:leds?|엘이디|발광)[^\\d]{0,12}${word}\\s*개`, 'i');
-    if (after.test(prompt)) return count;
-    const before = new RegExp(`${word}\\s*개(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
-    if (before.test(prompt)) return count;
-  }
-  return null;
+  const measured = usable.find((token) => token.form !== 'word');
+  if (measured) return measured.value;
+  return usable.find((token) => token.form === 'word')?.value ?? null;
 }
 
 function findLedColors(prompt) {
@@ -630,12 +596,24 @@ function roundUpE24(ohms) {
   return Math.round(pick * (10 ** exp));
 }
 
-function resistorFromSupply({ supplyVolts, vf, color, assumed, specified = false }) {
-  const rawOhms = (Math.round(supplyVolts * 1000) - Math.round(vf * 1000)) / TYPICAL_LED_CURRENT_MA;
+function designCurrentMilliamps(requestedCurrentMa) {
+  return Number.isFinite(requestedCurrentMa) && requestedCurrentMa > 0
+    ? requestedCurrentMa
+    : TYPICAL_LED_CURRENT_MA;
+}
+
+function formatFormulaCurrent(milliamps) {
+  const shown = Math.round(milliamps * 1000) / 1000;
+  return `${shown}mA`;
+}
+
+function resistorFromSupply({ supplyVolts, vf, color, assumed, specified = false, currentMa = null }) {
+  const usedMa = designCurrentMilliamps(currentMa);
+  const rawOhms = (Math.round(supplyVolts * 1000) - Math.round(vf * 1000)) / usedMa;
   const resistanceOhms = roundUpE24(rawOhms);
   const resistorValue = formatOhms(resistanceOhms);
   const shownVf = formatVolts(vf);
-  const formula = `(${formatVolts(supplyVolts)}V - ${shownVf}V) / ${TYPICAL_LED_CURRENT_MA}mA = ${formatOhms(rawOhms)}`;
+  const formula = `(${formatVolts(supplyVolts)}V - ${shownVf}V) / ${formatFormulaCurrent(usedMa)} = ${formatOhms(rawOhms)}`;
   const rounded = formatOhms(rawOhms) !== resistorValue;
   const rounding = rounded ? `, rounded up to the next E24 value ${resistorValue}` : '';
   const colorLabel = color?.prose ?? 'red';
@@ -667,7 +645,7 @@ function resistorFromSupply({ supplyVolts, vf, color, assumed, specified = false
   };
 }
 
-function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms, specifiedVf = null }) {
+function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms, specifiedVf = null, currentMa = null }) {
   const vfColor = color ?? LED_COLOR_SPECS[0];
   const specified = Number.isFinite(specifiedVf);
   const assumed = !color && !specified;
@@ -679,7 +657,8 @@ function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms, spe
       vf,
       color: color ?? (assumed ? LED_COLOR_SPECS[0] : vfColor),
       assumed,
-      specified
+      specified,
+      currentMa
     });
   const resistanceOhms = resistorExplicit ? explicitOhms : calculation.resistanceOhms;
   const resistorValue = formatOhms(resistanceOhms);
@@ -952,7 +931,8 @@ export function parseDiscreteLedRequest(prompt) {
     supplyVolts,
     resistorExplicit,
     explicitOhms,
-    specifiedVf
+    specifiedVf,
+    currentMa: requestedCurrentMa
   }));
   if (channels.some((channel) => !channel.resistorValue)) return null;
   const primary = channels[0];
@@ -986,7 +966,8 @@ export function parseDiscreteLedRequest(prompt) {
     calculation: primary.calculation,
     unsupported,
     supplyAssumed,
-    specifiedVf: Number.isFinite(specifiedVf) ? specifiedVf : null
+    specifiedVf: Number.isFinite(specifiedVf) ? specifiedVf : null,
+    requestedCurrentMa: Number.isFinite(requestedCurrentMa) ? requestedCurrentMa : null
   };
   const reviewNotes = buildDiscreteReviewNotes({
     ...parsed,

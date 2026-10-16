@@ -181,6 +181,9 @@ test('count markers draft LEDs and a unitless number is not placed as ohms', asy
   for (const [prompt, shown] of [
     ['LED 2.5개', '2.5'],
     ['LED 2,5개', '2,5'],
+    ['2.5 LEDs on 5V', '2.5'],
+    ['2,5 LEDs on 5V', '2,5'],
+    ['2.5 pcs LED', '2.5'],
     ['LED 0개', '0'],
     ['LED -2개', '-2'],
     ['LED 0 pcs', '0']
@@ -302,6 +305,41 @@ test('tolerance, labeled and bare resistors, fullwidth digits, and sub-ohm refus
   const four = await generateLed('LED 4');
   const fourBlocker = four.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
   assert.match(fourBlocker.ko, /단위 없는 숫자 4는 /);
+});
+
+test('a specified LED current sizes the series resistor', async () => {
+  const twenty = await generateLed('LED 5V 20mA');
+  assert.equal(twenty.spec.discrete.refused, false);
+  assert.equal(twenty.spec.discrete.resistanceOhms, 150);
+  assert.equal(components(twenty, 'Device:R')[0].value, '150Ω');
+  assert.match(noteText(twenty, 'en'), /\(5V - 2V\) \/ 20mA = 150Ω/);
+  assert.equal(/10mA/.test(noteText(twenty, 'en')), false);
+  assert.equal(twenty.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false);
+  const draft = twenty.review.findings.warnings.find((finding) => finding.code === 'discrete-led-draft');
+  assert.match(draft.en, /specified 20mA/);
+  assert.equal(draft.message, draft.en);
+
+  const fifteen = await generateLed('LED 5V Vf 2V 15 mA');
+  assert.equal(fifteen.spec.discrete.specifiedVf, 2);
+  assert.equal(components(fifteen, 'Device:R')[0].value, '200Ω');
+  assert.match(noteText(fifteen, 'en'), /\(5V - 2V\) \/ 15mA = 200Ω/);
+  assert.equal(fifteen.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false);
+
+  const korean = await generateLed('LED 5V 20밀리암페어');
+  assert.equal(components(korean, 'Device:R')[0].value, '150Ω');
+  assert.match(noteText(korean, 'ko'), /20mA/);
+  assert.equal(noteText(korean), noteText(korean, 'ko'));
+  const koreanDraft = korean.review.findings.warnings.find((finding) => finding.code === 'discrete-led-draft');
+  assert.match(koreanDraft.ko, /지정한 20mA/);
+  assert.equal(koreanDraft.message, koreanDraft.ko);
+
+  const hot = await generateLed('LED 5V 40mA');
+  assert.equal(components(hot, 'Device:R')[0].value, '75Ω');
+  const warning = hot.review.findings.warnings.find((finding) => finding.code === 'discrete-led-headroom');
+  assert.ok(warning, JSON.stringify(hot.review.findings.warnings));
+  assert.match(warning.en, /requested current 40mA is above 30mA/);
+  assert.match(warning.ko, /30mA를 넘/);
+  assert.equal(warning.message, warning.en);
 });
 
 test('discrete LED color sets the value and calculates the series resistor unless one was requested', async () => {
@@ -789,6 +827,11 @@ test('README documents discrete LED limits', async () => {
   assert.match(readme, /GND/);
 });
 
+function kicadCliFailure(prompt, validation) {
+  const upgrade = validation?.formatUpgrade ?? {};
+  return `${prompt} exitCode=${validation?.exitCode} stderr=${JSON.stringify(validation?.stderr ?? '')} upgradeExitCode=${upgrade.exitCode} upgradeStderr=${JSON.stringify(upgrade.stderr ?? '')} erc=${JSON.stringify(validation?.erc ?? null)}`;
+}
+
 function realDiscreteLedSkipReason() {
   if (process.env.CHATPCB_KICAD_CLI_DISABLE) return 'CHATPCB_KICAD_CLI_DISABLE is set';
   if (!resolveKicadCli().path) return 'kicad-cli is not available';
@@ -835,12 +878,13 @@ test('real KiCad ERC of a discrete LED schematic reports zero errors', { skip: r
           projectDir,
           schematicPath: generated.files.schematic
         });
-        assert.equal(validation.skipped, false, prompt);
-        assert.equal(validation.erc.errorCount, 0, `${prompt} ${JSON.stringify(validation.erc)}`);
-        assert.equal(validation.erc.warningCount, 0, `${prompt} ${JSON.stringify(validation.erc)}`);
-        assert.equal(validation.erc.byType?.power_pin_not_driven ?? 0, 0, prompt);
-        assert.equal(validation.erc.byType?.same_local_global_label ?? 0, 0, prompt);
-        assert.equal(validation.ok, true, prompt);
+        const kicadDetail = kicadCliFailure(prompt, validation);
+        assert.equal(validation.skipped, false, kicadDetail);
+        assert.equal(validation.erc.errorCount, 0, kicadDetail);
+        assert.equal(validation.erc.warningCount, 0, kicadDetail);
+        assert.equal(validation.erc.byType?.power_pin_not_driven ?? 0, 0, kicadDetail);
+        assert.equal(validation.erc.byType?.same_local_global_label ?? 0, 0, kicadDetail);
+        assert.equal(validation.ok, true, kicadDetail);
         const schematicText = await readFile(generated.files.schematic, 'utf8');
         if (prompt === 'LED on 24V') {
           assert.match(schematicText, /power:\+24V/, prompt);
@@ -903,7 +947,8 @@ test('approving a discrete LED preview applies the schematic after real ERC', { 
     assert.equal(
       preview.result.candidateVerification?.erc?.status,
       'passed',
-      JSON.stringify(preview.result.candidateVerification ?? preview.result.review)
+      kicadCliFailure('schematic.generate', preview.result.validation ?? preview.result.candidateVerification ?? {})
+        + ` ${JSON.stringify(preview.result.candidateVerification ?? preview.result.review)}`
     );
     const approved = await dispatchToolCall({
       name: 'schematic.patch',

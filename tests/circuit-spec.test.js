@@ -63,6 +63,10 @@ test('count markers are quantities and only small or fractional bare numbers sta
     ['2 LEDs 5V Vf 3.2V', 2, 5, false, false, 180, '180Ω', 3.2],
     ['LED 3개 5V', 3, 5, false, false, 300, '300Ω', null],
     ['three LEDs on 5V', 3, 5, false, false, 300, '300Ω', null],
+    ['세 개의 LED', 3, 5, true, false, 300, '300Ω', null],
+    ['LED 세 개 5V', 3, 5, false, false, 300, '300Ω', null],
+    ['LED 세개', 3, 5, true, false, 300, '300Ω', null],
+    ['다섯 개의 LED', 5, 5, true, false, 300, '300Ω', null],
     // Bare integers >= 10 are series resistors again (a7690ad had made these ambiguous).
     ['LED 330', 1, 5, true, true, 330, '330Ω', null],
     ['5V LED 330', 1, 5, false, true, 330, '330Ω', null],
@@ -124,7 +128,7 @@ test('count markers are quantities and only small or fractional bare numbers sta
     ['LED forward voltage 3.2', '3.2'],
     ['3.2 LED on 5V', '3.2'],
     ['3,2 LED on 5V', '3'],
-    ['2.5 LEDs on 5V', '2.5'],
+    ['2.5 LED on 5V', '2.5'],
     ['LED 5V 2개 2', '2'],
     ['LED 9', '9'],
     ['LED 1', '1'],
@@ -165,6 +169,10 @@ test('count markers are quantities and only small or fractional bare numbers sta
     ['LED 0 pcs', '0'],
     ['LED -2 pcs', '-2'],
     ['LED 2.5 pcs', '2.5'],
+    ['2.5 pcs LED', '2.5'],
+    ['2.5 LEDs on 5V', '2.5'],
+    ['2,5 LEDs on 5V', '2,5'],
+    ['2,5 leds on 5V', '2,5'],
     ['LED 0x', '0'],
     ['LED x0', '0'],
     ['0 LEDs', '0'],
@@ -528,12 +536,16 @@ test('voltages, LED counts, and currents are not parsed as series resistors', ()
   assert.ok(current);
   assert.equal(current.supplyVolts, 5);
   assert.equal(current.resistorExplicit, false);
-  assert.equal(current.resistorValue, '300Ω');
+  assert.equal(current.resistanceOhms, 150);
+  assert.equal(current.resistorValue, '150Ω');
+  assert.match(current.calculation.summary.en, /\(5V - 2V\) \/ 20mA = 150Ω/);
+  assert.equal(/10mA/.test(current.calculation.summary.en), false);
 
   const spacedCurrent = parseDiscreteLedRequest('LED 5V 20 mA');
   assert.ok(spacedCurrent);
   assert.equal(spacedCurrent.resistorExplicit, false);
-  assert.equal(spacedCurrent.resistorValue, '300Ω');
+  assert.equal(spacedCurrent.resistanceOhms, 150);
+  assert.equal(spacedCurrent.resistorValue, '150Ω');
 
   for (const prompt of ['LED 5V 20mA 470', 'LED 5V 20 mA 470']) {
     const bareAfterCurrent = parseDiscreteLedRequest(prompt);
@@ -1186,6 +1198,9 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     ['3 k', [{ value: 3000, unit: 'ohm', raw: '3 k' }]],
     ['20mA', [{ value: 20, unit: 'mA', raw: '20mA' }]],
     ['20 mA', [{ value: 20, unit: 'mA', raw: '20 mA' }]],
+    ['20밀리암페어', [{ value: 20, unit: 'mA', raw: '20밀리암페어' }]],
+    ['20 밀리암페어', [{ value: 20, unit: 'mA', raw: '20 밀리암페어' }]],
+    ['20밀리 암페어', [{ value: 20, unit: 'mA', raw: '20밀리 암페어' }]],
     ['3 LEDs', [{ value: 3, unit: 'count', raw: '3 LEDs' }]],
     ['3개', [{ value: 3, unit: 'count', raw: '3개' }]],
     ['2 pcs', [{ value: 2, unit: 'count', raw: '2 pcs' }]],
@@ -1239,6 +1254,18 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     ['LED×3', [{ value: 3, unit: 'count', raw: 'LED×3' }]],
     ['two pcs', [{ value: 2, unit: 'count', raw: 'two pcs' }]],
     ['LED two pcs', [{ value: 2, unit: 'count', raw: 'two pcs' }]],
+    ['three LEDs', [{ value: 3, unit: 'count', raw: 'three LEDs' }]],
+    ['three red LEDs', [{ value: 3, unit: 'count', raw: 'three red LEDs' }]],
+    ['three red and green LEDs', [{ value: 3, unit: 'count', raw: 'three red and green LEDs' }]],
+    ['eight LEDs', [{ value: 8, unit: 'count', raw: 'eight LEDs' }]],
+    ['twelve LEDs', [{ value: 12, unit: 'count', raw: 'twelve LEDs' }]],
+    ['세 개의 LED', [{ value: 3, unit: 'count', raw: '세 개' }]],
+    ['LED 세 개', [{ value: 3, unit: 'count', raw: '세 개' }]],
+    ['LED 세개', [{ value: 3, unit: 'count', raw: '세개' }]],
+    ['다섯 개의 LED', [{ value: 5, unit: 'count', raw: '다섯 개' }]],
+    ['2.5 LEDs', [{ value: 2.5, unit: 'count', raw: '2.5 LEDs' }]],
+    ['2,5 LEDs', [{ value: 2.5, unit: 'count', raw: '2,5 LEDs' }]],
+    ['2.5 pcs LED', [{ value: 2.5, unit: 'count', raw: '2.5 pcs' }]],
     ['LED ２개 5V', [
       { value: 2, unit: 'count', raw: '2개' },
       { value: 5, unit: 'V', raw: '5V' }
@@ -1434,6 +1461,41 @@ test('quantity classification is order-independent inside a small window', () =>
     ]],
     ['two pcs LED', [
       ['two pcs', 'count']
+    ]],
+    ['three LEDs on 5V', [
+      ['three LEDs', 'count'],
+      ['5V', 'supply']
+    ]],
+    ['three red and green LEDs', [
+      ['three red and green LEDs', 'count']
+    ]],
+    ['세 개의 LED', [
+      ['세 개', 'count']
+    ]],
+    ['LED 세 개 5V', [
+      ['세 개', 'count'],
+      ['5V', 'voltage']
+    ]],
+    ['2.5 LEDs on 5V', [
+      ['2.5 LEDs', 'count'],
+      ['5V', 'supply']
+    ]],
+    ['2,5 LEDs on 5V', [
+      ['2,5 LEDs', 'count'],
+      ['5V', 'supply']
+    ]],
+    ['LED 5V 20mA', [
+      ['5V', 'voltage'],
+      ['20mA', 'current']
+    ]],
+    ['LED 5V Vf 2V 15 mA', [
+      ['5V', 'voltage'],
+      ['2V', 'vf'],
+      ['15 mA', 'current']
+    ]],
+    ['LED 5V 20밀리암페어', [
+      ['5V', 'voltage'],
+      ['20밀리암페어', 'current']
     ]]
   ];
   for (const [prompt, expected] of cases) {
@@ -1607,8 +1669,8 @@ test('LED current above 30mA reuses the headroom warning', () => {
     ['red LED 1R5 on 5V', '1.5Ω', /about 2A, above 30mA/, /68Ω/, false],
     ['5V red LED 1R5', '1.5Ω', /about 2A, above 30mA/, /68Ω/, false],
     ['LED 1R5 3V', '1.5Ω', /about 667mA, above 30mA/, /68Ω/, false],
-    ['LED 5V 40mA', '300Ω', /requested current 40mA is above 30mA/, null, false],
-    ['LED 5V 50 mA', '300Ω', /requested current 50mA is above 30mA/, null, false],
+    ['LED 5V 40mA', '75Ω', /requested current 40mA is above 30mA/, null, false],
+    ['LED 5V 50 mA', '62Ω', /requested current 50mA is above 30mA/, /68Ω/, false],
     ['LED 68Ω on 5V', '68Ω', /about 44mA, above 30mA/, null, false]
   ];
   for (const [prompt, resistor, current, tiny, headroom] of cases) {
@@ -1629,10 +1691,65 @@ test('LED current above 30mA reuses the headroom warning', () => {
   }
 
   const quiet = parseDiscreteLedRequest('LED 5V 20mA');
-  assert.equal(quiet.resistorValue, '300Ω');
+  assert.equal(quiet.resistorValue, '150Ω');
+  assert.equal(quiet.resistanceOhms, 150);
   assert.equal(quiet.resistorExplicit, false);
+  assert.equal(quiet.requestedCurrentMa, 20);
+  assert.match(quiet.calculation.summary.en, /\/ 20mA = 150Ω/);
+  assert.equal(/10mA/.test(quiet.calculation.summary.en), false);
   assert.equal(quiet.reviewWarnings.length, 0);
   assert.equal(quiet.reviewBlockers.length, 0);
+
+  const fifteen = parseDiscreteLedRequest('LED 5V Vf 2V 15 mA');
+  assert.equal(fifteen.refused, false);
+  assert.equal(fifteen.specifiedVf, 2);
+  assert.equal(fifteen.requestedCurrentMa, 15);
+  assert.equal(fifteen.resistanceOhms, 200);
+  assert.equal(fifteen.resistorValue, '200Ω');
+  assert.match(fifteen.calculation.summary.en, /\(5V - 2V\) \/ 15mA = 200Ω/);
+  assert.match(fifteen.calculation.summary.en, /specified forward voltage of 2V/);
+  assert.equal(fifteen.reviewWarnings.length, 0);
+
+  const koreanCurrent = parseDiscreteLedRequest('LED 5V 20밀리암페어');
+  assert.equal(koreanCurrent.refused, false, JSON.stringify(koreanCurrent.reviewBlockers));
+  assert.equal(koreanCurrent.resistorExplicit, false);
+  assert.equal(koreanCurrent.requestedCurrentMa, 20);
+  assert.equal(koreanCurrent.resistanceOhms, 150);
+  assert.equal(koreanCurrent.resistorValue, '150Ω');
+  assert.match(koreanCurrent.calculation.summary.ko, /20mA/);
+  assert.equal(/10mA/.test(koreanCurrent.calculation.summary.ko), false);
+  const koreanNote = koreanCurrent.reviewNotes.find((note) => note.code === 'discrete-led');
+  assert.equal(koreanNote.message, koreanNote.ko);
+
+  const hotCurrent = parseDiscreteLedRequest('LED 5V 40mA');
+  assert.equal(hotCurrent.refused, false);
+  assert.equal(hotCurrent.resistanceOhms, 75);
+  assert.equal(hotCurrent.resistorValue, '75Ω');
+  assert.match(hotCurrent.calculation.summary.en, /\(5V - 2V\) \/ 40mA = 75Ω/);
+  assert.equal(hotCurrent.reviewWarnings.length, 1);
+  assert.match(hotCurrent.reviewWarnings[0].en, /requested current 40mA is above 30mA/);
+  assert.match(hotCurrent.reviewWarnings[0].ko, /30mA를 넘/);
+  assert.equal(hotCurrent.reviewWarnings[0].message, hotCurrent.reviewWarnings[0].en);
+
+  const plainDraft = reviewCircuitReadiness({
+    spec: applyDiscreteLedSpec(normalizeCircuitSpec('LED'))
+  }).findings.warnings.find((item) => item.code === 'discrete-led-draft');
+  assert.match(plainDraft.en, /assume 10mA/);
+
+  const sizedDraft = reviewCircuitReadiness({
+    spec: applyDiscreteLedSpec(normalizeCircuitSpec('LED 5V 20mA'))
+  }).findings.warnings.find((item) => item.code === 'discrete-led-draft');
+  assert.match(sizedDraft.en, /specified 20mA/);
+  assert.equal(/assume 10mA/.test(sizedDraft.en), false);
+  assert.match(sizedDraft.ko, /지정한 20mA/);
+  assert.equal(sizedDraft.message, sizedDraft.en);
+
+  const koreanDraft = reviewCircuitReadiness({
+    spec: applyDiscreteLedSpec(normalizeCircuitSpec('LED 5V 20밀리암페어'))
+  }).findings.warnings.find((item) => item.code === 'discrete-led-draft');
+  assert.equal(koreanDraft.message, koreanDraft.ko);
+  assert.match(koreanDraft.ko, /지정한 20mA/);
+  assert.equal(/10mA와/.test(koreanDraft.ko), false);
 });
 
 test('every discrete LED message is one language and Korean has no English words', () => {
@@ -1653,6 +1770,13 @@ test('every discrete LED message is one language and Korean has no English words
     'LED 10개',
     'LED 2 5V',
     'LED 2.5개',
+    '2.5 LEDs on 5V',
+    '2,5 LEDs on 5V',
+    '2.5 pcs LED',
+    'LED 5V 20mA',
+    'LED 5V Vf 2V 15 mA',
+    'LED 5V 40mA',
+    'LED 5V 20밀리암페어',
     'LED 0 pcs',
     'LED 0Ω',
     '엘이디 0Ω',

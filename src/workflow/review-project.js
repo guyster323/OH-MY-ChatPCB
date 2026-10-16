@@ -164,21 +164,10 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
       }
     }
     if (!spec.discrete?.refused) {
-      const usesSpecifiedVf = Number.isFinite(spec.discrete?.specifiedVf);
       addFinding(
         findings.warnings,
         'discrete-led-draft',
-        usesSpecifiedVf
-          ? forPrompt(
-            'Discrete LED drafts assume 10mA and use the specified forward voltage; confirm the resistor and supply before release.',
-            '이산 LED 초안은 10mA와 지정한 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
-            spec.sourcePrompt
-          )
-          : forPrompt(
-            'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.',
-            '이산 LED 초안은 10mA와 일반적인 LED 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
-            spec.sourcePrompt
-          )
+        discreteDraftCaution(spec)
       );
     }
   }
@@ -296,6 +285,43 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     proposedFixes,
     residualRisks
   };
+}
+
+function specifiedLedCurrentLabel(spec) {
+  const milliamps = spec.discrete?.requestedCurrentMa;
+  if (!Number.isFinite(milliamps) || !(milliamps > 0)) return null;
+  return `${Math.round(milliamps * 1000) / 1000}mA`;
+}
+
+function discreteDraftCaution(spec) {
+  const usesSpecifiedVf = Number.isFinite(spec.discrete?.specifiedVf);
+  const current = specifiedLedCurrentLabel(spec);
+  if (current && usesSpecifiedVf) {
+    return forPrompt(
+      `Discrete LED drafts use the specified ${current} and the specified forward voltage; confirm the resistor and supply before release.`,
+      `이산 LED 초안은 지정한 ${current}와 지정한 순방향 전압을 사용합니다. 저항과 공급 전압을 출시 전에 확인하세요.`,
+      spec.sourcePrompt
+    );
+  }
+  if (current) {
+    return forPrompt(
+      `Discrete LED drafts use the specified ${current} and a typical LED forward voltage; confirm the resistor and supply before release.`,
+      `이산 LED 초안은 지정한 ${current}와 일반적인 LED 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.`,
+      spec.sourcePrompt
+    );
+  }
+  if (usesSpecifiedVf) {
+    return forPrompt(
+      'Discrete LED drafts assume 10mA and use the specified forward voltage; confirm the resistor and supply before release.',
+      '이산 LED 초안은 10mA와 지정한 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
+      spec.sourcePrompt
+    );
+  }
+  return forPrompt(
+    'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.',
+    '이산 LED 초안은 10mA와 일반적인 LED 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
+    spec.sourcePrompt
+  );
 }
 
 function promptUsesKorean(text) {

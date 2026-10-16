@@ -1174,20 +1174,21 @@ test('stock flatpak KiCad reads a home-visible config and ignores an empty one',
       fullCopy
     );
     const hookedCounts = ercCounts(report);
-    assert.equal(erc.exitCode, 0, `${erc.stderr} ${JSON.stringify(hookedCounts)}`);
-    assert.equal(hookedCounts.errorCount, 0, JSON.stringify(hookedCounts));
-    assert.equal(hookedCounts.warningCount, 0, JSON.stringify(hookedCounts));
+    const hookedDetail = `exitCode=${erc.exitCode} stderr=${JSON.stringify(erc.stderr ?? '')} ${JSON.stringify(hookedCounts)}`;
+    assert.equal(erc.exitCode, 0, hookedDetail);
+    assert.equal(hookedCounts.errorCount, 0, hookedDetail);
+    assert.equal(hookedCounts.warningCount, 0, hookedDetail);
 
     const markedReport = path.join(projectDir, 'hooked-marked-erc.json');
     const marked = await runHookedKicad(
       ['sch', 'erc', '--format', 'json', '--output', markedReport, schematic],
       markedCopy
     );
-    assert.equal(fs.existsSync(markedReport), true, `${marked.stderr} ${marked.stdout}`);
+    assert.equal(fs.existsSync(markedReport), true, `exitCode=${marked.exitCode} stderr=${JSON.stringify(marked.stderr ?? '')} ${marked.stdout}`);
     const markedCounts = ercCounts(markedReport);
     assert.ok(
       (markedCounts.byType.lib_symbol_issues ?? 0) > 0,
-      JSON.stringify(markedCounts)
+      `exitCode=${marked.exitCode} stderr=${JSON.stringify(marked.stderr ?? '')} ${JSON.stringify(markedCounts)}`
     );
     const cacheBase = path.join(cache, 'chatpcb');
     if (fs.existsSync(cacheBase)) {
@@ -1199,21 +1200,22 @@ test('stock flatpak KiCad reads a home-visible config and ignores an empty one',
       ['sch', 'erc', '--format', 'json', '--output', stockReport, schematic],
       fullCopy
     );
-    assert.equal(stock.status, 0, `${stock.stderr} ${stock.stdout}`);
+    const stockDetail = `exitCode=${stock.status} stderr=${JSON.stringify(stock.stderr ?? '')} ${JSON.stringify(ercCounts(stockReport))}`;
+    assert.equal(stock.status, 0, stockDetail);
     const stockCounts = ercCounts(stockReport);
-    assert.equal(stockCounts.errorCount, 0, JSON.stringify(stockCounts));
-    assert.equal(stockCounts.warningCount, 0, JSON.stringify(stockCounts));
+    assert.equal(stockCounts.errorCount, 0, stockDetail);
+    assert.equal(stockCounts.warningCount, 0, stockDetail);
 
     const stockMarkedReport = path.join(projectDir, 'stock-marked-erc.json');
     const stockMarked = runStockFlatpakKicad(
       ['sch', 'erc', '--format', 'json', '--output', stockMarkedReport, schematic],
       markedCopy
     );
-    assert.equal(fs.existsSync(stockMarkedReport), true, `${stockMarked.stderr} ${stockMarked.stdout}`);
+    assert.equal(fs.existsSync(stockMarkedReport), true, `exitCode=${stockMarked.status} stderr=${JSON.stringify(stockMarked.stderr ?? '')} ${stockMarked.stdout}`);
     const stockMarkedCounts = ercCounts(stockMarkedReport);
     assert.ok(
       (stockMarkedCounts.byType.lib_symbol_issues ?? 0) > 0,
-      JSON.stringify(stockMarkedCounts)
+      `exitCode=${stockMarked.status} stderr=${JSON.stringify(stockMarked.stderr ?? '')} ${JSON.stringify(stockMarkedCounts)}`
     );
 
     const emptyReport = path.join(projectDir, 'empty-erc.json');
@@ -1221,11 +1223,11 @@ test('stock flatpak KiCad reads a home-visible config and ignores an empty one',
       ['sch', 'erc', '--format', 'json', '--output', emptyReport, schematic],
       emptyConfig
     );
-    assert.equal(fs.existsSync(emptyReport), true, `${empty.stderr} ${empty.stdout}`);
+    assert.equal(fs.existsSync(emptyReport), true, `exitCode=${empty.status} stderr=${JSON.stringify(empty.stderr ?? '')} ${empty.stdout}`);
     const emptyCounts = ercCounts(emptyReport);
     assert.ok(
       (emptyCounts.byType.lib_symbol_issues ?? 0) > 0 || emptyCounts.warningCount > 0,
-      JSON.stringify(emptyCounts)
+      `exitCode=${empty.status} stderr=${JSON.stringify(empty.stderr ?? '')} ${JSON.stringify(emptyCounts)}`
     );
   } finally {
     if (previous.KICAD_SYMBOL_DIR == null) delete process.env.KICAD_SYMBOL_DIR;

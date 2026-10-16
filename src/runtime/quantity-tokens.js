@@ -378,8 +378,10 @@ function resistanceToken(prompt, start, end, ohms, form) {
 }
 
 function collectCurrent(prompt, candidates) {
-  const milli = /(?<![\w.])(\d+(?:\.\d+)?)\s*(?:m\s*a|ma|milli\s*amps?|milliamps?|milliamperes?|밀리\s*암페어)\b/gi;
-  const amps = /(?<![\w.])(\d+(?:\.\d+)?)\s*(?:amps?|amperes?|암페어)\b/gi;
+  // Hangul is not a word character, so \b never matches after 밀리암페어.
+  const boundary = '(?![A-Za-z0-9_])';
+  const milli = new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*(?:m\\s*a|ma|milli\\s*amps?|milliamps?|milliamperes?|밀리\\s*암페어)${boundary}`, 'gi');
+  const amps = new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*(?:amps?|amperes?|암페어)${boundary}`, 'gi');
   for (const match of prompt.matchAll(milli)) {
     pushCurrent(candidates, prompt, match, Number(match[1]), 'mA');
   }
@@ -482,18 +484,107 @@ function collectTolerance(prompt, candidates) {
   }
 }
 
+const KOREAN_COUNT_WORDS = [
+  ['하나', 1],
+  ['한', 1],
+  ['둘', 2],
+  ['두', 2],
+  ['셋', 3],
+  ['세', 3],
+  ['넷', 4],
+  ['네', 4],
+  ['다섯', 5],
+  ['여섯', 6],
+  ['일곱', 7],
+  ['여덟', 8],
+  ['아홉', 9],
+  ['열', 10]
+];
+
+function candidateOverlaps(candidates, start, end) {
+  return candidates.some((item) => start < item.end && end > item.start);
+}
+
+function pushWordCountToken(candidates, prompt, start, end, value) {
+  candidates.push({
+    priority: PRIORITY.count,
+    start,
+    end,
+    invalid: false,
+    token: {
+      value,
+      unit: 'count',
+      raw: prompt.slice(start, end),
+      start,
+      end,
+      kind: 'count',
+      form: 'word',
+      range: null,
+      ac: false,
+      dc: false,
+      pot: false,
+      validCount: Number.isInteger(value) && value >= 1,
+      countText: String(value)
+    }
+  });
+}
+
+// "three red and green LEDs" keeps up to three words between the number and
+// LEDs. A supply inside that window stays a voltage token: the count then
+// covers only the number word. "two pcs LED" is already a pcs count.
+function collectEnglishWordCounts(prompt, candidates) {
+  const words = Object.keys(COUNT_WORD).join('|');
+  const englishLed = new RegExp(`\\b(${words})\\b(?:\\s+\\w+){0,3}\\s+leds?\\b`, 'i');
+  const english = englishLed.exec(prompt);
+  if (!english) return false;
+  const value = COUNT_WORD[english[1].toLowerCase()];
+  const fullStart = english.index ?? 0;
+  const fullEnd = fullStart + english[0].length;
+  const wordEnd = fullStart + english[1].length;
+  if (!candidateOverlaps(candidates, fullStart, fullEnd)) {
+    pushWordCountToken(candidates, prompt, fullStart, fullEnd, value);
+  } else if (!candidateOverlaps(candidates, fullStart, wordEnd)) {
+    pushWordCountToken(candidates, prompt, fullStart, wordEnd, value);
+  }
+  return true;
+}
+
+// Longer Korean number words win, matching the previous circuit-spec search.
+// "하나와" is not a count: the word has to sit next to 개 and an LED word.
+function collectKoreanWordCounts(prompt, candidates) {
+  const words = [...KOREAN_COUNT_WORDS].sort((left, right) => right[0].length - left[0].length);
+  for (const [word, value] of words) {
+    const after = new RegExp(`(?:leds?|엘이디|발광)[^\\d]{0,12}(${word}\\s*개)`, 'i');
+    const before = new RegExp(`(${word}\\s*개)(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
+    const afterMatch = after.exec(prompt);
+    const beforeMatch = before.exec(prompt);
+    const match = afterMatch ?? beforeMatch;
+    if (!match) continue;
+    const raw = match[1];
+    const start = afterMatch
+      ? match.index + match[0].length - raw.length
+      : match.index;
+    pushWordCountToken(candidates, prompt, start, start + raw.length, value);
+    return;
+  }
+}
+
 function collectCounts(prompt, candidates) {
   // pcs/pc/ea/개/×/x are counts in either order ("x3", "3x", "3 pcs", "3ea").
   // A fraction, zero, or a leading minus stays a count token so the draft can
-  // refuse it. The LED word itself stays integer-only: "3.2 LED" is not 2 LEDs.
-  // "LEDx3" / "LED×3" glue the marker to the word. "two pcs" is a count too.
+  // refuse it. Singular "LED" stays integer-only: "3.2 LED" is not 2 LEDs.
+  // Plural "2.5 LEDs" and "2,5 LEDs" are fractional counts. "LEDx3" / "LED×3"
+  // glue the marker to the word. Number words ("three LEDs", "two pcs",
+  // "세 개") are count tokens too.
   const led = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+)\s*(?:[x\u00D7]\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b/gi;
+  const fractionalLeds = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+[.,]\d+)\s*leds\b/gi;
   const marker = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+(?:[.,]\d+)?)\s*(?:개|(?:pcs|pc|ea)(?![A-Za-z])|[x\u00D7](?![\w.]))/gi;
   const prefix = /(?<![\w.])[x\u00D7]\s*([+\-\u2212])?(\d+(?:[.,]\d+)?)(?![\w.])/gi;
   const gluedLed = /(?<![A-Za-z0-9])leds?[x\u00D7](\d+)(?![\w.])/gi;
   const words = Object.keys(COUNT_WORD).join('|');
   const wordPcs = new RegExp(`(?<![A-Za-z])(${words})\\s+pcs(?![A-Za-z])`, 'gi');
   for (const match of prompt.matchAll(led)) pushCount(candidates, prompt, match, match[1], match[2]);
+  for (const match of prompt.matchAll(fractionalLeds)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(marker)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(prefix)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(gluedLed)) pushCount(candidates, prompt, match, '', match[1]);
@@ -523,6 +614,9 @@ function collectCounts(prompt, candidates) {
       }
     });
   }
+  // English number words win over Korean ones, as they did before this moved
+  // out of circuit-spec. A pcs token such as "two pcs" is already collected.
+  if (!collectEnglishWordCounts(prompt, candidates)) collectKoreanWordCounts(prompt, candidates);
 }
 
 // "Vf=3.2", "Vf 3.2", and glued "vf3.2" are a forward voltage when labeled Vf.
