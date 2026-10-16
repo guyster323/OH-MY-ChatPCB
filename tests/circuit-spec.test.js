@@ -305,9 +305,10 @@ test('existing discrete LED supply phrases stay on the named rail and resistor',
 
   const adapter = parseDiscreteLedRequest('LED on a 5V AC adapter');
   assert.ok(adapter);
-  assert.equal(adapter.refused, false);
-  assert.equal(adapter.supplyVolts, 5);
-  assert.equal(adapter.supplyNet, '+5V');
+  assert.equal(adapter.refused, true);
+  assert.equal(adapter.supplyNet, null);
+  assert.equal(adapter.reviewBlockers[0]?.code, 'discrete-led-ac-supply');
+  assert.match(adapter.reviewBlockers[0].message, /supply is AC/i);
 
   const green = parseDiscreteLedRequest('green LED on 5V');
   assert.ok(green);
@@ -334,7 +335,7 @@ test('discrete LED supply voltage parsing is table-driven and fail-closed', () =
     ['LED 3300 mV', 3.3, '+3V3'],
     ['LED 12 volts', 12, '+12V'],
     ['LED 24V', 24, '+24V'],
-    ['LED on a 5V AC adapter', 5, '+5V']
+    ['LED on a 5V adapter', 5, '+5V']
   ];
   for (const [prompt, volts, net] of accepted) {
     const parsed = parseDiscreteLedRequest(prompt);
@@ -411,12 +412,16 @@ test('low LED headroom warns once and a supply at or below Vf blocks the draft',
 
   const blue = parseDiscreteLedRequest('blue LED on 3V');
   assert.ok(blue);
-  assert.equal(blue.refused, false);
-  assert.equal(blue.resistorValue, '1kΩ');
+  assert.equal(blue.refused, true);
+  assert.equal(blue.resistorValue, null);
+  assert.equal(blue.supplyNet, null);
   assert.equal(blue.reviewWarnings.length, 0);
   assert.equal(blue.reviewBlockers.length, 1);
   assert.equal(blue.reviewBlockers[0].code, 'discrete-led-below-vf');
   assert.match(blue.reviewBlockers[0].message, /not above/i);
+  assert.match(blue.reviewBlockers[0].message, /파란/);
+  assert.equal(blue.reviewBlockers[0].message.includes('Unsupported'), false);
+  assert.equal(/placeholder/i.test(blue.reviewBlockers[0].message), false);
   assert.match(blue.reviewNotes.map((note) => note.message).join('\n'), /not above/i);
 
   const near = parseDiscreteLedRequest('red LED on 2.5V');
@@ -436,6 +441,179 @@ test('low LED headroom warns once and a supply at or below Vf blocks the draft',
   const comfortable = parseDiscreteLedRequest('white LED on 5V');
   assert.equal(comfortable.reviewWarnings.length, 0);
   assert.equal(comfortable.reviewBlockers.length, 0);
+});
+
+test('AC supply indications are refused for any voltage and DC wording still parses', () => {
+  const refused = [
+    ['LED 24 VAC', 24],
+    ['LED 24 Vac', 24],
+    ['LED 12V AC', 12],
+    ['12V AC LED', 12],
+    ['LED 24 V AC', 24],
+    ['AC adapter 9VAC LED', 9],
+    ['LED on an AC adapter 9VAC', 9],
+    ['LED 9Vac', 9],
+    ['LED 5VAC', 5],
+    ['LED Vac', null],
+    ['Vac LED', null],
+    ['LED 교류', null],
+    ['교류 LED', null],
+    ['AC 전원 LED', null],
+    ['LED AC 전원', null]
+  ];
+  for (const [prompt, volts] of refused) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.supplyNet, null, prompt);
+    assert.equal(parsed.resistorValue, null, prompt);
+    assert.equal(parsed.channels.length, 0, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-ac-supply', prompt);
+    assert.match(parsed.reviewBlockers[0].message, /supply is AC/i, prompt);
+    assert.match(parsed.reviewBlockers[0].message, /교류/, prompt);
+    assert.equal(parsed.reviewBlockers[0].message.includes('Unsupported'), false, prompt);
+    if (volts == null) {
+      assert.equal(parsed.supplyVolts, null, prompt);
+    } else {
+      assert.equal(parsed.supplyVolts, volts, prompt);
+      assert.match(parsed.reviewBlockers[0].message, new RegExp(`${volts}V AC`), prompt);
+    }
+  }
+
+  const accepted = [
+    ['LED 5 V DC', 5, '+5V'],
+    ['LED 12VDC', 12, '+12V'],
+    ['LED 5VDC', 5, '+5V'],
+    ['LED 24VDC', 24, '+24V'],
+    ['DC LED 5V', 5, '+5V'],
+    ['LED on a 5V adapter', 5, '+5V'],
+    ['LED on 24V', 24, '+24V']
+  ];
+  for (const [prompt, volts, net] of accepted) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.supplyVolts, volts, prompt);
+    assert.equal(parsed.supplyNet, net, prompt);
+    assert.equal(parsed.reviewBlockers.length, 0, prompt);
+  }
+});
+
+test('several different LED supply voltages are refused instead of picking the first', () => {
+  const refused = [
+    ['LED 5V and 12V', [5, 12]],
+    ['LED 5V, 12V', [5, 12]],
+    ['5V and 12V LEDs', [5, 12]],
+    ['LED 3.3V or 5V', [3.3, 5]],
+    ['LED on 9V and 12V', [9, 12]],
+    ['LED 12V and 5V supply', [12, 5]]
+  ];
+  for (const [prompt, volts] of refused) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.supplyVolts, null, `${prompt} picked ${parsed.supplyVolts}`);
+    assert.equal(parsed.supplyNet, null, prompt);
+    assert.equal(parsed.resistorValue, null, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, prompt);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-ambiguous-supply', prompt);
+    assert.match(parsed.reviewBlockers[0].message, /which supply/i, prompt);
+    assert.match(parsed.reviewBlockers[0].message, /어떤 공급/, prompt);
+    for (const value of volts) {
+      assert.match(parsed.reviewBlockers[0].message, new RegExp(`${String(value).replace('.', '\\.')}V`), prompt);
+    }
+  }
+
+  const accepted = [
+    ['LED 5V and 5V', 5, '+5V', false],
+    ['LED 5V, 5 V', 5, '+5V', false],
+    ['3.3V LED 3,3V', 3.3, '+3V3', false],
+    ['LED 12V and 12 volts', 12, '+12V', false],
+    ['LED Vf 2V on 5V supply', 5, '+5V', false],
+    ['LED 2V forward, 12V supply', 12, '+12V', false],
+    ['LED 1.8V red at 9V', 9, '+9V', false],
+    ['LED 순방향 2V, 전원 5V', 5, '+5V', false],
+    ['LED Vf 2V, 배터리 9V', 9, '+9V', false],
+    ['LED Vf 2V', 5, '+5V', true]
+  ];
+  for (const [prompt, volts, net, assumed] of accepted) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.supplyVolts, volts, prompt);
+    assert.equal(parsed.supplyNet, net, prompt);
+    assert.equal(parsed.supplyAssumed, assumed, prompt);
+    assert.equal(parsed.reviewBlockers.length, 0, prompt);
+  }
+  assert.equal(parseDiscreteLedRequest('LED Vf 2V on 5V supply').resistorValue, '300Ω');
+  assert.equal(parseDiscreteLedRequest('LED 1.8V red at 9V').resistorValue, '750Ω');
+  assert.equal(parseDiscreteLedRequest('LED 2V forward, 12V supply').resistorValue, '1kΩ');
+});
+
+test('a supply that is not above the LED forward voltage is refused without a placeholder', () => {
+  const cases = [
+    ['LED on 0.5V', 0.5, /red/i, /빨간/, /2V/],
+    ['red LED on 1.8V', 1.8, /red/i, /빨간/, /2V/],
+    ['빨간 LED 1.8V', 1.8, /red/i, /빨간/, /2V/],
+    ['blue LED on 3V', 3, /blue/i, /파란/, /3V/],
+    ['white LED on 3V', 3, /white/i, /하얀/, /3\.2V/],
+    ['red LED with a 470 ohm resistor on 1.8V', 1.8, /red/i, /빨간/, /2V/],
+    ['red and blue LEDs on 2.5V', 2.5, /blue/i, /파란/, /3V/]
+  ];
+  for (const [prompt, volts, enColor, koColor, vf] of cases) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, true, `${prompt} resistor ${parsed.resistorValue}`);
+    assert.equal(parsed.supplyVolts, volts, prompt);
+    assert.equal(parsed.supplyNet, null, prompt);
+    assert.equal(parsed.resistorValue, null, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.deepEqual(parsed.channels, [], prompt);
+    assert.equal(parsed.reviewWarnings.length, 0, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, prompt);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-below-vf', prompt);
+    const message = parsed.reviewBlockers[0].message;
+    assert.match(message, /not above/i, prompt);
+    assert.match(message, enColor, prompt);
+    assert.match(message, koColor, prompt);
+    assert.match(message, vf, prompt);
+    assert.equal(/placeholder/i.test(message), false, message);
+    assert.equal(message.includes('Unsupported'), false, message);
+    assert.equal(message.includes('1kΩ'), false, message);
+    assert.match(parsed.reviewNotes.map((note) => note.message).join('\n'), koColor, prompt);
+  }
+});
+
+test('dangerously small explicit LED resistors reuse the single headroom warning', () => {
+  const cases = [
+    ['LED 1R5 3V', '1.5Ω', false],
+    ['LED 1R5 on 5V', '1.5Ω', false],
+    ['red LED 10Ω on 5V', '10Ω', false],
+    ['red LED with a 10 ohm resistor on 5V', '10Ω', false],
+    ['red LED 1R5 on 2.5V', '1.5Ω', true]
+  ];
+  for (const [prompt, resistor, headroom] of cases) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, prompt);
+    assert.equal(parsed.resistorValue, resistor, prompt);
+    assert.equal(parsed.reviewBlockers.length, 0, prompt);
+    assert.equal(parsed.reviewWarnings.length, 1, `${prompt} ${JSON.stringify(parsed.reviewWarnings)}`);
+    assert.equal(parsed.reviewWarnings[0].code, 'discrete-led-headroom', prompt);
+    assert.ok(parsed.reviewWarnings[0].message.includes(resistor), parsed.reviewWarnings[0].message);
+    assert.match(parsed.reviewWarnings[0].message, /68Ω/, prompt);
+    if (headroom) {
+      assert.match(parsed.reviewWarnings[0].message, /headroom is only/i, prompt);
+    } else {
+      assert.equal(/headroom is only/i.test(parsed.reviewWarnings[0].message), false, prompt);
+    }
+  }
+
+  const boundary = parseDiscreteLedRequest('LED 68Ω on 5V');
+  assert.equal(boundary.resistorValue, '68Ω');
+  assert.equal(boundary.reviewWarnings.length, 0);
+  assert.equal(boundary.reviewBlockers.length, 0);
 });
 
 test('quantity cap and RGB substitution notes include Korean', () => {

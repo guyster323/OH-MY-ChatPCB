@@ -281,9 +281,11 @@ test('mains and supplies above 24V are refused instead of generating an LED circ
   assert.equal(allowed.review.findings.blockers.some((finding) => finding.code === 'discrete-led-high-voltage'), false);
 
   const adapter = await generateLed('LED on a 5V AC adapter');
-  assert.equal(adapter.spec.discrete.supplyNet, '+5V');
-  assert.equal(components(adapter, 'Device:LED').length, 1);
-  assert.equal(adapter.review.findings.blockers.some((finding) => finding.code === 'discrete-led-high-voltage'), false);
+  assert.equal(adapter.spec.discrete.supplyNet, null);
+  assert.equal(components(adapter, 'Device:LED').length, 0);
+  assert.equal(components(adapter, 'Device:R').length, 0);
+  assert.ok(adapter.review.findings.blockers.some((finding) => finding.code === 'discrete-led-ac-supply'));
+  assert.equal(adapter.review.status, 'blocked');
 });
 
 test('a 9V battery LED uses power:+9V and a battery connector', async () => {
@@ -323,7 +325,7 @@ test('a nonstandard rail uses power:VCC when the library has no dedicated symbol
   assert.equal(result.review.findings.blockers.some((finding) => finding.code === 'discrete-led-high-voltage'), false);
 });
 
-test('low LED headroom warns once and a supply at Vf still drafts the placeholder', async () => {
+test('low LED headroom warns once and a supply at Vf is refused without a placeholder', async () => {
   const white = await generateLed('white LED on 3.3V');
   assert.equal(components(white, 'Device:R')[0].value, '10Ω');
   assert.equal(white.review.findings.warnings.filter((finding) => finding.code === 'discrete-led-headroom').length, 1);
@@ -332,11 +334,66 @@ test('low LED headroom warns once and a supply at Vf still drafts the placeholde
   assert.equal(white.review.status, 'ready-for-prototype-review');
 
   const blue = await generateLed('blue LED on 3V');
-  assert.equal(components(blue, 'Device:LED').length, 1);
-  assert.equal(components(blue, 'Device:R')[0].value, '1kΩ');
-  assert.equal(components(blue, 'power:VCC')[0].value, '+3V');
+  assert.equal(components(blue, 'Device:LED').length, 0);
+  assert.equal(components(blue, 'Device:R').length, 0);
+  assert.equal(blue.spec.schematic.components.some((part) => String(part.libId).startsWith('power:')), false);
+  assert.equal(/placeholder/i.test(blue.schematic), false);
+  assert.equal(blue.schematic.includes('1kΩ'), false);
   assert.ok(blue.review.findings.blockers.some((finding) => finding.code === 'discrete-led-below-vf'));
+  assert.match(blue.review.findings.blockers.map((finding) => finding.message).join('\n'), /파란/);
   assert.equal(blue.review.status, 'blocked');
+});
+
+test('AC, ambiguous supplies, and below-Vf LED prompts generate no placeholder circuit', async () => {
+  const cases = [
+    ['LED 24 VAC', 'discrete-led-ac-supply'],
+    ['LED 12V AC', 'discrete-led-ac-supply'],
+    ['AC adapter 9VAC LED', 'discrete-led-ac-supply'],
+    ['LED 교류', 'discrete-led-ac-supply'],
+    ['AC 전원 LED', 'discrete-led-ac-supply'],
+    ['LED 5V and 12V', 'discrete-led-ambiguous-supply'],
+    ['red LED on 1.8V', 'discrete-led-below-vf'],
+    ['LED on 0.5V', 'discrete-led-below-vf']
+  ];
+  for (const [prompt, code] of cases) {
+    const refused = await generateLed(prompt);
+    assert.equal(refused.spec.kind, 'discrete-led', prompt);
+    assert.equal(refused.spec.discrete.refused, true, prompt);
+    assert.equal(refused.spec.discrete.supplyNet, null, prompt);
+    assert.equal(refused.spec.power.rails.length, 0, prompt);
+    assert.equal(components(refused, 'Device:LED').length, 0, prompt);
+    assert.equal(components(refused, 'Device:R').length, 0, prompt);
+    assert.equal(refused.spec.schematic.components.some((part) => String(part.libId).startsWith('power:')), false, prompt);
+    assert.equal(refused.schematic.includes('Device:LED'), false, prompt);
+    assert.equal(/placeholder/i.test(refused.schematic), false, prompt);
+    assert.equal(refused.schematic.includes('Unsupported'), false, prompt);
+    assert.equal(/VSUP/.test(refused.spice), false, prompt);
+    assert.ok(
+      refused.review.findings.blockers.some((finding) => finding.code === code),
+      `${prompt} ${JSON.stringify(refused.review.findings.blockers)}`
+    );
+    assert.equal(refused.review.status, 'blocked', prompt);
+    const message = refused.review.findings.blockers.map((finding) => finding.message).join('\n');
+    if (code === 'discrete-led-ac-supply') assert.match(message, /supply is AC/i, prompt);
+    if (code === 'discrete-led-ambiguous-supply') assert.match(message, /which supply/i, prompt);
+    if (code === 'discrete-led-below-vf') {
+      assert.match(message, /not above/i, prompt);
+      assert.match(message, /공급 전압/, prompt);
+    }
+  }
+});
+
+test('explicit 1R5 and 10 ohm LED resistors warn once', async () => {
+  for (const [prompt, resistor] of [['LED 1R5 3V', '1.5Ω'], ['red LED 10Ω on 5V', '10Ω']]) {
+    const result = await generateLed(prompt);
+    assert.equal(components(result, 'Device:R')[0].value, resistor, prompt);
+    const warnings = result.review.findings.warnings.filter((finding) => finding.code === 'discrete-led-headroom');
+    assert.equal(warnings.length, 1, `${prompt} ${JSON.stringify(result.review.findings.warnings)}`);
+    assert.ok(warnings[0].message.includes(resistor), warnings[0].message);
+    assert.match(warnings[0].message, /68Ω/, prompt);
+    assert.equal(result.review.findings.blockers.length, 0, prompt);
+    assert.equal(result.review.status, 'ready-for-prototype-review', prompt);
+  }
 });
 
 test('discrete LED power nets use PWR_FLAG and do not repeat the power name as a local label', async () => {
@@ -447,8 +504,10 @@ test('real KiCad ERC of a discrete LED schematic reports zero errors', { skip: r
           assert.equal(schematicText.includes('(label "+7V4")'), false, prompt);
         }
         if (prompt === 'blue LED on 3V') {
-          assert.match(schematicText, /power:VCC/, prompt);
-          assert.equal(schematicText.includes('power:+3V0'), false, prompt);
+          assert.equal(schematicText.includes('Device:LED'), false, prompt);
+          assert.equal(schematicText.includes('power:VCC'), false, prompt);
+          assert.equal(/placeholder/i.test(schematicText), false, prompt);
+          assert.match(schematicText, /not above/i, prompt);
         }
       } finally {
         await rm(projectDir, { force: true, recursive: true });

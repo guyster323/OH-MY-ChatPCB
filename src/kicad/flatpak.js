@@ -9,9 +9,42 @@ const wrapperScriptCache = new Map();
 
 let flatpakLibraryRootOverride = null;
 
-// A path segment that is exactly "flatpak". "flatpak-kicad" is a different directory.
+const FLATPAK_LAYOUT_DIR = new Set(['exports', 'app', 'runtime']);
+const FLATPAK_FORCE_ON = new Set(['1', 'true', 'yes']);
+const FLATPAK_FORCE_OFF = new Set(['0', 'false', 'no']);
+
+function pathSegments(value) {
+  return String(value).split(/[/\\]+/).filter((segment) => segment.length > 0);
+}
+
+// Only a real Flatpak install layout counts. A directory that is merely named
+// "flatpak", or "flatpak-tools", is a different tree.
 export function isFlatpakPath(value) {
-  return String(value).split(/[/\\]/).some((segment) => segment === 'flatpak');
+  const segments = pathSegments(value);
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    if (segments[index] !== 'flatpak' || !FLATPAK_LAYOUT_DIR.has(segments[index + 1])) continue;
+    const previous = segments[index - 1];
+    const beforePrevious = segments[index - 2];
+    if (beforePrevious === 'var' && previous === 'lib') return true;
+    if (beforePrevious === '.local' && previous === 'share') return true;
+  }
+  return false;
+}
+
+function flatpakUserHome(env = {}) {
+  for (const key of ['HOME', 'USERPROFILE']) {
+    const value = env[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function flatpakCliOverride(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (FLATPAK_FORCE_ON.has(normalized)) return true;
+  if (FLATPAK_FORCE_OFF.has(normalized)) return false;
+  return null;
 }
 
 export function isKicadDirectoryEnv(key) {
@@ -41,9 +74,8 @@ export function flatpakLibraryRoots({
   }
 
   const roots = ['/var/lib/flatpak'];
-  if (typeof env.HOME === 'string' && env.HOME.length > 0) {
-    roots.push(path.join(env.HOME, '.local', 'share', 'flatpak'));
-  }
+  const home = flatpakUserHome(env);
+  if (home) roots.push(path.join(home, '.local', 'share', 'flatpak'));
   return roots.map((candidate) => mapPath(candidate));
 }
 
@@ -55,10 +87,27 @@ export function flatpakAppLibraryPaths(libraryType, {
   if (platform !== 'linux') {
     return [];
   }
-  return [
-    `/var/lib/flatpak/app/${KICAD_FLATPAK_APP_ID}/current/active/files/share/kicad/${libraryType}`,
-    `${env.HOME}/.local/share/flatpak/app/${KICAD_FLATPAK_APP_ID}/current/active/files/share/kicad/${libraryType}`
-  ].filter(Boolean).map((candidate) => mapPath(candidate));
+  const paths = [
+    `/var/lib/flatpak/app/${KICAD_FLATPAK_APP_ID}/current/active/files/share/kicad/${libraryType}`
+  ];
+  const home = flatpakUserHome(env);
+  if (home) {
+    paths.push(path.join(
+      home,
+      '.local',
+      'share',
+      'flatpak',
+      'app',
+      KICAD_FLATPAK_APP_ID,
+      'current',
+      'active',
+      'files',
+      'share',
+      'kicad',
+      libraryType
+    ));
+  }
+  return paths.map((candidate) => mapPath(candidate));
 }
 
 function flatpakRuntimeName(libraryType) {
@@ -101,21 +150,28 @@ export function flatpakRuntimeLibraryCandidatePaths(libraryType, {
   return candidates;
 }
 
-function flatpakCliBasename(cliPath) {
+function isKicadFlatpakWrapperName(cliPath) {
   const base = String(cliPath).split(/[/\\]/).pop();
-  return base === KICAD_FLATPAK_APP_ID || base === `${KICAD_FLATPAK_APP_ID}.exe` || isFlatpakPath(cliPath);
+  return base === KICAD_FLATPAK_APP_ID || base === `${KICAD_FLATPAK_APP_ID}.exe`;
 }
 
-// Decide once, at CLI resolution. KICAD_CLI_FLATPAK=1 and Flatpak paths do not
-// read the file. A shebang script is only a fallback, and only off Windows.
+function flatpakCliBasename(cliPath) {
+  return isKicadFlatpakWrapperName(cliPath) || isFlatpakPath(cliPath);
+}
+
+// Decide once, at CLI resolution. Off Windows, KICAD_CLI_FLATPAK forces the
+// result: 1/true/yes on, 0/false/no off. Any other value is ignored. Windows
+// ignores that variable. Flatpak layouts and the KiCad app id do not read the file.
 export function cliIsFlatpakKicad(cliPath, {
   env = {},
   platform = process.platform,
   io = {}
 } = {}) {
   if (!cliPath) return false;
-  if (env.KICAD_CLI_FLATPAK === '1') return true;
-  if ((io.platform ?? platform) === 'win32') return false;
+  const platformId = io.platform ?? platform;
+  if (platformId === 'win32') return false;
+  const override = flatpakCliOverride(env.KICAD_CLI_FLATPAK);
+  if (override != null) return override;
   if (flatpakCliBasename(cliPath)) return true;
 
   const realpathSync = io.realpathSync ?? fs.realpathSync;
