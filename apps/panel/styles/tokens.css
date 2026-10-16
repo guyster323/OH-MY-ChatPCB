@@ -1,0 +1,102 @@
+/* Generated from redesign/build.mjs (concept C Soft v2). Do not hand-edit; regenerate. */
+:root{
+  --font:"Pretendard", "SUIT", Inter, "Segoe UI", system-ui, sans-serif;
+  --mono:ui-monospace, Consolas, monospace;
+  --fs-xs:12px;
+  --fs-sm:14px;
+  --fs-md:14px;
+  --fs-lg:16px;
+  --fs-xl:18px;
+  --lh:1.45;
+  --sp-1:2px;
+  --sp-2:4px;
+  --sp-3:6px;
+  --sp-4:8px;
+  --sp-5:12px;
+  --sp-6:16px;
+  --sp-7:20px;
+  --r-sm:10px;
+  --r-md:14px;
+  --r-lg:18px;
+  --r-pill:999px;
+  --target:28px;
+  
+}
+
+:root,[data-theme=light]{
+  color-scheme:light;
+  --bg:#f2f4fa;
+  --surface:#ffffff;
+  --surface2:#eef1f9;
+  --text:#1f2440;
+  --muted:#545b78;
+  --border:#e0e4f1;
+  --border-strong:#7f86a4;
+  --accent:#0b7566;
+  --on-accent:#ffffff;
+  --accent-text:#09695b;
+  --accent-soft:#e3f4f0;
+  --success:#16703f;
+  --success-bg:#e6f5ec;
+  --danger:#b4232f;
+  --danger-bg:#fdeaec;
+  --warn:#875400;
+  --warn-bg:#fdf1d9;
+  --focus:#0b7566;
+  --locked:#545b78;
+  --shadow:0 2px 8px rgba(31,36,64,.06), 0 1px 2px rgba(31,36,64,.05);
+  
+}
+[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#13151e;
+  --surface:#1b1e2a;
+  --surface2:#252938;
+  --text:#eef0f7;
+  --muted:#a8aec5;
+  --border:#2d3245;
+  --border-strong:#6d7495;
+  --accent:#4fd1b5;
+  --on-accent:#0a1d19;
+  --accent-text:#6fe0c6;
+  --accent-soft:#143029;
+  --success:#62d596;
+  --success-bg:#112619;
+  --danger:#ff8f96;
+  --danger-bg:#2d1519;
+  --warn:#f0c062;
+  --warn-bg:#2a2111;
+  --focus:#6fe0c6;
+  --locked:#a8aec5;
+  --shadow:0 2px 10px rgba(0,0,0,.35);
+  
+}
+
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+  color-scheme:dark;
+  --bg:#13151e;
+  --surface:#1b1e2a;
+  --surface2:#252938;
+  --text:#eef0f7;
+  --muted:#a8aec5;
+  --border:#2d3245;
+  --border-strong:#6d7495;
+  --accent:#4fd1b5;
+  --on-accent:#0a1d19;
+  --accent-text:#6fe0c6;
+  --accent-soft:#143029;
+  --success:#62d596;
+  --success-bg:#112619;
+  --danger:#ff8f96;
+  --danger-bg:#2d1519;
+  --warn:#f0c062;
+  --warn-bg:#2a2111;
+  --focus:#6fe0c6;
+  --locked:#a8aec5;
+  --shadow:0 2px 10px rgba(0,0,0,.35);
+  
+}
+
+}
+
