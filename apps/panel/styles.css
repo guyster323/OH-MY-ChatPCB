@@ -102,7 +102,14 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
 .workflow-lane h2 { margin: 0; font-size: 10px; letter-spacing: 0.02em; color: #64748b; text-transform: uppercase; }
 .workflow-lane[data-active="true"] h2 { color: #0f766e; }
 .workflow-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.flow-btn { width: 28px; min-height: 28px; padding: 0; display: grid; place-items: center; position: relative; background: #334155; border-color: #475569; box-shadow: 0 0 6px rgb(148 163 184 / 0.35); }
+.flow-btn { width: auto; min-width: 28px; min-height: 28px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; position: relative; background: #334155; border-color: #475569; box-shadow: 0 0 6px rgb(148 163 184 / 0.35); }
+.step-icon { width: 12px; height: 12px; flex: none; }
+.step-label { font-size: 13px; font-weight: 600; line-height: 1.2; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.lang-control { display: grid; gap: 3px; justify-items: end; }
+.wf-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.eyebrow { font-size: 12px; font-weight: 600; }
+.badge { font-size: 12px; font-weight: 700; }
 .flow-btn .px-cut { fill: #334155; }
 .flow-btn[data-state="idle"] { opacity: 0.72; }
 .flow-btn[data-state="locked"] { opacity: 0.34; box-shadow: none; }

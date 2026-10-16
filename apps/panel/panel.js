@@ -16,22 +16,7 @@ const WORKFLOW_ORDER = [
   'layout.concept', 'layout.place-major', 'layout.place-rest', 'layout.route', 'layout.edit', 'layout.review',
   'fab.gerber', 'fab.bom', 'fab.submit'
 ];
-const WORKFLOW_COPY = {
-  'circuit.concept': { wait: 'Circuit 컨셉을 채팅으로 보내 주세요.', run: '회로 컨셉을 읽고 있어요.' },
-  'circuit.parts': { wait: '주요 부품을 고르거나 채팅으로 답하세요.', run: '주요 부품을 고르고 있어요.' },
-  'circuit.draft': { wait: '회로 초안이 준비됐어요. 적용을 누르면 작성 단계가 끝납니다.', run: '회로 초안을 그리고 있어요.' },
-  'circuit.edit': { wait: '고칠 회로 내용을 채팅으로 보내 주세요.', run: '회로를 수정하고 있어요.' },
-  'circuit.review': { wait: '회로 리뷰를 확인하고 다음으로 넘어가세요.', run: '회로 리뷰를 돌리고 있어요.' },
-  'layout.concept': { wait: '보드 크기, 형태, 층수를 알려 주세요.', run: '레이아웃 컨셉을 정리하고 있어요.' },
-  'layout.place-major': { wait: '주요 부품 배치를 채팅으로 지시해 주세요.', run: '주요 부품을 배치하고 있어요.' },
-  'layout.place-rest': { wait: '남은 부품 배치를 지시해 주세요.', run: '남은 부품을 배치하고 있어요.' },
-  'layout.route': { wait: '배선 규칙을 알려 주세요.', run: '배선을 긋고 있어요.' },
-  'layout.edit': { wait: '레이아웃에서 고칠 점을 보내 주세요.', run: '레이아웃을 수정하고 있어요.' },
-  'layout.review': { wait: '레이아웃 리뷰를 확인하세요. 끝나면 제품화로 갑니다.', run: '레이아웃 리뷰를 돌리고 있어요.' },
-  'fab.gerber': { wait: 'GERBER 등 JLCPCB 제출 산출물을 만들 차례입니다.', run: '제조 산출물을 만들고 있어요.' },
-  'fab.bom': { wait: 'BOM·조립 파일을 확인할 차례입니다.', run: 'BOM을 정리하고 있어요.' },
-  'fab.submit': { wait: 'JLCPCB 제출 패키지를 확인해 주세요.', run: '제출 패키지를 묶고 있어요.' }
-};
+const SVG_NS = 'http://www.w3.org/2000/svg';
 const PROGRESS_TO_STEP = {
   conversation: 'circuit.concept',
   provider: 'circuit.parts',
@@ -109,6 +94,9 @@ const workflowCliEl = document.querySelector('#workflow-cli');
 
 connect();
 syncWorkflow();
+window.chatpcbI18n?.onChange(() => {
+  syncWorkflow();
+});
 
 newProjectFormEl.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -137,8 +125,10 @@ for (const button of document.querySelectorAll('.flow-btn')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
     if (typeof dialog?.showModal === 'function') dialog.showModal();
-    const copy = WORKFLOW_COPY[button.dataset.step];
-    if (copy && promptEl && !promptEl.disabled) promptEl.placeholder = copy.wait;
+    const hint = t(`workflow.copy.${button.dataset.step}.wait`);
+    if (hint && promptEl && !promptEl.disabled && hint !== `workflow.copy.${button.dataset.step}.wait`) {
+      promptEl.placeholder = hint;
+    }
   });
 }
 window.addEventListener('message', (event) => handleHostMessage(event.data));
@@ -725,6 +715,66 @@ function deriveWorkflow() {
   return { active, done, mode };
 }
 
+function t(key, vars) {
+  const translate = window.chatpcbI18n?.t;
+  return typeof translate === 'function' ? translate(key, vars) : key;
+}
+
+function renderStepIcon(svg, state) {
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const visual = state === 'done'
+    ? 'done'
+    : (state === 'locked' ? 'locked' : (state === 'wait' || state === 'run' ? 'current' : 'todo'));
+  if (visual === 'done') {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M2 6.5l2.5 2.5L10 3.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.8');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return;
+  }
+  if (visual === 'locked') {
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', '2.5');
+    rect.setAttribute('y', '5.5');
+    rect.setAttribute('width', '7');
+    rect.setAttribute('height', '5');
+    rect.setAttribute('rx', '1');
+    rect.setAttribute('fill', 'currentColor');
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M4 5.5V4a2 2 0 014 0v1.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.4');
+    svg.appendChild(rect);
+    svg.appendChild(path);
+    return;
+  }
+  const circle = document.createElementNS(SVG_NS, 'circle');
+  circle.setAttribute('cx', '6');
+  circle.setAttribute('cy', '6');
+  circle.setAttribute('r', '3.5');
+  if (visual === 'current') {
+    circle.setAttribute('fill', 'currentColor');
+  } else {
+    circle.setAttribute('fill', 'none');
+    circle.setAttribute('stroke', 'currentColor');
+    circle.setAttribute('stroke-width', '1.4');
+  }
+  svg.appendChild(circle);
+}
+
+function workflowStateKey(state) {
+  if (state === 'done') return 'done';
+  if (state === 'locked') return 'locked';
+  if (state === 'wait' || state === 'run') return 'current';
+  return 'pending';
+}
+
 function syncWorkflow() {
   const { active, done, mode } = deriveWorkflow();
   const activeIndex = workflowIndex(active);
@@ -743,20 +793,47 @@ function syncWorkflow() {
     else if (index < activeIndex) state = 'done';
     else state = 'idle';
     button.dataset.state = state;
+    button.dataset.s = state === 'done'
+      ? 'done'
+      : (state === 'locked' ? 'locked' : (state === 'wait' || state === 'run' ? 'current' : 'todo'));
+    const stepLabel = t(`workflow.step.${id}`);
+    const laneLabel = t(`workflow.lane.${lane}`);
+    const stateLabel = t(`workflow.state.${workflowStateKey(state)}`);
+    const labelEl = button.querySelector('.step-label');
+    if (labelEl) labelEl.textContent = stepLabel;
+    button.setAttribute('aria-label', `${laneLabel} · ${stepLabel} — ${stateLabel}`);
+    if (state === 'wait' || state === 'run') button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+    renderStepIcon(button.querySelector('.step-icon'), state);
   }
 
   for (const lane of document.querySelectorAll('.workflow-lane')) {
-    lane.dataset.active = String(active.startsWith(`${lane.dataset.lane}.`));
+    const laneId = lane.dataset.lane;
+    lane.dataset.active = String(active.startsWith(`${laneId}.`));
+    const heading = lane.querySelector('.lane-h');
+    if (heading && laneId) heading.textContent = t(`workflow.lane.${laneId}`);
   }
 
-  const copy = WORKFLOW_COPY[active];
-  if (workflowCaptionEl && copy) {
-    workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
-      ? '생성에 실패했습니다. 기술 상세를 확인하거나 다시 Send 하세요.'
-      : (mode === 'run' ? copy.run : (mode === 'idle' ? '프로젝트를 만들면 Circuit 컨셉부터 시작합니다.' : copy.wait));
+  const progressEl = document.querySelector('#workflow-progress');
+  if (progressEl && active) {
+    const stepIndex = WORKFLOW_ORDER.indexOf(active);
+    const lane = active.split('.')[0];
+    progressEl.textContent = t('workflow.progress', {
+      n: stepIndex < 0 ? 1 : stepIndex + 1,
+      total: WORKFLOW_ORDER.length,
+      label: `${t(`workflow.lane.${lane}`)} ${t(`workflow.step.${active}`)}`
+    });
   }
-  if (promptEl && copy && mode === 'wait' && !promptEl.disabled) {
-    promptEl.placeholder = copy.wait;
+
+  const copyWait = t(`workflow.copy.${active}.wait`);
+  const copyRun = t(`workflow.copy.${active}.run`);
+  if (workflowCaptionEl && active) {
+    workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
+      ? t('workflow.caption.failed')
+      : (mode === 'run' ? copyRun : (mode === 'idle' ? t('workflow.caption.idle') : copyWait));
+  }
+  if (promptEl && mode === 'wait' && !promptEl.disabled && copyWait) {
+    promptEl.placeholder = copyWait;
   }
   if (workflowCliEl) {
     const showCli = mode === 'run' && lastProgressText;
