@@ -59,6 +59,30 @@ function pinRealKicadConfigHome(platform, env, exists) {
   if (dir) env.KICAD_CONFIG_HOME = dir;
 }
 
+// Real cache directory for $XDG_CACHE_HOME/chatpcb. An absolute XDG_CACHE_HOME
+// is that directory. Otherwise it is <real HOME>/.cache. A relative value is
+// not a cache directory; callers decide whether to keep it.
+function realAbsoluteCacheDir(env) {
+  const existing = envPath(env.XDG_CACHE_HOME);
+  if (existing && path.isAbsolute(existing)) return existing;
+  const home = envPath(env.HOME);
+  if (!home || !path.isAbsolute(home)) return null;
+  return path.join(home, '.cache');
+}
+
+// A private KiCad config copy is stored under $XDG_CACHE_HOME/chatpcb. A stock
+// Flatpak KiCad sandbox (filesystems=home) cannot see a temporary HOME under
+// /tmp, so before HOME moves, an unset XDG_CACHE_HOME on Linux (and any other
+// platform that is not macOS or Windows) is pinned to the real cache directory.
+// A value that is already set stays as it is. ChatGPT config isolation follows
+// XDG_CONFIG_HOME and HOME, and does not read XDG_CACHE_HOME.
+function pinRealXdgCacheHome(platform, env) {
+  if (platform === 'darwin' || platform === 'win32') return;
+  if (envPath(env.XDG_CACHE_HOME)) return;
+  const dir = realAbsoluteCacheDir(env);
+  if (dir) env.XDG_CACHE_HOME = dir;
+}
+
 // os.homedir() on Windows is USERPROFILE, not HOME. The resolver only needs
 // that fallback when APPDATA is unset. Other platforms follow HOME.
 function configHome(platform, env) {
@@ -96,6 +120,7 @@ export function isolateProcessHome({
   // reads KICAD_CONFIG_HOME from the environment, which would otherwise see
   // only the empty temporary root.
   pinRealKicadConfigHome(platform, env, exists);
+  pinRealXdgCacheHome(platform, env);
   const root = mkdtemp(path.join(temporaryDirectory, 'chatpcb-home-'));
   if (platform === 'win32') {
     // ChatPCB config is %APPDATA%\chatpcb. USERPROFILE is only the fallback

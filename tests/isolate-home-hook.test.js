@@ -438,3 +438,120 @@ test('isolateProcessHome pins the real KiCad config before redirecting home', ()
   assert.equal(process.env.KICAD_CONFIG_HOME, kicadBefore);
   assert.equal(process.env.APPDATA, appDataBefore);
 });
+
+test('isolateProcessHome pins an unset XDG_CACHE_HOME to the real cache directory on linux', () => {
+  const homeBefore = process.env.HOME;
+  const cacheBefore = process.env.XDG_CACHE_HOME;
+  const configBefore = process.env.XDG_CONFIG_HOME;
+  const home = '/home/dev';
+  const realCache = path.join(home, '.cache');
+
+  const linux = { HOME: home, XDG_CONFIG_HOME: '/xdg/config' };
+  const linuxRoot = isolateInjected('linux', linux, [], 'cache-linux');
+  assert.equal(linux.XDG_CACHE_HOME, realCache);
+  assert.equal(path.isAbsolute(linux.XDG_CACHE_HOME), true);
+  assert.equal(linux.HOME, linuxRoot);
+  assert.notEqual(path.resolve(linux.HOME), path.resolve(home));
+  assert.equal(pathInside(linux.XDG_CACHE_HOME, linuxRoot), false);
+  assert.equal(linux.XDG_CONFIG_HOME, path.join(linuxRoot, '.config'));
+  const linuxConfig = resolveChatGPTConfigDir({ platform: 'linux', env: linux, home: linuxRoot });
+  assert.equal(linuxConfig, path.join(linuxRoot, '.config', 'chatpcb'));
+  assert.equal(pathInside(linuxConfig, linuxRoot), true);
+  assert.equal(pathInside(linuxConfig, realCache), false);
+
+  const keptCache = '/custom/cache';
+  const kept = { HOME: home, XDG_CACHE_HOME: keptCache };
+  const keptRoot = isolateInjected('linux', kept, [], 'cache-kept');
+  assert.equal(kept.XDG_CACHE_HOME, keptCache);
+  assert.notEqual(kept.XDG_CACHE_HOME, realCache);
+  assert.equal(pathInside(kept.XDG_CACHE_HOME, keptRoot), false);
+  assert.equal(kept.XDG_CONFIG_HOME, path.join(keptRoot, '.config'));
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'linux', env: kept, home: keptRoot }),
+    path.join(keptRoot, '.config', 'chatpcb')
+  );
+
+  const relativeCache = { HOME: home, XDG_CACHE_HOME: 'relative/cache' };
+  isolateInjected('linux', relativeCache, [], 'cache-relative');
+  assert.equal(relativeCache.XDG_CACHE_HOME, 'relative/cache');
+
+  const blank = { HOME: home, XDG_CACHE_HOME: '' };
+  isolateInjected('linux', blank, [], 'cache-blank');
+  assert.equal(blank.XDG_CACHE_HOME, realCache);
+
+  const noHome = {};
+  const noHomeRoot = isolateInjected('linux', noHome, [], 'cache-no-home');
+  assert.equal(Object.hasOwn(noHome, 'XDG_CACHE_HOME'), false);
+  assert.equal(noHome.HOME, noHomeRoot);
+  assert.equal(noHome.XDG_CONFIG_HOME, path.join(noHomeRoot, '.config'));
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'linux', env: noHome, home: noHomeRoot }),
+    path.join(noHomeRoot, '.config', 'chatpcb')
+  );
+
+  const relativeHome = { HOME: 'relative-home' };
+  const relativeHomeRoot = isolateInjected('linux', relativeHome, [], 'cache-rel-home');
+  assert.equal(Object.hasOwn(relativeHome, 'XDG_CACHE_HOME'), false);
+  assert.equal(relativeHome.HOME, relativeHomeRoot);
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'linux', env: relativeHome, home: relativeHomeRoot }),
+    path.join(relativeHomeRoot, '.config', 'chatpcb')
+  );
+
+  const other = { HOME: home };
+  const otherRoot = isolateInjected('freebsd', other, [], 'cache-freebsd');
+  assert.equal(other.XDG_CACHE_HOME, realCache);
+  assert.equal(other.HOME, otherRoot);
+  assert.equal(pathInside(other.XDG_CACHE_HOME, otherRoot), false);
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'freebsd', env: other, home: otherRoot }),
+    path.join(otherRoot, '.config', 'chatpcb')
+  );
+
+  const macHome = '/Users/dev';
+  const mac = { HOME: macHome };
+  const macRoot = isolateInjected('darwin', mac, [], 'cache-mac');
+  assert.equal(Object.hasOwn(mac, 'XDG_CACHE_HOME'), false);
+  assert.equal(mac.HOME, macRoot);
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'darwin', env: mac, home: macRoot }),
+    path.join(macRoot, 'Library', 'Application Support', 'chatpcb')
+  );
+
+  const macKeptCache = '/Users/dev/Library/Caches';
+  const macKept = { HOME: macHome, XDG_CACHE_HOME: macKeptCache };
+  const macKeptRoot = isolateInjected('darwin', macKept, [], 'cache-mac-kept');
+  assert.equal(macKept.XDG_CACHE_HOME, macKeptCache);
+  assert.equal(macKept.HOME, macKeptRoot);
+  assert.equal(macKept.XDG_CONFIG_HOME, undefined);
+
+  const win = {
+    HOME: 'C:\\Users\\dev',
+    USERPROFILE: 'C:\\Users\\dev',
+    APPDATA: 'C:\\Users\\dev\\AppData\\Roaming'
+  };
+  const winRoot = isolateInjected('win32', win, [], 'cache-win');
+  assert.equal(Object.hasOwn(win, 'XDG_CACHE_HOME'), false);
+  assert.equal(win.HOME, 'C:\\Users\\dev');
+  assert.equal(win.USERPROFILE, 'C:\\Users\\dev');
+  assert.equal(win.APPDATA, path.join(winRoot, 'AppData', 'Roaming'));
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'win32', env: win }),
+    path.join(winRoot, 'AppData', 'Roaming', 'chatpcb')
+  );
+
+  const winKept = {
+    HOME: 'C:\\Users\\dev',
+    USERPROFILE: 'C:\\Users\\dev',
+    APPDATA: 'C:\\Users\\dev\\AppData\\Roaming',
+    XDG_CACHE_HOME: 'C:\\keep-cache'
+  };
+  const winKeptRoot = isolateInjected('win32', winKept, [], 'cache-win-kept');
+  assert.equal(winKept.XDG_CACHE_HOME, 'C:\\keep-cache');
+  assert.equal(winKept.HOME, 'C:\\Users\\dev');
+  assert.equal(winKept.APPDATA, path.join(winKeptRoot, 'AppData', 'Roaming'));
+
+  assert.equal(process.env.HOME, homeBefore);
+  assert.equal(process.env.XDG_CACHE_HOME, cacheBefore);
+  assert.equal(process.env.XDG_CONFIG_HOME, configBefore);
+});
