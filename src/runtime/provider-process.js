@@ -5,10 +5,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS } from '../shared/constants.js';
 import { createEnvelope } from './envelope.js';
 import { PROMPT_FILE_PLACEHOLDER } from './provider-registry.js';
 
-const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
+const knownChatPcbTools = new Set(KNOWN_CHATPCB_TOOLS);
 const DEFAULT_KILL_GRACE_MS = 2000;
 // Detached children are their own process group, so SIGINT/SIGTERM/SIGHUP sent
 // to this process does not reach them. Ids stay until the group itself is gone,
@@ -42,7 +43,7 @@ export async function runProviderProcess({
   cwd = process.cwd(),
   env = {},
   timeoutMs = 120000,
-  allowedToolNames = DEFAULT_ALLOWED_TOOL_NAMES,
+  allowedToolNames = PROVIDER_ALLOWED_TOOLS,
   traceDir,
   signal,
   onEvent,
@@ -200,12 +201,19 @@ export async function runProviderProcess({
         clearKillTimer();
         if (!finish()) return;
         if (pendingError) {
+          attachUnknownToolTranscript(pendingError, events, exitCode, stderr);
           reject(pendingError);
           return;
         }
 
         try {
           parser.finish();
+          if (parser.unknownToolErrors.length > 0) {
+            const error = parser.unknownToolErrors[0];
+            attachUnknownToolTranscript(error, events, exitCode, stderr);
+            reject(error);
+            return;
+          }
           const transcript = {
             exitCode,
             events,
@@ -234,6 +242,7 @@ export async function runProviderProcess({
 
           resolve(transcript);
         } catch (error) {
+          attachUnknownToolTranscript(error, events, exitCode, stderr);
           reject(error);
         }
       });
@@ -268,8 +277,28 @@ const GROK_STREAM_TYPES = new Set([
   'max_turns_reached'
 ]);
 
+// Unknown names stay coded as UNKNOWN_TOOL, but the child is allowed to
+// finish so a known call in the same output still reaches the daemon.
+function rememberUnknownTool(events, unknownToolErrors, error) {
+  if (error?.code !== 'UNKNOWN_TOOL') return false;
+  unknownToolErrors.push(error);
+  const payload = error.toolCall;
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    events.push(createEnvelope('tool.call', payload));
+  }
+  return true;
+}
+
+function attachUnknownToolTranscript(error, events, exitCode, stderr) {
+  if (error?.code !== 'UNKNOWN_TOOL' || Array.isArray(error.parsedEvents)) return;
+  error.parsedEvents = events.slice();
+  error.providerExitCode = exitCode ?? 0;
+  error.providerStderr = redactProviderText(stderr.join(''));
+}
+
 function createProviderOutputParser({ allowedTools, onEvent, providerId }) {
   const events = [];
+  const unknownToolErrors = [];
   const grokText = { value: '', sawEnd: false };
   // JSON-output mode is selected from the provider definition id. Sniffing stdout
   // buffered every provider until exit when its first line was not JSON.
@@ -283,13 +312,21 @@ function createProviderOutputParser({ allowedTools, onEvent, providerId }) {
     for (const event of events.slice(before)) onEvent(event);
   };
 
+  const captureLine = (line, options) => {
+    const before = events.length;
+    try {
+      addProviderLine(events, line, allowedTools, options);
+    } catch (error) {
+      if (!rememberUnknownTool(events, unknownToolErrors, error)) throw error;
+    }
+    emitSince(before);
+  };
+
   const consumeLine = (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
     if (!jsonOutput) {
-      const before = events.length;
-      addProviderLine(events, line, allowedTools);
-      emitSince(before);
+      captureLine(line);
       return;
     }
 
@@ -303,13 +340,12 @@ function createProviderOutputParser({ allowedTools, onEvent, providerId }) {
     if (parsed.type === 'error') throw grokOutputError(parsed);
     if (parsed.type === 'end' && parsed.stopReason === 'error') throw grokStopError(parsed);
     if (isGrokResultEnvelope(parsed)) return;
-    const before = events.length;
-    addProviderLine(events, line, allowedTools, { jsonOutput: true, grokText });
-    emitSince(before);
+    captureLine(line, { jsonOutput: true, grokText });
   };
 
   return {
     events,
+    unknownToolErrors,
     pushChunk(chunk) {
       raw += chunk;
       pending += chunk;
@@ -330,7 +366,12 @@ function createProviderOutputParser({ allowedTools, onEvent, providerId }) {
       if (envelope && (isGrokResultEnvelope(envelope) || envelope.type === 'error' || envelope.stopReason === 'error')) {
         assertGrokResultOk(envelope);
         events.length = 0;
-        absorbGrokResult(events, envelope, allowedTools);
+        unknownToolErrors.length = 0;
+        try {
+          absorbGrokResult(events, envelope, allowedTools);
+        } catch (error) {
+          if (!rememberUnknownTool(events, unknownToolErrors, error)) throw error;
+        }
         emitSince(0);
         return;
       }
@@ -339,7 +380,11 @@ function createProviderOutputParser({ allowedTools, onEvent, providerId }) {
           throw providerOutputError('GROK_OUTPUT_INCOMPLETE', 'Grok JSON output ended before a complete result.');
         }
         const before = events.length;
-        flushGrokText(events, grokText, allowedTools);
+        try {
+          flushGrokText(events, grokText, allowedTools);
+        } catch (error) {
+          if (!rememberUnknownTool(events, unknownToolErrors, error)) throw error;
+        }
         emitSince(before);
         return;
       }
@@ -547,6 +592,13 @@ function redactValue(value) {
   return value;
 }
 
+function unknownProviderToolError(payload) {
+  const error = new Error(`Unsupported provider tool call: ${payload.name}`);
+  error.code = 'UNKNOWN_TOOL';
+  error.toolCall = payload;
+  return error;
+}
+
 function validateProviderToolCall(payload, allowedTools) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Provider tool.call payload must be an object.');
@@ -556,8 +608,12 @@ function validateProviderToolCall(payload, allowedTools) {
     throw new Error('Provider tool.call payload requires an id.');
   }
 
-  if (typeof payload.name !== 'string' || !allowedTools.has(payload.name)) {
+  if (typeof payload.name !== 'string' || payload.name.length === 0) {
     throw new Error(`Unsupported provider tool call: ${payload.name}`);
+  }
+
+  if (!allowedTools.has(payload.name) && !knownChatPcbTools.has(payload.name)) {
+    throw unknownProviderToolError(payload);
   }
 
   if (payload.args !== undefined && (!payload.args || typeof payload.args !== 'object' || Array.isArray(payload.args))) {

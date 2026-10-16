@@ -361,7 +361,7 @@ export function startCircuitConversation(prompt, spec, { proMode = false } = {})
   };
 }
 
-function nextOpen(conversation, spec) {
+function nextOpen(conversation, _spec) {
   const detection = detectProductRequest(conversation.sourcePrompt);
   return openFields(detection, conversation.answers, { proMode: conversation.proMode === true });
 }

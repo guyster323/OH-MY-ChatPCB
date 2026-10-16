@@ -24,6 +24,13 @@ async function snapshot(root) {
 const cleanErc = async () => ({ ok: true, erc: { errorCount: 0, warningCount: 0 } });
 const cleanDrc = async () => ({ ok: true, drc: { violationCount: 0, unconnectedCount: 0 } });
 
+// These tests assert inspection results, not a live KiCad install. A host
+// kicad-cli probe can fail or succeed between two calls and make equal
+// inspections look different. Pass getKicadVersionImpl to override.
+function inspect(options) {
+  return inspectProject({ getKicadVersionImpl: async () => null, ...options });
+}
+
 function schematicWithoutFootprint() {
   return `(kicad_sch (version 1)
   (symbol (lib_id "Demo:Part") (at 10 20 0) (uuid schematic-without-footprint)
@@ -33,7 +40,7 @@ function schematicWithoutFootprint() {
 test('inspectProject returns stable artifact evidence and separate validation results', async () => {
   const root = await makeProject();
   try {
-    const result = await inspectProject({
+    const result = await inspect({
       projectDir: root,
       now: () => '2026-09-03T00:00:00.000Z',
       validateProjectImpl: cleanErc,
@@ -60,7 +67,7 @@ test('inspectProject exposes stable deterministic facts without changing validat
       validateBoardImpl: cleanDrc,
       analyzerAdapters: []
     };
-    const [first, second] = await Promise.all([inspectProject(options), inspectProject(options)]);
+    const [first, second] = await Promise.all([inspect(options), inspect(options)]);
 
     assert.equal(first.validationClean, true);
     assert.equal(JSON.stringify(first.inspection.facts), JSON.stringify(second.inspection.facts));
@@ -81,7 +88,7 @@ test('inspectProject isolates validator mutations from saved project files and e
   const beforeInventory = await collectArtifactInventory({ projectDir: root });
   const validationDirs = [];
   try {
-    const result = await inspectProject({
+    const result = await inspect({
       projectDir: root,
       validateProjectImpl: async ({ projectDir }) => {
         validationDirs.push(projectDir);
@@ -112,7 +119,7 @@ test('inspectProject invokes its injected analyzer implementation for completion
   let calls = 0;
 
   try {
-    const result = await inspectProject({
+    const result = await inspect({
       projectDir: root,
       validateProjectImpl: cleanErc,
       validateBoardImpl: cleanDrc,
@@ -150,7 +157,7 @@ test('inspectProject discards facts and findings when the project mutates while 
   const analysisFinishedBarrier = new Promise((resolve) => { analysisFinished = resolve; });
 
   try {
-    const inspectionPromise = inspectProject({
+    const inspectionPromise = inspect({
       projectDir: root,
       validateProjectImpl: async () => {
         validationStarted();
@@ -186,7 +193,7 @@ test('inspectProject discards facts and findings when the project mutates while 
 
 test('inspectProject rejects an unsafe project path without changing source files', async () => {
   await assert.rejects(
-    inspectProject({ projectDir: homedir(), validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc }),
+    inspect({ projectDir: homedir(), validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc }),
     { code: 'UNSAFE_PROJECT_DIR' }
   );
 });
@@ -196,7 +203,7 @@ test('inspectProject rejects invalid manifest JSON without changing source files
   await writeFile(path.join(root, 'demo.chatpcb.json'), '{not-json', 'utf8');
   const before = await snapshot(root);
   try {
-    await assert.rejects(inspectProject({ projectDir: root, validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc }), {
+    await assert.rejects(inspect({ projectDir: root, validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc }), {
       code: 'CHATPCB_MANIFEST_INVALID'
     });
     assert.deepEqual(await snapshot(root), before);
@@ -211,7 +218,7 @@ test('inspectProject rejects multiple manifests without changing source files', 
   await writeFile(path.join(root, 'two.chatpcb.json'), '{}', 'utf8');
   const before = await snapshot(root);
   try {
-    await assert.rejects(inspectProject({ projectDir: root, validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc }), {
+    await assert.rejects(inspect({ projectDir: root, validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc }), {
       code: 'MULTIPLE_CHATPCB_MANIFESTS'
     });
     assert.deepEqual(await snapshot(root), before);
@@ -225,7 +232,7 @@ test('inspectProject reports a missing board through DRC validation without chan
   await rm(path.join(root, 'demo.kicad_pcb'));
   const before = await snapshot(root);
   try {
-    const result = await inspectProject({ projectDir: root, validateProjectImpl: cleanErc });
+    const result = await inspect({ projectDir: root, validateProjectImpl: cleanErc });
     assert.equal(result.validation.drc.ok, true);
     assert.equal(result.validation.drc.skipped, true);
     assert.equal(result.validation.drc.reason.code, 'NO_BOARD');
@@ -241,7 +248,7 @@ test('inspectProject reports missing manifest freshness without changing source 
   const root = await makeProject();
   const before = await snapshot(root);
   try {
-    const result = await inspectProject({ projectDir: root, validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc });
+    const result = await inspect({ projectDir: root, validateProjectImpl: cleanErc, validateBoardImpl: cleanDrc });
     assert.equal(result.manifest.schemaVersion, null);
     assert.equal(result.manifest.freshness.status, 'missing');
     assert.deepEqual(await snapshot(root), before);
@@ -253,7 +260,7 @@ test('inspectProject reports missing manifest freshness without changing source 
 test('inspectProject records an available KiCad version and omits disposable validator report paths', async () => {
   const root = await makeProject();
   try {
-    const result = await inspectProject({
+    const result = await inspect({
       projectDir: root,
       getKicadVersionImpl: async () => ({ version: '9.0.1', command: 'kicad-cli', source: 'test' }),
       validateProjectImpl: async ({ projectDir }) => ({
@@ -308,8 +315,8 @@ test('inspectProject omits context unless selection is provided and does not cha
     validateBoardImpl: cleanDrc
   };
   try {
-    const without = await inspectProject(options);
-    const withSelection = await inspectProject({ ...options, selection: structuredClone(selectionFixture) });
+    const without = await inspect(options);
+    const withSelection = await inspect({ ...options, selection: structuredClone(selectionFixture) });
     const { context, ...rest } = withSelection;
 
     assert.equal('context' in without, false);
@@ -353,7 +360,7 @@ test('inspectProject discards selection context when evidence changes during ins
   const analysisFinishedBarrier = new Promise((resolve) => { analysisFinished = resolve; });
 
   try {
-    const inspectionPromise = inspectProject({
+    const inspectionPromise = inspect({
       projectDir: root,
       now: () => '2026-09-03T00:00:00.000Z',
       selection: structuredClone(selectionFixture),
@@ -396,7 +403,7 @@ test('inspectProject discards selection context when the transaction digest move
   const analysisFinishedBarrier = new Promise((resolve) => { analysisFinished = resolve; });
 
   try {
-    const inspectionPromise = inspectProject({
+    const inspectionPromise = inspect({
       projectDir: root,
       now: () => '2026-09-03T00:00:00.000Z',
       selection: structuredClone(selectionFixture),

@@ -58,8 +58,10 @@ Not implemented yet:
 
 ## Quick Start
 
+Node.js 22 or newer is required. Install dependencies with `npm ci`.
+
 ```powershell
-npm install
+npm ci
 npm test
 npm run daemon
 npm run launch:kicad
@@ -77,10 +79,10 @@ Use this flow to create a named KiCad project from a Korean or English request.
 cd C:\path\to\OH-MY-ChatPCB
 ```
 
-2. Install dependencies and run the full local verification:
+2. Install dependencies and run the full local verification. Node.js 22 or newer is required. Installs use `npm ci`:
 
 ```powershell
-npm install
+npm ci
 npm test
 npm run verify:sample
 npm run verify:panel
@@ -228,7 +230,7 @@ node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 
 The example prompt above creates a schematic-only project (no `.kicad_pcb`), so `drc` returns `skipped: true` with reason `NO_BOARD`. A PCB draft is created only for supported board profiles, for example `--prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator."`; run `drc` on such a project, or on a project where you created the board in KiCad yourself. Expect that board draft to fail DRC today: with KiCad 10.0.7 it reports `22` violations (`lib_footprint_mismatch` 21, `isolated_copper` 1) and `0` unconnected items, and `drc` exits with code `2`. These counts were measured with the bundled fixture footprints (`tests/fixtures/kicad-libraries`); with the full installed KiCad libraries the result can differ. The draft is a starting point, not a DRC-clean board.
 
-`validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; with KiCad 10.0.7 the CLI example above validates with `0` errors and `2` warnings (`isolated_pin_label`), while `npm run generate:sample` validates with `0` errors and `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
+`CHATPCB_KICAD_CLI_DISABLE=1` turns KiCad CLI discovery off. ChatPCB then prints `kicad-cli disabled by CHATPCB_KICAD_CLI_DISABLE` once on stderr and reports validation as unavailable. `validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; with KiCad 10.0.7 the CLI example above validates with `0` errors and `2` warnings (`isolated_pin_label`), while `npm run generate:sample` validates with `0` errors and `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
 
 ## Evidence and migration
 
@@ -240,7 +242,7 @@ Schema v1 manifests remain readable and inspect as `legacy-unverified`; they con
 
 Daemon JSON and provider tool calls cannot select the KiCad executable: request `kicadCliPath` fields are ignored. Configure `startDaemon({ dispatchOptions: { kicadCliPath: '/trusted/path/to/kicad-cli' } })` or the operator-owned `KICAD_CLI_PATH` environment instead. Local `inspect`, `validate`, and `drc` CLI commands retain `--kicad-cli` for trusted operator use.
 
-Inspection, ERC, and DRC reject projects reached through symbolic links/junctions, and links or special files anywhere in their tree, before running KiCad. Supply a canonical project path; linked ancestors are not followed. Version queries and inspect-time ERC/DRC operate in a checked disposable copy whose internally created temp root is canonicalized with `realpath` so OS temp aliases do not reject the copy; cleanup waits for all validators to settle. Schematic patch previews do the same for their candidate tree: the internally created patch temp root is canonicalized before candidate ERC, which excludes the original project from automatic PATH discovery. Automatic PATH lookup uses absolute directories and excludes both the process working directory and the original project tree, even when inspect or patch validation has changed cwd to a private copy. Trusted `--kicad-cli` / `explicitPath` and operator-owned `KICAD_CLI_PATH` still override discovery. A missing tool is reported unavailable. This protects the inspection boundary for untrusted project trees; the installed KiCad toolchain and server configuration remain trusted.
+Inspection, ERC, and DRC reject a project directory that is itself a symbolic link or junction, and they reject links or special files anywhere inside the project tree, before running KiCad. A symlink ancestor is allowed only when that same path is an ancestor of the OS temporary directory (for example macOS `/var` → `/private/var`) or of the canonical allowed workspace root. Every other symlink ancestor is rejected. Version queries and inspect-time ERC/DRC operate in a checked disposable copy whose internally created temp root is canonicalized with `realpath` so OS temp aliases do not reject the copy; cleanup waits for all validators to settle. Schematic patch previews do the same for their candidate tree: the internally created patch temp root is canonicalized before candidate ERC, which excludes the original project from automatic PATH discovery. Automatic PATH lookup uses absolute directories and excludes both the process working directory and the original project tree, even when inspect or patch validation has changed cwd to a private copy. Trusted `--kicad-cli` / `explicitPath` and operator-owned `KICAD_CLI_PATH` still override discovery. A missing tool is reported unavailable. This protects the inspection boundary for untrusted project trees; the installed KiCad toolchain and server configuration remain trusted.
 
 `chatpcb inspect --project <dir>` continues to print JSON. Its `result.inspection.facts` records saved-artifact structure: schematic components, labels, wires, junctions, no-connect markers, and nets; plus board nets, footprints, pads, segments, vias, summaries, and heuristic unrouted-net candidates. `result.inspection.analyzers` reports whether each analyzer was `complete`, `partial`, `skipped`, or `failed`, with typed diagnostics.
 

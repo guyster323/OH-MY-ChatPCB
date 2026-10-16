@@ -3,6 +3,8 @@ import { access, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
+
 export const PROMPT_FILE_PLACEHOLDER = '__PROMPT_FILE__';
 
 const DEFAULT_PROVIDER_TIMEOUT_MS = 120000;
@@ -17,7 +19,10 @@ const DEFAULT_WINDOWS_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
 // multiplies the 82–265s latency per turn, and can still finish without a mutating
 // call. A schema enum is enforced by the structured-output decoder, so each request
 // allows only the mutating tool for that context.
-const GROK_MUTATING_TOOLS = ['schematic.generate', 'schematic.patch'];
+// Grok's schema allows one mutating tool. The names come from the shared allowlist.
+const GROK_MUTATING_TOOLS = [ToolName.SCHEMATIC_GENERATE, ToolName.SCHEMATIC_PATCH].filter((name) => (
+  PROVIDER_ALLOWED_TOOLS.includes(name)
+));
 
 export function grokMutatingToolNames(context = {}) {
   if (Array.isArray(context.mutatingTools) && context.mutatingTools.length > 0) {
@@ -26,7 +31,8 @@ export function grokMutatingToolNames(context = {}) {
   }
   // Same rule as project.request: allowGenerate is false exactly when a spec already exists.
   const existing = context.allowGenerate === false || (context.allowGenerate !== true && context.projectExists === true);
-  return existing ? ['schematic.patch'] : ['schematic.generate'];
+  const selected = existing ? ToolName.SCHEMATIC_PATCH : ToolName.SCHEMATIC_GENERATE;
+  return GROK_MUTATING_TOOLS.filter((name) => name === selected);
 }
 
 export function buildGrokToolCallSchema(context = {}) {
@@ -62,7 +68,7 @@ function grokArgsSchema(name) {
   // previewNativeChange reads prompt and, for schematic.patch, optional projectName.
   // Approval controls (approved, cancel, patchId) are stripped in withProjectContext
   // and are not provider arguments.
-  if (name === 'schematic.patch') {
+  if (name === ToolName.SCHEMATIC_PATCH) {
     return {
       type: 'object',
       additionalProperties: false,
@@ -332,7 +338,8 @@ export function buildProviderPrompt({
   userMessage,
   projectDir,
   allowedTools = [],
-  inspectionContext
+  inspectionContext,
+  projectExists = false
 } = {}) {
   const definition = getProviderDefinition(provider);
   const toolList = allowedTools.length ? allowedTools.map((tool) => `- ${tool}`).join('\n') : '- no tools allowed';
@@ -344,7 +351,7 @@ export function buildProviderPrompt({
       'Choose one allowed ChatPCB tool and return it as the structured response:',
       toolCallShape,
       'Set type to tool.call. Put the circuit request in args.prompt.',
-      allowedTools.includes('schematic.patch')
+      allowedTools.includes(ToolName.SCHEMATIC_PATCH)
         ? 'args.prompt must be a complete circuit description that keeps the existing design and applies the user request. projectName is optional.'
         : 'args.prompt must describe the circuit to generate.',
       'Do not emit tool.result. The local daemon executes tools and returns results.',
@@ -363,13 +370,20 @@ export function buildProviderPrompt({
   const lines = [
     ...instructions,
     'Allowed tool names:',
-    toolList,
+    toolList
+  ];
+
+  if (projectExists) {
+    lines.push('Note: The project already exists. Use schematic.patch to modify it, not project.create or schematic.generate.');
+  }
+
+  lines.push(
     '',
     'User request:',
     userMessage ?? '',
     '',
     projectDir ? `Project directory: ${projectDir}` : 'Project directory: not provided'
-  ];
+  );
 
   if (provider === 'grok' && inspectionContext) {
     lines.push(
