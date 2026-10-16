@@ -260,7 +260,7 @@ function findLedColors(prompt) {
     if (index >= 0) found.push({ ...color, index });
   }
   found.sort((left, right) => left.index - right.index);
-  return found.map(({ index, patterns, ...color }) => color);
+  return found.map(({ index: _index, patterns: _patterns, ...color }) => color);
 }
 
 function unsupportedLedFeatures(prompt) {
