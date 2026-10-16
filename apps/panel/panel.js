@@ -91,13 +91,17 @@ let lastProgressStage = null;
 let lastProgressText = '';
 let lastWorkflowActive = 'circuit.concept';
 let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutReviewed: false };
+let connectionStatusKey = 'connection.connecting';
+const laneOpen = new Map();
 const pendingCalls = new Map();
 const workflowCaptionEl = document.querySelector('#workflow-caption');
 const workflowCliEl = document.querySelector('#workflow-cli');
 
 connect();
+setConnectionStatus(connectionStatusKey);
 syncWorkflow();
 window.chatpcbI18n?.onChange(() => {
+  setConnectionStatus(connectionStatusKey, statusEl?.dataset.state);
   syncWorkflow();
   renderPatchApproval();
 });
@@ -144,27 +148,52 @@ for (const button of document.querySelectorAll('.flow-btn')) {
     }
   });
 }
+for (const row of document.querySelectorAll('.lane-row')) {
+  row.addEventListener('click', () => {
+    const laneId = row.closest('.workflow-lane')?.dataset.lane;
+    if (!laneId) return;
+    if (row.getAttribute('aria-disabled') === 'true') {
+      const reason = document.getElementById(row.getAttribute('aria-describedby') || '');
+      if (reason) {
+        reason.hidden = false;
+        reason.focus();
+      }
+      return;
+    }
+    laneOpen.set(laneId, row.getAttribute('aria-expanded') !== 'true');
+    syncWorkflow();
+  });
+}
 window.addEventListener('message', (event) => handleHostMessage(event.data));
 window.addEventListener('focus', () => refreshHostProjectStatus());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refreshHostProjectStatus();
 });
 
+function setConnectionStatus(key, state) {
+  connectionStatusKey = key;
+  if (statusEl) statusEl.textContent = t(key);
+  if (statusEl && state !== undefined) {
+    if (state) statusEl.dataset.state = state;
+    else delete statusEl.dataset.state;
+  }
+}
+
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
   socket.addEventListener('open', () => {
-    statusEl.textContent = 'Connected';
+    setConnectionStatus('connection.connected', 'ok');
     clearPatchApproval();
     refreshProviderStatus();
     inspectActiveProject();
   });
   socket.addEventListener('message', (event) => handleEnvelope(JSON.parse(event.data)));
   socket.addEventListener('close', () => {
-    statusEl.textContent = 'Disconnected';
+    setConnectionStatus('connection.disconnected', 'warn');
     setTimeout(connect, 1500);
   });
   socket.addEventListener('error', () => {
-    statusEl.textContent = 'Connection error';
+    setConnectionStatus('connection.error', 'warn');
   });
 }
 
@@ -929,6 +958,16 @@ function workflowStateKey(state) {
   return 'pending';
 }
 
+function laneSummary(buttons, current) {
+  const total = buttons.length;
+  const doneCount = buttons.filter((button) => button.dataset.state === 'done').length;
+  let stateLabel = t('workflow.state.pending');
+  if (doneCount === 0 && !current) stateLabel = t('workflow.not-started');
+  else if (total > 0 && doneCount === total) stateLabel = t('workflow.state.done');
+  else if (current) stateLabel = t('workflow.state.current');
+  return t('workflow.summary', { done: doneCount, total, state: stateLabel });
+}
+
 function syncWorkflow() {
   const { active, done, mode } = deriveWorkflow();
   const activeIndex = workflowIndex(active);
@@ -963,12 +1002,19 @@ function syncWorkflow() {
 
   for (const lane of document.querySelectorAll('.workflow-lane')) {
     const laneId = lane.dataset.lane;
-    lane.dataset.active = String(active.startsWith(`${laneId}.`));
-    const heading = lane.querySelector('.lane-h');
-    if (heading && laneId) heading.textContent = t(`workflow.lane.${laneId}`);
+    const current = Boolean(laneId && active.startsWith(`${laneId}.`));
+    lane.dataset.active = String(current);
+    if (current) laneOpen.delete(laneId);
+    const laneLabel = laneId ? t(`workflow.lane.${laneId}`) : '';
+    for (const el of lane.querySelectorAll('.lane-h, .lane-name')) el.textContent = laneLabel;
     const buttons = [...lane.querySelectorAll('.flow-btn[data-step]')];
     const lockedButtons = buttons.filter((button) => button.dataset.state === 'locked');
+    const allLocked = buttons.length > 0 && lockedButtons.length === buttons.length;
     const reason = laneId ? document.getElementById(`lock-r-${laneId}`) : null;
+    const row = lane.querySelector('.lane-row');
+    const body = lane.querySelector('.lane-c');
+    const summary = row?.querySelector('.lane-sum');
+    const doneCount = buttons.filter((button) => button.dataset.state === 'done').length;
     if (lockedButtons.length && reason) {
       const reasonKey = laneId === 'fab' ? 'workflow.locked.fab' : 'workflow.locked.layout';
       reason.hidden = false;
@@ -982,16 +1028,7 @@ function syncWorkflow() {
         button.removeAttribute('aria-disabled');
         button.removeAttribute('aria-describedby');
       }
-      if (lockedButtons.length === buttons.length) {
-        lane.setAttribute('aria-disabled', 'true');
-        lane.setAttribute('aria-describedby', reason.id);
-      } else {
-        lane.removeAttribute('aria-disabled');
-        lane.removeAttribute('aria-describedby');
-      }
     } else {
-      lane.removeAttribute('aria-disabled');
-      lane.removeAttribute('aria-describedby');
       if (reason) {
         reason.hidden = true;
         reason.textContent = '';
@@ -1001,6 +1038,34 @@ function syncWorkflow() {
         button.removeAttribute('aria-describedby');
       }
     }
+    if (allLocked && reason) {
+      lane.setAttribute('aria-disabled', 'true');
+      lane.setAttribute('aria-describedby', reason.id);
+    } else {
+      lane.removeAttribute('aria-disabled');
+      lane.removeAttribute('aria-describedby');
+    }
+    const expanded = !allLocked && (current || laneOpen.get(laneId) === true);
+    if (summary) {
+      summary.hidden = allLocked;
+      if (!allLocked) summary.textContent = laneSummary(buttons, current);
+    }
+    if (row) {
+      if (allLocked && reason) {
+        row.setAttribute('aria-disabled', 'true');
+        row.setAttribute('aria-describedby', reason.id);
+      } else {
+        row.removeAttribute('aria-disabled');
+        row.removeAttribute('aria-describedby');
+      }
+      row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      row.hidden = expanded && current;
+      const iconState = allLocked ? 'locked' : (doneCount === buttons.length && buttons.length ? 'done' : (current ? 'wait' : 'idle'));
+      renderStepIcon(row.querySelector('.lane-icon'), iconState);
+    }
+    if (body) body.hidden = !expanded;
+    const heading = lane.querySelector('.lane-h');
+    if (heading) heading.hidden = Boolean(row && !row.hidden);
   }
 
   const progressEl = document.querySelector('#workflow-progress');

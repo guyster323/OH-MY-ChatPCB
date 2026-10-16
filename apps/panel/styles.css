@@ -42,7 +42,16 @@ button, input, select, textarea, summary, a[href] {
   gap: var(--sp-3);
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   padding: var(--sp-3) var(--sp-3) 0;
+}
+.stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 .card, .topbar, .project-setup, .status-card, .review-panel, .workflow-board, .chat-column, .results, .panel-dialog {
   background: var(--surface);
@@ -106,6 +115,25 @@ h3 { font-size: var(--fs-xs); }
   font-family: var(--mono);
   font-size: var(--fs-xs);
 }
+.meta-status { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; flex-wrap: wrap; }
+.hdr-side { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.hdr > .provider-control { display: flex; justify-content: end; min-width: 0; }
+.hdr > .provider-control select { width: min(100%, 11rem); }
+.hdr-side .lang-control { display: flex; }
+.hdr-side select { width: auto; min-width: 4.5rem; }
+#connection-status { display: inline-flex; align-items: center; margin: 0; min-width: 0; }
+#connection-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  margin-right: 6px;
+  flex: none;
+}
+#connection-status[data-state="warn"]::before { background: var(--warn); }
+#active-project-directory { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+#new-project-again { margin-top: 0; flex: none; }
 .dot {
   display: inline-block;
   width: 8px;
@@ -213,7 +241,8 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 
 .workflow-board { display: grid; gap: var(--sp-2); }
 .wf-h { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); }
-.workflow-lane {
+.workflow-lane { display: grid; gap: var(--sp-2); }
+.lane-c {
   display: grid;
   gap: var(--sp-2);
   background: var(--surface2);
@@ -254,18 +283,12 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
   border-color: var(--border-strong);
 }
 .lock-reason {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
   margin: 0;
-  padding: var(--sp-2) var(--sp-4);
-  border-radius: var(--r-sm);
-  background: var(--warn-bg);
   color: var(--warn);
   font-size: var(--fs-xs);
   line-height: 1.4;
 }
+.lane-row .lock-reason { background: transparent; padding: 0; }
 .lane-row {
   display: flex;
   align-items: center;
@@ -281,7 +304,7 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
   text-align: left;
   cursor: pointer;
 }
-.lane-row b { font-weight: 700; }
+.lane-row b { font-weight: 700; min-width: 4.5em; }
 .lane-row .muted { margin-left: auto; font-size: var(--fs-xs); }
 .lane-row[aria-disabled="true"] {
   background: var(--warn-bg);
@@ -289,10 +312,11 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
   border-color: transparent;
   cursor: not-allowed;
   align-items: flex-start;
+  white-space: normal;
   padding: var(--sp-2) var(--sp-4);
 }
-.lane-row[aria-disabled="true"] .r { font-size: var(--fs-xs); line-height: 1.4; font-weight: 500; text-align: left; }
-#workflow-caption { font-size: var(--fs-xs); line-height: 1.4; }
+.lane-row[aria-disabled="true"] .r { flex: 1; min-width: 0; font-size: var(--fs-xs); line-height: 1.4; font-weight: 500; text-align: left; white-space: normal; }
+#workflow-caption { font-size: var(--fs-xs); line-height: 1.35; }
 .workflow-cli {
   margin: 0;
   font-family: var(--mono);
@@ -304,7 +328,8 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
   text-overflow: ellipsis;
 }
 
-.status-dock { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.status-dock { display: block; }
+.tools nav { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-bottom: var(--sp-2); }
 .dock-btn {
   min-width: 28px;
   min-height: 28px;
@@ -348,10 +373,9 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  flex: 1;
   min-height: 0;
-  overflow: auto;
 }
+#conversation-log:empty, #conversation-options:empty { display: none; }
 #conversation-log {
   display: grid;
   gap: var(--sp-3);
@@ -420,7 +444,7 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 }
 .patch-cta-hero { display: flex; gap: var(--sp-3); align-items: center; }
 .patch-cta-hero h2, .approval h3, #patch-approval-title { font-size: 15px; font-weight: 700; }
-#patch-approval-lead { font-size: var(--fs-xs); }
+#patch-approval-lead, #patch-approval-status { font-size: var(--fs-xs); }
 .patch-approval-actions, .actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .patch-approval-actions .btn, .patch-approval-actions button, .actions .btn { min-height: 32px; font-size: var(--fs-xs); }
 .erc {
@@ -469,7 +493,7 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   box-shadow: none;
 }
 .dock .row, .composer .row { display: flex; gap: var(--sp-3); }
-.dock input, .dock textarea, .composer textarea { min-height: 36px; min-width: 0; font-size: var(--fs-sm); }
+.dock input, .dock textarea, .composer textarea { min-height: 36px; min-width: 0; width: auto; flex: 1; font-size: var(--fs-sm); }
 .dock .btn, .dock button, .composer button { min-height: 36px; }
 .plan { display: flex; gap: var(--sp-3); align-items: center; font-size: var(--fs-xs); color: var(--muted); }
 .plan a { color: var(--accent-text); font-weight: 600; min-height: 28px; min-width: 28px; display: inline-flex; align-items: center; }

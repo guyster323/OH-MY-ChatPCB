@@ -5,65 +5,77 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
     <link rel="stylesheet" href="./styles/tokens.css" />
-    <link rel="stylesheet" href="./styles.css?v=20261016-soft4" />
+    <link rel="stylesheet" href="./styles.css?v=20261016-soft5" />
   </head>
   <body>
     <main class="shell">
-      <header class="topbar">
-        <div>
+      <header class="topbar hdr card">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><rect x="3" y="3" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 0v3M7 11v3M0 7h3M11 7h3" stroke="currentColor" stroke-width="1.6"/></svg></span>
           <h1>ChatPCB</h1>
-          <p id="connection-status">Connecting</p>
         </div>
-        <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time.">
-          <input id="pro-mode" type="checkbox" />
-          <span>Pro</span>
-        </label>
         <label class="provider-control">
-          <span data-i18n="provider.label">Provider</span>
+          <span class="sr" data-i18n="provider.label">Provider</span>
           <select id="provider" data-i18n-aria-label="provider.label" aria-label="Provider">
             <option value="codex">Codex CLI</option>
             <option value="claude">Claude Code</option>
             <option value="copilot">Copilot CLI</option>
           </select>
-          <span id="provider-status">Provider pending</span>
         </label>
-        <label class="lang-control">
-          <span class="sr" data-i18n="lang.label">Language</span>
-          <select id="lang" data-i18n-aria-label="lang.label" aria-label="Language">
-            <option value="en">English</option>
-            <option value="ko">한국어</option>
-          </select>
-        </label>
+        <div class="meta">
+          <div class="meta-status">
+            <p id="connection-status" role="status">Connecting</p>
+            <span id="provider-status">Provider pending</span>
+          </div>
+          <div class="hdr-side">
+            <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time.">
+              <input id="pro-mode" type="checkbox" />
+              <span>Pro</span>
+            </label>
+            <label class="lang-control">
+              <span class="sr" data-i18n="lang.label">Language</span>
+              <select id="lang" data-i18n-aria-label="lang.label" aria-label="Language">
+                <option value="en">English</option>
+                <option value="ko">한국어</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="active-project" class="meta" role="status" aria-label="Active project" hidden>
+          <span id="active-project-name" class="sr"></span>
+          <code id="active-project-directory"></code>
+          <button type="button" id="new-project-again" class="btn btn-sm" data-i18n="project.new">New project</button>
+        </div>
       </header>
 
-      <section class="project-setup" aria-labelledby="project-setup-title">
-        <h2 id="project-setup-title">Start a project</h2>
+      <div class="stage">
+      <section class="project-setup card" aria-labelledby="project-setup-title">
+        <h2 id="project-setup-title" data-i18n="project.title">Start a project</h2>
         <form id="new-project-form" class="new-project-form">
           <label>
-            <span>Workspace root</span>
+            <span data-i18n="project.workspace">Workspace root</span>
             <input id="workspace-root" value="./workspaces" autocomplete="off" />
           </label>
           <label>
-            <span>Project name</span>
+            <span data-i18n="project.name">Project name</span>
             <input id="project-name" autocomplete="off" required />
           </label>
-          <button type="submit">New project</button>
+          <button type="submit" data-i18n="project.new">New project</button>
         </form>
       </section>
 
-      <section id="active-project" class="status-card active-project" role="status" aria-label="Active project" hidden>
-        <h2>Active project</h2>
-        <p id="active-project-name"></p>
-        <code id="active-project-directory"></code>
-        <button type="button" id="new-project-again">New project</button>
-      </section>
-
-      <section class="workflow-board" aria-labelledby="workflow-title">
+      <section class="workflow-board card" aria-labelledby="workflow-title">
         <div class="wf-h">
           <h2 id="workflow-title" class="eyebrow" data-i18n="workflow.title">Workflow</h2>
           <span id="workflow-progress" class="badge"></span>
         </div>
         <div class="workflow-lane" data-lane="circuit">
+          <button type="button" class="lane-row" aria-expanded="false" hidden>
+            <svg class="lane-icon" viewBox="0 0 12 12" aria-hidden="true"></svg>
+            <b class="lane-name" data-i18n="workflow.lane.circuit">Circuit</b>
+            <span class="muted lane-sum"></span>
+          </button>
+          <div class="lane-c">
           <h2 class="lane-h" data-i18n="workflow.lane.circuit">Circuit</h2>
           <ol class="workflow-steps steps">
             <li><button type="button" class="flow-btn step" data-step="circuit.concept" data-state="idle" data-help="컨셉: 어떤 회로인지 채팅으로 설명"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.circuit.concept">Concept</span></button></li>
@@ -72,8 +84,16 @@
             <li><button type="button" class="flow-btn step" data-step="circuit.edit" data-state="idle" data-help="수정: 회로를 고칠 내용을 채팅으로"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.circuit.edit">Edit</span></button></li>
             <li><button type="button" class="flow-btn step" data-step="circuit.review" data-state="idle" data-open="review-dialog" data-help="리뷰: ERC와 차단 항목 확인"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.circuit.review">Review</span></button></li>
           </ol>
+          </div>
         </div>
         <div class="workflow-lane" data-lane="layout">
+          <button type="button" class="lane-row" aria-expanded="false" aria-disabled="true" aria-describedby="lock-r-layout">
+            <svg class="lane-icon" viewBox="0 0 12 12" aria-hidden="true"></svg>
+            <b class="lane-name" data-i18n="workflow.lane.layout">Layout</b>
+            <span class="muted lane-sum" hidden></span>
+            <span id="lock-r-layout" class="r lock-reason" tabindex="-1">Locked until Circuit review passes ERC.</span>
+          </button>
+          <div class="lane-c" hidden>
           <h2 class="lane-h" data-i18n="workflow.lane.layout">Layout</h2>
           <ol class="workflow-steps steps">
             <li><button type="button" class="flow-btn step" data-step="layout.concept" data-state="idle" data-help="컨셉: 보드 크기, 형태, 층수"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.layout.concept">Concept</span></button></li>
@@ -83,45 +103,29 @@
             <li><button type="button" class="flow-btn step" data-step="layout.edit" data-state="idle" data-help="수정: 배치·배선을 고칠 내용"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.layout.edit">Edit</span></button></li>
             <li><button type="button" class="flow-btn step" data-step="layout.review" data-state="idle" data-open="erc-dialog" data-help="리뷰: DRC와 레이아웃 확인"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.layout.review">Review</span></button></li>
           </ol>
-          <p id="lock-r-layout" class="lock-reason" tabindex="-1" hidden></p>
+          </div>
         </div>
         <div class="workflow-lane" data-lane="fab">
+          <button type="button" class="lane-row" aria-expanded="false" aria-disabled="true" aria-describedby="lock-r-fab">
+            <svg class="lane-icon" viewBox="0 0 12 12" aria-hidden="true"></svg>
+            <b class="lane-name" data-i18n="workflow.lane.fab">Fab</b>
+            <span class="muted lane-sum" hidden></span>
+            <span id="lock-r-fab" class="r lock-reason" tabindex="-1">Locked until Layout review passes DRC.</span>
+          </button>
+          <div class="lane-c" hidden>
           <h2 class="lane-h" data-i18n="workflow.lane.fab">Fab</h2>
           <ol class="workflow-steps steps">
             <li><button type="button" class="flow-btn step" data-step="fab.gerber" data-state="locked" data-open="artifacts-dialog" data-help="GERBER 등 제조 산출물"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.fab.gerber">Gerber</span></button></li>
             <li><button type="button" class="flow-btn step" data-step="fab.bom" data-state="locked" data-open="artifacts-dialog" data-help="BOM·조립 파일"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.fab.bom">BOM</span></button></li>
             <li><button type="button" class="flow-btn step" data-step="fab.submit" data-state="locked" data-help="JLCPCB 제출 패키지"><svg class="step-icon" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="step-label" data-i18n="workflow.step.fab.submit">JLCPCB submit</span></button></li>
           </ol>
-          <p id="lock-r-fab" class="lock-reason" tabindex="-1" hidden></p>
+          </div>
         </div>
-        <p id="workflow-caption">프로젝트를 만들면 Circuit 컨셉부터 시작합니다.</p>
+        <p id="workflow-caption">Create a project to start with the circuit concept.</p>
         <p id="workflow-cli" class="workflow-cli" hidden></p>
-        <nav class="status-dock" aria-label="Project tools">
-          <button type="button" class="dock-btn" data-open="review-dialog" data-help="Review: blockers and proposed fixes" title="Review">
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/><rect x="5" y="11" width="4" height="1" class="px-cut"/></svg>
-          </button>
-          <button type="button" class="dock-btn" data-open="erc-dialog" data-help="ERC: electrical rules check" title="ERC">
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="8" width="4" height="2"/><rect x="5" y="5" width="2" height="8"/><rect x="9" y="3" width="5" height="2"/><rect x="12" y="5" width="2" height="8"/></svg>
-          </button>
-          <button type="button" class="dock-btn" data-open="evidence-dialog" data-help="Project evidence digest and inspection" title="Evidence">
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="4" height="4" class="px-cut"/></svg>
-          </button>
-          <button type="button" class="dock-btn" data-open="patch-dialog" data-help="Patch approval" title="Patch">
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="12" height="3"/><rect x="7" y="2" width="3" height="12"/></svg>
-          </button>
-          <button type="button" class="dock-btn" data-open="kicad-dialog" data-help="Open or link the KiCad project" title="KiCad">
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="2" height="5" class="px-cut"/><rect x="8" y="6" width="3" height="2" class="px-cut"/></svg>
-          </button>
-          <button type="button" class="dock-btn" data-open="artifacts-dialog" data-help="Generated files" title="Artifacts">
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg>
-          </button>
-          <button type="button" class="dock-btn" id="conflict-dock-btn" data-open="conflict-dialog" data-help="Unsaved KiCad editor changes" title="Unsaved" hidden>
-            <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="7" y="2" width="2" height="8"/><rect x="7" y="12" width="2" height="2"/></svg>
-          </button>
-        </nav>
       </section>
 
-      <section id="conversation-card" class="chat-column">
+      <section id="conversation-card" class="chat-column card">
         <p id="request-status" role="status" aria-label="Request status" data-state="idle">Create a project to send a circuit request.</p>
         <details id="request-technical-details" hidden>
           <summary>Technical details</summary>
@@ -132,7 +136,7 @@
         <div id="conversation-options" class="conversation-options"></div>
         <section id="patch-approval-card" class="status-card patch-approval-card" aria-labelledby="patch-approval-title" hidden>
           <div class="patch-cta-hero">
-            <img src="./sprites/preview.png" alt="" width="48" height="48" class="progress-sprite" />
+            <img src="./sprites/preview.png" alt="" width="28" height="28" class="progress-sprite" />
             <div>
               <h2 id="patch-approval-title" data-i18n="patch.title">Apply schematic draft?</h2>
               <p id="patch-approval-lead" data-i18n="patch.lead">The schematic file does not change until you apply.</p>
@@ -147,14 +151,47 @@
           </div>
           <p id="apply-why" hidden></p>
         </section>
-        <form id="composer" class="composer">
-          <label>
-            <span>Circuit request</span>
-            <textarea id="prompt" rows="2" spellcheck="true" disabled placeholder="Ask or reply…"></textarea>
-          </label>
-          <div class="composer-actions"><button type="submit" disabled>Send</button></div>
-        </form>
+        <details class="tools status-dock">
+          <summary data-i18n="tools.summary">Tools</summary>
+          <nav aria-label="Project tools">
+            <button type="button" class="dock-btn" data-open="review-dialog" data-help="Review: blockers and proposed fixes" data-i18n-title="tools.review" title="Review">
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="10" height="13"/><rect x="5" y="5" width="6" height="1" class="px-cut"/><rect x="5" y="8" width="6" height="1" class="px-cut"/><rect x="5" y="11" width="4" height="1" class="px-cut"/></svg>
+              <span data-i18n="tools.review">Review</span>
+            </button>
+            <button type="button" class="dock-btn" data-open="erc-dialog" data-help="ERC: electrical rules check" data-i18n-title="tools.erc" title="ERC">
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="8" width="4" height="2"/><rect x="5" y="5" width="2" height="8"/><rect x="9" y="3" width="5" height="2"/><rect x="12" y="5" width="2" height="8"/></svg>
+              <span data-i18n="tools.erc">ERC</span>
+            </button>
+            <button type="button" class="dock-btn" data-open="evidence-dialog" data-help="Project evidence digest and inspection" data-i18n-title="tools.evidence" title="Evidence">
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="4" height="4" class="px-cut"/></svg>
+              <span data-i18n="tools.evidence">Evidence</span>
+            </button>
+            <button type="button" class="dock-btn" data-open="patch-dialog" data-help="Patch approval" data-i18n-title="tools.patch" title="Patch">
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="7" width="12" height="3"/><rect x="7" y="2" width="3" height="12"/></svg>
+              <span data-i18n="tools.patch">Patch</span>
+            </button>
+            <button type="button" class="dock-btn" data-open="kicad-dialog" data-help="Open or link the KiCad project" data-i18n-title="tools.kicad" title="KiCad">
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10"/><rect x="6" y="6" width="2" height="5" class="px-cut"/><rect x="8" y="6" width="3" height="2" class="px-cut"/></svg>
+              <span data-i18n="tools.kicad">KiCad</span>
+            </button>
+            <button type="button" class="dock-btn" data-open="artifacts-dialog" data-help="Generated files" data-i18n-title="tools.artifacts" title="Artifacts">
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="7" height="9"/><rect x="6" y="5" width="7" height="9"/></svg>
+              <span data-i18n="tools.artifacts">Artifacts</span>
+            </button>
+            <button type="button" class="dock-btn" id="conflict-dock-btn" data-open="conflict-dialog" data-help="Unsaved KiCad editor changes" data-i18n-title="tools.unsaved" title="Unsaved" hidden>
+              <svg class="px-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="7" y="2" width="2" height="8"/><rect x="7" y="12" width="2" height="2"/></svg>
+              <span data-i18n="tools.unsaved">Unsaved</span>
+            </button>
+          </nav>
+        </details>
       </section>
+      </div>
+      <form id="composer" class="composer dock">
+        <div class="row">
+          <textarea id="prompt" rows="1" spellcheck="true" disabled aria-label="Circuit request" data-i18n-aria-label="composer.label" placeholder="Ask or reply…" data-i18n-placeholder="composer.placeholder"></textarea>
+          <button type="submit" disabled data-i18n="composer.send">Send</button>
+        </div>
+      </form>
     </main>
 
     <dialog id="review-dialog" class="panel-dialog">
@@ -227,6 +264,6 @@
     </dialog>
 
     <script src="./i18n.js?v=20261016-soft1"></script>
-    <script src="./panel.js?v=20261016-soft1"></script>
+    <script src="./panel.js?v=20261016-soft5"></script>
   </body>
 </html>
