@@ -962,11 +962,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(first.status, 410);
         assert.equal(second.status, 410);
         assert.match(first.body, /This sign-in attempt expired/);
-        assert.match(first.body, /Nothing was saved/);
-        assert.match(first.body, /Continue with ChatGPT/);
-        assert.match(first.body, /로그인 시도가 만료되었습니다/);
-        assert.match(first.body, /저장된 내용은 없습니다/);
-        assert.match(first.body, /ChatPCB/);
+        assert.match(first.body, /Nothing was saved\. Go back to ChatPCB and start sign-in again\./);
+        assert.match(first.body, /로그인 시도가 만료되었습니다\. 저장된 내용은 없습니다\. ChatPCB로 돌아가서 로그인을 다시 시작하세요\./);
+        assert.doesNotMatch(first.body, /Continue with ChatGPT/);
         assert.equal(tokenCalls.length, 0);
         assert.equal(await loadCredentials(), null);
 
