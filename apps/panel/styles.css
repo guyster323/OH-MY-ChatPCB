@@ -378,12 +378,15 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 #conversation-log:empty, #conversation-options:empty { display: none; }
 #conversation-log {
   display: grid;
+  align-content: start;
   gap: var(--sp-3);
   margin: 0;
   padding: 0;
   list-style: none;
   flex: 1;
-  min-height: 0;
+  min-height: 96px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 #conversation-log li, .msg {
   font-size: var(--fs-sm);

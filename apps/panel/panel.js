@@ -495,6 +495,11 @@ function resetProjectResults() {
   syncWorkflow();
 }
 
+function scrollConversationToLatest() {
+  if (!conversationLogEl) return;
+  conversationLogEl.scrollTop = conversationLogEl.scrollHeight;
+}
+
 function renderConversation(result) {
   lastRequestResult = result;
   conversationCardEl.hidden = false;
@@ -554,6 +559,8 @@ function renderConversation(result) {
     }
     conversationLogEl.append(item);
   }
+  // scrollIntoView would move the page and push the approval card below the fold.
+  scrollConversationToLatest();
   conversationOptionsEl.replaceChildren();
   for (const option of result.options ?? []) {
     const button = document.createElement('button');
@@ -918,6 +925,7 @@ function renderPatchApproval() {
   }
   renderErcBox(erc, active);
   renderCurrentFileErc(erc, active);
+  scrollConversationToLatest();
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
@@ -1241,6 +1249,7 @@ function syncWorkflow() {
     workflowCliEl.hidden = !showCli;
     workflowCliEl.textContent = showCli ? lastProgressText : '';
   }
+  scrollConversationToLatest();
 }
 
 function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '' }) {
