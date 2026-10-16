@@ -69,7 +69,7 @@ test('Phase 1 migration documents describe the evidence-gated runtime contract',
   const architecture = await readFile('docs/ARCHITECTURE.md', 'utf8');
   const roadmap = await readFile('docs/ROADMAP.md', 'utf8');
   const plan = await readFile('plan.md', 'utf8');
-  const handoff = await readFile('docs/handoff-next-session.md', 'utf8');
+  const handoff = await readFile('docs/archive/handoff-next-session.md', 'utf8');
 
   assert.match(readme, /project\.inspect/);
   assert.match(readme, /schema v2 migration is planned future work/i);

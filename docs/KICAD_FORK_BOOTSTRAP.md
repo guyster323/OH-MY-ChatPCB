@@ -1,5 +1,7 @@
 # KiCad Fork Bootstrap
 
+[← README](../README.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
+
 ## Target
 
 Create a KiCad 10.0.x fork branch that embeds ChatPCB as a right-side panel.
@@ -68,24 +70,18 @@ npm run launch:kicad
 
 Official KiCad builds do not contain this fork panel. In that case the standalone browser fallback remains explicit: copy the displayed `.kicad_pro` path and open it manually in KiCad. The browser must not claim that KiCad was reloaded.
 
-## Current Windows Configure Evidence
+## Windows Build Configuration
 
-The local `chatpcb-panel-scaffold` checkout is at:
-
-```powershell
-C:\Users\windo\kicad-source-mirror-chatpcb
-```
-
-`cmake` is not on the default PATH, but Visual Studio bundles a working CMake:
+The local kicad-source-mirror-chatpcb checkout uses Visual Studio's bundled CMake:
 
 ```powershell
 C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe
 ```
 
-The Visual Studio generator path stalled during the initial `CompilerIdC.vcxproj` compile in this shell. The Ninja path works after loading the VS build environment and using the local vcpkg toolchain:
+Configure with Ninja generator after loading the VS build environment and using vcpkg toolchain:
 
 ```powershell
-cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"" >nul && set VCPKG_ROOT=C:\Users\windo\vcpkg&& ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"" -S . -B build\chatpcb-vcpkg -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKICAD_BUILD_QA_TESTS=OFF -DKICAD_INSTALL_DEMOS=OFF -DCMAKE_TOOLCHAIN_FILE=C:\Users\windo\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"" >nul && set VCPKG_ROOT=%USERPROFILE%\vcpkg&& ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"" -S . -B build\chatpcb-vcpkg -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKICAD_BUILD_QA_TESTS=OFF -DKICAD_INSTALL_DEMOS=OFF -DCMAKE_TOOLCHAIN_FILE=%USERPROFILE%\vcpkg\scripts\buildsystems\vcpkg.cmake"
 ```
 
 Build the schematic editor target:
@@ -109,3 +105,5 @@ The first fork milestone has been directly verified with Computer Use when:
 ## Constraint
 
 Do not introduce custom top-level `chatpcb_*` nodes into KiCad files. Store draft metadata in `.chatpcb.json` and only put human-reviewable notes into KiCad schematic text until real symbol placement is implemented.
+
+[← README](../README.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md)

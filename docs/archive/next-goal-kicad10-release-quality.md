@@ -61,7 +61,7 @@ Context:
 - KiCad fork checkout: C:\Users\windo\kicad-source-mirror-chatpcb
 - Start by reading:
   1. C:\Users\windo\chatpcb2\docs\next-goal-kicad10-release-quality.md
-  2. C:\Users\windo\chatpcb2\docs\handoff-next-session.md
+  2. docs/archive/handoff-next-session.md
   3. C:\Users\windo\chatpcb2\plan.md
   4. C:\Users\windo\chatpcb2\CONTRIBUTING.md
 - The previous verified root commit was ff9b888.
@@ -137,7 +137,7 @@ Verification expected before completion:
 - final git status for both root repo and KiCad fork
 
 Completion:
-- Update C:\Users\windo\chatpcb2\docs\handoff-next-session.md with exact findings, commands, versions, blockers, and next steps.
+- Update docs/archive/handoff-next-session.md with exact findings, commands, versions, blockers, and next steps.
 - Update C:\Users\windo\chatpcb2\plan.md if phases or acceptance criteria changed.
 - Commit and push only if the implementation and verification are complete.
 ```
@@ -147,7 +147,7 @@ Completion:
 Open these in this order:
 
 1. `docs/next-goal-kicad10-release-quality.md`
-2. `docs/handoff-next-session.md`
+2. `docs/archive/handoff-next-session.md`
 3. `plan.md`
 4. `CONTRIBUTING.md`
 5. `src/runtime/circuit-spec.js`

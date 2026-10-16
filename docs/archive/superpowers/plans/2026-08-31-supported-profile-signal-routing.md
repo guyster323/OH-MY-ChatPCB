@@ -72,7 +72,7 @@ Expected: all tests pass and the new assertions prove multi-leg SCL/SDA routes.
 ### Task 3: Measure KiCad output
 
 **Files:**
-- Modify only if results are measured: `plan.md`, `docs/handoff-next-session.md`
+- Modify only if results are measured: `plan.md`, `docs/archive/handoff-next-session.md`
 
 - [x] **Step 1: Regenerate both profiles**
 

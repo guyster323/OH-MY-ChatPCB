@@ -1,98 +1,282 @@
 # ChatPCB Architecture
 
-OH-MY-ChatPCB is a local-first, evidence-gated KiCad agent runtime that connects user-owned AI providers to native KiCad workflows with deterministic inspection, reviewable patches, validation, rollback, and human release gates.
+[← README](../README.md) · [Roadmap](ROADMAP.md) · [KiCad fork bootstrap](KICAD_FORK_BOOTSTRAP.md)
 
-## Runtime Boundaries
+## 개요
 
-The product UI is the KiCad schematic editor's right-side ChatPCB panel. `apps/panel` is the WebView bundle hosted by that panel, not a standalone web application. The browser path is a fallback when the ChatPCB-enabled KiCad host is unavailable.
+OH-MY-ChatPCB는 로컬 우선(local-first), 증거 기반(evidence-gated) KiCad 에이전트 런타임으로, 사용자 소유 AI 제공자를 네이티브 KiCad 워크플로에 연결합니다.
 
-ChatPCB is split into three local-only layers:
+The product UI is the KiCad schematic editor's right-side ChatPCB panel, not a standalone web application.
 
-- KiCad fork UI: a `wxWebView` side panel and a small launcher for `chatpcb-agentd`
-- Agent daemon: websocket and HTTP tool-call bridge on `127.0.0.1`
-- KiCad automation: project generation, `kicad-cli` validation, and `ngspice` simulation hooks
+## 3계층 구조
 
-The daemon does not store provider API keys. Provider-specific adapters call already-authenticated local CLI tools through the process bridge, accept provider-emitted `tool.call` JSON only, redact secrets from stderr transcripts and optional local trace files, and support process-level cancellation with `AbortSignal`.
+```
+┌─────────────────────────────────────┐
+│  KiCad Fork (C++ wxWebView Panel)  │  ← 사용자 인터페이스
+├─────────────────────────────────────┤
+│  Agent Daemon (127.0.0.1:41317)    │  ← WebSocket/HTTP 브리지
+├─────────────────────────────────────┤
+│  KiCad Automation (kicad-cli)      │  ← 생성, 검증, SPICE
+└─────────────────────────────────────┘
+```
 
-## Natural-Language Project Flow
+**모든 컴포넌트는 로컬에서만 실행됩니다. 외부 서버 없음.**
 
-The panel owns one active named project at a time:
+## 데이터 흐름
 
-1. `project.create { workspaceRoot, projectName }` validates the Unicode display name, creates a safe slugged directory inside the selected workspace, and returns its normal filesystem path.
-2. The user writes a Korean or English circuit request and presses **Send**.
-3. Before dispatch, the panel asks the KiCad host for `project.status`. A dirty editor produces `linkState: "conflict"`; the panel does not send `project.request` or request a reload until the unsaved edits are resolved.
-4. `project.request { projectDir, prompt, provider }` invokes the selected local provider, confines emitted tool calls to the active project, and falls back to bounded local generation or an approval-gated patch preview when the provider returns no call.
-5. The daemon validates ERC, restores the previous artifacts when an existing-project update fails validation, recomputes the readiness review, and returns `{ operation, files, validation, review, providerEvents }`.
-6. The panel renders request status, ERC, readiness review, artifacts, and KiCad link state independently. A clean host may receive `project.reload`; standalone browser mode instead shows the `.kicad_pro` path for manual opening. Official standalone KiCad opens that project path through `kicad.exe`; a direct `eeschema.exe` launch must receive the matching `.kicad_sch`, never the `.kicad_pro`.
+### 1. 프로젝트 생성
+```
+Panel → daemon: project.create { workspaceRoot, projectName }
+       ← daemon: { projectDir: "/safe/path/my-project" }
+```
 
-The host bridge accepts `project.open`, `project.status`, and `project.reload` messages. It validates absolute `.kicad_pro` paths, correlates responses with the containing active-project directory, uses the current schematic editor APIs, and refuses open/reload while the editor has unsaved content.
+### 2. 회로 요청
+```
+Panel → KiCad Host: project.status (dirty check)
+      ← Host: { linkState: "ready" | "conflict" }
 
-## Message Envelope
+Panel → daemon: project.request { projectDir, prompt, provider }
+       ← daemon: { operation, files, validation, review }
 
-All panel/daemon messages use this shape:
+Panel → Host: project.reload (if ready)
+```
+
+### 3. 패치 승인
+```
+daemon: schematic.patch (preview)
+       → { diff, beforeHash, afterHash, approval }
+
+Panel: user clicks "Apply"
+      → daemon: schematic.patch { approved: true }
+         daemon: atomic write + verify + rollback on mismatch
+```
+
+## 핵심 원칙
+
+### Evidence-Gated
+- 모든 변경사항은 미리보기 필수
+- artifact-bound approval (단일 사용, 만료, 해시 검증)
+- 롤백 보장 (전/후 스냅샷)
+
+### Deterministic Inspection
+- `project.inspect`: 저장된 KiCad 파일의 해시와 구조 추출
+- 빌트인 analyzer: 회로도 (components, nets, labels), PCB (footprints, pads, traces)
+- 외부 analyzer: 샌드박스 필요 (현재 비활성)
+
+### Validation Gates
+1. **ERC** (Electrical Rules Check): 회로도 전기 규칙 검증
+2. **DRC** (Design Rules Check): PCB 설계 규칙 검증 + 미연결 확인
+3. **Readiness Review**: 부품, 소싱, 데이터시트, 시뮬레이션, 레이아웃 증거 종합
+
+**중요**: ERC 0/0 ≠ 제조 준비 완료. DRC + readiness + 인간 승인 필요.
+
+## 주요 컴포넌트
+
+### Panel UI (`apps/panel/`)
+- 바닐라 JavaScript WebView 번들
+- KiCad fork의 wxWebView에 로드됨
+- Circuit / Layout / 제품화 워크플로 보드
+- WebSocket 연결로 daemon과 통신
+
+### Runtime (`src/runtime/`)
+- `agent-daemon.js`: HTTP/WS 서버 (127.0.0.1:41317), 도구 호출 디스패처, 경로 가드 (home/system 거부), provider 브리지 (Codex, Claude Code, Copilot CLI)
+- `provider-process.js`: 로컬 AI CLI 프로세스 실행과 출력 정화
+- `provider-registry.js`: provider 정의, 가용성, 프롬프트 구성
+- `board-profiles.js`: 지원 보드 프로필 (ESP32-S3, STM32 등)
+- `circuit-spec.js`: 자연어 프롬프트를 CircuitSpec으로 정규화
+- `envelope.js`: WebSocket envelope 생성과 검증
+- `part-sourcing.js`: 부품 검색과 소싱 요약
+- `patch-approval-registry.js`: 만료되는 단일 사용 패치 승인
+- `product-catalog.js`: 제품 요청 감지와 인터뷰 초안
+- `project-mutex-registry.js`: 프로젝트별 트랜잭션 잠금
+- `request-conversation.js`: 회로 요청 대화 상태
+- `transaction-journal.js`: 프로젝트 트랜잭션 저널 저장
+
+### Workflow (`src/workflow/`)
+- `generate-mcu-project.js`: MCU 주변장치 회로도/PCB 생성
+- `project-transaction.js`: 트랜잭션 적용과 롤백
+- `schematic-patch.js`: 승인 게이트, diff, apply
+- `validate-project.js`: ERC 파싱과 상태 보고
+- `validate-board.js`: DRC 파싱과 미연결 항목 추출
+- `inspect-project.js`: artifact 인벤토리와 다이제스트
+- `inspection-copy.js`: 심볼릭 링크를 거부하고 검사 트리를 복사
+- `native-proposal-source.js`: 회로 사양으로 프로젝트 산출물을 다시 생성하는 제안
+- `project-workspace.js`: 프로젝트 디렉터리 생성과 경로 가드
+- `review-project.js`: 회로 readiness 리뷰
+- `simulate-project.js`: `.cir` 픽스처를 `ngspice -b`로 실행
+
+### Analyzer (`src/analyzer/`)
+- `sexpr.js`: S-expression 파서
+- `kicad-schematic.js`: 회로도 구조 사실 추출 (deterministic)
+- `kicad-pcb.js`: PCB 구조 사실 추출 (deterministic)
+- `project-analyzer.js`: analyzer 오케스트레이션
+- `external-adapter.js`: 외부 analyzer. 샌드박스 런처가 없어 실행은 skip (`ANALYZER_SANDBOX_UNAVAILABLE`)
+- `fact-contract.js`: fact/finding 정규화와 confidence 계약
+- confidence 라벨: `deterministic`, `heuristic`, `datasheet-backed`
+
+### Selection context (`src/context/`)
+- `selection-context.js`: KiCad 편집기 선택 항목 정규화와 선택 증거
+
+### Evidence (`src/evidence/`)
+- `evidence-manifest.js`: artifact-bound 증거 매니페스트
+- `artifact-inventory.js`: 저장된 파일 해싱과 인벤토리
+- `transaction-inventory.js`: 트랜잭션 기록
+
+### KiCad Integration (`src/kicad/`)
+- `kicad-cli.js`: KiCad CLI 경로 탐색과 wrapper
+- `project-generator.js`: 심볼, 풋프린트, 넷, 트레이스 생성
+- `board-route-planner.js`: 보수적 라우팅 알고리즘
+- `pad-geometry.js`: 패드 지오메트리 계산
+
+## 메시지 프로토콜
+
+모든 panel/daemon 메시지는 동일한 envelope 사용:
 
 ```json
 {
   "version": 1,
   "id": "evt_<uuid>",
   "type": "tool.call",
-  "createdAt": "2026-06-05T00:00:00.000Z",
-  "payload": {}
+  "createdAt": "2026-10-15T00:00:00.000Z",
+  "payload": { /* tool-specific */ }
 }
 ```
 
-Supported types:
-
+**지원되는 타입**:
 - `chat.message`
 - `agent.delta`
 - `tool.call`
 - `tool.result`
-- `project.diff`
 - `system.status`
 
-## Generation Contract
+## 생성 계약
 
-The v1 generator produces review drafts for MCU peripheral circuits. It writes:
-
-- `.kicad_pro`
-- `.kicad_sch`
-- `chatpcb.kicad_sym`
+### 출력 파일
+- `.kicad_pro`, `.kicad_sch`, `.kicad_pcb`
+- `chatpcb.kicad_sym` (프로젝트 로컬 심볼 라이브러리)
 - `sym-lib-table`
-- `.chatpcb.json`
-- `_simulation.cir`
-- `.kicad_pcb` for supported board profiles
+- `.chatpcb.json` (intent/evidence manifest, schema v2)
+- `_simulation.cir` (SPICE)
 
-The schematic uses project-local ChatPCB fixture symbols, wire stubs, net labels, no-connect markers for intentionally unused optional pins, and review notes. KiCad files are the authoritative editable state. `.chatpcb.json` is an intent/evidence manifest that records ChatPCB context but never replaces saved KiCad state; custom top-level `chatpcb_*` schematic nodes are not allowed.
+### 규칙
+- **KiCad files are the authoritative editable state**
+- `.chatpcb.json` is an intent/evidence manifest, not a replacement for KiCad files
+- 커스텀 `chatpcb_*` 최상위 노드 금지
+- Schema v1 manifests remain readable but unverified (`legacy-unverified`)
+- Schema v2 is artifact-bound with canonical `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, `releaseGates`
+- Rollback covers KiCad files (`.kicad_sch`, `.kicad_pcb`, `.kicad_pro`, `.kicad_dru`), `.chatpcb.json`, libraries (`.kicad_sym`, `.kicad_mod`, `sym-lib-table`, `fp-lib-table`), and SPICE fixtures (`.cir`)
 
-## Inspection, evidence, and approval
+## 보안 경계
 
-`project.inspect { projectDir, analyzerAdapters? }` inventories saved project artifacts, computes deterministic hashes, runs validation against a checked copy, records toolchain evidence, and reports manifest freshness. The daemon ignores request-supplied `kicadCliPath` and takes the executable only from trusted dispatch configuration or operator-owned discovery settings. Provider-emitted path overrides are stripped; recursive inspection, ERC/DRC and patch validation preserve the server configuration. The local CLI's `--kicad-cli` is a trusted operator option.
+### Provider Isolation
+- API 키 저장 안 함
+- 로컬 CLI만 호출 (Codex, Claude Code, Copilot)
+- stderr 시크릿 리다렉션
+- `AbortSignal` 기반 프로세스 취소
 
-Before inspect, ERC, or DRC starts, filesystem checks reject root/ancestor links, junctions, child links and special files, and inspect also checks canonical workspace containment when configured. Callers must supply a canonical project path; user-supplied project or ancestor links are not followed. Copying does not dereference links. The internally created inspection temp root is canonicalized with `realpath` before the copy is validated, so OS temp aliases do not reject the private tree; the destination is checked again before use. Version queries run within that disposable tree. All validators settle before cleanup, including when a sibling fails. Absolute PATH lookup excludes the process working directory and the original project tree, including when inspect or patch-candidate validation has changed cwd to a copy. Trusted `explicitPath` and `KICAD_CLI_PATH` remain operator overrides. These controls do not sandbox a malicious installed KiCad binary or an adversary with concurrent control of the server account.
+### Path Guards
+- 프로젝트 경로에서 심볼릭 링크 거부
+- workspace root 격리 옵션
+- home/system 디렉토리 생성 거부
+- canonical path 검증
 
-Inspection returns `inspection.facts`, `inspection.analyzers`, and top-level `findings`. Built-in extractors produce deterministic saved-artifact facts for schematic structure (components, labels, wires, junctions, no-connects, nets) and PCB structure (nets, footprints, pads, segments, vias, summary); unrouted-net candidates are heuristic. Confidence is always `deterministic`, `heuristic`, or `datasheet-backed`: structural facts are review evidence, never proof of electrical correctness or release readiness. Analyzer status is `complete`, `partial`, `skipped`, or `failed`, with typed diagnostics.
+### KiCad CLI Validation
+- daemon은 request의 `kicadCliPath` 무시
+- 서버 설정 또는 `KICAD_CLI_PATH` 환경변수만 신뢰
+- PATH 검색: 절대 경로만, 프로세스 cwd와 프로젝트 트리 제외
+- 임시 복사본은 canonicalize 후 검증
 
-Schema v1 `.chatpcb.json` files remain readable but unverified and inspect as `legacy-unverified`, because they have no artifact-bound evidence. Schema v2 is artifact-bound and uses canonical top-level `constraints`, `artifacts`, `toolchain`, `facts`, `findings`, `approvals`, and `releaseGates`; inspection derives the project digest from sorted artifact records. Any tracked artifact change makes prior evidence stale.
+### Analyzer Sandbox
+- 외부 analyzer 실행 현재 **비활성**
+- `ANALYZER_SANDBOX_UNAVAILABLE` 반환
+- 재활성화 조건: 완전한 페이로드 무결성 + 파일시스템 격리
 
-Every artifact-bound approval contains the exact candidate patch identity, before/after bytes, and whole-project digests. Candidate generation and KiCad validation run in the retained disposable copy, so the preview contains KiCad-normalized bytes. The internally created patch temp root is canonicalized with `realpath` before candidate ERC, which passes `excludeProjectDir` as the original project so automatic PATH discovery cannot select a project-tree binary after cwd changes to the copy. User-supplied project and ancestor links remain rejected; only that internal temp root is normalized. Applying it requires the same single-use, unexpired approval, recomputes the complete current project digest immediately before a write, writes the approved bytes exactly, and verifies final hashes. A stale input writes nothing; a final-byte mismatch restores the snapshot. Provider-emitted validation is routed through the same disposable inspection path. All generated artifacts participate in preview and rollback, including `.kicad_pcb` drafts.
+## 검증 순서
 
-Circuit JSON, kicad-happy, KiCad IPC, and placement/routing solver integrations remain optional integrations. External analyzer process execution is currently disabled in both JSON and project-copy modes. Explicit definitions return `ANALYZER_SANDBOX_UNAVAILABLE` with no executable reads, payload staging, or process launch. There is no caller-controlled override. A future launcher must enforce complete payload integrity and filesystem isolation before execution can be restored. Built-in facts remain available.
+1. **KiCad CLI 탐색**
+   - 명시적 플래그
+   - `KICAD_CLI_PATH` 환경변수
+   - Windows 설치 디렉토리 (10 → 9 → 8 → 7)
+   - PATH의 절대 경로 (cwd와 프로젝트 제외)
 
-## Validation Contract
+2. **ERC/DRC 실행**
+   - 검증용 disposable 복사본 생성
+   - `kicad-cli sch erc --format json`
+   - `kicad-cli pcb drc --refill-zones --format json`
+   - KiCad CLI 없으면 `skipped: true` 반환
 
-KiCad CLI lookup order:
+3. **Readiness Review**
+   - ERC + 부품 소싱 + 데이터시트 + 시뮬레이션 + 레이아웃 증거
+   - ERC 통과 ≠ release ready
+   - DRC unconnected 카운트 포함
 
-1. explicit command flag
-2. `KICAD_CLI_PATH`
-3. Windows install directories for KiCad 10, 9, 8, then 7
-4. absolute directories on `PATH` that are outside the process working directory and outside the original project tree (`excludeProjectDir`); relative entries, the working directory, and original-project descendants are ignored even when inspect or patch-candidate validation uses a disposable copy as cwd. Trusted `explicitPath` and `KICAD_CLI_PATH` are not subject to that PATH exclusion. If none exist, the tool is unavailable.
+## 파일 구조
 
-If KiCad CLI or ngspice is missing, commands return `ok: true` with `skipped: true` and a typed reason.
+```
+OH-MY-ChatPCB/
+├── bin/
+│   └── chatpcb-cli.js                 # CLI 진입점
+├── src/
+│   ├── analyzer/
+│   │   ├── external-adapter.js        # 외부 analyzer (skip)
+│   │   ├── fact-contract.js           # fact/finding 계약
+│   │   ├── kicad-pcb.js               # PCB 사실 추출
+│   │   ├── kicad-schematic.js         # 회로도 사실 추출
+│   │   ├── project-analyzer.js        # analyzer 오케스트레이션
+│   │   └── sexpr.js                   # S-expr 파서
+│   ├── context/
+│   │   └── selection-context.js       # 편집기 선택 컨텍스트
+│   ├── evidence/
+│   │   ├── artifact-inventory.js      # 파일 해싱
+│   │   ├── evidence-manifest.js       # artifact-bound 증거
+│   │   └── transaction-inventory.js   # 트랜잭션 기록
+│   ├── kicad/
+│   │   ├── board-route-planner.js     # 라우팅 알고리즘
+│   │   ├── kicad-cli.js               # KiCad CLI wrapper
+│   │   ├── pad-geometry.js            # 패드 지오메트리
+│   │   └── project-generator.js       # 심볼/풋프린트 생성
+│   ├── runtime/
+│   │   ├── agent-daemon.js            # WebSocket/HTTP 서버
+│   │   ├── board-profiles.js          # 지원 보드 프로필
+│   │   ├── circuit-spec.js            # 프롬프트 → CircuitSpec
+│   │   ├── envelope.js                # WebSocket envelope
+│   │   ├── part-sourcing.js           # 부품 소싱
+│   │   ├── patch-approval-registry.js # 패치 승인 토큰
+│   │   ├── product-catalog.js         # 제품 요청 카탈로그
+│   │   ├── project-mutex-registry.js  # 프로젝트 잠금
+│   │   ├── provider-process.js        # AI CLI 프로세스 브리지
+│   │   ├── provider-registry.js       # provider 탐색과 상태
+│   │   ├── request-conversation.js    # 회로 요청 대화
+│   │   └── transaction-journal.js     # 트랜잭션 저널
+│   └── workflow/
+│       ├── generate-mcu-project.js    # 회로도/PCB 생성
+│       ├── inspect-project.js         # artifact 인벤토리
+│       ├── inspection-copy.js         # 검사 트리 복사
+│       ├── native-proposal-source.js  # 네이티브 재생성 제안
+│       ├── project-transaction.js     # 적용과 롤백
+│       ├── project-workspace.js       # 프로젝트 경로 가드
+│       ├── review-project.js          # readiness 리뷰
+│       ├── schematic-patch.js         # 패치 승인 게이트
+│       ├── simulate-project.js        # ngspice 배치 실행
+│       ├── validate-board.js          # DRC 검증
+│       └── validate-project.js        # ERC 검증
+├── apps/panel/                         # WebView UI
+├── kicad-fork/chatpcb_panel/          # C++ wxWebView 호스트
+└── tests/                              # node --test 테스트 스위트
+```
 
-[EEBench](https://eebench.org/) is the planned analog/power quality bar between schematic drafts and manufacturing exports: requirements, design, and SPICE-backed checks with cost scored only after the circuit works. It is not a current ChatPCB leaderboard target. EEBench V1 grades atopile `.ato` bundles, not KiCad files, and does not cover layout or fabrication. A skip or missing `ngspice` is unavailable, not a pass.
+## 다음 단계
 
-ERC and readiness are deliberately separate. ERC reports schematic electrical-rule errors and warnings. It does not run PCB DRC and cannot establish manufacturing readiness. The readiness review also accounts for unresolved parts, sourcing, datasheet checks, simulations, layout/DRC evidence, and other release gates; therefore `validation.erc.errorCount === 0` may coexist with warnings or a blocked review.
+현재 아키텍처 부채:
+- `agent-daemon.js` 971줄 (서버 + 디스패처 + 이벤트 혼재)
+- `project-generator.js` 1874줄 (MCU + DCDC + BMS + lib + SPICE 혼재)
+- 포트 41317이 7개 파일에 하드코딩
+- 프로토콜 메시지 타입이 중복 정의
 
-Board validation is exposed separately as `validate.drc` and `chatpcb drc`. It runs `pcb drc --refill-zones --format json`, parses both `violations` and `unconnected_items`, and reports `ok: true` only when the KiCad command succeeds with zero entries in both arrays. A missing KiCad CLI or board returns typed `skipped` output; a malformed report or a real DRC finding returns `ok: false`.
+리팩토링 계획은 [Roadmap](ROADMAP.md) 참조.
 
-The ADBMS6830 path is intentionally schematic-only. It creates a named 16S Li-ion example with cell-tap filters, passive-balance branches, NTC inputs, an example VREG pass stage, and isoSPI connectors, while keeping the PCB artifact absent until the exact device variant, high-voltage safety architecture, placement, isolation, and manufacturing evidence are reviewed.
+---
+
+**자세한 설계 문서와 계획은 [docs/archive/](archive/)에 보관되어 있습니다.**
+
+[← README](../README.md) · [Roadmap](ROADMAP.md) · [KiCad fork bootstrap](KICAD_FORK_BOOTSTRAP.md) · [Session handoff](archive/handoff-next-session.md)

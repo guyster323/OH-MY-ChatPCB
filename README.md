@@ -12,6 +12,84 @@ The current implementation is the first runnable foundation of that plan:
 - KiCad fork C++ host under `kicad-fork/chatpcb_panel`, wired into the schematic editor right pane
 - provider process bridge for local CLI agents such as Codex, Claude Code, and Copilot CLI
 
+## Prerequisites / 사전 요구사항
+
+- **Node.js 22 or newer.** `npm test` and `npm run verify:panel` use the global `WebSocket` built into Node 22.
+- **KiCad 10.** Schematic ERC and board DRC call `kicad-cli`. Put that executable on `PATH`, or set `KICAD_CLI_PATH` to its absolute path. On Windows the resolver also searches the per-user and `C:/Program Files/KiCad` install directories, checking `10.0` before `9.0`, `8.0`, and `7.0` in each location.
+- **git**, to clone [OH-MY-ChatPCB](https://github.com/guyster323/OH-MY-ChatPCB).
+
+Confirm Node and KiCad before the quick start:
+
+```bash
+node -v
+kicad-cli version
+```
+
+These two commands are the same in bash and PowerShell. `node -v` should report a 22.x or newer release. `kicad-cli version` should report KiCad 10. If the shell cannot find `kicad-cli`, set `KICAD_CLI_PATH` and run that binary's `version` command.
+
+**KiCad from Flatpak (Linux).** The Flatpak build does not put `kicad-cli` on `PATH`. You can run it directly with `flatpak run --command=kicad-cli org.kicad.KiCad version`, but ChatPCB needs a single executable path, so create a small wrapper and put it on `PATH` (or point `KICAD_CLI_PATH` at it):
+
+```bash
+sudo tee /usr/local/bin/kicad-cli >/dev/null <<'SH'
+#!/bin/sh
+exec flatpak run --filesystem=host --filesystem=/tmp --no-documents-portal --command=kicad-cli org.kicad.KiCad "$@"
+SH
+sudo chmod +x /usr/local/bin/kicad-cli
+kicad-cli version
+```
+
+`--filesystem=host` and `--filesystem=/tmp` let the sandboxed `kicad-cli` read your project and the temporary copies ChatPCB validates; without them ERC/DRC can fail to load the schematic. Use `~/.local/bin/kicad-cli` instead of `/usr/local/bin` if you don't have `sudo`.
+
+## Quick Start
+
+### Windows
+
+```powershell
+npm install
+npm test
+npm run daemon
+npm run launch:kicad
+```
+
+`npm run launch:kicad` opens the ChatPCB-enabled schematic editor. Use the right-side ChatPCB panel. The standalone browser fallback is only for machines that do not yet have that fork binary.
+
+### Linux / macOS
+
+`npm run sync:kicad-fork`, `npm run configure:kicad-fork`, `npm run launch:kicad`, and `npm run verify:kicad` are PowerShell scripts for the Windows KiCad fork. On Linux and macOS, clone the repository, install from the lockfile, run the daemon, then generate and validate the sample with the Node scripts in `package.json`.
+
+```bash
+git clone https://github.com/guyster323/OH-MY-ChatPCB.git
+cd OH-MY-ChatPCB
+npm ci
+```
+
+Start the daemon in this terminal and leave it running. `npm run daemon` runs `node ./bin/chatpcb-cli.js daemon` and prints the bound URL for `chatpcb-agentd` (default `127.0.0.1:41317`).
+
+```bash
+npm run daemon
+```
+
+In a second terminal, from the same checkout, generate the STM32 sample and run ERC:
+
+```bash
+npm run generate:sample
+npm run validate:sample
+```
+
+`npm run generate:sample` writes the project under `workspaces/sample-mcu`. `npm run validate:sample` calls `kicad-cli`. When that binary is missing, the JSON result has `skipped: true` and reason code `KICAD_CLI_UNAVAILABLE`, and the process still exits 0. A real KiCad 10 run reports `0` ERC errors and `0` warnings for this sample.
+
+The product UI remains the right-side ChatPCB panel inside the KiCad schematic editor. The Windows quick start is what launches that host. `apps/panel/index.html` is only the standalone browser fallback.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — three-layer runtime, data flow, and security boundaries
+- [Roadmap](docs/ROADMAP.md) — product goal, current state, and the P0/P1/P2 order
+- [KiCad fork bootstrap](docs/KICAD_FORK_BOOTSTRAP.md) — schematic-editor panel host, WebView contract, and the Windows build
+- [Contributing](CONTRIBUTING.md) — test-first workflow, local-only credentials, and the fork workflow
+- [Development plan](plan.md) — completed checklist and the current baseline
+- [Session handoff](docs/archive/handoff-next-session.md) — archived measured gate and release blockers
+- [KiCad 10 release-quality notes](docs/archive/next-goal-kicad10-release-quality.md) — archived next-goal handoff
+
 ## Status
 
 This is not a packaged KiCad installer yet. The product path is still the ChatPCB-enabled schematic editor with a visible right-side ChatPCB panel; official KiCad builds do not include that host.
@@ -56,20 +134,9 @@ Not implemented yet:
 - Live JLCPCB/LCSC sourcing and datasheet release evidence
 - EEBench-style SPICE + cost verification, and an official [EEBench](https://eebench.org/) leaderboard run (V1 grades atopile `.ato` submissions, not KiCad artifacts)
 
-## Quick Start
-
-```powershell
-npm install
-npm test
-npm run daemon
-npm run launch:kicad
-```
-
-`npm run launch:kicad` opens the ChatPCB-enabled schematic editor. Use the right-side ChatPCB panel. The standalone browser fallback is only for machines that do not yet have that fork binary.
-
 ## User Test Guide
 
-Use this flow to create a named KiCad project from a Korean or English request.
+Use this flow to create a named KiCad project from a Korean or English request. The commands below are Windows PowerShell. Linux and macOS clone, install, daemon, sample generation, and validation are in [Linux / macOS](#linux--macos). `npm test`, `npm run verify:sample`, `npm run verify:panel`, and `npm run verify:ui` are Node scripts and run on Linux and macOS as well. `npm run launch:kicad` does not.
 
 1. Start in the repository root:
 
@@ -230,7 +297,9 @@ The example assumes one 16S Li-ion stack (59.2V nominal, 67.2V at 4.2V/cell), in
 
 ## Architecture
 
-The intended KiCad fork keeps KiCad UI changes small:
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architecture overview.
+
+Quick summary:
 
 1. KiCad creates a right dock panel.
 2. The panel hosts `apps/panel` in `wxWebView`.
@@ -257,7 +326,7 @@ The current tool-call names are:
 
 ## KiCad Fork Integration
 
-Use `kicad-fork/chatpcb_panel` as the source drop-in and `kicad-fork/integration/wire-chatpcb-panel.patch` as the schematic-editor wiring. `npm run sync:kicad-fork` copies the current panel C++ and WebView bundle into `C:\Users\windo\kicad-source-mirror-chatpcb`. `npm run launch:kicad` starts that ChatPCB-enabled `eeschema.exe` with this repository's panel URL and daemon.
+The host contract and Windows build steps are in [KiCad fork bootstrap](docs/KICAD_FORK_BOOTSTRAP.md). Use `kicad-fork/chatpcb_panel` as the source drop-in and `kicad-fork/integration/wire-chatpcb-panel.patch` as the schematic-editor wiring. `npm run sync:kicad-fork` copies the current panel C++ and WebView bundle into `C:\Users\windo\kicad-source-mirror-chatpcb`. `npm run launch:kicad` starts that ChatPCB-enabled `eeschema.exe` with this repository's panel URL and daemon.
 
 ## License
 

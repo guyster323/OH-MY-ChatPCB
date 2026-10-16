@@ -27,7 +27,7 @@ Files: Modify tests/project-generator.test.js and src/kicad/project-generator.js
 
 ### Task 2: Verify official DRC and document
 
-Files: Modify docs/handoff-next-session.md only after success.
+Files: Modify docs/archive/handoff-next-session.md only after success.
 
 - [ ] Generate both supported profile projects and run the existing KiCad 10.0.3 JSON DRC commands.
 - [ ] Parse violations and unconnected_items; stop without tracked edits if any gate fails.
