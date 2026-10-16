@@ -383,82 +383,73 @@ test('usePromptFile writes temp file on all platforms and child can read it', as
 });
 
 test('usePromptFile cleans up temp file on success', async () => {
-  const { readdir } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
+  try {
+    const script = 'console.log("CHATPCB_CLEANUP_TEST");';
 
-  const beforeFiles = await readdir(tmpdir());
-  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+    await runProviderProcess({
+      command: process.execPath,
+      args: ['-e', script],
+      input: 'Cleanup test prompt.',
+      usePromptFile: true,
+      tempDirectory,
+      timeoutMs: 2000
+    });
 
-  const script = 'console.log("CHATPCB_CLEANUP_TEST");';
-
-  await runProviderProcess({
-    command: process.execPath,
-    args: ['-e', script],
-    input: 'Cleanup test prompt.',
-    usePromptFile: true,
-    timeoutMs: 2000
-  });
-
-  const afterFiles = await readdir(tmpdir());
-  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
-
-  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+    assert.deepEqual(await readdir(tempDirectory), []);
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test('usePromptFile cleans up temp file on error', async () => {
-  const { readdir } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
+  try {
+    const script = 'console.log(JSON.stringify({type:"tool.call", payload:{id:"bad", name:"unknown.tool", args:{}}}));';
 
-  const beforeFiles = await readdir(tmpdir());
-  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+    await assert.rejects(
+      () =>
+        runProviderProcess({
+          command: process.execPath,
+          args: ['-e', script],
+          input: 'Error test prompt.',
+          usePromptFile: true,
+          tempDirectory,
+          timeoutMs: 2000
+        }),
+      /Unsupported provider tool call/
+    );
 
-  const script = 'console.log(JSON.stringify({type:"tool.call", payload:{id:"bad", name:"unknown.tool", args:{}}}));';
-
-  await assert.rejects(
-    () =>
-      runProviderProcess({
-        command: process.execPath,
-        args: ['-e', script],
-        input: 'Error test prompt.',
-        usePromptFile: true,
-        timeoutMs: 2000
-      }),
-    /Unsupported provider tool call/
-  );
-
-  const afterFiles = await readdir(tmpdir());
-  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
-
-  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+    assert.deepEqual(await readdir(tempDirectory), []);
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test('usePromptFile cleans up temp file on timeout', async () => {
-  const { readdir } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
+  try {
+    const script = 'setTimeout(() => {}, 10000);';
 
-  const beforeFiles = await readdir(tmpdir());
-  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+    await assert.rejects(
+      () =>
+        runProviderProcess({
+          command: process.execPath,
+          args: ['-e', script],
+          input: 'Timeout test prompt.',
+          usePromptFile: true,
+          tempDirectory,
+          timeoutMs: 50
+        }),
+      /timed out/
+    );
 
-  const script = 'setTimeout(() => {}, 10000);';
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-  await assert.rejects(
-    () =>
-      runProviderProcess({
-        command: process.execPath,
-        args: ['-e', script],
-        input: 'Timeout test prompt.',
-        usePromptFile: true,
-        timeoutMs: 50
-      }),
-    /timed out/
-  );
-
-  await new Promise((resolve) => setTimeout(resolve, 100));
-
-  const afterFiles = await readdir(tmpdir());
-  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
-
-  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+    assert.deepEqual(await readdir(tempDirectory), []);
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test('usePromptFile handles empty input by writing empty temp file', async () => {
@@ -474,7 +465,7 @@ test('usePromptFile handles empty input by writing empty temp file', async () =>
         'const promptFileIndex = args.indexOf("--prompt-file");',
         'const promptPath = args[promptFileIndex + 1];',
         'const content = fs.readFileSync(promptPath, "utf8");',
-        'console.log("Prompt length:", content.length);'
+        'console.log("Prompt length: " + content.length);'
       ].join('\n'),
       'utf8'
     );
@@ -495,32 +486,29 @@ test('usePromptFile handles empty input by writing empty temp file', async () =>
 });
 
 test('rejects immediately with cleanup when abort signal is already aborted', async () => {
-  const { readdir } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
+  try {
+    const controller = new AbortController();
+    controller.abort();
 
-  const beforeFiles = await readdir(tmpdir());
-  const chatpcbPromptsBefore = beforeFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
+    await assert.rejects(
+      () =>
+        runProviderProcess({
+          command: process.execPath,
+          args: ['-e', 'console.log("should not run");'],
+          input: 'Pre-aborted test prompt.',
+          usePromptFile: true,
+          tempDirectory,
+          signal: controller.signal,
+          timeoutMs: 2000
+        }),
+      /cancelled/
+    );
 
-  const controller = new AbortController();
-  controller.abort();
-
-  await assert.rejects(
-    () =>
-      runProviderProcess({
-        command: process.execPath,
-        args: ['-e', 'console.log("should not run");'],
-        input: 'Pre-aborted test prompt.',
-        usePromptFile: true,
-        signal: controller.signal,
-        timeoutMs: 2000
-      }),
-    /cancelled/
-  );
-
-  const afterFiles = await readdir(tmpdir());
-  const chatpcbPromptsAfter = afterFiles.filter((f) => f.startsWith('chatpcb-prompt-'));
-
-  assert.equal(chatpcbPromptsAfter.length, chatpcbPromptsBefore.length);
+    assert.deepEqual(await readdir(tempDirectory), []);
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test('trace write failure still settles with the provider result and removes the temp dir', async () => {
@@ -528,7 +516,7 @@ test('trace write failure still settles with the provider result and removes the
   const blocker = path.join(root, 'not-a-directory');
   await writeFile(blocker, 'blocked');
   const traceDir = path.join(blocker, 'traces');
-  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
   const originalError = console.error;
   const originalWarn = console.warn;
   const errors = [];
@@ -546,6 +534,7 @@ test('trace write failure still settles with the provider result and removes the
       args: ['-e', 'console.log("TRACE_FAIL_OK");'],
       input: 'prompt that must be cleaned up',
       usePromptFile: true,
+      tempDirectory,
       traceDir,
       timeoutMs: 2000
     });
@@ -553,7 +542,7 @@ test('trace write failure still settles with the provider result and removes the
     assert.equal(transcript.exitCode, 0);
     assert.equal(transcript.events[0].payload.text, 'TRACE_FAIL_OK');
     assert.equal(transcript.tracePath, undefined);
-    assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+    assert.deepEqual(await readdir(tempDirectory), []);
     assert.ok(errors.some((args) => String(args[0]).includes('Failed to write provider trace')));
     assert.ok(errors.some((args) => args[1] instanceof Error));
     assert.equal(warnings.length, 0);
@@ -561,6 +550,7 @@ test('trace write failure still settles with the provider result and removes the
     console.error = originalError;
     console.warn = originalWarn;
     await rm(root, { force: true, recursive: true });
+    await rm(tempDirectory, { force: true, recursive: true });
   }
 });
 
@@ -568,7 +558,7 @@ test('a provider output error still rejects when the trace directory cannot be w
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-trace-reject-'));
   const blocker = path.join(root, 'not-a-directory');
   await writeFile(blocker, 'blocked');
-  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
 
   try {
     await assert.rejects(
@@ -577,34 +567,41 @@ test('a provider output error still rejects when the trace directory cannot be w
         args: ['-e', 'console.log(JSON.stringify({type:"tool.call", payload:{id:"bad", name:"unknown.tool", args:{}}}));'],
         input: 'bad output',
         usePromptFile: true,
+        tempDirectory,
         traceDir: path.join(blocker, 'traces'),
         timeoutMs: 2000
       }),
       /Unsupported provider tool call/
     );
 
-    assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+    assert.deepEqual(await readdir(tempDirectory), []);
   } finally {
     await rm(root, { force: true, recursive: true });
+    await rm(tempDirectory, { force: true, recursive: true });
   }
 });
 
 test('usePromptFile cleans up temp file on cancel', async () => {
-  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
-  const controller = new AbortController();
-  const promise = runProviderProcess({
-    command: process.execPath,
-    args: ['-e', 'setTimeout(() => {}, 10000)'],
-    input: 'Cancel this prompt.',
-    usePromptFile: true,
-    signal: controller.signal,
-    timeoutMs: 5000
-  });
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
+  try {
+    const controller = new AbortController();
+    const promise = runProviderProcess({
+      command: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 10000)'],
+      input: 'Cancel this prompt.',
+      usePromptFile: true,
+      tempDirectory,
+      signal: controller.signal,
+      timeoutMs: 5000
+    });
 
-  setTimeout(() => controller.abort(), 20);
+    setTimeout(() => controller.abort(), 20);
 
-  await assert.rejects(promise, /cancelled/);
-  assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+    await assert.rejects(promise, /cancelled/);
+    assert.deepEqual(await readdir(tempDirectory), []);
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test('Windows shim caret-escapes cmd metacharacters and double-escapes batch shims', () => {
