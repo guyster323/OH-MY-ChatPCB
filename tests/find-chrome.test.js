@@ -725,6 +725,11 @@ test('browser launchers resolve Chrome through the shared helper', async () => {
   const uiTest = await readFile(new URL('./panel-ui-verifier.test.js', import.meta.url), 'utf8');
   const finderSource = await readFile(new URL('../scripts/lib/find-chrome.js', import.meta.url), 'utf8');
 
+  const panelTests = await Promise.all(
+    ['panel-soft-ui.test.js', 'panel-erc-gate.test.js', 'panel-test-hook.test.js']
+      .map((name) => readFile(new URL(`./${name}`, import.meta.url), 'utf8'))
+  );
+
   assert.match(verifier, /findChrome\(/);
   assert.match(uiTest, /findChrome\(/);
   assert.match(finderSource, /playwright-headless-shell/);
@@ -733,6 +738,13 @@ test('browser launchers resolve Chrome through the shared helper', async () => {
   assert.doesNotMatch(verifier, /findBrowserExecutable/);
   assert.match(verifier, /chromeLaunchOptions\(/);
   assert.match(uiTest, /chromeLaunchOptions\(/);
+  for (const source of panelTests) {
+    assert.match(source, /findChrome\(/);
+    assert.match(source, /chromeLaunchOptions\(/);
+    assert.match(source, /process\.env\.CI/);
+    assert.match(source, /t\.skip\(`Chromium unavailable:/);
+    assert.doesNotMatch(source, /chromium\.executablePath\(/);
+  }
   assert.match(finderSource, /chromeLaunchOptions\(/);
   assert.match(finderSource, /const executablePath = executablePathForLaunch\(found\)/);
   assert.match(verifier, /isUiHeadless\(\)/);
