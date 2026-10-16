@@ -16,6 +16,11 @@ The current implementation is the first runnable foundation of that plan:
 
 This is not a packaged KiCad installer yet. The product path is still the ChatPCB-enabled schematic editor with a visible right-side ChatPCB panel; official KiCad builds do not include that host.
 
+**Requirements:**
+- Node.js 22 or later
+- KiCad 10.0 CLI (optional for validation)
+- One of the supported provider CLIs (Codex, Claude, or Copilot)
+
 Implemented now:
 
 - Natural-language MCU peripheral prompt normalization (English regex plus Korean ESP32-S3 sensor-board matching for the supported profile)
@@ -58,7 +63,9 @@ Not implemented yet:
 
 ## Quick Start
 
-```powershell
+Node.js 22 or later is required.
+
+```bash
 npm install
 npm test
 npm run daemon
@@ -67,19 +74,27 @@ npm run launch:kicad
 
 `npm run launch:kicad` opens the ChatPCB-enabled schematic editor. Use the right-side ChatPCB panel. The standalone browser fallback is only for machines that do not yet have that fork binary.
 
+**Important:** Provider status checks and CLI spawns use the daemon process PATH and environment. They do not start a login shell, so directories added only in `~/.profile`, `~/.bashrc`, or a desktop session are invisible unless that same PATH is exported in the environment that starts the daemon. Put each CLI directory on the daemon's PATH before `npm run daemon`. If a binary is missing there, the panel reports `missing`, or the request fails with `spawn … ENOENT` and the install hint.
+
+```bash
+# Example: add "$(npm prefix -g)/bin" to the daemon PATH, then start the daemon
+export PATH="$(npm prefix -g)/bin:$PATH"
+npm run daemon
+```
+
 ## User Test Guide
 
 Use this flow to create a named KiCad project from a Korean or English request.
 
 1. Start in the repository root:
 
-```powershell
-cd C:\path\to\OH-MY-ChatPCB
+```bash
+cd /path/to/OH-MY-ChatPCB
 ```
 
 2. Install dependencies and run the full local verification:
 
-```powershell
+```bash
 npm install
 npm test
 npm run verify:sample
@@ -99,15 +114,17 @@ Expected result:
 
 3. Start the local daemon:
 
-```powershell
+```bash
 npm run daemon
 ```
 
 Keep this terminal running. The daemon owns the local websocket endpoint used by the panel.
 
+**Important**: Ensure provider CLIs are on PATH before starting the daemon. The daemon inherits your shell's PATH environment.
+
 4. Launch the ChatPCB-enabled schematic editor:
 
-```powershell
+```bash
 npm run launch:kicad
 ```
 
@@ -155,11 +172,119 @@ codex exec -C C:\path\to\OH-MY-ChatPCB --dangerously-bypass-approvals-and-sandbo
 
 The expected Codex CLI result is a concise report that confirms the sample and browser UI verifications ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
 
+## Provider setup
+
+ChatPCB supports three local CLI providers: **Codex**, **Claude Code**, and **GitHub Copilot CLI**. Install and authenticate the CLI before use. The panel status check only looks for the provider executable on the daemon process PATH (`codex`, `claude`, or `gh`). It does not check login, subscriptions, or the Copilot extension.
+
+The daemon's PATH must include the CLI directories. Export them in the same environment that starts `npm run daemon`. A login shell profile is not consulted.
+
+### Codex CLI
+
+**Install:**
+
+```bash
+npm install -g @openai/codex
+```
+
+If the global npm prefix is user-scoped (for example `~/.local`), add its `bin` directory to the daemon's PATH:
+
+```bash
+npm prefix -g
+export PATH="$(npm prefix -g)/bin:$PATH"
+```
+
+**Authenticate:**
+
+```bash
+codex login --device-auth
+```
+
+Follow the device code flow and approve the login in your browser. Verify authentication:
+
+```bash
+codex login status
+```
+
+Expected output: `Logged in using ChatGPT` (or similar). Login is not part of the panel status check.
+
+**Troubleshooting:**
+
+- `codex: missing` means the `codex` executable is not on the daemon's PATH. Check `npm prefix -g` and export that `bin` directory before starting the daemon.
+- Device auth requires a ChatGPT account.
+
+### Claude Code CLI
+
+**Install:**
+
+Follow the official [Claude Code setup](https://docs.anthropic.com/en/docs/claude-code/setup) or install the official npm package:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+**Authenticate:**
+
+```bash
+claude login
+```
+
+Follow the prompts to authenticate with your Anthropic account. Login is not part of the panel status check.
+
+**Verify:**
+
+```bash
+claude --version
+```
+
+**Troubleshooting:**
+
+- `claude: missing` means the `claude` executable is not on the daemon's PATH. Use `npm prefix -g` to find the global npm directory and add its `bin` directory to the daemon's PATH.
+
+### GitHub Copilot CLI
+
+The panel reports Copilot availability by checking that the `gh` executable is on the daemon's PATH. It does not run `gh extension list`, `gh auth status`, or a subscription check. `copilot: available` means `gh` was found. `copilot: missing` means `gh` was not found. An installed `gh` without the Copilot extension still reports `available`.
+
+**Install GitHub CLI** so `gh` is on the daemon's PATH. See [cli.github.com](https://cli.github.com/):
+
+```bash
+# Windows
+winget install --id GitHub.cli
+
+# macOS
+brew install gh
+
+# Linux: https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+```
+
+Copilot requests also need the extension and a login. The status check does not verify either:
+
+```bash
+gh extension install github/gh-copilot
+gh auth login
+gh copilot --version
+```
+
+Copilot CLI requires an active GitHub Copilot subscription. Check it at [github.com/settings/copilot](https://github.com/settings/copilot). The panel does not query that page.
+
+**Troubleshooting:**
+
+- `copilot: missing` means the `gh` executable is not on the daemon's PATH. Install GitHub CLI and start the daemon with that directory on PATH. This status does not mean the extension is missing.
+- `copilot: available` means the `gh` executable is on the daemon's PATH. Authentication and the `gh-copilot` extension were not checked. If a later request fails, run `gh auth status` and `gh extension list` in the daemon's environment.
+
+### Provider status in the panel
+
+After installing a provider CLI, restart the daemon (`npm run daemon`) from an environment whose PATH includes the CLI directories, then refresh the panel. The provider selector shows:
+
+- `available`: the provider executable (`codex`, `claude`, or `gh`) is on the daemon process PATH. Login and the Copilot extension are not checked.
+- `missing`: that executable was not found on the daemon process PATH. The status line and its tooltip include the install hint.
+
+When spawn fails with `ENOENT`, the request error includes the same install hint.
+
 ## Browser UI verification
 
 Run this command for the closest repeatable check to a user operating the current panel:
 
-```powershell
+```bash
 npm run verify:ui
 ```
 
@@ -177,7 +302,7 @@ After opening the project (or its matching `.kicad_sch` in the schematic editor)
 
 ## CLI
 
-```powershell
+```bash
 node ./bin/chatpcb-cli.js generate --project ./workspaces/demo --prompt "STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED."
 node ./bin/chatpcb-cli.js validate --project ./workspaces/demo
 node ./bin/chatpcb-cli.js drc --project ./workspaces/demo
@@ -210,7 +335,7 @@ The built-in extractor runs automatically. External analyzer execution is disabl
 
 Generate the schematic-only battery-monitor example with an explicit ADBMS6830 request:
 
-```powershell
+```bash
 node ./bin/chatpcb-cli.js generate --project ./workspaces/adbms6830-16s-bms-example --prompt "ADBMS6830 16S Li-ion battery monitor with passive balancing, four 10k NTCs, and isoSPI."
 node ./bin/chatpcb-cli.js validate --project ./workspaces/adbms6830-16s-bms-example
 ```

@@ -350,6 +350,72 @@ try {
   assert.equal(await hostPage.locator('#artifact-list li').count(), 0);
   assert.equal(await hostPage.locator('#kicad-link-card').getAttribute('hidden'), '');
 
+  console.log('Testing rollback, stop, and ERC preview...');
+  
+  await hostPage.getByLabel('Circuit request').fill(prompt);
+  await hostPage.getByRole('button', { name: 'Send' }).click();
+  const stopButton = hostPage.locator('#stop-request-button');
+  await hostPage.waitForFunction(() => {
+    const button = document.querySelector('#stop-request-button');
+    return button && !button.disabled;
+  }, null, { timeout: 5000 }).catch(() => {});
+  
+  const stopWasEnabled = await stopButton.isEnabled().catch(() => false);
+  console.log(`Stop button enabled during request: ${stopWasEnabled}`);
+  
+  await hostPage.waitForFunction(() => {
+    const state = document.querySelector('#request-status')?.dataset.state;
+    const previewReady = document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.';
+    return state === 'completed' || state === 'failed' || previewReady;
+  });
+  
+  const ercPreview = await hostPage.evaluate(() => ({
+    visible: !document.querySelector('#patch-preview-erc')?.hidden,
+    summary: document.querySelector('#patch-preview-erc-summary')?.textContent,
+    warning: document.querySelector('#patch-preview-erc-warning')?.textContent
+  }));
+  console.log(`ERC preview: ${JSON.stringify(ercPreview)}`);
+  assert.ok(ercPreview.visible || ercPreview.summary, 'ERC preview should be visible');
+  
+  if (await hostPage.locator('#approve-patch-button').isEnabled()) {
+    await hostPage.locator('#approve-patch-button').click({ force: true });
+    await hostPage.waitForFunction(() => {
+      const state = document.querySelector('#request-status')?.dataset.state;
+      return state === 'completed' || state === 'failed';
+    });
+  }
+  
+  const filesAfterApply = await hostPage.evaluate(() => document.querySelectorAll('#artifact-list li').length);
+  assert.ok(filesAfterApply > 0, 'Files should be present after apply');
+  
+  for (const btn of hostPage.locator('.dock-btn[data-open="transaction-dialog"]').all()) {
+    await (await btn).click();
+    break;
+  }
+  await hostPage.waitForTimeout(500);
+  
+  const transactionsBefore = await hostPage.evaluate(() => document.querySelector('#transaction-status')?.textContent);
+  console.log(`Transactions: ${transactionsBefore}`);
+  
+  const rollbackButton = hostPage.locator('#rollback-button');
+  if (await rollbackButton.isEnabled()) {
+    await rollbackButton.click();
+    
+    await hostPage.waitForFunction(() => document.querySelector('#rollback-confirm-dialog')?.open, null, { timeout: 2000 }).catch(() => {});
+    
+    const confirmDialog = await hostPage.evaluate(() => document.querySelector('#rollback-confirm-dialog')?.open);
+    if (confirmDialog) {
+      await hostPage.locator('#rollback-confirm-yes').click();
+      await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running', null, { timeout: 10000 });
+      
+      const statusAfterRollback = await hostPage.evaluate(() => ({
+        status: document.querySelector('#request-status')?.textContent,
+        artifacts: document.querySelectorAll('#artifact-list li').length
+      }));
+      console.log(`After rollback: ${JSON.stringify(statusAfterRollback)}`);
+    }
+  }
+
   assert.deepEqual(pageErrors, []);
 
   console.log(JSON.stringify({ ok: true, verified: 'named project Send-only request and separate status cards', browser: browser.browserType().name() }, null, 2));

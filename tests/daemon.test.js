@@ -885,6 +885,31 @@ test('daemon does not fall back after provider parse, cancellation, or non-zero 
   }
 });
 
+test('daemon includes the install hint when the provider spawn fails with ENOENT', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-enoent-'));
+  try {
+    const error = new Error('spawn codex ENOENT');
+    error.code = 'ENOENT';
+    const result = await dispatchToolCall(
+      {
+        id: 'call_project_request_enoent',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Create an STM32 board.' }
+      },
+      providerOptions({ runProviderProcessImpl: async () => { throw error; } })
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'ENOENT');
+    assert.match(result.error.message, /spawn codex ENOENT/);
+    assert.match(result.error.message, /not found on the daemon PATH/);
+    assert.match(result.error.message, /npm install -g @openai\/codex/);
+    assert.match(result.error.message, /codex login --device-auth/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('project.request falls back to a native preview when the provider only inspects', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-inspect-only-'));
 

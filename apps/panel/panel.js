@@ -1,6 +1,72 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
+
+const UI_STRINGS = {
+  connectionStatus: {
+    connecting: 'Connecting',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    connectionError: 'Connection error'
+  },
+  requestStatus: {
+    idle: 'Create a project to send a circuit request.',
+    ready: 'Project ready. Describe the circuit you want to create.',
+    running: 'Running request…',
+    applying: 'Applying the circuit draft…',
+    completed: 'Completed',
+    failed: 'Request failed. Check technical details or try again.',
+    rollingBack: 'Rolling back transaction...',
+    rolledBack: 'Transaction rolled back successfully.',
+    rollbackFailed: 'Rollback failed.',
+    stopping: 'Stopping request...',
+    stopped: 'Request stopped.',
+    notCancelled: 'The request was not cancelled.'
+  },
+  project: {
+    createPrompt: 'Create a project before sending a circuit request.',
+    promptRequired: 'Circuit request is required.',
+    creating: 'Creating project…'
+  },
+  patch: {
+    previewReady: 'Circuit draft is ready. Apply it to the schematic?',
+    previewLead: 'Files will not change until you apply.',
+    approvalReady: 'Patch preview is ready for approval.',
+    approvalCleared: 'Patch preview cancelled.',
+    approvalStale: 'Approval unavailable: stale evidence. Inspect the project again before approving.'
+  },
+  erc: {
+    previewTitle: 'ERC Preview',
+    summary: (errors, warnings) => `ERC: ${errors} errors, ${warnings} warnings`,
+    warning: 'ERC errors detected. Apply may be rejected due to validation failures.',
+    topIssues: (issues) => ` Top issues: ${issues}`
+  },
+  transaction: {
+    noTransactions: 'No transactions',
+    noneAvailable: 'No transactions available',
+    noneToRollback: 'No transactions to rollback',
+    loadFailed: 'Could not load transactions.',
+    rollbackFailedDetail: 'The transaction could not be rolled back.',
+    count: (count) => `${count} transaction(s)`,
+    rollbackTitle: (id) => `Rollback transaction ${id}`,
+    row: (id, status, fileCount, when) => `${id}: ${status} · ${fileCount} file(s)${when ? ` (${when})` : ''}`,
+    confirmRollback: (id) => `Roll back transaction ${id}? This will restore the previous project state.`,
+    rollbackButton: 'Rollback',
+    transactionButton: 'Rollback last transaction'
+  },
+  stop: {
+    button: 'Stop',
+    noActiveRequest: 'No active request',
+    requestIdNotAvailable: 'Request ID not available',
+    stopTheRequest: 'Stop the current request'
+  },
+  kicad: {
+    conflictTitle: 'KiCad changes need attention',
+    conflictMessage: 'Unsaved KiCad changes were detected. Save or discard them in KiCad before sending this update.',
+    recheckButton: 'I saved — recheck'
+  }
+};
+
 const PROGRESS_COPY = {
   conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
   provider: { title: 'CLI와 대화 중', sprite: 'cli' },
@@ -65,6 +131,14 @@ const newProjectAgainEl = document.querySelector('#new-project-again');
 const conflictCardEl = document.querySelector('#conflict-card');
 const conflictDockBtnEl = document.querySelector('#conflict-dock-btn');
 const recheckKiCadButtonEl = document.querySelector('#recheck-kicad-button');
+const stopRequestButtonEl = document.querySelector('#stop-request-button');
+const rollbackButtonEl = document.querySelector('#rollback-button');
+const transactionCardEl = document.querySelector('#transaction-card');
+const transactionStatusEl = document.querySelector('#transaction-status');
+const transactionListEl = document.querySelector('#transaction-list');
+const patchPreviewErcEl = document.querySelector('#patch-preview-erc');
+const patchPreviewErcSummaryEl = document.querySelector('#patch-preview-erc-summary');
+const patchPreviewErcWarningEl = document.querySelector('#patch-preview-erc-warning');
 const artifactListEl = document.querySelector('#artifact-list');
 const reviewPanelEl = document.querySelector('#review-panel');
 const reviewStatusEl = document.querySelector('#review-status');
@@ -127,10 +201,16 @@ openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
+stopRequestButtonEl.addEventListener('click', stopRequest);
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
-    if (typeof dialog?.showModal === 'function') dialog.showModal();
+    if (typeof dialog?.showModal === 'function') {
+      if (button.dataset.open === 'transaction-dialog') {
+        refreshTransactionStatus();
+      }
+      dialog.showModal();
+    }
   });
 }
 for (const button of document.querySelectorAll('.flow-btn')) {
@@ -189,6 +269,7 @@ async function sendProjectRequest() {
   }
   if (activeRequestId) return;
 
+  clearPatchPreviewErc();
   const requestProject = activeProject;
   setRequestBusy(true);
   const status = await requestHostProjectStatus();
@@ -224,6 +305,7 @@ async function sendProjectRequest() {
   activeRequestId = id;
   activeRequestProjectDir = requestProject.projectDir;
   pendingCalls.set(id, 'project.request');
+  setRequestBusy(true);
   sendToolCall({
     id,
     name: 'project.request',
@@ -255,7 +337,13 @@ function sendToolCall(payload) {
   } else {
     pendingCalls.delete(payload.id);
     renderRequestStatus({ state: 'failed', summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.', technicalDetail: 'chatpcb-agentd is not connected.' });
-    if (payload.name === 'project.request') setRequestBusy(false);
+    if (payload.name === 'project.request') {
+      if (payload.id === activeRequestId) {
+        activeRequestId = null;
+        activeRequestProjectDir = null;
+      }
+      setRequestBusy(false);
+    }
   }
 }
 
@@ -319,6 +407,38 @@ function handleEnvelope(envelope) {
     if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
       clearPatchApproval();
       renderRequestStatus({ state: 'failed', summary: 'Patch approval could not be completed.', technicalDetail: envelope.payload.error?.message ?? 'Patch tool call failed.' });
+      if (callName === 'schematic.patch.approve') refreshTransactionStatus();
+      return;
+    }
+    if (callName === 'provider.cancel') {
+      const message = reasonDetail(envelope.payload.error, UI_STRINGS.requestStatus.notCancelled);
+      appendProgress({ stage: 'fail', text: message });
+      renderRequestStatus({
+        state: activeRequestId ? 'running' : 'failed',
+        summary: UI_STRINGS.requestStatus.notCancelled,
+        technicalDetail: message
+      });
+      setRequestBusy(Boolean(activeRequestId));
+      return;
+    }
+    if (callName === 'project.transaction.rollback') {
+      const message = reasonDetail(envelope.payload.error, UI_STRINGS.requestStatus.rollbackFailed);
+      renderRequestStatus({
+        state: 'failed',
+        summary: UI_STRINGS.requestStatus.rollbackFailed,
+        technicalDetail: message
+      });
+      refreshTransactionStatus();
+      return;
+    }
+    if (callName === 'project.transaction.status') {
+      const message = reasonDetail(envelope.payload.error, UI_STRINGS.transaction.loadFailed);
+      transactionStatusEl.textContent = message;
+      transactionListEl.replaceChildren();
+      rollbackButtonEl.disabled = true;
+      rollbackButtonEl.title = message;
+      rollbackButtonEl.onclick = null;
+      return;
     }
     return;
   }
@@ -357,14 +477,65 @@ function handleEnvelope(envelope) {
     clearPatchApproval();
     renderProjectRequest(envelope.payload.result);
     inspectActiveProject();
+    refreshTransactionStatus();
     return;
   }
   if (callName === 'schematic.patch.cancel') return;
   if (callName === 'provider.status') {
     const provider = envelope.payload.result;
-    providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
+    const statusText = provider.status === 'missing' && provider.hint 
+      ? `${provider.provider}: ${provider.status} — ${provider.hint}`
+      : `${provider.provider}: ${provider.status}`;
+    providerStatusEl.textContent = statusText;
     providerStatusEl.dataset.status = provider.status;
+    providerStatusEl.title = provider.hint ?? '';
   }
+  if (callName === 'provider.cancel') {
+    const result = envelope.payload.result;
+    if (!result?.cancelled) {
+      const detail = reasonDetail(result?.reason, UI_STRINGS.requestStatus.notCancelled);
+      appendProgress({ stage: 'fail', text: UI_STRINGS.requestStatus.notCancelled });
+      renderRequestStatus({
+        state: activeRequestId ? 'running' : 'failed',
+        summary: UI_STRINGS.requestStatus.notCancelled,
+        technicalDetail: detail
+      });
+      setRequestBusy(Boolean(activeRequestId));
+      return;
+    }
+    renderRequestStatus({
+      state: activeRequestId ? 'running' : 'completed',
+      summary: activeRequestId ? UI_STRINGS.requestStatus.stopping : UI_STRINGS.requestStatus.stopped
+    });
+    setRequestBusy(Boolean(activeRequestId));
+    return;
+  }
+  if (callName === 'project.transaction.status') {
+    renderTransactionStatus(envelope.payload.result);
+    return;
+  }
+  if (callName === 'project.transaction.rollback') {
+    const result = envelope.payload.result;
+    if (!result?.rolledBack) {
+      renderRequestStatus({
+        state: 'failed',
+        summary: UI_STRINGS.requestStatus.rollbackFailed,
+        technicalDetail: reasonDetail(result?.reason, UI_STRINGS.transaction.rollbackFailedDetail)
+      });
+    } else {
+      renderRequestStatus({ state: 'completed', summary: UI_STRINGS.requestStatus.rolledBack });
+    }
+    inspectActiveProject();
+    refreshTransactionStatus();
+    return;
+  }
+}
+
+function reasonDetail(reason, fallback) {
+  if (!reason) return fallback;
+  if (typeof reason === 'string') return reason;
+  if (reason.code && reason.message) return `${reason.code}: ${reason.message}`;
+  return reason.message || reason.code || fallback;
 }
 
 function activateProject(project) {
@@ -511,6 +682,7 @@ function renderProjectRequest(result) {
     renderReview(result.review);
     renderArtifacts(result.files);
     renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
+    renderPatchPreviewErc(result.validation);
     return;
   }
   renderReview(result.review);
@@ -532,6 +704,7 @@ function renderProjectRequest(result) {
 
   const projectFile = findProjectFile(result.files);
   const successfulUpdate = !result.rolledBack && result.validation?.ok !== false;
+  refreshTransactionStatus();
   if (!successfulUpdate) return;
   if (projectFile) {
     kiCadLinkCardEl.hidden = false;
@@ -644,6 +817,7 @@ function renderPatchApproval() {
 
 function approvePatch() {
   if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
+  clearPatchPreviewErc();
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
   const id = `patch_approve_${Date.now()}`;
@@ -657,6 +831,7 @@ function cancelPatch() {
   pendingCalls.set(id, 'schematic.patch.cancel');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
   clearPatchApproval('Patch preview cancelled.');
+  clearPatchPreviewErc();
 }
 
 function workflowIndex(id) {
@@ -1108,6 +1283,127 @@ function stopConflictWatch() {
 function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
+  stopRequestButtonEl.disabled = !isBusy || !activeRequestId;
+  stopRequestButtonEl.title = !isBusy
+    ? UI_STRINGS.stop.noActiveRequest
+    : !activeRequestId
+      ? UI_STRINGS.stop.requestIdNotAvailable
+      : UI_STRINGS.stop.stopTheRequest;
+}
+
+function stopRequest() {
+  if (!activeRequestId) return;
+  const id = `provider_cancel_${Date.now()}`;
+  pendingCalls.set(id, 'provider.cancel');
+  sendToolCall({ id, name: 'provider.cancel', args: { id: activeRequestId } });
+  appendProgress({ stage: 'fail', text: UI_STRINGS.requestStatus.stopping });
+  renderRequestStatus({ state: 'running', summary: UI_STRINGS.requestStatus.stopping });
+}
+
+function refreshTransactionStatus() {
+  if (!activeProject) return;
+  const id = `transaction_status_${Date.now()}`;
+  pendingCalls.set(id, 'project.transaction.status');
+  sendToolCall({ id, name: 'project.transaction.status', args: { projectDir: activeProject.projectDir } });
+}
+
+function renderTransactionStatus(status) {
+  const transactions = Array.isArray(status?.transactions) ? status.transactions : [];
+  if (transactions.length === 0) {
+    transactionStatusEl.textContent = UI_STRINGS.transaction.noTransactions;
+    transactionListEl.replaceChildren();
+    rollbackButtonEl.disabled = true;
+    rollbackButtonEl.title = UI_STRINGS.transaction.noneAvailable;
+    rollbackButtonEl.onclick = null;
+    return;
+  }
+
+  transactionStatusEl.textContent = UI_STRINGS.transaction.count(transactions.length);
+  transactionListEl.replaceChildren();
+
+  for (const txn of transactions.slice(-5).reverse()) {
+    const item = document.createElement('li');
+    const fileCount = Array.isArray(txn.changes) ? txn.changes.length : 0;
+    const when = txn.createdAt ? new Date(txn.createdAt).toLocaleString() : '';
+    item.dataset.transactionId = txn.transactionId ?? '';
+    item.dataset.status = txn.status ?? '';
+    item.textContent = UI_STRINGS.transaction.row(txn.transactionId ?? '', txn.status ?? '', fileCount, when);
+    transactionListEl.append(item);
+  }
+
+  const lastTxn = transactions[transactions.length - 1];
+  const transactionId = lastTxn?.transactionId;
+  rollbackButtonEl.disabled = !transactionId;
+  rollbackButtonEl.title = transactionId ? UI_STRINGS.transaction.rollbackTitle(transactionId) : UI_STRINGS.transaction.noneToRollback;
+  rollbackButtonEl.onclick = transactionId ? () => showRollbackConfirmation(transactionId) : null;
+}
+
+function renderPatchPreviewErc(validation = {}) {
+  if (!validation || !validation.erc) {
+    clearPatchPreviewErc();
+    return;
+  }
+
+  const erc = validation.erc;
+  const errorCount = erc.errorCount ?? 0;
+  const warningCount = erc.warningCount ?? 0;
+
+  patchPreviewErcEl.hidden = false;
+  patchPreviewErcSummaryEl.textContent = UI_STRINGS.erc.summary(errorCount, warningCount);
+
+  if (errorCount > 0) {
+    const topIssues = Object.entries(erc.byType ?? {})
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 3)
+      .map(([type, count]) => `${type} (${count})`)
+      .join(', ');
+    patchPreviewErcWarningEl.hidden = false;
+    patchPreviewErcWarningEl.textContent = `${UI_STRINGS.erc.warning}${topIssues ? UI_STRINGS.erc.topIssues(topIssues) : ''}`;
+  } else {
+    patchPreviewErcWarningEl.hidden = true;
+    patchPreviewErcWarningEl.textContent = '';
+  }
+}
+
+function clearPatchPreviewErc() {
+  patchPreviewErcEl.hidden = true;
+  patchPreviewErcSummaryEl.textContent = '';
+  patchPreviewErcWarningEl.textContent = '';
+  patchPreviewErcWarningEl.hidden = true;
+}
+
+function showRollbackConfirmation(transactionId) {
+  const confirmDialog = document.getElementById('rollback-confirm-dialog');
+  const confirmMessage = document.getElementById('rollback-confirm-message');
+  const confirmYes = document.getElementById('rollback-confirm-yes');
+  const confirmNo = document.getElementById('rollback-confirm-no');
+  if (!confirmDialog || !confirmMessage || !confirmYes || !confirmNo || !activeProject) return;
+
+  confirmMessage.textContent = UI_STRINGS.transaction.confirmRollback(transactionId);
+
+  confirmYes.onclick = () => {
+    confirmDialog.close();
+    confirmYes.onclick = null;
+    confirmNo.onclick = null;
+    const id = `transaction_rollback_${Date.now()}`;
+    pendingCalls.set(id, 'project.transaction.rollback');
+    sendToolCall({
+      id,
+      name: 'project.transaction.rollback',
+      args: { projectDir: activeProject.projectDir, transactionId }
+    });
+    renderRequestStatus({ state: 'running', summary: UI_STRINGS.requestStatus.rollingBack });
+  };
+
+  confirmNo.onclick = () => {
+    confirmDialog.close();
+    confirmYes.onclick = null;
+    confirmNo.onclick = null;
+  };
+
+  if (typeof confirmDialog.showModal === 'function' && !confirmDialog.open) {
+    confirmDialog.showModal();
+  }
 }
 
 async function awaitStatus(statusPromise) {
