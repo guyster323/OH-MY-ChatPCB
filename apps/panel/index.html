@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
     <link rel="stylesheet" href="./styles/tokens.css" />
-    <link rel="stylesheet" href="./styles.css?v=20261016-soft9" />
+    <link rel="stylesheet" href="./styles.css?v=20261016-soft11" />
   </head>
   <body>
     <main class="shell">
@@ -28,10 +28,6 @@
             <span id="provider-status" data-i18n="provider.pending">Provider pending</span>
           </div>
           <div class="hdr-side">
-            <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time." data-i18n-title="pro.title">
-              <input id="pro-mode" type="checkbox" />
-              <span data-i18n="pro.label">Pro</span>
-            </label>
             <label class="lang-control">
               <span class="sr" data-i18n="lang.label">Language</span>
               <select id="lang" data-i18n-aria-label="lang.label" aria-label="Language">
@@ -200,6 +196,13 @@
           <span aria-hidden="true">·</span>
           <a href="#" lang="en" data-i18n="auth.chatgpt.manage-usage">Manage usage</a>
         </p>
+        <div class="ask-switch">
+          <button type="button" id="pro-mode" role="switch" aria-checked="false" aria-describedby="pro-mode-help">
+            <span class="ask-switch-track" aria-hidden="true"></span>
+            <span data-i18n="pro.switch">Ask me each choice</span>
+          </button>
+          <p id="pro-mode-help" data-i18n="pro.switch-help">On asks about each choice. Off applies recommended choices.</p>
+        </div>
         <div class="row">
           <textarea id="prompt" rows="1" spellcheck="true" disabled aria-label="Circuit request" data-i18n-aria-label="composer.label" placeholder="Ask or reply…" data-i18n-placeholder="composer.placeholder"></textarea>
           <button type="submit" disabled data-i18n="composer.send">Send</button>
@@ -277,6 +280,6 @@
     </dialog>
 
     <script src="./i18n.js?v=20261016-soft1"></script>
-    <script src="./panel.js?v=20261016-soft10"></script>
+    <script src="./panel.js?v=20261016-soft11"></script>
   </body>
 </html>

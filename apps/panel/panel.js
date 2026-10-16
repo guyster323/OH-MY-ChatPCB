@@ -128,6 +128,12 @@ formEl.addEventListener('submit', (event) => {
   event.preventDefault();
   sendProjectRequest();
 });
+document.querySelector('#pro-mode')?.addEventListener('click', () => {
+  const control = document.querySelector('#pro-mode');
+  if (control?.getAttribute('role') !== 'switch') return;
+  const checked = control.getAttribute('aria-checked') === 'true';
+  control.setAttribute('aria-checked', checked ? 'false' : 'true');
+});
 providerEl.addEventListener('change', refreshProviderStatus);
 openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
@@ -299,7 +305,7 @@ async function sendProjectRequest() {
       projectDir: requestProject.projectDir,
       prompt,
       provider: providerEl.value,
-      proMode: document.querySelector('#pro-mode')?.checked === true
+      proMode: document.querySelector('#pro-mode')?.getAttribute('aria-checked') === 'true'
     }
   });
 }
