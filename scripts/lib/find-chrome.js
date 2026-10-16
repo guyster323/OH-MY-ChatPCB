@@ -46,6 +46,7 @@ export async function findChrome({
   arch = process.arch,
   playwrightExecutablePath,
   playwrightHeadlessShellPath,
+  readPlaywrightHeadlessShellRegistry = readPrivateRegistryHeadlessShellPath,
   exists = defaultExists,
   listDir = defaultListDir
 } = {}) {
@@ -78,6 +79,7 @@ export async function findChrome({
     platform,
     arch,
     explicitPath: playwrightHeadlessShellPath,
+    readRegistry: readPlaywrightHeadlessShellRegistry,
     exists,
     listDir
   });
@@ -141,16 +143,23 @@ function playwrightChromiumPath(explicit) {
   }
 }
 
-async function findHeadlessShell({ env, platform, arch, explicitPath, exists, listDir }) {
+async function findHeadlessShell({ env, platform, arch, explicitPath, readRegistry, exists, listDir }) {
   const checked = [];
   const registryPath = explicitPath !== undefined
-    ? (explicitPath || '')
-    : registryHeadlessShellPath();
+    ? (explicitPath || null)
+    : await registryHeadlessShellPath({ env, platform, arch, exists, listDir, readRegistry });
   if (registryPath) {
     checked.push(registryPath);
     if (await canExecute(registryPath, exists)) return { path: registryPath, checked };
   }
 
+  const scanned = await scanHeadlessShellCache({ env, platform, arch, exists, listDir });
+  checked.push(...scanned.checked);
+  return { path: scanned.path, checked };
+}
+
+async function scanHeadlessShellCache({ env, platform, arch, exists, listDir }) {
+  const checked = [];
   const root = browsersCacheDir(env);
   if (!root) return { path: null, checked };
   let names = [];
@@ -187,21 +196,56 @@ function shellRevision(name) {
   return match ? Number(match[1]) : 0;
 }
 
-function registryHeadlessShellPath() {
-  let registryApi;
+// Verified against Playwright 1.60.0. playwright-core/lib/coreBundle's registry is
+// private. Every internal access sits in its own try/catch. If that API is missing
+// or throws, scan chromium_headless_shell-* under PLAYWRIGHT_BROWSERS_PATH or the
+// per-OS ms-playwright cache. If both fail, return null.
+async function registryHeadlessShellPath({ env, platform, arch, exists, listDir, readRegistry }) {
+  let fromRegistry = null;
   try {
-    registryApi = require('playwright-core/lib/coreBundle').registry;
+    fromRegistry = readRegistry();
   } catch {
-    return '';
+    fromRegistry = null;
   }
-  const registry = registryApi?.registry;
-  if (!registry || typeof registry.findExecutable !== 'function') return '';
+  if (typeof fromRegistry === 'string' && fromRegistry) return fromRegistry;
+  const scanned = await scanHeadlessShellCache({ env, platform, arch, exists, listDir });
+  return scanned.path;
+}
+
+function readPrivateRegistryHeadlessShellPath() {
+  let bundle;
   try {
-    const executable = registry.findExecutable('chromium-headless-shell');
-    const shellPath = executable?.executablePath?.();
-    return typeof shellPath === 'string' ? shellPath : '';
+    bundle = require('playwright-core/lib/coreBundle');
   } catch {
-    return '';
+    return null;
+  }
+
+  let registryModule;
+  try {
+    registryModule = bundle.registry;
+  } catch {
+    return null;
+  }
+
+  let registry;
+  try {
+    registry = registryModule.registry;
+  } catch {
+    return null;
+  }
+
+  let executable;
+  try {
+    executable = registry.findExecutable('chromium-headless-shell');
+  } catch {
+    return null;
+  }
+
+  try {
+    const shellPath = executable.executablePath();
+    return typeof shellPath === 'string' && shellPath ? shellPath : null;
+  } catch {
+    return null;
   }
 }
 
