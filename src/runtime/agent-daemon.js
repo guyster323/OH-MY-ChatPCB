@@ -7,9 +7,9 @@ import path from 'node:path';
 import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
-import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
-import { publicProposal } from '../workflow/native-proposal-source.js';
+import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
 import { createProjectMutexRegistry } from './project-mutex-registry.js';
@@ -18,9 +18,9 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
+import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
-import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
+import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
 
 const knownChatPcbTools = new Set(KNOWN_CHATPCB_TOOLS);
 
@@ -317,13 +317,19 @@ function recoverParsedProviderFailure(error) {
   };
 }
 
+function providerDispatchContext(ctx, designSource) {
+  const dispatchCtx = { ...ctx, designSource };
+  if (ctx?.[projectLockHeld] === true) dispatchCtx[projectLockHeld] = true;
+  return dispatchCtx;
+}
+
 async function invokeProvider(call, ctx) {
   const {
     runProviderProcessImpl,
     checkProviderAvailabilityImpl,
     getProviderDefinitionImpl = getProviderDefinition,
     providerControllers,
-    allowGenerate = true,
+    allowGenerate: allowGenerateFlag,
     forceProjectDir = false,
     projectExists = false
   } = ctx;
@@ -349,17 +355,27 @@ async function invokeProvider(call, ctx) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
 
+  const launchContext = await providerLaunchContext({
+    provider,
+    projectDir,
+    allowGenerate: allowGenerateFlag,
+    projectExists,
+    inspectionContext: ctx.inspectionContext,
+    inspectResult: ctx.inspectResult
+  });
+  const allowGenerate = provider === 'grok' ? launchContext.allowGenerate !== false : allowGenerateFlag !== false;
   const contextAllowedTools = computeAllowedToolsForContext({
     allowGenerate,
     allowCreate: !forceProjectDir
   });
-
+  const promptTools = provider === 'grok' ? grokMutatingToolNames(launchContext) : [...contextAllowedTools];
   const input = buildProviderPrompt({
     provider,
     userMessage: prompt,
     projectDir,
-    allowedTools: Array.from(contextAllowedTools),
-    projectExists
+    allowedTools: promptTools,
+    inspectionContext: launchContext.inspectionContext,
+    projectExists: provider === 'grok' ? launchContext.projectExists === true : projectExists === true
   });
 
   let controller;
@@ -383,11 +399,14 @@ async function invokeProvider(call, ctx) {
     let transcript;
     try {
       transcript = await runProviderProcessImpl({
-        command: definition.command,
-        args: definition.args,
+        command: availability.resolvedPath || availability.command || definition.command,
+        args: buildProviderLaunchArgs(definition, launchContext),
         input,
+        timeoutMs: definition.timeoutMs,
         allowedToolNames: PROVIDER_ALLOWED_TOOLS,
         signal: controller.signal,
+        providerId: definition.id,
+        usePromptFile: definition.usePromptFile === true,
         onEvent: (event) => {
           alreadyStreamed = true;
           emitProviderEvent(ctx, event);
@@ -448,7 +467,10 @@ async function invokeProvider(call, ctx) {
       });
       toolResults.push({
         id: event.payload.id,
-        ...(await dispatchToolCall(toolCall, ctx))
+        ...(await dispatchToolCall(toolCall, providerDispatchContext(
+          ctx,
+          proposalSource({ provider: definition.id, via: 'provider' })
+        )))
       });
     }
     throwIfProviderRunAborted(providerControllers, invocationId, controller);
@@ -494,9 +516,10 @@ async function requestProject(call, ctx) {
   const awaitingInput = existingConversation?.status === 'awaiting-input';
   const shouldClarify = awaitingInput || !hasExistingSpec;
   const conversation = shouldClarify
-    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true })
+    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true, persist: false })
     : existingConversation;
   if (shouldClarify && conversation && !conversationWantsGenerate(conversation)) {
+    await saveCircuitConversation(projectDir, conversation);
     return {
       operation: 'clarify',
       requiresApproval: false,
@@ -535,7 +558,10 @@ async function requestProject(call, ctx) {
   const generatePrompt = hasSpec && !awaitingInput
     ? prompt
     : (conversation?.generatePrompt ?? prompt);
-  
+  if (shouldClarify && conversation) {
+    ctx.pendingConversationBytes = Buffer.from(serializeCircuitConversation(conversation));
+  }
+
   const callerHolds = typeof ctx.projectMutexRegistry.callerHolds === 'function'
     ? await ctx.projectMutexRegistry.callerHolds({ projectDir })
     : false;
@@ -576,8 +602,8 @@ async function requestProject(call, ctx) {
         throwIfProviderCancelled(ctx.providerControllers, invocationId);
         retryAttempted = true;
         const correctiveNote = hasSpec
-          ? `The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.`
-          : `Use schematic.generate for new projects (not project.create inside project.request).`;
+          ? 'The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.'
+          : 'Use schematic.generate for new projects (not project.create inside project.request).';
 
         providerResult = await invokeProvider({
           ...call,
@@ -588,18 +614,26 @@ async function requestProject(call, ctx) {
 
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
       let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
+      let usedBuiltinDraft = false;
       if (!preview) {
         throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        usedBuiltinDraft = true;
         emitProgress(ctx, {
           stage: 'preview',
           sprite: 'draft',
-          text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
+          fallback: 'built-in-draft',
+          reason: 'provider-returned-no-tool-call',
+          text: progressCopy(
+            prompt,
+            '공급자가 도구 호출을 반환하지 않아 내장 초안을 사용합니다.',
+            'The provider returned no tool call. Using the built-in draft.'
+          )
         });
         const generated = await previewNativeChange({
           projectDir,
           prompt: generatePrompt,
           context: args.selection
-        }, ctx);
+        }, providerDispatchContext(ctx, proposalSource({ via: 'native-fallback' })));
         if (!generated.ok) {
           if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
             const disallowedError = new Error(providerDisallowedMessage(prompt, providerResult.disallowedCalls));
@@ -627,7 +661,8 @@ async function requestProject(call, ctx) {
         ...preview,
         operation: hasSpec ? 'patched' : 'generated',
         providerEvents: providerResult.events,
-        conversation
+        conversation,
+        ...(usedBuiltinDraft ? { providerFallback: 'built-in-draft' } : {})
       };
     } catch (error) {
       // PROJECT_BUSY means another transaction holds the project and may be writing.
@@ -644,6 +679,13 @@ async function requestProject(call, ctx) {
         await disposeProvisionalPlans(provisionalPlans, ctx.patchApprovalRegistry, projectDir);
       } catch (disposeError) {
         if (!thrown?.snapshotPath) throw disposeError;
+      }
+      if (shouldClarify && conversation) {
+        try {
+          await saveCircuitConversation(projectDir, conversation);
+        } catch {
+          // Keep the provider error. The conversation is still on the thrown object.
+        }
       }
       if (thrown?.code === 'PROJECT_BUSY') throw thrown;
       if (thrown?.snapshotPath) throw thrown;
@@ -804,6 +846,49 @@ function lastMutatingResult(toolResults) {
 async function projectHasSpec(projectDir) {
   const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
   return entries.some((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
+}
+
+async function providerLaunchContext({
+  provider,
+  projectDir,
+  allowGenerate,
+  projectExists,
+  inspectionContext,
+  inspectResult
+}) {
+  if (provider !== 'grok') return { projectDir };
+
+  let exists = projectExists === true;
+  if (allowGenerate === false) exists = true;
+  else if (typeof allowGenerate !== 'boolean' && projectExists !== true && projectExists !== false && projectDir) {
+    try {
+      exists = await projectHasSpec(projectDir);
+    } catch {
+      exists = false;
+    }
+  }
+  const existing = allowGenerate === false || (allowGenerate !== true && exists);
+  const context = {
+    projectDir,
+    allowGenerate: !existing,
+    projectExists: existing
+  };
+  if (existing) {
+    context.inspectionContext = inspectionContext ?? await loadGrokInspectionContext(projectDir, inspectResult);
+  }
+  return context;
+}
+
+async function loadGrokInspectionContext(projectDir, inspectResult) {
+  let spec = null;
+  if (projectDir) {
+    try {
+      spec = await readChatPcbManifest(projectDir);
+    } catch {
+      spec = null;
+    }
+  }
+  return summarizeProjectInspection({ spec, inspection: inspectResult });
 }
 
 function guardToolProjectDir(call, allowedWorkspaceRoot) {
@@ -1060,7 +1145,9 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       projectName,
       context,
       validateProjectImpl: ctx.validateProjectImpl,
-      validateBoardImpl: ctx.validateBoardImpl
+      validateBoardImpl: ctx.validateBoardImpl,
+      conversationBytes: ctx.pendingConversationBytes,
+      source: ctx.designSource ?? proposalSource()
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(prompt);

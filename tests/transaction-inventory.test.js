@@ -101,6 +101,7 @@ test('collectTransactionSnapshot attaches the exact read bytes to sorted files',
 test('transactionArtifactKind classifies allowlisted names and rejects transients', () => {
   assert.equal(transactionArtifactKind('nested/전원.kicad_sch'), 'schematic');
   assert.equal(transactionArtifactKind('board.chatpcb.json'), 'chatpcb-manifest');
+  assert.equal(transactionArtifactKind('.chatpcb-conversation.json'), 'conversation');
   assert.equal(transactionArtifactKind('sym-lib-table'), 'symbol-table');
   assert.equal(transactionArtifactKind('fp-lib-table'), 'footprint-table');
   assert.equal(transactionArtifactKind(`libs${path.sep}fp-lib-table`), 'footprint-table');
