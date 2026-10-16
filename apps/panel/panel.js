@@ -907,14 +907,32 @@ function ercSourceHasSignal(source) {
 // preview validation when that is the recorded candidate result. The open
 // file's inspection ERC must not block a patch that fixes those errors.
 // A result from a different patchId is ignored, so a stale pass cannot open Apply.
+function candidateErcStale() {
+  const expected = patchApprovalState.patchId;
+  const result = lastRequestResult;
+  if (!expected || !result || typeof result !== 'object') return false;
+  const verification = result.candidateVerification;
+  const erc = verification && typeof verification === 'object' ? verification.erc : null;
+  return [result.patchId, verification?.patchId, erc?.patchId]
+    .some((id) => typeof id === 'string' && id.length > 0 && id !== expected);
+}
+
 function candidateErcSource() {
   const result = lastRequestResult;
-  if (!result || result.patchId !== patchApprovalState.patchId) return null;
+  if (!result || result.patchId !== patchApprovalState.patchId || candidateErcStale()) return null;
   const requestErc = result.candidateVerification?.erc;
   if (ercSourceHasSignal(requestErc)) return requestErc;
   const requestValidation = result.validation;
   if (ercSourceHasSignal(requestValidation)) return requestValidation;
   return null;
+}
+
+function applyBlockedReason(erc) {
+  if (patchRejectionCode) return { key: 'patch.unverified.body', text: t('patch.unverified.body') };
+  if (candidateErcStale()) return { key: 'patch.apply.blocked-stale', text: t('patch.apply.blocked-stale') };
+  if (erc.failed) return { key: 'patch.apply.blocked-erc', text: t('patch.apply.blocked-erc', { count: erc.count }) };
+  if (erc.skipped) return { key: 'patch.apply.skipped', text: t('patch.apply.skipped') };
+  return { key: 'patch.apply.blocked-missing', text: t('patch.apply.blocked-missing') };
 }
 
 function inspectionErcSource() {
@@ -1080,24 +1098,20 @@ function renderPatchApproval() {
   }
   hideApplyWithoutErcConfirm();
   if (active && !evidenceBlocked && !canApply) {
-    const reason = patchRejectionCode
-      ? t('patch.unverified.body')
-      : erc.failed
-        ? t('patch.apply.blocked-erc', { count: erc.count })
-        : erc.skipped
-          ? t('patch.apply.skipped')
-          : t('patch.apply.blocked-missing');
+    const blocked = applyBlockedReason(erc);
     approvePatchButtonEl.setAttribute('aria-disabled', 'true');
     approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
     if (applyWhyEl) {
       applyWhyEl.hidden = false;
-      applyWhyEl.textContent = reason;
+      applyWhyEl.dataset.reason = blocked.key;
+      applyWhyEl.textContent = blocked.text;
     }
   } else {
     approvePatchButtonEl.removeAttribute('aria-disabled');
     approvePatchButtonEl.removeAttribute('aria-describedby');
     if (applyWhyEl) {
       applyWhyEl.hidden = true;
+      applyWhyEl.removeAttribute('data-reason');
       applyWhyEl.replaceChildren();
     }
   }
@@ -1156,7 +1170,7 @@ function renderPatchApproval() {
       return;
     }
     patchApprovalStatusEl.hidden = false;
-    setPatchStatus('patch.apply.blocked-missing');
+    setPatchStatus(candidateErcStale() ? 'patch.apply.blocked-stale' : 'patch.apply.blocked-missing');
     return;
   }
   patchApprovalStatusEl.hidden = false;

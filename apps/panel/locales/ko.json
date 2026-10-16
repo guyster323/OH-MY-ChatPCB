@@ -18,6 +18,7 @@
   "patch.apply": "회로도에 적용",
   "patch.apply.blocked-erc": "적용하려면 ERC 오류 {count}개를 먼저 고쳐 주세요.",
   "patch.apply.blocked-missing": "이 패치의 ERC 결과가 없어요.",
+  "patch.apply.blocked-stale": "기록된 ERC가 이 패치와 맞지 않아요.",
   "patch.apply.skipped": "KiCad가 없어 ERC를 건너뛰었어요.",
   "patch.apply.without-erc": "ERC 없이 적용",
   "patch.apply.without-erc.risk": "ERC를 실행하지 않아서 이 초안의 회로 오류를 확인하지 못했어요. 적용하면 스키매틱이 바뀌어요.",

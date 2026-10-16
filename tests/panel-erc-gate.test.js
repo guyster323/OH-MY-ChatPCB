@@ -220,6 +220,9 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(candidateMissing.ariaDisabled, 'true');
     assert.equal(candidateMissing.overrideHidden, true);
     assert.equal(candidateMissing.whyText, en['patch.apply.blocked-missing']);
+    assert.equal(candidateMissing.whyReason, 'patch.apply.blocked-missing');
+    assert.equal(candidateMissing.statusText, en['patch.apply.blocked-missing']);
+    assert.equal(candidateMissing.statusKey, 'patch.apply.blocked-missing');
     assert.deepEqual(candidateMissing.sent, []);
 
     const staleCandidate = await showPatch(page, {
@@ -235,7 +238,32 @@ test('panel apply follows the recorded ERC result', async (t) => {
     }, 'apply');
     assert.equal(staleCandidate.ariaDisabled, 'true');
     assert.equal(staleCandidate.overrideHidden, true);
+    assert.equal(staleCandidate.whyReason, 'patch.apply.blocked-stale');
+    assert.equal(staleCandidate.whyText, en['patch.apply.blocked-stale']);
+    assert.equal(staleCandidate.statusText, en['patch.apply.blocked-stale']);
+    assert.equal(staleCandidate.statusKey, 'patch.apply.blocked-stale');
+    assert.notEqual(staleCandidate.whyText, en['patch.apply.blocked-missing']);
+    assert.notEqual(staleCandidate.whyText, en['patch.blocked']);
     assert.deepEqual(staleCandidate.sent, []);
+
+    const mismatchedErc = await showPatch(page, {
+      validation: passedValidation,
+      candidateVerification: {
+        patchId: 'patch-other',
+        erc: {
+          patchId: 'patch-other',
+          ok: true,
+          skipped: false,
+          status: 'passed',
+          erc: { errorCount: 0, warningCount: 0 }
+        }
+      }
+    }, 'apply');
+    assert.equal(mismatchedErc.ariaDisabled, 'true');
+    assert.equal(mismatchedErc.whyReason, 'patch.apply.blocked-stale');
+    assert.equal(mismatchedErc.whyText, en['patch.apply.blocked-stale']);
+    assert.equal(mismatchedErc.statusKey, 'patch.apply.blocked-stale');
+    assert.deepEqual(mismatchedErc.sent, []);
 
     const faked = await showPatch(page, { validation: { passed: true } }, 'apply');
     assert.equal(faked.ariaDisabled, null);
@@ -355,6 +383,9 @@ function showPatch(page, state, click) {
       disabled: button.disabled,
       whyHidden: why.hidden,
       whyText: why.textContent,
+      whyReason: why.dataset.reason ?? '',
+      statusText: document.querySelector('#patch-approval-status')?.textContent ?? '',
+      statusKey: document.querySelector('#patch-approval-status')?.dataset.i18n ?? '',
       skippedNoticeCount: countVisibleText(document.querySelector('#patch-approval-card'), window.t('patch.apply.skipped')),
       overrideHidden: override.hidden,
       overrideDisabled: override.disabled,

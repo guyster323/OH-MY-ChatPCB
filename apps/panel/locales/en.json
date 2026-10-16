@@ -18,6 +18,7 @@
   "patch.apply": "Apply to schematic",
   "patch.apply.blocked-erc": "Fix the {count} ERC errors before applying.",
   "patch.apply.blocked-missing": "ERC has not been recorded for this patch.",
+  "patch.apply.blocked-stale": "The recorded ERC does not match this patch.",
   "patch.apply.skipped": "ERC was skipped because KiCad is unavailable.",
   "patch.apply.without-erc": "Apply without ERC",
   "patch.apply.without-erc.risk": "ERC did not run, so circuit errors in this draft were not checked. Applying still changes the schematic.",
