@@ -521,13 +521,29 @@ async function writeCredentialsFile(creds) {
   return stored;
 }
 
-async function restoreCredentialBytes(credPath, previous) {
+/**
+ * Put `previous` bytes back without truncating `credPath` first.
+ * A failure while creating the temp file leaves the destination unchanged.
+ * `fsImpl` overrides the file operations (tests inject a failing write).
+ */
+export async function restoreCredentialBytes(credPath, previous, fsImpl) {
+  const write = fsImpl?.writeFile ?? writeFile;
+  const changeMode = fsImpl?.chmod ?? chmod;
+  const renameFile = fsImpl?.rename ?? rename;
+  const remove = fsImpl?.unlink ?? unlink;
   if (previous == null) {
-    await unlink(credPath).catch(() => {});
+    await remove(credPath).catch(() => {});
     return;
   }
-  await writeFile(credPath, previous, { mode: 0o600 });
-  await chmod(credPath, 0o600);
+  const tempPath = uniqueTempPath(credPath);
+  try {
+    await write(tempPath, previous, { mode: 0o600 });
+    await changeMode(tempPath, 0o600);
+    await renameFile(tempPath, credPath);
+  } finally {
+    await remove(tempPath).catch(() => {});
+  }
+  await changeMode(credPath, 0o600);
 }
 
 export async function saveCredentials(creds) {
@@ -2148,10 +2164,16 @@ function resolveAuthGraceMs(graceMs) {
     ?? AUTH_GRACE_MS;
 }
 
-const SECRET_JSON_KEYS = /"(access_token|refresh_token|id_token|code_verifier|client_secret|code)"(\s*:\s*)"(?:\\.|[^"\\])*"/g;
+const SECRET_FIELD = 'access_token|refresh_token|id_token|code_verifier|client_secret|code';
+const SECRET_JSON_KEYS = new RegExp(`"(${SECRET_FIELD})"(\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`, 'g');
+const SECRET_JSON_SINGLE_KEYS = new RegExp(`'(${SECRET_FIELD})'(\\s*:\\s*)'(?:\\\\.|[^'\\\\])*'`, 'g');
+// Form bodies and query strings. The value runs until `&` or whitespace.
+// `code_verifier` is listed before `code` so the longer name wins.
+const SECRET_FORM_FIELDS = new RegExp(`\\b(${SECRET_FIELD})=[^&\\s]*`, 'g');
 const BEARER_TOKEN = /\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi;
 const API_KEY = /\bsk-[A-Za-z0-9_-]{8,}/g;
 const REFRESH_TOKEN = /\brt_[A-Za-z0-9._~+/=-]{8,}/g;
+const SESSION_KEY = /\bsess-[A-Za-z0-9._~+/=-]{8,}/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){0,2}/g;
 const EMAIL_ADDRESS = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 
@@ -2159,6 +2181,9 @@ const EMAIL_ADDRESS = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
  * Redact credentials in ChatGPT API errors and daemon logs.
  * Values shorter than 8 characters are left alone so a stand-in like "AT"
  * cannot rewrite ordinary words. Email local-parts keep their first character.
+ * The same field names are masked in JSON, single-quoted fields, and
+ * form-encoded `name=value` text (the value ends at `&` or whitespace).
+ * A sess- key is masked when 8 or more token characters follow.
  */
 export function maskSecrets(text, accessToken) {
   let masked = String(text ?? '');
@@ -2166,13 +2191,19 @@ export function maskSecrets(text, accessToken) {
     masked = masked.split(accessToken).join('[REDACTED]');
   }
   SECRET_JSON_KEYS.lastIndex = 0;
+  SECRET_JSON_SINGLE_KEYS.lastIndex = 0;
+  SECRET_FORM_FIELDS.lastIndex = 0;
   BEARER_TOKEN.lastIndex = 0;
   API_KEY.lastIndex = 0;
   REFRESH_TOKEN.lastIndex = 0;
+  SESSION_KEY.lastIndex = 0;
   JWT.lastIndex = 0;
   EMAIL_ADDRESS.lastIndex = 0;
   masked = masked.replace(SECRET_JSON_KEYS, '"$1"$2"[REDACTED]"');
+  masked = masked.replace(SECRET_JSON_SINGLE_KEYS, "'$1'$2'[REDACTED]'");
+  masked = masked.replace(SECRET_FORM_FIELDS, '$1=[REDACTED]');
   masked = masked.replace(BEARER_TOKEN, 'Bearer [REDACTED]');
+  masked = masked.replace(SESSION_KEY, '[REDACTED]');
   masked = masked.replace(JWT, '[REDACTED]');
   masked = masked.replace(API_KEY, '[REDACTED]');
   masked = masked.replace(REFRESH_TOKEN, '[REDACTED]');

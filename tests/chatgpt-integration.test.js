@@ -24,6 +24,7 @@ import {
   loadCredentials,
   maskSecrets,
   openSystemBrowser,
+  restoreCredentialBytes,
   refreshAccessToken,
   resolveChatGPTSettings,
   saveCredentials,
@@ -1467,7 +1468,35 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       '"code_verifier":"plain verifier !","client_secret":"plain-secret",',
       '"note":"leave-this","code":1}'
     ].join('');
-    const secrets = [refresh, apiKey, projectKey, jwt, bearer.slice('Bearer '.length), 'plain-access', 'plain-refresh', 'plain-id', 'plain-code', 'plain verifier !', 'plain-secret', 'jane@example.com'];
+    const form = [
+      'grant_type=authorization_code',
+      'code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+      'code_challenge_method=S256',
+      'response_type=code',
+      'access_token=form-access',
+      'refresh_token=form-refresh',
+      'id_token=form-id',
+      'code=form-code',
+      'code_verifier=form-verifier',
+      'client_secret=form-secret',
+      'client_id=keep-client'
+    ].join('&');
+    const formSpaced = 'before access_token=form-access-ws refresh_token=form-refresh-ws\nid_token=form-id-ws code=form-code-ws code_verifier=form-verifier-ws client_secret=form-secret-ws after';
+    const single = [
+      "{'access_token': 'sq-access', 'refresh_token': 'sq-refresh',",
+      "'id_token': 'sq-id', 'code': 'sq-code',",
+      "'code_verifier': 'sq verifier !', 'client_secret': 'sq-secret',",
+      "'note': 'leave-this', 'code': 1}"
+    ].join(' ');
+    const session = 'sess-Ab3._~+/=-TESTTOKEN';
+    const secrets = [
+      refresh, apiKey, projectKey, jwt, bearer.slice('Bearer '.length),
+      'plain-access', 'plain-refresh', 'plain-id', 'plain-code', 'plain verifier !', 'plain-secret',
+      'form-access', 'form-refresh', 'form-id', 'form-code', 'form-verifier', 'form-secret',
+      'form-access-ws', 'form-refresh-ws', 'form-id-ws', 'form-code-ws', 'form-verifier-ws', 'form-secret-ws',
+      'sq-access', 'sq-refresh', 'sq-id', 'sq-code', 'sq verifier !', 'sq-secret',
+      session, 'jane@example.com'
+    ];
 
     const maskedRefresh = maskSecrets(`token ${refresh} end`);
     assert.equal(maskedRefresh.includes(refresh), false);
@@ -1506,9 +1535,53 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     assert.match(maskedJson, /"note":"leave-this"/);
     assert.match(maskedJson, /"code":1/);
 
+    const maskedForm = maskSecrets(form);
+    for (const secret of ['form-access', 'form-refresh', 'form-id', 'form-code', 'form-verifier', 'form-secret']) {
+      assert.equal(maskedForm.includes(secret), false, secret);
+    }
+    assert.equal(maskedForm, [
+      'grant_type=authorization_code',
+      'code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+      'code_challenge_method=S256',
+      'response_type=code',
+      'access_token=[REDACTED]',
+      'refresh_token=[REDACTED]',
+      'id_token=[REDACTED]',
+      'code=[REDACTED]',
+      'code_verifier=[REDACTED]',
+      'client_secret=[REDACTED]',
+      'client_id=keep-client'
+    ].join('&'));
+
+    const maskedFormSpaced = maskSecrets(formSpaced);
+    for (const secret of ['form-access-ws', 'form-refresh-ws', 'form-id-ws', 'form-code-ws', 'form-verifier-ws', 'form-secret-ws']) {
+      assert.equal(maskedFormSpaced.includes(secret), false, secret);
+    }
+    assert.equal(
+      maskedFormSpaced,
+      'before access_token=[REDACTED] refresh_token=[REDACTED]\nid_token=[REDACTED] code=[REDACTED] code_verifier=[REDACTED] client_secret=[REDACTED] after'
+    );
+
+    const maskedSingle = maskSecrets(single);
+    for (const secret of ['sq-access', 'sq-refresh', 'sq-id', 'sq-code', 'sq verifier !', 'sq-secret']) {
+      assert.equal(maskedSingle.includes(secret), false, secret);
+    }
+    assert.match(maskedSingle, /'access_token': '\[REDACTED\]'/);
+    assert.match(maskedSingle, /'refresh_token': '\[REDACTED\]'/);
+    assert.match(maskedSingle, /'id_token': '\[REDACTED\]'/);
+    assert.match(maskedSingle, /'code': '\[REDACTED\]'/);
+    assert.match(maskedSingle, /'code_verifier': '\[REDACTED\]'/);
+    assert.match(maskedSingle, /'client_secret': '\[REDACTED\]'/);
+    assert.match(maskedSingle, /'note': 'leave-this'/);
+    assert.match(maskedSingle, /'code': 1/);
+
+    assert.equal(maskSecrets(`key ${session} end`), 'key [REDACTED] end');
+    assert.equal(maskSecrets('prefix sess-12 suffix'), 'prefix sess-12 suffix');
+
     const plain = [
       'Route the 3V3 net with a 10k resistor. The code review passed.',
-      'See sk-12, rt_ab, Bearer, eyJabc, and sketch this board.',
+      'See sk-12, rt_ab, Bearer, eyJabc, sess-12, and sketch this board.',
+      'code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM response_type=code client_id=oaiapp_TEST',
       'ChatGPT API error: 400 Input must be a list',
       'ChatGPT sign-in waiting on http://127.0.0.1:41318/auth/callback until 2026-10-16T00:00:00.000Z',
       'ChatGPT OpenID discovery failed (403); using fallback endpoints',
@@ -1517,10 +1590,75 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     assert.equal(maskSecrets(plain), plain);
     assert.equal(maskSecrets(plain, 'AT'), plain);
 
-    const combined = `${refresh} ${apiKey} ${projectKey} ${jwt} ${bearer} ${email} ${json}`;
+    const combined = `${refresh} ${apiKey} ${projectKey} ${jwt} ${bearer} ${email} ${session} ${json} ${form} ${formSpaced} ${single}`;
     const once = maskSecrets(combined, 'test-access-token-DO-NOT-USE-0123456789');
     assert.equal(maskSecrets(once), once);
     for (const secret of secrets) assert.equal(once.includes(secret), false, secret);
+  });
+
+  it('leaves the original credential file intact when restore fails mid-write', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-atomic-'));
+    const credPath = path.join(dir, 'chatgpt-credentials-oaiapp_TEST.json');
+    const original = Buffer.from('{"access_token":"original-secret-value","refresh_token":"rt_original"}\n');
+    const previous = Buffer.from('{"access_token":"previous-secret-value","refresh_token":"rt_previous"}\n');
+    const realWriteFile = writeFile;
+    const temps = [];
+    const assertTempPath = (target) => {
+      const marker = `${credPath}.${process.pid}.`;
+      assert.equal(target.startsWith(marker), true);
+      assert.equal(target.endsWith('.tmp'), true);
+      assert.match(target.slice(marker.length, -'.tmp'.length), /^[0-9a-f]{12}$/);
+      assert.equal(target === credPath, false);
+    };
+    try {
+      await realWriteFile(credPath, original, { mode: 0o600 });
+      let injected = false;
+      await assert.rejects(
+        restoreCredentialBytes(credPath, previous, {
+          async writeFile(target, data, options) {
+            assertTempPath(target);
+            assert.equal(options?.mode, 0o600);
+            temps.push(target);
+            injected = true;
+            await realWriteFile(target, Buffer.from('PARTIAL!'), { mode: 0o600 });
+            const error = new Error('injected write failure');
+            error.code = 'EIO';
+            throw error;
+          }
+        }),
+        (err) => err?.code === 'EIO' && /injected write failure/.test(err.message)
+      );
+      assert.equal(injected, true);
+      assert.equal(await readFile(credPath, 'utf8'), original.toString('utf8'));
+      assert.equal((await stat(credPath)).size, original.length);
+      assert.equal((await readFile(credPath, 'utf8')).includes('PARTIAL!'), false);
+      assert.equal((await readFile(credPath, 'utf8')).includes('previous-secret-value'), false);
+      assert.deepEqual(
+        (await readdir(dir)).filter((name) => name !== path.basename(credPath)),
+        []
+      );
+
+      await restoreCredentialBytes(credPath, previous, {
+        async writeFile(target, data, options) {
+          assertTempPath(target);
+          assert.equal(options?.mode, 0o600);
+          temps.push(target);
+          await realWriteFile(target, data, options);
+        }
+      });
+      assert.equal(temps.length, 2);
+      assert.equal(temps[0] === temps[1], false);
+      assert.equal(await readFile(credPath, 'utf8'), previous.toString('utf8'));
+      if (process.platform !== 'win32') {
+        assert.equal((await stat(credPath)).mode & 0o777, 0o600);
+      }
+      assert.deepEqual(
+        (await readdir(dir)).filter((name) => name !== path.basename(credPath)),
+        []
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('masks refresh tokens, api keys, emails, and json fields in api errors and daemon logs', async () => {
