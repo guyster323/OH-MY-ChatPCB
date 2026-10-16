@@ -89,6 +89,8 @@ let pendingHostStatus = null;
 let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
 let patchRejectionCode = null;
+let chatGptUiEnabled = false;
+let chatGptSignedIn = null;
 let patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
 let lastRequestResult = null;
 let lastProgressStage = null;
@@ -190,13 +192,21 @@ function applyHostQueries() {
   else if (auth === 'signedout' || auth === 'out' || auth === 'false') setChatGptAuthState({ signedIn: false });
 }
 
+function setChatGptShell(el, visible) {
+  if (!el) return;
+  const show = chatGptUiEnabled && visible;
+  el.hidden = !show;
+  if (show) el.removeAttribute('inert');
+  else el.setAttribute('inert', '');
+}
+
 function setChatGptAuthState(state = {}) {
-  const signedIn = state?.signedIn;
-  const known = signedIn === true || signedIn === false;
+  if (state?.signedIn === true || state?.signedIn === false) chatGptSignedIn = state.signedIn;
   const card = document.querySelector('#chatgpt-signin');
   const plan = document.querySelector('#chatgpt-plan');
-  if (card) card.hidden = !(known && signedIn === false);
-  if (plan) plan.hidden = !(known && signedIn === true);
+  // Sign-in and plan stay out of the tab order until ChatGPT auth is wired up.
+  setChatGptShell(card, chatGptSignedIn === false);
+  setChatGptShell(plan, chatGptSignedIn === true);
 }
 
 function setConnectionStatus(key, state) {
@@ -1764,6 +1774,10 @@ window.setChatGptAuthState = setChatGptAuthState;
 // A query string is not enough: only the test server sets this flag before the page loads.
 if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__CHATPCB_TEST_MODE__ === true) {
   window.__chatpcbTest = {
+    showChatGptUi() {
+      chatGptUiEnabled = true;
+      setChatGptAuthState({});
+    },
     showPatch(state = {}) {
       const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
       activeProject = project;

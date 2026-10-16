@@ -461,7 +461,37 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           assert.match(connected, /[가-힣]/, `${theme}/${lang} connected korean`);
         }
 
-        await page.evaluate(() => window.setChatGptAuthState({ signedIn: false }));
+        const gated = await page.evaluate(() => {
+          const card = document.querySelector('#chatgpt-signin');
+          const plan = document.querySelector('#chatgpt-plan');
+          const button = card.querySelector('button');
+          const link = plan.querySelector('a');
+          button.focus();
+          link.focus();
+          return {
+            cardHidden: card.hidden,
+            planHidden: plan.hidden,
+            cardInert: card.inert,
+            planInert: plan.inert,
+            focusedButton: document.activeElement === button,
+            focusedLink: document.activeElement === link,
+            planLang: plan.lang,
+            planText: plan.textContent
+          };
+        });
+        assert.equal(gated.cardHidden, true, `${theme}/${lang} ChatGPT sign-in hidden`);
+        assert.equal(gated.planHidden, true, `${theme}/${lang} ChatGPT plan hidden`);
+        assert.equal(gated.cardInert, true, `${theme}/${lang} ChatGPT sign-in inert`);
+        assert.equal(gated.planInert, true, `${theme}/${lang} ChatGPT plan inert`);
+        assert.equal(gated.focusedButton, false, `${theme}/${lang} ChatGPT button focusable`);
+        assert.equal(gated.focusedLink, false, `${theme}/${lang} Manage usage focusable`);
+        assert.equal(gated.planLang, 'en', `${theme}/${lang} plan lang`);
+        assert.match(gated.planText, /Using ChatGPT plan/);
+        assert.match(gated.planText, /Manage usage/);
+        await page.evaluate(() => {
+          window.__chatpcbTest.showChatGptUi();
+          window.setChatGptAuthState({ signedIn: false });
+        });
         const button = await page.evaluate(() => {
           const el = document.querySelector('.siwc-btn');
           const style = getComputedStyle(el);
