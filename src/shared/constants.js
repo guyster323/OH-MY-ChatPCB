@@ -23,6 +23,11 @@ export const ToolName = {
   PROVIDER_CANCEL: 'provider.cancel'
 };
 
+export const PatchAction = {
+  APPROVE: 'schematic.patch.approve',
+  CANCEL: 'schematic.patch.cancel'
+};
+
 export const PROVIDER_ALLOWED_TOOLS = [
   ToolName.SCHEMATIC_GENERATE,
   ToolName.PROJECT_CREATE,

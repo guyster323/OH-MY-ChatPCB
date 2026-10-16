@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_DAEMON_PORT, ProtocolMessageType, ToolName, PROVIDER_ALLOWED_TOOLS } from '../src/shared/constants.js';
+import { DEFAULT_DAEMON_PORT, PatchAction, ProtocolMessageType, ToolName, PROVIDER_ALLOWED_TOOLS } from '../src/shared/constants.js';
 
 test('DEFAULT_DAEMON_PORT is defined', () => {
   assert.equal(typeof DEFAULT_DAEMON_PORT, 'number');
@@ -28,6 +28,13 @@ test('ToolName constants are defined', () => {
   assert.equal(ToolName.PROVIDER_LIST, 'provider.list');
   assert.equal(ToolName.PROVIDER_INVOKE, 'provider.invoke');
   assert.equal(ToolName.PROVIDER_CANCEL, 'provider.cancel');
+});
+
+test('PatchAction constants are defined', () => {
+  assert.deepStrictEqual(PatchAction, {
+    APPROVE: 'schematic.patch.approve',
+    CANCEL: 'schematic.patch.cancel'
+  });
 });
 
 test('PROVIDER_ALLOWED_TOOLS contains expected tools', () => {

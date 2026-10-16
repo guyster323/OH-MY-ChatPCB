@@ -2,29 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { DEFAULT_DAEMON_PORT, ProtocolMessageType, ToolName } from '../src/shared/constants.js';
+import { DEFAULT_DAEMON_PORT, PatchAction, ProtocolMessageType, ToolName } from '../src/shared/constants.js';
 
-// Keys apps/panel/constants.js must mirror from src/shared/constants.js.
-// deepStrictEqual checks both directions: extra keys, missing keys, moved keys,
-// and nested values fail on either side. PatchAction is panel-only.
-// PROVIDER_ALLOWED_TOOLS is daemon-only. Neither belongs in this subset.
-const MIRRORED_KEYS = ['DEFAULT_DAEMON_PORT', 'ProtocolMessageType', 'ToolName'];
-
-const panelConstantsUrl = new URL('../apps/panel/constants.js', import.meta.url);
-
-const sharedConstantsSubset = constantsSubset({
+// The whole window.ChatPCB object must equal this subset. PROVIDER_ALLOWED_TOOLS
+// stays daemon-only and is not part of the panel surface. Extra panel keys,
+// missing keys, moved keys, and nested value drift all fail deepStrictEqual.
+const sharedPanelConstants = {
   DEFAULT_DAEMON_PORT,
   ProtocolMessageType,
-  ToolName
-});
+  ToolName,
+  PatchAction
+};
 
-function constantsSubset(record) {
-  const subset = {};
-  for (const key of MIRRORED_KEYS) {
-    subset[key] = record[key];
-  }
-  return subset;
-}
+const panelConstantsUrl = new URL('../apps/panel/constants.js', import.meta.url);
 
 // vm object literals use that realm's Object.prototype. deepStrictEqual treats a
 // different prototype as inequality even when the keys and values match, so copy
@@ -43,32 +33,44 @@ function plainData(value) {
   return copy;
 }
 
-function panelConstantsSubset(source) {
+function loadPanelConstants(source) {
   const window = {};
   vm.runInNewContext(source, { window }, { filename: 'apps/panel/constants.js' });
   if (window.ChatPCB === null || typeof window.ChatPCB !== 'object') {
     throw new TypeError('apps/panel/constants.js must assign window.ChatPCB to an object.');
   }
-  return plainData(constantsSubset(window.ChatPCB));
+  return plainData(window.ChatPCB);
 }
 
 test('panel constants match the shared constants they mirror', async () => {
   const source = await readFile(panelConstantsUrl, 'utf8');
-  assert.deepStrictEqual(panelConstantsSubset(source), sharedConstantsSubset);
+  assert.deepStrictEqual(loadPanelConstants(source), sharedPanelConstants);
 });
 
 test('in-memory panel constant drift fails the structural comparison', async () => {
   const source = await readFile(panelConstantsUrl, 'utf8');
 
-  const withPanelOnlyKey = source.replace(
+  const withNestedPanelOnlyKey = source.replace(
     "  PROVIDER_CANCEL: 'provider.cancel'\n};",
     "  PROVIDER_CANCEL: 'provider.cancel',\n  PANEL_ONLY: 'panel.only'\n};"
   );
-  assert.notEqual(withPanelOnlyKey, source);
-  const panelOnlySubset = panelConstantsSubset(withPanelOnlyKey);
-  assert.equal(panelOnlySubset.ToolName.PANEL_ONLY, 'panel.only');
+  assert.notEqual(withNestedPanelOnlyKey, source);
+  const nestedPanelOnly = loadPanelConstants(withNestedPanelOnlyKey);
+  assert.equal(nestedPanelOnly.ToolName.PANEL_ONLY, 'panel.only');
   assert.throws(
-    () => assert.deepStrictEqual(panelOnlySubset, sharedConstantsSubset),
+    () => assert.deepStrictEqual(nestedPanelOnly, sharedPanelConstants),
+    assert.AssertionError
+  );
+
+  const withTopLevelPanelOnlyKey = source.replace(
+    'window.ChatPCB = window.ChatPCB || {};',
+    "window.ChatPCB = window.ChatPCB || {};\nwindow.ChatPCB.PANEL_ONLY = 'panel.only';"
+  );
+  assert.notEqual(withTopLevelPanelOnlyKey, source);
+  const topLevelPanelOnly = loadPanelConstants(withTopLevelPanelOnlyKey);
+  assert.equal(topLevelPanelOnly.PANEL_ONLY, 'panel.only');
+  assert.throws(
+    () => assert.deepStrictEqual(topLevelPanelOnly, sharedPanelConstants),
     assert.AssertionError
   );
 
@@ -77,10 +79,21 @@ test('in-memory panel constant drift fails the structural comparison', async () 
     'window.ChatPCB.DEFAULT_DAEMON_PORT = 413170;'
   );
   assert.notEqual(withWidenedPort, source);
-  const widenedPortSubset = panelConstantsSubset(withWidenedPort);
-  assert.equal(widenedPortSubset.DEFAULT_DAEMON_PORT, 413170);
+  const widenedPort = loadPanelConstants(withWidenedPort);
+  assert.equal(widenedPort.DEFAULT_DAEMON_PORT, 413170);
   assert.throws(
-    () => assert.deepStrictEqual(widenedPortSubset, sharedConstantsSubset),
+    () => assert.deepStrictEqual(widenedPort, sharedPanelConstants),
+    assert.AssertionError
+  );
+
+  const withCommentedPort = source.replace(
+    'window.ChatPCB.DEFAULT_DAEMON_PORT = 41317;',
+    '// window.ChatPCB.DEFAULT_DAEMON_PORT = 41317;\nwindow.ChatPCB.DEFAULT_DAEMON_PORT = 1;'
+  );
+  assert.notEqual(withCommentedPort, source);
+  assert.equal(loadPanelConstants(withCommentedPort).DEFAULT_DAEMON_PORT, 1);
+  assert.throws(
+    () => assert.deepStrictEqual(loadPanelConstants(withCommentedPort), sharedPanelConstants),
     assert.AssertionError
   );
 });
