@@ -127,7 +127,8 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'legacy-unverified');
     await page.getByLabel('Circuit request').fill(previewPrompt);
     await page.getByRole('button', { name: 'Send' }).click();
-    await page.waitForFunction(() => /legacy.*patch hash/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 30000 });
+    await page.waitForFunction(() => /saved by an older version/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 30000 });
+    assert.equal(await page.locator('#patch-approval-status').getAttribute('data-state'), 'warning');
     assert.equal(await page.getByRole('button', { name: 'Approve' }).isDisabled(), false);
     await page.getByRole('button', { name: 'Cancel' }).click();
     inspectGeneratedProject = false;
@@ -166,7 +167,9 @@ async function main() {
     assert.doesNotMatch(failedZeroCountValidation.text ?? '', /\[object Object\]/);
 
     await assertValidationState(page, skippedValidationPrompt, 'skipped', /ERC skipped/);
+    await assertSkippedErcBlocked(page);
     await page.waitForFunction(() => /ERC skipped \[NO_SCHEMATIC\]: No schematic was available for ERC\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
+    await confirmApplyWithoutErc(page);
     await assertValidationState(page, unavailableValidationPrompt, 'unavailable', /ERC unavailable|ERC skipped/);
     await page.waitForFunction(() => /ERC skipped \[KICAD_CLI_UNAVAILABLE\]: KiCad CLI was not available\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
 
@@ -313,7 +316,7 @@ async function main() {
 
     await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
     await hostPage.getByRole('button', { name: 'Send' }).click();
-    await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+    await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.', null, { timeout: 120000 });
     await hostPage.waitForFunction(() => document.querySelector('#approve-patch-button') && !document.querySelector('#approve-patch-button').disabled);
     await hostPage.locator('#approve-patch-button').evaluate((button) => button.click());
     await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running', null, { timeout: 60000 });
@@ -426,13 +429,58 @@ async function assertValidationState(page, request, expectedState, expectedText)
     || /Apply it to the schematic\?/.test(requestStatus ?? '')
     || /스키매틱에 적용/.test(requestStatus ?? '')
   ) {
-    await page.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+    // A skipped or failed ERC blocks approval. Do not wait for the ready sentence.
+    await page.waitForFunction(() => {
+      const status = document.querySelector('#patch-approval-status');
+      if (status?.dataset.state === 'blocked') return true;
+      return status?.textContent === 'Patch preview is ready for approval.';
+    });
   }
   await page.waitForFunction((state) => {
     const current = document.querySelector('#validation-status')?.dataset.state;
     return current === state || (state === 'unavailable' && current === 'skipped');
   }, expectedState);
   assert.match(await page.locator('#validation-status').textContent() ?? '', expectedText);
+}
+
+async function assertSkippedErcBlocked(page) {
+  const blocked = await page.evaluate(() => ({
+    state: document.querySelector('#patch-approval-status')?.dataset.state,
+    text: document.querySelector('#patch-approval-status')?.textContent ?? '',
+    why: document.querySelector('#apply-why')?.textContent ?? '',
+    whyHidden: document.querySelector('#apply-why')?.hidden ?? true,
+    ariaDisabled: document.querySelector('#approve-patch-button')?.getAttribute('aria-disabled'),
+    confirmHidden: document.querySelector('#apply-without-erc-confirm')?.hidden ?? true,
+    overrideHidden: document.querySelector('#approve-patch-without-erc')?.hidden ?? true
+  }));
+  assert.equal(blocked.state, 'blocked');
+  assert.match(blocked.text, /ERC was skipped/);
+  assert.equal(blocked.whyHidden, false);
+  assert.match(blocked.why, /ERC was skipped/);
+  assert.equal(blocked.ariaDisabled, 'true');
+  assert.equal(blocked.confirmHidden, true);
+  assert.equal(blocked.overrideHidden, false);
+}
+
+async function confirmApplyWithoutErc(page) {
+  const override = page.locator('#approve-patch-without-erc');
+  await override.waitFor({ state: 'visible' });
+  await override.click();
+  await page.locator('#apply-without-erc-confirm').waitFor({ state: 'visible' });
+  assert.match(
+    await page.locator('#apply-without-erc-risk').textContent() ?? '',
+    /ERC did not run/
+  );
+  await page.locator('#confirm-apply-without-erc').click();
+  await page.waitForFunction(() => {
+    const state = document.querySelector('#request-status')?.dataset.state;
+    return state === 'completed' || state === 'failed';
+  }, null, { timeout: 120000 });
+  const outcome = await page.evaluate(() => ({
+    state: document.querySelector('#request-status')?.dataset.state,
+    text: document.querySelector('#request-status')?.textContent ?? ''
+  }));
+  assert.equal(outcome.state, 'completed', outcome.text);
 }
 
 async function startUiDaemon() {

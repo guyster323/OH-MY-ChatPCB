@@ -666,7 +666,8 @@ function renderProjectRequest(result) {
   renderReview(result.review);
   renderArtifacts(result.files);
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
-  const validationFailed = result.validation?.ok === false;
+  // A skipped candidate keeps validation.ok false. Once the daemon applied it, the request succeeded.
+  const validationFailed = result.applied !== true && result.validation?.ok === false;
   const requestFailed = result.rolledBack || validationFailed;
   const completedDetail = result.operation === 'patched' ? t('request.completed-updated') : t('request.completed-generated');
   const summary = result.rolledBack
@@ -686,7 +687,7 @@ function renderProjectRequest(result) {
   appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
 
   const projectFile = findProjectFile(result.files);
-  const successfulUpdate = !result.rolledBack && result.validation?.ok !== false;
+  const successfulUpdate = result.applied === true || (!result.rolledBack && result.validation?.ok !== false);
   if (!successfulUpdate) return;
   if (projectFile) {
     kiCadLinkCardEl.hidden = false;
