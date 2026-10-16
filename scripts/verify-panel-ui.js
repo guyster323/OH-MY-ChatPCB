@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
+import { findChrome } from './lib/find-chrome.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -36,6 +37,11 @@ let inspectGeneratedProject = false;
 const DEFAULT_VERIFY_UI_TIMEOUT_MS = 120000;
 
 async function main() {
+  // Supported hook so tests can prove this process reached main without a browser.
+  if (process.env.CHATPCB_VERIFY_UI_DRY_RUN === '1') {
+    console.log('chatpcb-verify-ui-dry-run');
+    return;
+  }
   const requestTimeoutMs = resolveVerifyUiTimeoutMs();
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
   const staticServer = await startStaticServer(panelRoot);
@@ -535,30 +541,14 @@ async function fakeProviderTranscript({ input }) {
 }
 
 async function launchBrowser() {
-  const executablePath = await findBrowserExecutable();
-  return chromium.launch({ headless: process.env.CHATPCB_UI_HEADLESS !== '0', executablePath });
-}
-
-async function findBrowserExecutable() {
-  const candidates = [
-    process.env.CHATPCB_BROWSER_PATH,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA ?? '', 'Google\\Chrome\\Application\\chrome.exe'),
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft\\Edge\\Application\\msedge.exe')
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Keep looking; Playwright can use its bundled browser if no system browser is found.
-    }
+  const found = await findChrome();
+  if (!found.path) {
+    throw new Error(found.reason);
   }
-  return undefined;
+  return chromium.launch({
+    headless: process.env.CHATPCB_UI_HEADLESS !== '0',
+    executablePath: found.path
+  });
 }
 
 async function startStaticServer(rootDir) {
@@ -666,7 +656,13 @@ function parseTimeoutMs(raw, label) {
 function isCliEntry() {
   const entry = process.argv[1];
   if (!entry) return false;
-  return path.resolve(entry) === fileURLToPath(import.meta.url);
+  // argv[1] keeps the path used to launch node, including a symlink. The module
+  // URL is the real file. Compare canonical paths so a symlink still runs main.
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
 }
 
 if (isCliEntry()) {

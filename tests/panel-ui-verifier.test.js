@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { constants } from 'node:fs';
-import { access, readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
+import { findChrome } from '../scripts/lib/find-chrome.js';
 import { resolveVerifyUiTimeoutMs, waitForCompletedOrFailFast } from '../scripts/verify-panel-ui.js';
-
-const chromePath = '/usr/bin/google-chrome';
 
 test('panel browser UI verification script is exposed through npm', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
@@ -16,6 +18,26 @@ test('panel browser UI verification script is exposed through npm', async () => 
     packageJson.scripts['verify:ui'],
     'node ./scripts/verify-panel-ui.js'
   );
+});
+
+test('verify UI script reaches main when invoked through a symlink', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'chatpcb-verify-ui-symlink-'));
+  const linkPath = path.join(dir, 'verify-panel-ui.js');
+  const scriptPath = fileURLToPath(new URL('../scripts/verify-panel-ui.js', import.meta.url));
+
+  try {
+    await symlink(scriptPath, linkPath);
+    const result = spawnSync(process.execPath, [linkPath], {
+      encoding: 'utf8',
+      env: { ...process.env, CHATPCB_VERIFY_UI_DRY_RUN: '1' },
+      timeout: 15_000
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    assert.equal(result.stdout, 'chatpcb-verify-ui-dry-run\n');
+  } finally {
+    await rm(dir, { force: true, recursive: true });
+  }
 });
 
 test('verify UI wait timeout keeps 120000 unless env or --timeout-ms overrides it', () => {
@@ -161,15 +183,14 @@ function statusDocument({ state, statusText, extra = '' }) {
 }
 
 async function launchChrome(t) {
-  try {
-    await access(chromePath, constants.X_OK);
-  } catch {
-    t.skip(`${chromePath} is not available`);
+  const found = await findChrome();
+  if (!found.path) {
+    t.skip(found.reason);
     return null;
   }
   return chromium.launch({
     headless: true,
-    executablePath: chromePath,
+    executablePath: found.path,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   });
 }
