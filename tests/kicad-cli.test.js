@@ -412,7 +412,9 @@ test('flatpak detection uses an explicit signal and does not sniff path or basen
   }
 });
 
-test('runKicadCli drops flatpak KiCad directory env when KICAD_CLI_FLATPAK=1', async () => {
+test('runKicadCli drops flatpak KiCad directory env when KICAD_CLI_FLATPAK=1', {
+  skip: process.platform === 'win32' ? 'flatpak and /bin/sh scripts are POSIX-only' : false
+}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-cli-run-'));
   const scriptPath = path.join(root, 'kicad-cli');
   try {
