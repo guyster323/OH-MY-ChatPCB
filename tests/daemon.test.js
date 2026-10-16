@@ -10,7 +10,7 @@ import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registr
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-import { saveCircuitConversation } from '../src/runtime/request-conversation.js';
+import { CONVERSATION_FILE, saveCircuitConversation } from '../src/runtime/request-conversation.js';
 import { saveCredentials } from '../src/runtime/auth/chatgpt-auth.js';
 import { isolateHome } from './isolate-home.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
@@ -2240,6 +2240,89 @@ test('chatgpt tool call records source.provider and keeps the profile parts list
   }
 });
 
+const DISCRETE_LED_PROMPT = 'LED 하나와 330옴 저항을 5V에 연결하는 간단한 회로 만들어줘';
+
+function assertDiscreteLedEvidence(result) {
+  const components = result.components ?? [];
+  const manifestParts = result.manifest?.parts ?? [];
+  assert.ok(components.length > 0, 'preview parts list is empty');
+  assert.ok(manifestParts.length > 0, 'preview manifest has no part evidence');
+  const evidence = [...components, ...manifestParts];
+  assert.ok(evidence.some((part) => part.libId === 'Device:LED'), JSON.stringify(evidence));
+  assert.ok(
+    evidence.some((part) => part.libId === 'Device:R' && /330/.test(String(part.value ?? ''))),
+    JSON.stringify(evidence)
+  );
+  assert.ok(
+    evidence.some((part) => /(?:\+)?5V/.test(`${part.value ?? ''} ${part.libId ?? ''}`) && /power:|Connector/.test(part.libId ?? '')),
+    JSON.stringify(evidence)
+  );
+  assert.match(result.diff ?? '', /Device:LED/);
+  assert.match(result.diff ?? '', /330/);
+}
+
+test('chatgpt schematic.generate of a discrete LED prompt keeps LED, 330 ohm, and 5V part evidence', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-chatgpt-led-'));
+  const services = await transactionServices({ validateProjectImpl: passingErc });
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  const restoreFetch = stubChatGptFetch(JSON.stringify({
+    type: 'tool.call',
+    payload: {
+      id: 'call_led',
+      name: 'schematic.generate',
+      args: { prompt: DISCRETE_LED_PROMPT }
+    }
+  }));
+  try {
+    await withChatGptHome(async () => {
+      const created = await dispatchToolCall({
+        name: 'project.create',
+        args: { workspaceRoot, projectName: 'LED Test' }
+      });
+      const result = await dispatchToolCall({
+        id: 'call_chatgpt_led',
+        name: 'project.request',
+        args: {
+          provider: 'chatgpt',
+          projectDir: created.result.projectDir,
+          prompt: DISCRETE_LED_PROMPT
+        }
+      }, services);
+      assert.equal(result.ok, true, result.error?.message);
+      assert.equal(result.result.requiresApproval, true);
+      assert.equal(result.result.source.provider, 'chatgpt');
+      assert.equal(result.result.source.via, 'provider');
+      assertDiscreteLedEvidence(result.result);
+      const saved = JSON.parse(await readFile(path.join(created.result.projectDir, CONVERSATION_FILE), 'utf8'));
+      assert.deepEqual(saved.lastSource, { provider: 'chatgpt', via: 'provider' });
+    });
+  } finally {
+    restoreKicadLibraryEnv(previous);
+    restoreFetch();
+    services.patchApprovalRegistry.disposeAll();
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('native schematic.generate of the same discrete LED prompt keeps LED, 330 ohm, and 5V part evidence', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-native-led-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  try {
+    const result = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: DISCRETE_LED_PROMPT }
+    }, { validateProjectImpl: passingErc });
+    assert.equal(result.ok, true, result.error?.message);
+    assert.equal(result.result.source.via, 'native-fallback');
+    assert.equal(result.result.source.provider, null);
+    assertDiscreteLedEvidence(result.result);
+  } finally {
+    restoreKicadLibraryEnv(previous);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('chatgpt native fallback records provider null and still drafts profile parts', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-chatgpt-fallback-'));
   const services = await transactionServices({ validateProjectImpl: passingErc });
@@ -2264,6 +2347,8 @@ test('chatgpt native fallback records provider null and still drafts profile par
       assert.equal(result.result.source.provider, null);
       assert.equal(result.result.source.via, 'native-fallback');
       assertProfileParts(result.result);
+      const saved = JSON.parse(await readFile(path.join(created.result.projectDir, CONVERSATION_FILE), 'utf8'));
+      assert.deepEqual(saved.lastSource, { provider: null, via: 'native-fallback' });
       const decision = logs.lines.filter((line) => line.includes('provider chatgpt:'));
       assert.deepEqual(decision, ['provider chatgpt: fell back to native: provider returned no tool call']);
     });

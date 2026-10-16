@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
-    <link rel="stylesheet" href="./styles.css?v=20261016-chatgpt-wording" />
+    <link rel="stylesheet" href="./styles.css?v=20261016-discrete-source" />
   </head>
   <body>
     <main class="shell">
@@ -131,6 +131,8 @@
               <p id="patch-approval-lead">적용을 누르기 전에는 스키매틱 파일이 바뀌지 않습니다.</p>
             </div>
           </div>
+          <p id="patch-approval-source" class="patch-source" hidden></p>
+          <ul id="patch-approval-parts" class="patch-parts" hidden></ul>
           <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
           <details id="patch-approval-technical-details" hidden>
             <summary>Technical details</summary>
@@ -220,6 +222,6 @@
       </section>
     </dialog>
 
-    <script src="./panel.js?v=20261016-chatgpt-reopen-error"></script>
+    <script src="./panel.js?v=20261016-discrete-source"></script>
   </body>
 </html>

@@ -38,5 +38,7 @@
   "connection.daemon.open": "데몬 연결됨",
   "connection.daemon.closed": "데몬 연결 끊김",
   "connection.daemon.error": "데몬 연결 오류",
-  "approval.no-manifest": "부품 근거(manifest) 없이 승인 가능: 부품 목록을 확인하세요"
+  "approval.no-manifest": "부품 근거(manifest) 없이 승인 가능: 부품 목록을 확인하세요",
+  "source.chatgpt": "ChatGPT로 생성",
+  "source.native": "내장 생성기"
 }

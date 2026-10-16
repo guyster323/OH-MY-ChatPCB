@@ -19,7 +19,7 @@ import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
-import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
+import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation } from './request-conversation.js';
 import { createChatGPTAuthManager, maskSecrets } from './auth/chatgpt-auth.js';
 
 function emitProgress(ctx, payload) {
@@ -514,6 +514,13 @@ async function requestProject(call, ctx) {
         sprite: 'preview',
         text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
       });
+    }
+    if (conversation && preview?.source) {
+      conversation.lastSource = {
+        provider: preview.source.provider ?? null,
+        via: preview.source.via ?? null
+      };
+      await saveCircuitConversation(projectDir, conversation);
     }
     return {
       ...preview,

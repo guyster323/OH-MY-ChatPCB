@@ -195,6 +195,8 @@ const inspectionArtifactCountEl = document.querySelector('#inspection-artifact-c
 const inspectionErcEl = document.querySelector('#inspection-erc');
 const inspectionDrcEl = document.querySelector('#inspection-drc');
 const patchApprovalCardEl = document.querySelector('#patch-approval-card');
+const patchApprovalSourceEl = document.querySelector('#patch-approval-source');
+const patchApprovalPartsEl = document.querySelector('#patch-approval-parts');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
 const patchApprovalTechnicalDetailsEl = document.querySelector('#patch-approval-technical-details');
 const patchApprovalTechnicalDetailEl = document.querySelector('#patch-approval-technical-detail');
@@ -277,6 +279,7 @@ document.addEventListener('visibilitychange', () => {
 
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
+  window.__daemonSocket = socket;
   socket.addEventListener('open', () => {
     setDaemonConnectionState('open');
     clearPatchApproval();
@@ -368,6 +371,12 @@ function refreshProviderStatus() {
   const id = `provider_status_${Date.now()}`;
   pendingCalls.set(id, 'provider.status');
   sendToolCall({ id, name: 'provider.status', args: { provider: providerEl.value } });
+}
+
+function refreshProviderStatusForAuth(previous, next) {
+  if (next !== 'signed_in' && next !== 'signed_out') return;
+  if (previous === next) return;
+  refreshProviderStatus();
 }
 
 function restoreProviderSelection() {
@@ -792,6 +801,47 @@ function renderInspectionValidation(label, result) {
     : `DRC ${summary.violationCount ?? 0}/${summary.unconnectedCount ?? 0}`;
 }
 
+function draftSourceLabel(source) {
+  if (!source) return '';
+  if (source.via === 'provider' && source.provider === 'chatgpt') return t('source.chatgpt');
+  if (source.via === 'native-fallback') return t('source.native');
+  return '';
+}
+
+function draftParts(preview) {
+  const components = Array.isArray(preview?.components) ? preview.components : [];
+  if (components.length > 0) return components;
+  const manifestParts = preview?.manifest?.parts;
+  return Array.isArray(manifestParts) ? manifestParts : [];
+}
+
+function renderDraftEvidence(preview) {
+  if (!patchApprovalSourceEl || !patchApprovalPartsEl) return;
+  const source = preview?.source ?? preview?.conversation?.lastSource ?? null;
+  const label = draftSourceLabel(source);
+  patchApprovalSourceEl.textContent = label;
+  patchApprovalSourceEl.hidden = label.length === 0;
+  const parts = draftParts(preview);
+  patchApprovalPartsEl.replaceChildren();
+  for (const part of parts) {
+    const item = document.createElement('li');
+    item.textContent = `${part.ref ?? ''} · ${part.value ?? ''} · ${part.libId ?? ''}`;
+    patchApprovalPartsEl.append(item);
+  }
+  patchApprovalPartsEl.hidden = parts.length === 0;
+}
+
+function clearDraftEvidence() {
+  if (patchApprovalSourceEl) {
+    patchApprovalSourceEl.textContent = '';
+    patchApprovalSourceEl.hidden = true;
+  }
+  if (patchApprovalPartsEl) {
+    patchApprovalPartsEl.replaceChildren();
+    patchApprovalPartsEl.hidden = true;
+  }
+}
+
 function setPatchApproval(preview) {
   clearPatchApproval();
   patchApprovalState = { patchId: preview.patchId, expiresAt: preview.expiresAt, timeout: null };
@@ -803,6 +853,7 @@ function setPatchApproval(preview) {
     }, delay);
   }
   renderPatchApproval();
+  renderDraftEvidence(preview);
 }
 
 function setPatchApprovalTechnicalDetail(text) {
@@ -817,6 +868,7 @@ function clearPatchApproval(message = 'No patch preview active.') {
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
   patchApprovalStatusEl.dataset.state = 'idle';
   patchApprovalStatusEl.textContent = message;
+  clearDraftEvidence();
   setPatchApprovalTechnicalDetail('');
   approvePatchButtonEl.disabled = true;
   cancelPatchButtonEl.disabled = true;
@@ -1431,6 +1483,7 @@ function applyChatGPTAuthStatus(result) {
     showChatGPTAuthExpired();
     return;
   }
+  const previousAuthState = chatgptAuthState.state;
   stopChatGPTAuthPolling();
   chatgptAuthState = {
     state: result.state || 'signed_out',
@@ -1443,14 +1496,17 @@ function applyChatGPTAuthStatus(result) {
   };
   renderChatGPTAuth();
   if (result.state === 'error' && result.code) updateLiveRegion({ state: 'error', code: result.code });
+  refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
 }
 
 function handleChatGPTAuthChanged(payload) {
+  const previousAuthState = chatgptAuthState.state;
   chatgptAuthState = { ...chatgptAuthState, ...payload };
   if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
   else stopChatGPTAuthPolling();
   renderChatGPTAuth();
   updateLiveRegion(payload);
+  refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
 }
 
 function renderChatGPTAuth() {

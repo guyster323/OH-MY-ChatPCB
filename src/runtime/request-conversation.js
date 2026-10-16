@@ -204,6 +204,7 @@ const ANSWER_LABELS = {
 };
 
 const SPEC_GROUPS = [
+  { id: 'parts', labelKo: '부품', labelEn: 'Parts', keys: ['discrete-led.led', 'discrete-led.resistor', 'discrete-led.supply'] },
   { id: 'power', labelKo: '전원', labelEn: 'Power', keys: ['power-architecture.railStrategy', 'isolated-dcdc.topology', 'isolated-dcdc.isolation'] },
   { id: 'battery', labelKo: '배터리', labelEn: 'Battery', keys: ['energy-storage.pack'] },
   { id: 'mcu', labelKo: 'MCU', labelEn: 'MCU', keys: ['mcu-board.mcuPart'] },
