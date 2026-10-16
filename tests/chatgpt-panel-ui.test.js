@@ -1,5 +1,6 @@
 import './setup/isolate-home.mjs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -85,7 +86,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
     window.__chatgptSignedIn = config.signedIn === true;
     if (config.storedProvider) localStorage.setItem('chatpcb.provider', config.storedProvider);
     else if (config.rememberChatGPT) localStorage.setItem('chatpcb.provider', 'chatgpt');
-    if (config.switchOfferDone) localStorage.setItem('chatpcb.chatgpt-switch-offered', '1');
+    if (config.switchOfferKey) localStorage.setItem(config.switchOfferKey, '1');
     if (config.watchRawKeys) {
       window.__rawI18nSeen = [];
       const note = () => {
@@ -196,7 +197,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
     signedIn: signedIn === true,
     rememberChatGPT: rememberChatGPT === true,
     storedProvider: storedProvider || '',
-    switchOfferDone: switchOfferDone === true,
+    switchOfferKey: switchOfferDone ? switchOfferKey('ada@ex.com') : '',
     watchRawKeys: watchRawKeys === true,
     approvalFlow: approvalFlow === true
   });
@@ -211,6 +212,12 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
 
 const waiting = { state: 'waiting', attemptId: 'attempt-1', authUrl: 'https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client&x=1' };
 const signedInAccount = { state: 'signed_in', account: { email: 'ada@ex.com', name: 'Ada' }, plan: 'plus' };
+const SWITCH_OFFER_HASH_HEX = 16;
+
+function switchOfferKey(identity) {
+  const hash = createHash('sha256').update(identity).digest('hex').slice(0, SWITCH_OFFER_HASH_HEX);
+  return `chatpcb.chatgpt-switch-offered.${hash}`;
+}
 
 async function emitChatGPTAuth(page, payload, id = 'auth_changed') {
   await page.evaluate(({ payload: next, id: eventId }) => {
@@ -750,7 +757,8 @@ test('first sign-in offers a switch that selects and remembers ChatGPT', async (
     await page.locator('#chatgpt-switch-offer-accept').click();
     assert.equal(await page.locator('#provider').inputValue(), 'chatgpt');
     assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.provider')), 'chatgpt');
-    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.chatgpt-switch-offered')), '1');
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), switchOfferKey('ada@ex.com')), '1');
+    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.chatgpt-switch-offered')), null);
     assert.equal(await offer.isHidden(), true);
     await page.reload();
     assert.equal(await page.locator('#provider').inputValue(), 'chatgpt');
@@ -774,7 +782,8 @@ test('not now keeps the provider and the switch offer does not return', async (t
     await page.locator('#chatgpt-switch-offer-dismiss').click();
     assert.equal(await page.locator('#provider').inputValue(), 'grok');
     assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.provider')), 'grok');
-    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.chatgpt-switch-offered')), '1');
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), switchOfferKey('ada@ex.com')), '1');
+    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.chatgpt-switch-offered')), null);
     assert.equal(await page.locator('#chatgpt-switch-offer').isHidden(), true);
     await page.reload();
     await waitForSwitchOfferDecision(page, 'hidden');
@@ -808,6 +817,71 @@ test('loading already signed in after the offer does not show it', async (t) => 
     assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.provider')), 'claude');
     assert.equal(await page.locator('#chatgpt-switch-offer').isHidden(), true);
     assert.equal((await page.locator('#chatgpt-switch-offer-text').textContent()) ?? '', '');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a different ChatGPT account is offered the switch once', async (t) => {
+  const opened = await openChatGPTWaiting(t, { locale: 'en-US', startResult: waiting, leaveProvider: true });
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  const ada = { state: 'signed_in', account: { email: 'ada@ex.com', name: 'Ada' }, plan: 'plus' };
+  const bob = { state: 'signed_in', account: { email: 'bob@ex.com', name: 'Bob' }, plan: 'plus' };
+  const cara = { state: 'signed_in', account: { sub: 'user_cara', email: 'ada@ex.com', name: 'Cara' }, plan: 'plus' };
+  try {
+    await page.selectOption('#provider', 'grok');
+    await emitChatGPTAuth(page, ada, 'auth_changed_ada');
+    await page.waitForFunction(() => {
+      const offer = document.querySelector('#chatgpt-switch-offer');
+      return offer?.dataset.decision === 'shown' && offer.hidden === false;
+    });
+    await page.locator('#chatgpt-switch-offer-dismiss').click();
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), switchOfferKey('ada@ex.com')), '1');
+    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.chatgpt-switch-offered')), null);
+    assert.equal(await page.locator('#provider').inputValue(), 'grok');
+
+    await emitChatGPTAuth(page, bob, 'auth_changed_bob');
+    await page.waitForFunction(() => {
+      const offer = document.querySelector('#chatgpt-switch-offer');
+      return offer?.dataset.decision === 'shown' && offer.hidden === false;
+    }, null, { timeout: 4000 });
+    await page.locator('#chatgpt-switch-offer-dismiss').click();
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), switchOfferKey('bob@ex.com')), '1');
+    await emitChatGPTAuth(page, ada, 'auth_changed_ada_again');
+    await waitForSwitchOfferDecision(page, 'hidden');
+    await emitChatGPTAuth(page, bob, 'auth_changed_bob_again');
+    await waitForSwitchOfferDecision(page, 'hidden');
+    assert.equal(await page.locator('#provider').inputValue(), 'grok');
+
+    const beforeCara = await page.evaluate(() => Object.keys(localStorage));
+    await emitChatGPTAuth(page, cara, 'auth_changed_cara');
+    await page.waitForFunction(() => {
+      const offer = document.querySelector('#chatgpt-switch-offer');
+      return offer?.dataset.decision === 'shown' && offer.hidden === false;
+    }, null, { timeout: 4000 });
+    await page.locator('#chatgpt-switch-offer-dismiss').click();
+    const added = await page.evaluate((previous) => (
+      Object.keys(localStorage).filter((key) => !previous.includes(key))
+    ), beforeCara);
+    assert.deepEqual(added, [switchOfferKey('user_cara')]);
+    await emitChatGPTAuth(page, cara, 'auth_changed_cara_again');
+    await waitForSwitchOfferDecision(page, 'hidden');
+
+    const stored = await page.evaluate(() => {
+      const entries = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        entries.push([key, localStorage.getItem(key)]);
+      }
+      return entries;
+    });
+    const flat = JSON.stringify(stored);
+    assert.equal(flat.includes('ada@ex.com'), false);
+    assert.equal(flat.includes('bob@ex.com'), false);
+    assert.equal(flat.includes('user_cara'), false);
+    assert.equal(await page.locator('#provider').inputValue(), 'grok');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();

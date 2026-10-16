@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, createVerify, randomBytes, randomUUID } from 'node:crypto';
-import { chmod, link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
-import { existsSync, realpathSync } from 'node:fs';
+import { chmod, copyFile, link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { constants as fsConstants, existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve as resolvePath } from 'node:path';
 import http from 'node:http';
 import { homedir } from 'node:os';
@@ -48,6 +48,10 @@ const CLIENT_ID_ENV = 'CHATPCB_CHATGPT_CLIENT_ID';
 const MODEL_ENV = 'CHATPCB_CHATGPT_MODEL';
 const RESPONSES_TIMEOUT_ENV = 'CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS';
 const HOST_ID_FILE = 'chatgpt-host-id.txt';
+// Written into the active config directory after one migration attempt, and
+// after sign-out, credential deletion, or an invalid_client cleanup. Presence
+// means legacy files must not be copied again.
+const MIGRATION_MARKER = '.migrated-from-legacy';
 // RFC 4122 UUIDv4 URN. The URN and the hex digits are case-insensitive.
 const UUID_HOST_ID = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // RFC 9278: urn:ietf:params:oauth:jwk-thumbprint:<hash-alg>:<unpadded base64url>
@@ -140,7 +144,9 @@ function absoluteEnvPath(value) {
 // $XDG_CONFIG_HOME/chatpcb or ~/.config/chatpcb.
 // When XDG_CONFIG_HOME is an absolute path other than ~/.config, credential
 // and host-id files that exist only under ~/.config/chatpcb are copied across
-// by migrateLegacyChatGPTConfig. Files already in the XDG directory stay put.
+// once by migrateLegacyChatGPTConfig. A marker in the new directory stops a
+// later copy, including after those files are deleted. Files already in the
+// XDG directory stay put. Symlinks under the legacy directory are not followed.
 export function resolveChatGPTConfigDir({
   platform = process.platform,
   env = process.env,
@@ -204,9 +210,9 @@ function sameConfigDir(left, right) {
   }
 }
 
-async function pathExists(filePath) {
+async function pathExists(filePath, fsImpl) {
   try {
-    await lstat(filePath);
+    await (fsImpl?.lstat ?? lstat)(filePath);
     return true;
   } catch (error) {
     if (error.code === 'ENOENT') return false;
@@ -214,63 +220,143 @@ async function pathExists(filePath) {
   }
 }
 
-// Write the full file under a temporary name in the destination directory,
-// then link it into place. link fails if the name already exists, so a race
-// or a second call cannot replace a credential or host id.
-async function copyOwnedFileIfMissing(src, dest) {
-  let bytes;
+function isSymlink(statResult) {
+  return Boolean(statResult && typeof statResult.isSymbolicLink === 'function' && statResult.isSymbolicLink());
+}
+
+function isRegularFile(statResult) {
+  return Boolean(statResult && typeof statResult.isFile === 'function' && statResult.isFile());
+}
+
+// Publish tempPath as dest without replacing an existing name. link is atomic
+// on the same filesystem and fails with EEXIST when dest is already there.
+// Filesystems that cannot hard-link fall back to an exclusive copy.
+async function publishWithoutOverwrite(tempPath, dest, fsImpl) {
+  const linkFile = fsImpl?.link ?? link;
+  const copy = fsImpl?.copyFile ?? copyFile;
   try {
-    bytes = await readFile(src);
+    await linkFile(tempPath, dest);
+    return true;
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    if (error.code !== 'EPERM' && error.code !== 'EXDEV' && error.code !== 'ENOTSUP') throw error;
+  }
+  if (await pathExists(dest, fsImpl)) return false;
+  try {
+    await copy(tempPath, dest, fsConstants.COPYFILE_EXCL);
+    return true;
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
+// Copy into a temporary name in the destination directory, tighten it to
+// 0600, then publish without replacing a file that appeared in between.
+async function copyOwnedFileIfMissing(src, dest, fsImpl) {
+  const copy = fsImpl?.copyFile ?? copyFile;
+  const changeMode = fsImpl?.chmod ?? chmod;
+  const remove = fsImpl?.unlink ?? unlink;
+  const tempPath = uniqueTempPath(dest);
+  try {
+    await copy(src, tempPath);
+    if (process.platform !== 'win32') await changeMode(tempPath, 0o600);
+    const published = await publishWithoutOverwrite(tempPath, dest, fsImpl);
+    if (!published) return false;
   } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'EISDIR') return false;
     throw error;
+  } finally {
+    await remove(tempPath).catch(() => {});
   }
+  if (process.platform !== 'win32') await changeMode(dest, 0o600).catch(() => {});
+  return true;
+}
+
+async function writeMigrationMarker(destDir, fsImpl) {
+  const dest = join(destDir, MIGRATION_MARKER);
+  if (await pathExists(dest, fsImpl)) return;
+  const makeDir = fsImpl?.mkdir ?? mkdir;
+  const changeMode = fsImpl?.chmod ?? chmod;
+  const write = fsImpl?.writeFile ?? writeFile;
+  const remove = fsImpl?.unlink ?? unlink;
+  await makeDir(destDir, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') await changeMode(destDir, 0o700).catch(() => {});
+  if (await pathExists(dest, fsImpl)) return;
   const tempPath = uniqueTempPath(dest);
   try {
-    await writeFile(tempPath, bytes, { mode: 0o600 });
-    if (process.platform !== 'win32') await chmod(tempPath, 0o600);
-    try {
-      await link(tempPath, dest);
-    } catch (error) {
-      if (error.code === 'EEXIST') return false;
-      throw error;
-    }
+    await write(tempPath, '1\n', { mode: 0o600 });
+    if (process.platform !== 'win32') await changeMode(tempPath, 0o600);
+    const published = await publishWithoutOverwrite(tempPath, dest, fsImpl);
+    if (!published) return;
   } finally {
-    await unlink(tempPath).catch(() => {});
+    await remove(tempPath).catch(() => {});
   }
-  if (process.platform !== 'win32') await chmod(dest, 0o600).catch(() => {});
-  return true;
+  if (process.platform !== 'win32') await changeMode(dest, 0o600).catch(() => {});
+}
+
+// True only when a later load could copy ~/.config/chatpcb into a different
+// absolute XDG config directory. Sign-out, deletion, and invalid_client write
+// the marker in that case so the cleanup cannot be undone by migration.
+function legacyMigrationApplies({
+  platform = process.platform,
+  env = process.env,
+  home
+} = {}) {
+  if (platform === 'win32' || platform === 'darwin') return false;
+  const xdg = absoluteEnvPath(env.XDG_CONFIG_HOME);
+  if (!xdg) return false;
+  const homeDir = resolvePath(home ?? homedir());
+  return !sameConfigDir(xdg, join(homeDir, '.config'));
+}
+
+async function ensureMigrationMarker() {
+  if (!legacyMigrationApplies()) return;
+  await writeMigrationMarker(getConfigDir());
 }
 
 /**
  * Copy credential and host-id files from ~/.config/chatpcb into the active
  * config directory when XDG_CONFIG_HOME is absolute and is not ~/.config.
- * A file that already exists at the destination is never replaced.
- * Copied files are owner-only (0600) and the destination directory is
- * owner-only (0700). macOS and Windows ignore XDG_CONFIG_HOME. A relative
- * or empty XDG_CONFIG_HOME is ignored. `home` and `env` override the process
- * environment so tests can inject a temporary home.
+ * The attempt runs once. Whatever it copies or skips, it leaves
+ * `.migrated-from-legacy` (0600) in the new directory and later calls stop.
+ * A symlink legacy directory, and any symlinked file inside a real legacy
+ * directory, is skipped rather than followed. A file that already exists at
+ * the destination is never replaced. Copied files are owner-only (0600) and
+ * the destination directory is owner-only (0700). macOS and Windows ignore
+ * XDG_CONFIG_HOME. A relative or empty XDG_CONFIG_HOME is ignored. `home`,
+ * `env`, and `fsImpl` override the process environment so tests can inject a
+ * temporary home or a filesystem that rejects hard links.
  *
  * @returns {Promise<string[]>} basenames copied on this call
  */
 export async function migrateLegacyChatGPTConfig({
   platform = process.platform,
   env = process.env,
-  home
+  home,
+  fsImpl
 } = {}) {
-  if (platform === 'win32' || platform === 'darwin') return [];
-  const xdg = absoluteEnvPath(env.XDG_CONFIG_HOME);
-  if (!xdg) return [];
+  if (!legacyMigrationApplies({ platform, env, home })) return [];
   const homeDir = resolvePath(home ?? homedir());
-  const legacyRoot = join(homeDir, '.config');
-  if (sameConfigDir(xdg, legacyRoot)) return [];
-  const legacyDir = join(legacyRoot, 'chatpcb');
+  const legacyDir = join(homeDir, '.config', 'chatpcb');
   const destDir = resolveChatGPTConfigDir({ platform, env, home: homeDir });
   if (sameConfigDir(destDir, legacyDir)) return [];
+  if (await pathExists(join(destDir, MIGRATION_MARKER), fsImpl)) return [];
+
+  const readDir = fsImpl?.readdir ?? readdir;
+  const statPath = fsImpl?.lstat ?? lstat;
+  let legacyStat;
+  try {
+    legacyStat = await statPath(legacyDir);
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  if (isSymlink(legacyStat) || !legacyStat.isDirectory?.()) return [];
 
   let names;
   try {
-    names = await readdir(legacyDir);
+    names = await readDir(legacyDir);
   } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return [];
     throw error;
@@ -281,15 +367,25 @@ export async function migrateLegacyChatGPTConfig({
   const copied = [];
   let prepared = false;
   for (const name of wanted) {
+    const src = join(legacyDir, name);
+    let srcStat;
+    try {
+      srcStat = await statPath(src);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (isSymlink(srcStat) || !isRegularFile(srcStat)) continue;
     const dest = join(destDir, name);
-    if (await pathExists(dest)) continue;
+    if (await pathExists(dest, fsImpl)) continue;
     if (!prepared) {
-      await mkdir(destDir, { recursive: true, mode: 0o700 });
-      if (process.platform !== 'win32') await chmod(destDir, 0o700).catch(() => {});
+      await (fsImpl?.mkdir ?? mkdir)(destDir, { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') await (fsImpl?.chmod ?? chmod)(destDir, 0o700).catch(() => {});
       prepared = true;
     }
-    if (await copyOwnedFileIfMissing(join(legacyDir, name), dest)) copied.push(name);
+    if (await copyOwnedFileIfMissing(src, dest, fsImpl)) copied.push(name);
   }
+  await writeMigrationMarker(destDir, fsImpl);
   if (copied.length > 0) {
     logAuth(`Copied ChatGPT config (${copied.join(', ')}) from ${legacyDir} to ${destDir}`);
   }
@@ -722,7 +818,10 @@ async function unlinkClientCredentials(clientId) {
 async function dropIssuedClient(clientId) {
   if (!isReusableClientId(clientId)) return;
   bumpSessionGeneration();
-  await withCredentialWrite(() => unlinkClientCredentials(clientId));
+  await withCredentialWrite(async () => {
+    await ensureMigrationMarker();
+    await unlinkClientCredentials(clientId);
+  });
 }
 
 async function dropRegistrationsForNewHost(newHostId) {
@@ -780,6 +879,7 @@ function retainRegistration(creds) {
 
 async function clearStoredSession() {
   await withCredentialWrite(async () => {
+    await ensureMigrationMarker();
     const configDir = getConfigDir();
     if (!existsSync(configDir)) return;
     const files = await readdir(configDir);
@@ -805,7 +905,10 @@ async function clearStoredSession() {
 }
 
 export async function deleteCredentials() {
-  return withCredentialWrite(unlinkAllCredentialFiles);
+  return withCredentialWrite(async () => {
+    await ensureMigrationMarker();
+    await unlinkAllCredentialFiles();
+  });
 }
 
 function combineSignals(signals) {
@@ -1982,7 +2085,7 @@ export function createChatGPTAuthManager({
     const plan = extractPlan(creds);
     return {
       state: 'signed_in',
-      account: accountFromCredentials(creds),
+      account: accountForPanel(creds),
       plan: plan || undefined
     };
   }
@@ -2049,7 +2152,7 @@ export function createChatGPTAuthManager({
         graceFlows.delete(authFlow);
         emitAuth(emitFn, {
           state: 'signed_in',
-          account: creds.account,
+          account: accountForPanel(creds),
           plan: extractPlan(creds) || undefined,
           attemptId: authFlow.attemptId
         });
@@ -2210,6 +2313,17 @@ export function accountFromCredentials(creds) {
     if (name) stored.name = name;
   }
   return Object.keys(stored).length > 0 ? stored : undefined;
+}
+
+// Auth status sent to the panel. `sub` is preferred over email when the
+// switch-offer record is keyed, and the raw email is not copied into that key.
+function accountForPanel(creds) {
+  const account = accountFromCredentials(creds);
+  const sub = firstString(creds?.subject) || subjectFromIdToken(creds?.id_token);
+  if (!sub) return account;
+  if (!account) return { sub };
+  if (firstString(account.sub)) return account;
+  return { ...account, sub };
 }
 
 async function readChatGPTConfig() {

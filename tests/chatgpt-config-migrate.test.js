@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { constants as fsConstants, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
 import {
+  clearOidcDiscoveryCache,
+  createChatGPTAuthManager,
+  deleteCredentials,
   getOrCreateHostId,
   loadCredentials,
-  migrateLegacyChatGPTConfig
+  migrateLegacyChatGPTConfig,
+  refreshAccessToken,
+  useFallbackAuthEndpoints
 } from '../src/runtime/auth/chatgpt-auth.js';
 
 const HOST_ID = 'urn:uuid:12345678-1234-4234-8234-123456789abc';
 const TOKEN = 'ACCESS-TOKEN-SHOULD-NOT-LOG';
+const MIGRATION_MARKER = '.migrated-from-legacy';
 const ENV_KEYS = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'APPDATA', 'LOCALAPPDATA'];
 
 function delay(ms) {
@@ -66,6 +72,24 @@ async function writeOwned(filePath, body, mode = 0o644) {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, body, { mode });
   if (process.platform !== 'win32') await chmod(filePath, mode);
+}
+
+function skipUnlessXdgMigration(t) {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    t.skip('XDG_CONFIG_HOME applies only off macOS and Windows');
+    return true;
+  }
+  return false;
+}
+
+function useDistinctConfig(home, xdg) {
+  const saved = snapshotEnv();
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  process.env.XDG_CONFIG_HOME = xdg;
+  delete process.env.APPDATA;
+  delete process.env.LOCALAPPDATA;
+  return saved;
 }
 
 describe('legacy ChatGPT config migration', { concurrency: 1 }, () => {
@@ -289,11 +313,13 @@ describe('legacy ChatGPT config migration', { concurrency: 1 }, () => {
           migrateLegacyChatGPTConfig(opts),
           migrateLegacyChatGPTConfig(opts)
         ]);
+        const migrated = ['chatgpt-credentials-oaiapp_TEST.json', 'chatgpt-host-id.txt'];
         const names = (await readdir(dest)).sort();
-        assert.deepEqual(names, ['chatgpt-credentials-oaiapp_TEST.json', 'chatgpt-host-id.txt']);
+        assert.deepEqual(names, [MIGRATION_MARKER, ...migrated].sort());
         assert.equal(await readFile(path.join(dest, 'chatgpt-host-id.txt'), 'utf8'), HOST_ID);
         assert.equal(await readFile(path.join(dest, 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'), body);
-        assert.deepEqual([...new Set([...first, ...second])].sort(), names);
+        assert.equal(await readFile(path.join(dest, MIGRATION_MARKER), 'utf8').then((text) => text.includes(TOKEN)), false);
+        assert.deepEqual([...new Set([...first, ...second])].sort(), migrated);
         assertMode(await modeOf(dest), 0o700);
         assertMode(await modeOf(path.join(dest, 'chatgpt-host-id.txt')), 0o600);
         assert.equal(logs.lines.some((line) => line.includes(TOKEN)), false);
@@ -362,6 +388,326 @@ describe('legacy ChatGPT config migration', { concurrency: 1 }, () => {
       } finally {
         logs.restore();
         restoreEnv(saved);
+      }
+    });
+  });
+
+  test('the first migration still copies, then a removed copy is not migrated again', async () => {
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      const body = JSON.stringify({ client_id: 'oaiapp_old', access_token: 'OLD_AT' });
+      await writeOwned(path.join(legacy, 'chatgpt-credentials-oaiapp_old.json'), body);
+      const logs = captureErrors();
+      try {
+        const copied = await migrateLegacyChatGPTConfig({
+          platform: 'linux',
+          home,
+          env: { XDG_CONFIG_HOME: xdg }
+        });
+        assert.deepEqual(copied, ['chatgpt-credentials-oaiapp_old.json']);
+        assert.equal(await readFile(path.join(dest, 'chatgpt-credentials-oaiapp_old.json'), 'utf8'), body);
+        const marker = path.join(dest, MIGRATION_MARKER);
+        const markerStat = await lstat(marker);
+        assert.equal(markerStat.isSymbolicLink(), false);
+        assert.equal(markerStat.isFile(), true);
+        assertMode(markerStat.mode & 0o777, 0o600);
+        assert.equal((await readdir(dest)).some((name) => name.endsWith('.tmp')), false);
+        await unlink(path.join(dest, 'chatgpt-credentials-oaiapp_old.json'));
+        const again = await migrateLegacyChatGPTConfig({
+          platform: 'linux',
+          home,
+          env: { XDG_CONFIG_HOME: xdg }
+        });
+        assert.deepEqual(again, []);
+        assert.equal(existsSync(path.join(dest, 'chatgpt-credentials-oaiapp_old.json')), false);
+        assert.equal(await readFile(path.join(legacy, 'chatgpt-credentials-oaiapp_old.json'), 'utf8'), body);
+        assert.equal(logs.lines.some((line) => line.includes('OLD_AT')), false);
+      } finally {
+        logs.restore();
+      }
+    });
+  });
+
+  test('deleteCredentials then loadCredentials does not restore legacy credentials', async (t) => {
+    if (skipUnlessXdgMigration(t)) return;
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      const fileName = 'chatgpt-credentials-oaiapp_old.json';
+      const body = JSON.stringify({ client_id: 'oaiapp_old', access_token: 'OLD_AT' });
+      await writeOwned(path.join(legacy, fileName), body);
+      await writeOwned(path.join(dest, fileName), body);
+      const saved = useDistinctConfig(home, xdg);
+      const logs = captureErrors();
+      try {
+        await deleteCredentials();
+        assert.equal(existsSync(path.join(dest, fileName)), false);
+        const marker = await lstat(path.join(dest, MIGRATION_MARKER));
+        assert.equal(marker.isSymbolicLink(), false);
+        assert.equal(marker.isFile(), true);
+        assertMode(marker.mode & 0o777, 0o600);
+        assert.equal(await loadCredentials(), null);
+        assert.equal(existsSync(path.join(dest, fileName)), false);
+        assert.equal(await readFile(path.join(legacy, fileName), 'utf8'), body);
+        assert.equal(logs.lines.some((line) => line.includes('OLD_AT')), false);
+        assert.equal((await readdir(dest)).some((name) => name.endsWith('.tmp')), false);
+      } finally {
+        logs.restore();
+        restoreEnv(saved);
+      }
+    });
+  });
+
+  test('invalid_client cleanup then loadCredentials does not restore legacy credentials', async (t) => {
+    if (skipUnlessXdgMigration(t)) return;
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      const fileName = 'chatgpt-credentials-oaiapp_old.json';
+      const body = JSON.stringify({ client_id: 'oaiapp_old', access_token: 'OLD_AT', refresh_token: 'OLD_RT' });
+      await writeOwned(path.join(legacy, fileName), body);
+      await writeOwned(path.join(dest, fileName), body);
+      const saved = useDistinctConfig(home, xdg);
+      const originalFetch = globalThis.fetch;
+      const logs = captureErrors();
+      try {
+        useFallbackAuthEndpoints();
+        globalThis.fetch = async () => new Response(JSON.stringify({ error: 'invalid_client' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' }
+        });
+        await assert.rejects(refreshAccessToken('OLD_RT', 'oaiapp_old'), (err) => {
+          assert.equal(err.code, 'invalid_client');
+          assert.equal(String(err.message).includes('OLD_AT'), false);
+          assert.equal(String(err.message).includes('OLD_RT'), false);
+          return true;
+        });
+        assert.equal(existsSync(path.join(dest, fileName)), false);
+        const marker = await lstat(path.join(dest, MIGRATION_MARKER));
+        assert.equal(marker.isSymbolicLink(), false);
+        assert.equal(marker.isFile(), true);
+        assertMode(marker.mode & 0o777, 0o600);
+        assert.equal(await loadCredentials(), null);
+        assert.equal(existsSync(path.join(dest, fileName)), false);
+        assert.equal(await readFile(path.join(legacy, fileName), 'utf8'), body);
+        assert.equal(logs.lines.some((line) => line.includes('OLD_AT') || line.includes('OLD_RT')), false);
+      } finally {
+        globalThis.fetch = originalFetch;
+        clearOidcDiscoveryCache();
+        logs.restore();
+        restoreEnv(saved);
+      }
+    });
+  });
+
+  test('sign-out writes the migration marker so a later load cannot import legacy credentials', async (t) => {
+    if (skipUnlessXdgMigration(t)) return;
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      const fileName = 'chatgpt-credentials-oaiapp_old.json';
+      const body = JSON.stringify({ client_id: 'oaiapp_old', access_token: 'OLD_AT' });
+      await writeOwned(path.join(legacy, fileName), body);
+      const saved = useDistinctConfig(home, xdg);
+      const logs = captureErrors();
+      try {
+        const manager = createChatGPTAuthManager();
+        assert.equal((await manager.signOut()).state, 'signed_out');
+        const marker = await lstat(path.join(dest, MIGRATION_MARKER));
+        assert.equal(marker.isSymbolicLink(), false);
+        assert.equal(marker.isFile(), true);
+        assertMode(marker.mode & 0o777, 0o600);
+        assertMode(await modeOf(dest), 0o700);
+        assert.equal(await loadCredentials(), null);
+        assert.equal(existsSync(path.join(dest, fileName)), false);
+        assert.equal(await readFile(path.join(legacy, fileName), 'utf8'), body);
+        assert.equal(logs.lines.some((line) => line.includes('OLD_AT')), false);
+      } finally {
+        logs.restore();
+        restoreEnv(saved);
+      }
+    });
+  });
+
+  test('copies with an exclusive file copy when hard links are unsupported', async () => {
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      const body = JSON.stringify({ client_id: 'oaiapp_old', access_token: 'OLD_AT' });
+      await writeOwned(path.join(legacy, 'chatgpt-credentials-oaiapp_old.json'), body);
+      for (const code of ['EPERM', 'EXDEV', 'ENOTSUP']) {
+        await rm(dest, { recursive: true, force: true });
+        const copyCalls = [];
+        let links = 0;
+        const logs = captureErrors();
+        try {
+          const copied = await migrateLegacyChatGPTConfig({
+            platform: 'linux',
+            home,
+            env: { XDG_CONFIG_HOME: xdg },
+            fsImpl: {
+              async link() {
+                links += 1;
+                const error = new Error(`injected ${code}`);
+                error.code = code;
+                throw error;
+              },
+              async copyFile(src, target, flag) {
+                copyCalls.push({ target, flag: flag ?? null });
+                if (flag === undefined) await copyFile(src, target);
+                else await copyFile(src, target, flag);
+              }
+            }
+          });
+          assert.equal(links > 0, true, code);
+          assert.deepEqual(copied, ['chatgpt-credentials-oaiapp_old.json']);
+          assert.equal(await readFile(path.join(dest, 'chatgpt-credentials-oaiapp_old.json'), 'utf8'), body);
+          assertMode(await modeOf(path.join(dest, 'chatgpt-credentials-oaiapp_old.json')), 0o600);
+          assertMode(await modeOf(path.join(dest, MIGRATION_MARKER)), 0o600);
+          const exclusive = copyCalls.filter((call) => call.flag === fsConstants.COPYFILE_EXCL);
+          assert.deepEqual(exclusive.map((call) => path.basename(call.target)).sort(), [
+            MIGRATION_MARKER,
+            'chatgpt-credentials-oaiapp_old.json'
+          ]);
+          assert.equal((await readdir(dest)).some((name) => name.endsWith('.tmp')), false);
+          assert.equal(logs.lines.some((line) => line.includes('OLD_AT')), false);
+          assertMode(await modeOf(path.join(legacy, 'chatgpt-credentials-oaiapp_old.json')), 0o644);
+        } finally {
+          logs.restore();
+        }
+      }
+    });
+  });
+
+  test('an unsupported hard link still refuses to replace an existing credential', async () => {
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      const kept = '{"client_id":"oaiapp_old","access_token":"KEEP"}\n';
+      await writeOwned(path.join(legacy, 'chatgpt-credentials-oaiapp_old.json'), '{"client_id":"oaiapp_old","access_token":"OLD_AT"}\n');
+      await writeOwned(path.join(dest, 'chatgpt-credentials-oaiapp_old.json'), kept);
+      const logs = captureErrors();
+      try {
+        const copied = await migrateLegacyChatGPTConfig({
+          platform: 'linux',
+          home,
+          env: { XDG_CONFIG_HOME: xdg },
+          fsImpl: {
+            async link() {
+              const error = new Error('injected EPERM');
+              error.code = 'EPERM';
+              throw error;
+            }
+          }
+        });
+        assert.deepEqual(copied, []);
+        assert.equal(await readFile(path.join(dest, 'chatgpt-credentials-oaiapp_old.json'), 'utf8'), kept);
+        assert.equal(logs.lines.some((line) => line.includes('OLD_AT')), false);
+      } finally {
+        logs.restore();
+      }
+    });
+  });
+
+  test('hard link errors other than an existing file or an unsupported link still fail', async () => {
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const legacy = path.join(home, '.config', 'chatpcb');
+      const dest = path.join(xdg, 'chatpcb');
+      await writeOwned(
+        path.join(legacy, 'chatgpt-credentials-oaiapp_old.json'),
+        JSON.stringify({ client_id: 'oaiapp_old', access_token: 'OLD_AT' })
+      );
+      const logs = captureErrors();
+      try {
+        await assert.rejects(
+          migrateLegacyChatGPTConfig({
+            platform: 'linux',
+            home,
+            env: { XDG_CONFIG_HOME: xdg },
+            fsImpl: {
+              link() {
+                const error = new Error('injected EIO');
+                error.code = 'EIO';
+                throw error;
+              }
+            }
+          }),
+          (err) => err?.code === 'EIO'
+        );
+        assert.equal(existsSync(path.join(dest, 'chatgpt-credentials-oaiapp_old.json')), false);
+        assert.equal(existsSync(path.join(dest, MIGRATION_MARKER)), false);
+        assert.equal(logs.lines.some((line) => line.includes('OLD_AT')), false);
+      } finally {
+        logs.restore();
+      }
+    });
+  });
+
+  test('does not follow a symlinked legacy directory or symlinked credential files', async (t) => {
+    await withTemp(async (root) => {
+      const home = path.join(root, 'home');
+      const xdg = path.join(root, 'xdg');
+      const outside = path.join(root, 'outside');
+      const realLegacy = path.join(root, 'real-legacy');
+      const secret = JSON.stringify({ client_id: 'oaiapp_link', access_token: 'SYMLINK_SECRET' });
+      const real = JSON.stringify({ client_id: 'oaiapp_real', access_token: 'REAL_TOKEN' });
+      await writeOwned(path.join(outside, 'secret.json'), secret);
+      await writeOwned(path.join(realLegacy, 'chatgpt-credentials-oaiapp_link.json'), secret);
+      const legacy = path.join(home, '.config', 'chatpcb');
+      await mkdir(path.join(home, '.config'), { recursive: true });
+      try {
+        await symlink(realLegacy, legacy, 'dir');
+      } catch (error) {
+        if (error.code === 'EPERM') {
+          t.skip('directory symlink is not permitted');
+          return;
+        }
+        throw error;
+      }
+      const logs = captureErrors();
+      try {
+        const copiedDir = await migrateLegacyChatGPTConfig({
+          platform: 'linux',
+          home,
+          env: { XDG_CONFIG_HOME: xdg }
+        });
+        assert.deepEqual(copiedDir, []);
+        assert.equal(existsSync(path.join(xdg, 'chatpcb', 'chatgpt-credentials-oaiapp_link.json')), false);
+        await rm(legacy, { force: true });
+        await mkdir(legacy, { recursive: true });
+        await symlink(path.join(outside, 'secret.json'), path.join(legacy, 'chatgpt-credentials-oaiapp_link.json'), 'file');
+        await writeOwned(path.join(legacy, 'chatgpt-credentials-oaiapp_real.json'), real);
+        const copiedFiles = await migrateLegacyChatGPTConfig({
+          platform: 'linux',
+          home,
+          env: { XDG_CONFIG_HOME: xdg }
+        });
+        assert.deepEqual(copiedFiles, ['chatgpt-credentials-oaiapp_real.json']);
+        const dest = path.join(xdg, 'chatpcb');
+        assert.equal(existsSync(path.join(dest, 'chatgpt-credentials-oaiapp_link.json')), false);
+        assert.equal(await readFile(path.join(dest, 'chatgpt-credentials-oaiapp_real.json'), 'utf8'), real);
+        for (const name of await readdir(dest)) {
+          const text = await readFile(path.join(dest, name), 'utf8').catch(() => '');
+          assert.equal(text.includes('SYMLINK_SECRET'), false, name);
+        }
+        assert.equal(logs.lines.some((line) => line.includes('SYMLINK_SECRET')), false);
+      } finally {
+        logs.restore();
       }
     });
   });

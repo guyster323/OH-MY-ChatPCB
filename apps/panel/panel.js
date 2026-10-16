@@ -239,9 +239,15 @@ let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
 let chatgptAuthExpiryTimer = null;
-let chatgptSwitchOfferRecorded = false;
+let switchOfferEpoch = 0;
+let activeSwitchOfferStorageKey = null;
+let activeSwitchIdentity = '';
+let anonymousSwitchOfferRecorded = false;
+const switchOfferRecordedKeys = new Set();
+const pageOnlySwitchIdentities = new Set();
 const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
-const CHATGPT_SWITCH_OFFER_KEY = 'chatpcb.chatgpt-switch-offered';
+const CHATGPT_SWITCH_OFFER_PREFIX = 'chatpcb.chatgpt-switch-offered';
+const CHATGPT_SWITCH_OFFER_HASH_HEX = 16;
 
 restoreProviderSelection();
 renderDaemonConnection();
@@ -418,21 +424,45 @@ function rememberProvider(provider) {
   }
 }
 
-function readChatGPTSwitchOffered() {
-  if (chatgptSwitchOfferRecorded) return true;
+function accountSwitchIdentity(account) {
+  const sub = typeof account?.sub === 'string' ? account.sub.trim() : '';
+  if (sub) return sub;
+  const email = typeof account?.email === 'string' ? account.email.trim() : '';
+  return email;
+}
+
+async function shortSha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  let hex = '';
+  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, '0');
+  return hex.slice(0, CHATGPT_SWITCH_OFFER_HASH_HEX);
+}
+
+function readStoredSwitchOffer(key) {
+  if (switchOfferRecordedKeys.has(key)) return true;
   try {
-    return localStorage.getItem(CHATGPT_SWITCH_OFFER_KEY) !== null;
+    return localStorage.getItem(key) !== null;
   } catch {
     return false;
   }
 }
 
 function rememberChatGPTSwitchOffered() {
-  chatgptSwitchOfferRecorded = true;
-  try {
-    localStorage.setItem(CHATGPT_SWITCH_OFFER_KEY, '1');
-  } catch {
-    // The choice still sticks for this page when storage is blocked.
+  if (activeSwitchOfferStorageKey) {
+    switchOfferRecordedKeys.add(activeSwitchOfferStorageKey);
+    try {
+      localStorage.setItem(activeSwitchOfferStorageKey, '1');
+    } catch {
+      // The choice still sticks for this page when storage is blocked.
+    }
+  } else if (activeSwitchIdentity) {
+    pageOnlySwitchIdentities.add(activeSwitchIdentity);
+  } else {
+    anonymousSwitchOfferRecorded = true;
+  }
+  if (chatgptSwitchOfferEl) {
+    chatgptSwitchOfferEl.hidden = true;
+    chatgptSwitchOfferEl.dataset.decision = 'hidden';
   }
 }
 
@@ -1596,11 +1626,32 @@ function handleChatGPTAuthChanged(payload) {
   refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
 }
 
-function syncChatGPTSwitchOffer() {
+async function syncChatGPTSwitchOffer() {
   if (!chatgptSwitchOfferEl || !providerEl || !i18nReady || !chatgptAuthKnown) return;
-  const show = chatgptAuthState.state === 'signed_in'
-    && providerEl.value !== 'chatgpt'
-    && !readChatGPTSwitchOffered();
+  const epoch = ++switchOfferEpoch;
+  const signedIn = chatgptAuthState.state === 'signed_in';
+  const identity = signedIn ? accountSwitchIdentity(chatgptAuthState.account) : '';
+  if (identity !== activeSwitchIdentity) {
+    chatgptSwitchOfferEl.hidden = true;
+    chatgptSwitchOfferEl.dataset.decision = 'pending';
+  }
+  let storageKey = null;
+  let already = false;
+  if (identity) {
+    try {
+      storageKey = `${CHATGPT_SWITCH_OFFER_PREFIX}.${await shortSha256Hex(identity)}`;
+    } catch {
+      storageKey = null;
+    }
+    if (epoch !== switchOfferEpoch) return;
+    already = storageKey ? readStoredSwitchOffer(storageKey) : pageOnlySwitchIdentities.has(identity);
+  } else if (signedIn) {
+    already = anonymousSwitchOfferRecorded;
+  }
+  if (epoch !== switchOfferEpoch) return;
+  activeSwitchOfferStorageKey = storageKey;
+  activeSwitchIdentity = identity;
+  const show = signedIn && providerEl.value !== 'chatgpt' && !already;
   chatgptSwitchOfferEl.dataset.decision = show ? 'shown' : 'hidden';
   if (!show) {
     chatgptSwitchOfferEl.hidden = true;
