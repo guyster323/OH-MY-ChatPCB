@@ -9,6 +9,7 @@ const PROGRESS_COPY = {
   ready: { title: '적용을 기다리고 있어요', sprite: 'preview' },
   apply: { title: '스키매틱에 넣는 중', sprite: 'apply' },
   done: { title: '완료', sprite: 'done' },
+  warn: { titleKey: 'progress.warn', sprite: 'preview' },
   fail: { title: '이번엔 적용하지 못했어요', sprite: 'fail' }
 };
 const WORKFLOW_ORDER = [
@@ -325,6 +326,11 @@ function handleEnvelope(envelope) {
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
   pendingCalls.delete(id);
 
+  if (!envelope.payload.ok && envelope.payload.error?.code === 'PROJECT_BUSY' && isProjectBusyCall(callName)) {
+    showProjectBusy(callName, envelope.payload.error?.message);
+    return;
+  }
+
   if (!envelope.payload.ok) {
     if (callName === 'schematic.generate') {
       setRequestBusy(false);
@@ -361,12 +367,25 @@ function handleEnvelope(envelope) {
           }
         }
       }
-      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? 'Tool call failed.' });
-      renderRequestStatus({
-        state: 'failed',
-        summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
-        technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
-      });
+      const errorCode = envelope.payload.error?.code;
+      const errorMessage = envelope.payload.error?.message ?? 'Tool call failed.';
+      const technicalDetail = envelope.payload.technicalDetail ?? errorMessage;
+
+      appendProgress({ stage: 'fail', text: errorMessage });
+
+      if (errorCode === 'PROVIDER_DISALLOWED_TOOL') {
+        renderRequestStatus({
+          state: 'failed',
+          summary: errorMessage,
+          technicalDetail
+        });
+      } else {
+        renderRequestStatus({
+          state: 'failed',
+          summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+          technicalDetail
+        });
+      }
     }
     if (callName === 'project.inspect') {
       if (inspectionState.requestId === id) renderInspectionFailure();
@@ -1169,7 +1188,9 @@ function appendProgress(payload = {}) {
   img.height = 32;
   const body = document.createElement('div');
   const title = document.createElement('strong');
-  title.textContent = copy.title;
+  const titleText = copy.titleKey ? t(copy.titleKey) : copy.title;
+  if (copy.titleKey) title.dataset.i18n = copy.titleKey;
+  title.textContent = titleText;
   body.append(title);
   if (payload.text) {
     const text = document.createElement('p');
@@ -1183,7 +1204,7 @@ function appendProgress(payload = {}) {
   }
   item.scrollIntoView({ block: 'nearest' });
   lastProgressStage = stage;
-  lastProgressText = payload.text || copy.title;
+  lastProgressText = payload.text || titleText;
   syncWorkflow();
 }
 
@@ -1464,6 +1485,37 @@ function stopConflictWatch() {
 function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
+}
+
+function isProjectBusyCall(callName) {
+  return callName === 'project.request'
+    || callName === 'schematic.generate'
+    || callName === 'schematic.patch'
+    || callName === 'schematic.patch.approve'
+    || callName === 'schematic.patch.cancel';
+}
+
+function showProjectBusy(callName, message) {
+  const summary = typeof message === 'string' && message.trim()
+    ? message.trim()
+    : t('request.project-busy');
+  if (callName === 'project.request') {
+    const requestProjectDir = activeRequestProjectDir;
+    pendingCalls.delete(activeRequestId);
+    activeRequestId = null;
+    activeRequestProjectDir = null;
+    setRequestBusy(false);
+    if (requestProjectDir !== activeProject?.projectDir) return;
+  } else if (callName === 'schematic.generate') {
+    setRequestBusy(Boolean(activeRequestId));
+    offerNativeDraft();
+  } else if (callName === 'schematic.patch.approve' || callName === 'schematic.patch' || callName === 'schematic.patch.cancel') {
+    // Keep the patch preview so Apply can be clicked again. A request that is still running keeps the composer locked.
+    setRequestBusy(Boolean(activeRequestId));
+    if (callName !== 'schematic.patch.cancel') renderPatchApproval();
+  }
+  appendProgress({ stage: 'fail', text: summary });
+  renderRequestStatus({ state: 'failed', summary });
 }
 
 window.setChatGptAuthState = setChatGptAuthState;

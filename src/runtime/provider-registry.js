@@ -49,11 +49,11 @@ export async function checkProviderAvailability({ provider, commandExistsImpl = 
   };
 }
 
-export function buildProviderPrompt({ provider, userMessage, projectDir, allowedTools = [] } = {}) {
+export function buildProviderPrompt({ provider, userMessage, projectDir, allowedTools = [], projectExists = false } = {}) {
   const definition = getProviderDefinition(provider);
   const toolList = allowedTools.length ? allowedTools.map((tool) => `- ${tool}`).join('\n') : '- no tools allowed';
 
-  return [
+  const lines = [
     `You are running as the ${definition.label} adapter for ChatPCB.`,
     'Respond with normal assistant text for reasoning or status.',
     'When you need ChatPCB to act, emit exactly one JSON Lines object on its own line:',
@@ -61,13 +61,22 @@ export function buildProviderPrompt({ provider, userMessage, projectDir, allowed
     'Allowed tool names:',
     toolList,
     'Do not emit tool.result. The local daemon executes tools and returns results.',
-    'Do not include API keys, tokens, or credentials in output.',
+    'Do not include API keys, tokens, or credentials in output.'
+  ];
+
+  if (projectExists) {
+    lines.push('Note: The project already exists. Use schematic.patch to modify it, not project.create or schematic.generate.');
+  }
+
+  lines.push(
     '',
     'User request:',
     userMessage ?? '',
     '',
     projectDir ? `Project directory: ${projectDir}` : 'Project directory: not provided'
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
 async function commandExists(command) {

@@ -157,7 +157,10 @@ test('rejects unsupported embedded calls while ignoring completed command execut
 
   await assert.rejects(
     () => runProviderProcess({ command: process.execPath, args: ['-e', script], timeoutMs: 2000 }),
-    /Unsupported provider tool call/
+    {
+      code: 'UNKNOWN_TOOL',
+      message: /Unsupported provider tool call/
+    }
   );
 });
 
@@ -208,8 +211,25 @@ test('rejects unknown provider tool calls before execution', async () => {
         args: ['-e', script],
         timeoutMs: 2000
       }),
-    /Unsupported provider tool call: board\.autoroute/
+    {
+      code: 'UNKNOWN_TOOL',
+      message: /Unsupported provider tool call: board\.autoroute/
+    }
   );
+});
+
+test('parses known ChatPCB tools that are outside the provider allowlist', async () => {
+  const script = 'console.log(JSON.stringify({type:"tool.call", payload:{id:"rollback_1", name:"project.transaction.rollback", args:{transactionId:"should-not-run"}}}));';
+
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.equal(transcript.events[0].type, 'tool.call');
+  assert.equal(transcript.events[0].payload.name, 'project.transaction.rollback');
 });
 
 test('redacts provider stderr secrets from transcripts', async () => {

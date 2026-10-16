@@ -431,6 +431,7 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
   background: var(--surface2);
 }
 .request-progress strong { display: block; font-size: var(--fs-xs); color: var(--accent-text); }
+.request-progress li[data-stage="warn"] strong { color: var(--warn); }
 .request-progress p { margin: 2px 0 0; font-size: var(--fs-xs); line-height: 1.35; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .progress-sprite { width: 28px; height: 28px; image-rendering: pixelated; object-fit: contain; }
 .dialog-hint { font-size: var(--fs-sm); line-height: 1.4; color: var(--text); }

@@ -48,6 +48,8 @@
   "composer.send": "Send",
   "composer.placeholder": "Describe a change, or reply…",
   "request.idle": "Create a project to send a circuit request.",
+  "request.project-busy": "Another operation is using this project. Try again in a moment.",
+  "progress.warn": "Needs attention.",
   "connection.connecting": "Connecting",
   "connection.connected": "Connected",
   "connection.disconnected": "Disconnected",
