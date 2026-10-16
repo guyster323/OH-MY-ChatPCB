@@ -5,9 +5,8 @@ import { createServer } from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
-import { chromium } from 'playwright';
 
-import { chromeLaunchOptions, findChrome } from '../scripts/lib/find-chrome.js';
+import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
 
 const LOGO_SHA256 = '568ce2e8701934856aaafc0ed1c3d0300f6c2ff384d0ae743dd1dea08570e12c';
 const PANEL_ROOT = resolve('apps/panel');
@@ -79,22 +78,8 @@ async function readBundledPretendard() {
   return { rules, faces };
 }
 
-// Same launch path as verify:ui. A headless shell is enough when its path is passed as executablePath.
-// A missing browser fails in CI and skips on a local machine.
-async function launchChromium(t) {
-  try {
-    const found = await findChrome();
-    if (!found.path) throw new Error(found.reason);
-    return await chromium.launch(chromeLaunchOptions(found, { headless: true }));
-  } catch (error) {
-    if (process.env.CI) throw error;
-    t.skip(`Chromium unavailable: ${error.message}`);
-    return null;
-  }
-}
-
 test('Apply stays enabled when the candidate ERC passes and the open file still fails ERC', async (t) => {
-  const browser = await launchChromium(t);
+  const browser = await launchPanelBrowser(t);
   if (!browser) return;
 
   const server = createServer(async (req, res) => {
@@ -218,7 +203,7 @@ test('en and ko panel locales have the same keys', async () => {
 });
 
 test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (t) => {
-  const browser = await launchChromium(t);
+  const browser = await launchPanelBrowser(t);
   if (!browser) return;
   const en = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/en.json'), 'utf8'));
   const ko = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/ko.json'), 'utf8'));

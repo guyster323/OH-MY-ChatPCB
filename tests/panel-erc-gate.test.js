@@ -4,9 +4,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
-import { chromium } from 'playwright';
 
-import { chromeLaunchOptions, findChrome } from '../scripts/lib/find-chrome.js';
+import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
 
 const PANEL_ROOT = resolve('apps/panel');
 const TYPES = {
@@ -25,22 +24,8 @@ const passedValidation = {
   erc: { errorCount: 0, warningCount: 0 }
 };
 
-// Same launch path as verify:ui. A headless shell is enough when its path is passed as executablePath.
-// A missing browser fails in CI and skips on a local machine.
-async function launchChromium(t) {
-  try {
-    const found = await findChrome();
-    if (!found.path) throw new Error(found.reason);
-    return await chromium.launch(chromeLaunchOptions(found, { headless: true }));
-  } catch (error) {
-    if (process.env.CI) throw error;
-    t.skip(`Chromium unavailable: ${error.message}`);
-    return null;
-  }
-}
-
 test('panel apply follows the recorded ERC result', async (t) => {
-  const browser = await launchChromium(t);
+  const browser = await launchPanelBrowser(t);
   if (!browser) return;
 
   const en = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/en.json'), 'utf8'));

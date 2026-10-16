@@ -6,7 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 
-import { chromium } from 'playwright';
+import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
 
 const panelRoot = path.resolve(import.meta.dirname, '../apps/panel');
 const panelLocale = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
@@ -15,12 +15,10 @@ const englishBusy = 'Another operation is using this project. Try again in a mom
 const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
 
 test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable', async (t) => {
-  const browser = await launchPanelBrowser();
-  if (!browser) {
-    if (process.env.CI) throw new Error('Chromium unavailable');
-    t.skip('no browser available');
-    return;
-  }
+  const browser = await launchPanelBrowser(t, {
+    args: ['--no-sandbox', '--disable-dev-shm-usage']
+  });
+  if (!browser) return;
 
   const calls = [];
   let daemon;
@@ -192,26 +190,6 @@ function responseFor(call, calls) {
 
 function busyMessage(prompt) {
   return /[가-힣]/.test(prompt ?? '') ? koreanBusy : englishBusy;
-}
-
-async function launchPanelBrowser() {
-  const options = {
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage']
-  };
-  const candidates = [process.env.CHATPCB_BROWSER_PATH, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].filter(Boolean);
-  for (const executablePath of candidates) {
-    try {
-      return await chromium.launch({ ...options, executablePath });
-    } catch {
-      // Try the next installed browser.
-    }
-  }
-  try {
-    return await chromium.launch(options);
-  } catch {
-    return null;
-  }
 }
 
 function isPeerDisconnect(error) {

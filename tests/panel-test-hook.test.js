@@ -5,9 +5,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
-import { chromium } from 'playwright';
 
-import { chromeLaunchOptions, findChrome } from '../scripts/lib/find-chrome.js';
+import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
 import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
 
@@ -22,22 +21,8 @@ const TYPES = {
   '.png': 'image/png'
 };
 
-// Same launch path as verify:ui. A headless shell is enough when its path is passed as executablePath.
-// A missing browser fails in CI and skips on a local machine.
-async function launchChromium(t) {
-  try {
-    const found = await findChrome();
-    if (!found.path) throw new Error(found.reason);
-    return await chromium.launch(chromeLaunchOptions(found, { headless: true }));
-  } catch (error) {
-    if (process.env.CI) throw error;
-    t.skip(`Chromium unavailable: ${error.message}`);
-    return null;
-  }
-}
-
 test('panel test hook exists only in test mode and cannot pass ERC for the daemon', async (t) => {
-  const browser = await launchChromium(t);
+  const browser = await launchPanelBrowser(t);
   if (!browser) return;
 
   const server = createServer(async (req, res) => {
