@@ -145,6 +145,12 @@ async function callChatGPTResponsesUnlogged({
       if (!response.ok) throw await httpError(response, accessToken);
       return readResponseStream(response);
     });
+    // Once per Responses API call. The reported model is the stream's model
+    // when the API sends one, otherwise the model we requested.
+    const reportedModel = typeof streamed.model === 'string' && streamed.model.trim()
+      ? streamed.model
+      : selectedModel;
+    logChatGptUsage(reportedModel, streamed.usage, accessToken);
     const turnCalls = collectTurnCalls(streamed, allowed);
     const prose = stripToolCallLines(streamed.text);
     const mutating = turnCalls.filter((call) => !READ_ONLY_TOOLS.has(call.name));
@@ -192,10 +198,6 @@ async function callChatGPTResponsesUnlogged({
     clientId,
     [originalRefresh, activeCreds.refresh_token || '']
   );
-  const reportedModel = typeof streamed.model === 'string' && streamed.model.trim()
-    ? streamed.model
-    : selectedModel;
-  logChatGptUsage(reportedModel, streamed.usage, accessToken);
   if (typeof onChunk === 'function' && text) onChunk(text);
   return {
     completed: true,
