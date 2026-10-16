@@ -264,7 +264,7 @@ test('provider.invoke keeps the user I2C connector when ChatGPT rewrites the too
         true
       );
       const blockers = preview.review?.findings?.blockers ?? [];
-      assert.equal(blockers.some((finding) => finding.id === 'missing-swd'), false);
+      assert.equal(blockers.some((finding) => finding.code === 'missing-swd'), false);
     });
   } finally {
     restoreKicadLibraryEnv(previousLibs);
