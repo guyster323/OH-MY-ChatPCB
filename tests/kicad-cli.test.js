@@ -866,6 +866,84 @@ test('private KiCad config cache follows the injected env, not the account home'
   }
 });
 
+function cacheEnvProbeScript(root) {
+  const scriptPath = path.join(root, 'cache-env-kicad-cli');
+  fs.writeFileSync(scriptPath, [
+    '#!/bin/sh',
+    'printf "XDG=%s\\n" "${XDG_CACHE_HOME-unset}"',
+    'printf "CFG=%s\\n" "${KICAD_CONFIG_HOME-unset}"',
+    ''
+  ].join('\n'), { mode: 0o755 });
+  return scriptPath;
+}
+
+function probeField(stdout, name) {
+  const line = stdout.split('\n').find((item) => item.startsWith(`${name}=`));
+  assert.ok(line, stdout);
+  return line.slice(name.length + 1);
+}
+
+test('relative or blank XDG_CACHE_HOME falls back to HOME/.cache and is not passed to kicad-cli', {
+  skip: process.platform === 'win32' ? 'POSIX shell script' : false
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-cache-env-'));
+  const scriptPath = cacheEnvProbeScript(root);
+  const home = path.join(root, 'home');
+  const project = path.join(root, 'project');
+  const absoluteCache = path.join(root, 'absolute-cache');
+  fs.mkdirSync(home);
+  fs.mkdirSync(project);
+  const fallback = path.join(home, '.cache');
+  try {
+    for (const xdg of ['rel-cache', 'rel/cache', '', '   ', './rel-cache']) {
+      const result = await runKicadCli([], {
+        env: {
+          KICAD_CLI_PATH: scriptPath,
+          XDG_CACHE_HOME: xdg,
+          HOME: home,
+          PATH: process.env.PATH ?? ''
+        },
+        cwd: project
+      });
+      assert.equal(result.exitCode, 0, result.stderr);
+      const childXdg = probeField(result.stdout, 'XDG');
+      const configHome = probeField(result.stdout, 'CFG');
+      assert.equal(childXdg, fallback, `XDG_CACHE_HOME ${JSON.stringify(xdg)} -> ${JSON.stringify(childXdg)}`);
+      assert.equal(path.isAbsolute(childXdg), true, childXdg);
+      assert.ok(configHome.startsWith(path.join(fallback, 'chatpcb', 'kicad-config-')), configHome);
+      assert.equal(fs.existsSync(path.join(project, 'rel-cache')), false);
+      assert.equal(fs.existsSync(path.join(project, 'rel')), false);
+    }
+
+    const kept = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: absoluteCache,
+        HOME: home,
+        PATH: process.env.PATH ?? ''
+      },
+      cwd: project
+    });
+    assert.equal(probeField(kept.stdout, 'XDG'), absoluteCache);
+    assert.ok(probeField(kept.stdout, 'CFG').startsWith(path.join(absoluteCache, 'chatpcb', 'kicad-config-')));
+
+    const noHome = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: 'rel/cache',
+        PATH: process.env.PATH ?? ''
+      },
+      cwd: project
+    });
+    assert.equal(noHome.exitCode, 0, noHome.stderr);
+    assert.equal(probeField(noHome.stdout, 'XDG'), 'unset');
+    assert.ok(probeField(noHome.stdout, 'CFG').startsWith(path.join(project, '.chatpcb', 'kicad-config-')));
+    assert.equal(fs.existsSync(path.join(project, 'rel')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('private KiCad config directories are mode 0700, including an existing parent', {
   skip: process.platform === 'win32' ? 'POSIX modes' : false
 }, async () => {

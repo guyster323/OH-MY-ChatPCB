@@ -136,12 +136,13 @@ export async function runKicadCli(args, options = {}) {
     throw error;
   }
   const flatpak = resolved.source === 'flatpak';
-  const env = kicadCliChildEnv(options.env ?? process.env, { flatpak });
+  const platform = options.platform ?? process.platform;
+  const env = kicadCliChildEnv(options.env ?? process.env, { flatpak, platform });
   // Concurrent kicad-cli processes rewrite the shared kicad_common.json.
   // Each invocation copies the live config into a private directory and deletes it.
   const privateConfigHome = await assignPrivateKicadConfigHome(env, {
     flatpak,
-    platform: options.platform ?? process.platform,
+    platform,
     cwd: options.cwd
   });
   try {
@@ -271,14 +272,30 @@ function kicadConfigCandidates(env, { flatpak, platform, home, realHome }) {
 
 // The private copy is resolved from the env handed to this call, not from the
 // passwd home. An absolute XDG_CACHE_HOME wins. Otherwise use HOME/.cache
-// (USERPROFILE on win32). A relative XDG_CACHE_HOME is ignored. With no home,
-// the copy lives in the project directory.
-function privateConfigBase(env, cwd, platform = process.platform) {
+// (USERPROFILE on win32). A relative or blank XDG_CACHE_HOME is ignored. With
+// no home, the copy lives in the project directory.
+function cacheDirectoryFromEnv(env, platform) {
   const xdg = typeof env.XDG_CACHE_HOME === 'string' ? env.XDG_CACHE_HOME.trim() : '';
-  if (xdg && path.isAbsolute(xdg)) return path.join(xdg, 'chatpcb');
+  if (xdg && path.isAbsolute(xdg)) return xdg;
   const home = cacheHomeDirectory(env, platform);
-  if (home) return path.join(home, '.cache', 'chatpcb');
+  if (home) return path.join(home, '.cache');
+  return null;
+}
+
+function privateConfigBase(env, cwd, platform = process.platform) {
+  const cache = cacheDirectoryFromEnv(env, platform);
+  if (cache) return path.join(cache, 'chatpcb');
   return path.join(cwd || process.cwd(), '.chatpcb');
+}
+
+// The XDG base-dir spec ignores a relative or empty XDG_CACHE_HOME. Replace it
+// with the absolute fallback, or drop it when there is no home, so kicad-cli
+// cannot create that relative cache under cwd.
+function sanitizeChildCacheHome(env, platform) {
+  if (!Object.prototype.hasOwnProperty.call(env, 'XDG_CACHE_HOME')) return;
+  const cache = cacheDirectoryFromEnv(env, platform);
+  if (cache) env.XDG_CACHE_HOME = cache;
+  else delete env.XDG_CACHE_HOME;
 }
 
 function cacheHomeDirectory(env, platform) {
@@ -324,8 +341,9 @@ async function assignPrivateKicadConfigHome(env, { flatpak, platform, cwd }) {
 // KICAD*_DIR from that runtime makes kicad-cli report lib_symbol_issues for
 // libraries it already has under /app/extensions. Node still reads those
 // directories to embed symbols; only the CLI child drops them.
-export function kicadCliChildEnv(env = {}, { flatpak = false } = {}) {
+export function kicadCliChildEnv(env = {}, { flatpak = false, platform = process.platform } = {}) {
   const child = { ...env };
+  sanitizeChildCacheHome(child, platform);
   if (!flatpak) return child;
   for (const key of Object.keys(child)) {
     const value = child[key];
