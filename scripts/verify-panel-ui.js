@@ -18,7 +18,7 @@ const projectName = 'STM32 센서 보드 01';
 // STM32 profile draft passes KiCad 10 ERC (0 errors). The ESP32-S3 draft fails ERC
 // with 17 label_dangling errors (GitHub issue #15). That failure used to hang this
 // flow while it waited for the request status to reach completed.
-// TODO(issue pending): the panel's ERC card shows "0 errors, 0 warnings" after apply fails ERC.
+// TODO(#17): the panel's ERC card shows "0 errors, 0 warnings" after apply fails ERC.
 const prompt = 'STM32와 I2C 센서 커넥터, 리셋 버튼, 상태 LED가 있는 회로를 만들어줘';
 const protocolFailurePrompt = 'Simulate a provider protocol failure.';
 const rollbackPrompt = 'Simulate a validation rollback.';
