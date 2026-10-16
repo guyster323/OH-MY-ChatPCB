@@ -514,6 +514,7 @@ test('daemon invokes a selected provider and executes emitted tool calls', async
     assert.equal(result.result.providerInvocation, true);
     assert.equal(result.result.provider, 'codex');
     assert.equal(providerCalls[0].command, 'codex');
+    assert.equal(providerCalls[0].providerId, 'codex');
     assert.deepEqual(providerCalls[0].args, getProviderDefinition('codex').args);
     assert.equal(providerCalls[0].timeoutMs, getProviderDefinition('codex').timeoutMs);
     assert.equal(providerCalls[0].args.includes('--cwd'), false);
@@ -570,6 +571,7 @@ test('daemon spawns grok at the resolved path with --cwd and the grok timeout', 
     assert.equal(providerCalls[0].args[1], root);
     assert.ok(providerCalls[0].args.includes('--prompt-file'));
     assert.equal(providerCalls[0].usePromptFile, true);
+    assert.equal(providerCalls[0].providerId, 'grok');
     assert.equal(providerCalls[0].timeoutMs, getProviderDefinition('grok').timeoutMs);
     assert.ok(getProviderDefinition('grok', {}).timeoutMs >= 300000);
   } finally {

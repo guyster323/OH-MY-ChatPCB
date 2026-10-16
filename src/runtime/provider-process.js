@@ -40,6 +40,7 @@ export async function runProviderProcess({
   traceDir,
   signal,
   onEvent,
+  providerId,
   usePromptFile = false,
   killGraceMs = DEFAULT_KILL_GRACE_MS,
   reportDiagnostic = reportProviderDiagnostic,
@@ -98,7 +99,7 @@ export async function runProviderProcess({
       trackProviderGroup(child);
 
       const allowedTools = new Set(allowedToolNames);
-      const parser = createProviderOutputParser({ allowedTools, onEvent });
+      const parser = createProviderOutputParser({ allowedTools, onEvent, providerId });
       const events = parser.events;
       const stderr = [];
       let settled = false;
@@ -261,9 +262,12 @@ const GROK_STREAM_TYPES = new Set([
   'max_turns_reached'
 ]);
 
-function createProviderOutputParser({ allowedTools, onEvent }) {
+function createProviderOutputParser({ allowedTools, onEvent, providerId }) {
   const events = [];
-  const grokText = { value: '' };
+  const grokText = { value: '', sawEnd: false };
+  // JSON-output mode is selected from the provider definition id. Sniffing stdout
+  // buffered every provider until exit when its first line was not JSON.
+  const jsonOutput = providerId === 'grok';
   let raw = '';
   let pending = '';
   let mode = 'unknown';
@@ -276,12 +280,25 @@ function createProviderOutputParser({ allowedTools, onEvent }) {
   const consumeLine = (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
+    if (!jsonOutput) {
+      const before = events.length;
+      addProviderLine(events, line, allowedTools);
+      emitSince(before);
+      return;
+    }
+
     const parsed = tryParseJson(trimmed);
     if (mode === 'unknown') mode = parsed ? 'lines' : 'document';
+    // A pretty-printed grok JSON document is not complete until the process closes.
     if (mode === 'document') return;
+    if (!parsed) {
+      throw providerOutputError('GROK_OUTPUT_UNPARSEABLE', 'Grok JSON output was cut off and could not be parsed.');
+    }
+    if (parsed.type === 'error') throw grokOutputError(parsed);
+    if (parsed.type === 'end' && parsed.stopReason === 'error') throw grokStopError(parsed);
     if (isGrokResultEnvelope(parsed)) return;
     const before = events.length;
-    addProviderLine(events, line, allowedTools, grokText);
+    addProviderLine(events, line, allowedTools, { jsonOutput: true, grokText });
     emitSince(before);
   };
 
@@ -300,36 +317,40 @@ function createProviderOutputParser({ allowedTools, onEvent }) {
         pending = '';
         consumeLine(tail);
       }
-      const envelope = tryParseJson(raw.trim());
-      if (isGrokResultEnvelope(envelope)) {
+      if (!jsonOutput) return;
+
+      const trimmed = raw.trim();
+      const envelope = tryParseJson(trimmed);
+      if (envelope && (isGrokResultEnvelope(envelope) || envelope.type === 'error' || envelope.stopReason === 'error')) {
+        assertGrokResultOk(envelope);
         events.length = 0;
         absorbGrokResult(events, envelope, allowedTools);
         emitSince(0);
         return;
       }
-      if (mode !== 'lines') {
-        const before = events.length;
-        for (const line of raw.split(/\r?\n/)) {
-          if (!line.trim()) continue;
-          addProviderLine(events, line, allowedTools, grokText);
+      if (mode === 'lines') {
+        if (!grokText.sawEnd) {
+          throw providerOutputError('GROK_OUTPUT_INCOMPLETE', 'Grok JSON output ended before a complete result.');
         }
+        const before = events.length;
+        flushGrokText(events, grokText, allowedTools);
         emitSince(before);
+        return;
       }
-      const before = events.length;
-      flushGrokText(events, grokText, allowedTools);
-      emitSince(before);
+      if (!trimmed || envelope) {
+        throw providerOutputError('GROK_OUTPUT_INCOMPLETE', 'Grok JSON output ended before a complete result.');
+      }
+      throw providerOutputError('GROK_OUTPUT_UNPARSEABLE', 'Grok JSON output was cut off and could not be parsed.');
     }
   };
 }
 
-function addProviderLine(events, line, allowedTools, grokText = { value: '' }) {
+function addProviderLine(events, line, allowedTools, { jsonOutput = false, grokText = null } = {}) {
   const trimmed = line.trim();
   if (!trimmed) return;
 
   const parsed = tryParseJson(trimmed);
   if (parsed) {
-    if (isGrokResultEnvelope(parsed)) return;
-
     if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message') {
       parseProviderMessageText(events, parsed.item.text ?? '', allowedTools);
       return;
@@ -345,12 +366,26 @@ function addProviderLine(events, line, allowedTools, grokText = { value: '' }) {
       return;
     }
 
-    if (isGrokStreamEvent(parsed)) {
-      absorbGrokStreamEvent(events, parsed, allowedTools, grokText);
+    // Grok event types are recognized only for the grok provider. Another
+    // provider's {type:"error"} line keeps the main rejection.
+    if (jsonOutput && parsed.type === 'error') throw grokOutputError(parsed);
+
+    if (jsonOutput && isGrokStreamEvent(parsed)) {
+      if (parsed.type === 'end' && parsed.stopReason === 'error') throw grokStopError(parsed);
+      if (parsed.type === 'end' && grokText) grokText.sawEnd = true;
+      absorbGrokStreamEvent(events, parsed, allowedTools, grokText ?? { value: '' });
       return;
     }
 
+    if (jsonOutput) {
+      throw providerOutputError('GROK_OUTPUT_INCOMPLETE', 'Grok JSON output ended before a complete result.');
+    }
+
     throw new Error('Providers may only emit tool.call JSON or normal assistant text.');
+  }
+
+  if (jsonOutput) {
+    throw providerOutputError('GROK_OUTPUT_UNPARSEABLE', 'Grok JSON output was cut off and could not be parsed.');
   }
 
   events.push(createEnvelope('agent.delta', { text: line }));
@@ -373,8 +408,39 @@ function absorbGrokStreamEvent(events, parsed, allowedTools, grokText) {
     grokText.value += typeof parsed.data === 'string' ? parsed.data : '';
     return;
   }
-  if (parsed.type === 'end' || parsed.type === 'error') {
+  if (parsed.type === 'end') {
     flushGrokText(events, grokText, allowedTools);
+  }
+}
+
+function providerOutputError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function grokFailureMessage(value) {
+  if (typeof value?.message === 'string' && value.message.trim()) return value.message.trim();
+  if (typeof value?.error === 'string' && value.error.trim()) return value.error.trim();
+  if (value?.error && typeof value.error === 'object' && typeof value.error.message === 'string' && value.error.message.trim()) {
+    return value.error.message.trim();
+  }
+  return '';
+}
+
+function grokOutputError(value) {
+  return providerOutputError('GROK_OUTPUT_ERROR', grokFailureMessage(value) || 'Grok returned an error.');
+}
+
+function grokStopError(value) {
+  return providerOutputError('GROK_STOP_ERROR', grokFailureMessage(value) || 'Grok stopped with an error.');
+}
+
+function assertGrokResultOk(envelope) {
+  if (envelope?.stopReason === 'error') throw grokStopError(envelope);
+  if (envelope?.type === 'error') throw grokOutputError(envelope);
+  if (!isGrokResultEnvelope(envelope)) {
+    throw providerOutputError('GROK_OUTPUT_INCOMPLETE', 'Grok JSON output ended before a complete result.');
   }
 }
 
@@ -386,6 +452,7 @@ function flushGrokText(events, grokText, allowedTools) {
 }
 
 function absorbGrokResult(events, envelope, allowedTools) {
+  const before = events.length;
   const structured = envelope.structuredOutput ?? envelope.structured_output;
   if (structured && typeof structured === 'object' && !Array.isArray(structured) && structured.type === 'tool.call') {
     validateProviderToolCall(structured.payload, allowedTools);
@@ -394,6 +461,9 @@ function absorbGrokResult(events, envelope, allowedTools) {
   }
   if (typeof envelope.text === 'string' && envelope.text.trim()) {
     parseProviderMessageText(events, envelope.text, allowedTools);
+  }
+  if (events.length === before) {
+    throw providerOutputError('GROK_OUTPUT_INCOMPLETE', 'Grok JSON output ended before a complete result.');
   }
 }
 

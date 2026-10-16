@@ -299,6 +299,7 @@ async function invokeProvider(call, ctx) {
       timeoutMs: definition.timeoutMs,
       allowedToolNames: PROVIDER_ALLOWED_TOOLS,
       signal: controller.signal,
+      providerId: definition.id,
       usePromptFile: definition.usePromptFile === true,
       onEvent: (event) => {
         streamed.push(event);

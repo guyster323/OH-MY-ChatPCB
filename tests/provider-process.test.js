@@ -5,6 +5,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { buildProviderKillCommand, providerProcessCommand, runProviderProcess } from '../src/runtime/provider-process.js';
 import { PROMPT_FILE_PLACEHOLDER } from '../src/runtime/provider-registry.js';
@@ -648,59 +649,113 @@ test('aborts during prompt write without spawning', async () => {
 });
 
 test('parses a recorded grok json-schema result into one schematic.generate tool call', async () => {
-  // Recorded from `grok --prompt-file --output-format json --json-schema` in a temp directory.
-  // Pretty-printed, with usage/cost fields and structuredOutput holding the tool call.
-  const recorded = `{
-  "text": "{\\"type\\":\\"tool.call\\",\\"payload\\":{\\"id\\":\\"sg1\\",\\"name\\":\\"schematic.generate\\",\\"args\\":{\\"prompt\\":\\"RP2040 board with USB-C power and an I2C connector.\\"}}}",
-  "stopReason": "end_turn",
-  "sessionId": "01a14236-498c-79d3-894e-653380daf41a",
-  "requestId": "f4a2e362-814f-48f7-aac8-57579278e92b",
-  "cwd": "/tmp/chatpcb-grok-schema-4Nk9",
-  "thought": "Preparing a ChatPCB tool call for schematic generation.",
-  "usage": {
-    "input_tokens": 12752,
-    "cache_read_input_tokens": 2304,
-    "cache_creation_input_tokens": 0,
-    "output_tokens": 417,
-    "reasoning_tokens": 370,
-    "total_tokens": 15473
-  },
-  "num_turns": 1,
-  "total_cost_usd": 0.00991372,
-  "total_cost_usd_ticks": 99137200,
-  "modelUsage": {
-    "grok-4.7-build": {
-      "inputTokens": 12752,
-      "outputTokens": 417,
-      "cacheReadInputTokens": 2304,
-      "cacheCreationInputTokens": 0,
-      "modelCalls": 1,
-      "costUSD": 0.00991372
-    }
-  },
-  "structuredOutput": {
-    "type": "tool.call",
-    "payload": {
-      "id": "sg1",
-      "name": "schematic.generate",
-      "args": {
-        "prompt": "RP2040 board with USB-C power and an I2C connector."
-      }
-    }
-  }
-}
-`;
-  const transcript = await runProviderProcess({
-    command: process.execPath,
-    args: ['-e', `process.stdout.write(${JSON.stringify(recorded)})`],
-    timeoutMs: 2000
-  });
+  // Recorded from `grok -m grok-4.7 --prompt-file --output-format json --json-schema` (provider flags).
+  const recorded = await readFile(grokFixture('json-schema-result.json'), 'utf8');
+  const expected = JSON.parse(recorded).structuredOutput.payload;
+  const transcript = await runProviderStdout(recorded, { providerId: 'grok' });
 
   assert.equal(transcript.exitCode, 0);
   assert.deepEqual(transcript.events.map((event) => event.type), ['tool.call']);
-  assert.equal(transcript.events[0].payload.id, 'sg1');
-  assert.equal(transcript.events[0].payload.name, 'schematic.generate');
-  assert.match(transcript.events[0].payload.args.prompt, /RP2040/);
+  assert.equal(transcript.events[0].payload.id, expected.id);
+  assert.equal(transcript.events[0].payload.name, expected.name);
+  assert.equal(transcript.events[0].payload.args.prompt, expected.args.prompt);
+});
+
+test('grok cut-off JSON fails instead of counting as success', async () => {
+  const recorded = await readFile(grokFixture('json-schema-result.json'), 'utf8');
+  const cutOff = recorded.slice(0, recorded.indexOf('"structuredOutput"'));
+  await assert.rejects(
+    () => runProviderStdout(cutOff, { providerId: 'grok' }),
+    (error) => {
+      assert.equal(error.code, 'GROK_OUTPUT_UNPARSEABLE');
+      assert.match(error.message, /cut off/);
+      return true;
+    }
+  );
+
+  const incomplete = JSON.parse(recorded);
+  delete incomplete.text;
+  delete incomplete.structuredOutput;
+  delete incomplete.sessionId;
+  await assert.rejects(
+    () => runProviderStdout(`${JSON.stringify(incomplete, null, 2)}\n`, { providerId: 'grok' }),
+    (error) => {
+      assert.equal(error.code, 'GROK_OUTPUT_INCOMPLETE');
+      assert.match(error.message, /complete result/);
+      return true;
+    }
+  );
+});
+
+test('grok stopReason error fails the run', async () => {
+  // grok 1.0.52 did not emit stopReason "error" (invalid model emits type:error;
+  // documented stop reasons are end_turn, max_tokens, max_turn_requests, refusal, cancelled).
+  // The recorded result is real; this case only changes stopReason.
+  const recorded = JSON.parse(await readFile(grokFixture('json-schema-result.json'), 'utf8'));
+  recorded.stopReason = 'error';
+  await assert.rejects(
+    () => runProviderStdout(`${JSON.stringify(recorded, null, 2)}\n`, { providerId: 'grok' }),
+    (error) => {
+      assert.equal(error.code, 'GROK_STOP_ERROR');
+      assert.match(error.message, /error/i);
+      return true;
+    }
+  );
+});
+
+test('recorded grok error JSON fails the run', async () => {
+  const recorded = await readFile(grokFixture('error-result.json'), 'utf8');
+  const expected = JSON.parse(recorded);
+  await assert.rejects(
+    () => runProviderStdout(recorded, { providerId: 'grok' }),
+    (error) => {
+      assert.equal(error.code, 'GROK_OUTPUT_ERROR');
+      assert.equal(error.message, expected.message);
+      return true;
+    }
+  );
+});
+
+test('non-grok providers stream each stdout line before the process exits', async () => {
+  const seen = [];
+  let settled = false;
+  const script = [
+    'console.log("Drafting circuit.");',
+    'setTimeout(() => process.exit(0), 2000);'
+  ].join('\n');
+  const pending = runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    providerId: 'codex',
+    timeoutMs: 5000,
+    onEvent: (event) => seen.push(event)
+  }).finally(() => {
+    settled = true;
+  });
+
+  const deadline = Date.now() + 1500;
+  while (seen.length === 0 && Date.now() < deadline) await delay(20);
+
+  assert.equal(settled, false);
+  assert.equal(seen[0].type, 'agent.delta');
+  assert.match(seen[0].payload.text, /Drafting circuit/);
+  const transcript = await pending;
+  assert.equal(transcript.exitCode, 0);
+  assert.equal(transcript.events[0].payload.text, 'Drafting circuit.');
+});
+
+test('non-grok JSON error lines keep the main rejection', async () => {
+  const script = 'console.log(JSON.stringify({type:"error", message:"provider blew up"}));';
+
+  await assert.rejects(
+    () => runProviderProcess({
+      command: process.execPath,
+      args: ['-e', script],
+      providerId: 'claude',
+      timeoutMs: 2000
+    }),
+    /Providers may only emit tool\.call/
+  );
 });
 
 test('parses grok streaming-json text into a tool call and ignores grok tool_call events', async () => {
@@ -728,6 +783,7 @@ test('parses grok streaming-json text into a tool call and ignores grok tool_cal
   const transcript = await runProviderProcess({
     command: process.execPath,
     args: ['-e', script],
+    providerId: 'grok',
     timeoutMs: 2000
   });
 
@@ -1042,4 +1098,17 @@ function forceKillPid(pid) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function grokFixture(name) {
+  return fileURLToPath(new URL(`./fixtures/grok/${name}`, import.meta.url));
+}
+
+function runProviderStdout(stdout, options = {}) {
+  return runProviderProcess({
+    command: process.execPath,
+    args: ['-e', `process.stdout.write(${JSON.stringify(stdout)})`],
+    timeoutMs: 2000,
+    ...options
+  });
 }
