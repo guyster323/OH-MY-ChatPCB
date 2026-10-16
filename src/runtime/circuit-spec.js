@@ -401,6 +401,22 @@ function implausibleForwardMessage(volts) {
   };
 }
 
+function invalidCountMessage(token) {
+  const shown = token.countText ?? String(token.value);
+  return {
+    en: `Refusing to draft an LED circuit because the LED count ${shown} is not a positive whole number. Zero, negative, and fractional counts are rejected. No LED, resistor, or power symbol was generated.`,
+    ko: `LED 개수 ${shown}는 양의 정수가 아닙니다. 0, 음수, 분수는 거부합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
+}
+
+function ambiguousNumberMessage(token) {
+  const raw = token.raw;
+  return {
+    en: `Refusing to draft an LED circuit because ${raw} has no unit. Is it a series resistor (for example 330Ω or 330 ohm) or an LED count (for example 3 pcs)? No LED, resistor, or power symbol was generated.`,
+    ko: `단위 없는 숫자 ${raw}는 저항으로 만들지 않습니다. 직렬 저항인지(330Ω 또는 330옴) LED 개수인지(3개) 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
+}
+
 function ambiguousSupplyMessage(volts) {
   return {
     en: `Refusing to draft an LED circuit because several supply voltages were given (${joinVoltLabels(volts)}). Which supply should the LED use? No LED, resistor, or power symbol was generated.`,
@@ -491,6 +507,7 @@ function parseLedCount(prompt, tokens) {
   const claimed = tokens.filter((token) => CLAIMED_QUANTITY_ROLES.has(token.role));
   for (const token of tokens) {
     if (token.kind !== 'count' || token.role !== 'count') continue;
+    if (token.validCount !== true) continue;
     if (!Number.isInteger(token.value) || token.value < 1) continue;
     if (isFractionalCountTail(prompt, token.start)) continue;
     if (claimed.some((other) => spansOverlap(token, other))) continue;
@@ -825,6 +842,27 @@ export function parseDiscreteLedRequest(prompt) {
   }
   const supply = resolveDiscreteSupply(text, scan);
   if (supply.refused) return refuseDiscreteLed({ ...supply, prompt: text });
+  const invalidCount = scan.tokens.find((token) => token.kind === 'count' && token.validCount !== true);
+  if (invalidCount) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-invalid-count',
+      prompt: text,
+      supplyVolts: supply.supplyVolts,
+      supplyAssumed: supply.supplyAssumed === true,
+      texts: invalidCountMessage(invalidCount)
+    });
+  }
+  // A unitless number that is not a count is never drafted as ohms.
+  const ambiguousNumber = scan.tokens.find((token) => token.kind === 'ambiguous');
+  if (ambiguousNumber) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-ambiguous-number',
+      prompt: text,
+      supplyVolts: supply.supplyVolts,
+      supplyAssumed: supply.supplyAssumed === true,
+      texts: ambiguousNumberMessage(ambiguousNumber)
+    });
+  }
   const supplyVolts = supply.supplyVolts;
   const supplyAssumed = supply.supplyAssumed === true;
   const forward = specifiedForward(scan.tokens);

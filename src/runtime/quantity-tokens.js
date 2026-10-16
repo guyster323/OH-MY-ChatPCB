@@ -3,7 +3,6 @@
 // A voltage range's value is its maximum.
 
 const CONTEXT_WINDOW = 32;
-const BARE_CONTEXT_WINDOW = 48;
 const POT_WINDOW = 48;
 
 const VOLTAGE_UNIT = '(?:[Vv][Oo][Ll][Tt][Ss]?|[Vv][Dd][Cc]|[Vv][Aa][Cc]|[Vv]|볼트)';
@@ -19,8 +18,12 @@ const VOLTAGE_START = '(?:(?<![\\w.])|(?<=\\b[Vv][Ff]))';
 const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
 const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
 const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
-const BARE_CONTEXT = /\bleds?\b|엘이디|발광|저항|\bresistors?\b|\bohms?\b|Ω|옴/i;
 const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
+// A bare number is a resistor only when ohm/resistor wording is the text
+// immediately beside it. "LED" itself is not that context.
+const RESISTOR_CONTEXT_WORD = '(?:\\bohms?\\b|\\bresistors?\\b|저항(?:값|은|는|이|가|을|를|의)?|(?<![가-힣])옴)';
+const RESISTOR_CONTEXT_BEFORE = new RegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
+const RESISTOR_CONTEXT_AFTER = new RegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
 
 const PRIORITY = {
   range: 0,
@@ -132,9 +135,10 @@ function isPotentiometer(prompt, start, end) {
   return POT_BEFORE.test(before) || POT_AFTER.test(after);
 }
 
-function bareHasResistorContext(prompt, start) {
-  const before = prompt.slice(Math.max(0, start - BARE_CONTEXT_WINDOW), start);
-  return BARE_CONTEXT.test(before);
+function bareHasResistorContext(prompt, start, end) {
+  const before = prompt.slice(Math.max(0, start - 24), start);
+  const after = prompt.slice(end, end + 24);
+  return RESISTOR_CONTEXT_BEFORE.test(before) || RESISTOR_CONTEXT_AFTER.test(after);
 }
 
 function pushMatch(candidates, match, priority, token, invalid = false) {
@@ -260,13 +264,15 @@ function collectRkm(prompt, candidates) {
 }
 
 function collectOhm(prompt, candidates) {
-  const pattern = /(?<![\w.])(\d+(?:\.\d+)?)\s*([rRkKmM])?\s*(?:옴|ohms?|Ω)/gi;
+  // "vf330Ω" keeps the Vf label outside the token. The ohm value is a resistor.
+  const pattern = /(?<![\w.])(?:[Vv][Ff](?=\d))?(\d+(?:\.\d+)?)\s*([rRkKmM])?\s*(?:옴|ohms?|Ω)/gi;
   for (const match of prompt.matchAll(pattern)) {
     const multiplier = match[2] ? resistanceMultiplier(match[2]) : 1;
     const ohms = Number(match[1]) * multiplier;
     if (!(ohms > 0)) continue;
-    const start = match.index ?? 0;
-    const end = start + match[0].length;
+    const matchStart = match.index ?? 0;
+    const end = matchStart + match[0].length;
+    const start = matchStart + match[0].indexOf(match[1]);
     candidates.push({
       priority: PRIORITY.ohm,
       start,
@@ -347,44 +353,67 @@ function pushCurrent(candidates, prompt, match, milliamps, unit) {
   });
 }
 
-function collectCounts(prompt, candidates) {
-  // A count cannot start on the tail of a fractional number. The digit before
-  // the match must not be '.', ',', or another digit ("3.2 LED" / "3,2 LED").
-  const pattern = /(?<![\w.,])(\d+)\s*(?:개|(?:x\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b)/gi;
-  for (const match of prompt.matchAll(pattern)) {
-    const start = match.index ?? 0;
-    const end = start + match[0].length;
-    candidates.push({
-      priority: PRIORITY.count,
+function parseCountMagnitude(raw) {
+  if (/^\d+$/.test(raw)) return Number(raw);
+  if (/^\d+\.\d+$/.test(raw)) return Number(raw);
+  const comma = /^(\d+),(\d+)$/.exec(raw);
+  if (comma && (comma[2].length === 1 || comma[2].length === 2)) {
+    return Number(`${comma[1]}.${comma[2]}`);
+  }
+  return null;
+}
+
+function pushCount(candidates, prompt, match, sign, rawNumber) {
+  const start = match.index ?? 0;
+  const end = start + match[0].length;
+  const negative = sign === '-' || sign === '\u2212';
+  const magnitude = parseCountMagnitude(rawNumber);
+  const validCount = !negative && /^\d+$/.test(rawNumber) && magnitude >= 1;
+  candidates.push({
+    priority: PRIORITY.count,
+    start,
+    end,
+    invalid: false,
+    token: {
+      value: magnitude == null ? 0 : magnitude * (negative ? -1 : 1),
+      unit: 'count',
+      raw: prompt.slice(start, end),
       start,
       end,
-      invalid: false,
-      token: {
-        value: Number(match[1]),
-        unit: 'count',
-        raw: prompt.slice(start, end),
-        start,
-        end,
-        kind: 'count',
-        form: 'count',
-        range: null,
-        ac: false,
-        dc: false,
-        pot: false
-      }
-    });
-  }
+      kind: 'count',
+      form: 'count',
+      range: null,
+      ac: false,
+      dc: false,
+      pot: false,
+      validCount,
+      countText: `${negative ? '-' : ''}${rawNumber}`
+    }
+  });
+}
+
+function collectCounts(prompt, candidates) {
+  // pcs/pc/ea/개/×/x are counts in either order ("x3", "3x", "3 pcs", "3ea").
+  // A fraction, zero, or a leading minus stays a count token so the draft can
+  // refuse it. The LED word itself stays integer-only: "3.2 LED" is not 2 LEDs.
+  const led = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+)\s*(?:[x\u00D7]\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b/gi;
+  const marker = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+(?:[.,]\d+)?)\s*(?:개|(?:pcs|pc|ea)(?![A-Za-z])|[x\u00D7](?![\w.]))/gi;
+  const prefix = /(?<![\w.])[x\u00D7]\s*([+\-\u2212])?(\d+(?:[.,]\d+)?)(?![\w.])/gi;
+  for (const match of prompt.matchAll(led)) pushCount(candidates, prompt, match, match[1], match[2]);
+  for (const match of prompt.matchAll(marker)) pushCount(candidates, prompt, match, match[1], match[2]);
+  for (const match of prompt.matchAll(prefix)) pushCount(candidates, prompt, match, match[1], match[2]);
 }
 
 // "Vf=3.2", "Vf 3.2", and glued "vf3.2" are a forward voltage when labeled Vf.
 // The same 0.5V to 5V window is applied to every Vf form in classifyQuantities.
-// Outside that window the value is refused, not kept as a resistor.
+// Outside that window the value is refused, not kept as a resistor. Unitless
+// "Vf 0" is inside the window check (implausible). A trailing Ω/ohm/옴 is not Vf.
 function collectUnitlessForward(prompt, candidates) {
-  const pattern = /\bvf(?=\d|\b)(?:\s*[=:]\s*|\s+)?(\d+(?:[.,]\d+)?)(?![\w.]|Ω|옴)/gi;
+  const pattern = /\bvf(?=\d|\b)(?:\s*[=:]\s*|\s+)?(\d+(?:[.,]\d+)?)(?![\w.]|\s*(?:[rRkKmM]\s*)?(?:옴|ohms?|Ω))/gi;
   for (const match of prompt.matchAll(pattern)) {
     const rawNumber = match[1];
     const volts = parseVoltageNumber(rawNumber);
-    if (!(volts > 0)) continue;
+    if (volts == null || volts < 0) continue;
     const start = (match.index ?? 0) + match[0].length - rawNumber.length;
     const end = start + rawNumber.length;
     const token = voltageToken(prompt, start, end, volts, '', 'V');
@@ -396,20 +425,38 @@ function collectUnitlessForward(prompt, candidates) {
   }
 }
 
+function ambiguousNumberToken(prompt, start, end, value) {
+  return {
+    value,
+    unit: 'bare',
+    raw: prompt.slice(start, end),
+    start,
+    end,
+    kind: 'ambiguous',
+    form: 'bare',
+    range: null,
+    ac: false,
+    dc: false,
+    pot: false
+  };
+}
+
 function collectBare(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+\.\d+|\d+)(?![\w]|\.\d)/g;
   for (const match of prompt.matchAll(pattern)) {
     const start = match.index ?? 0;
-    if (!bareHasResistorContext(prompt, start)) continue;
     const end = start + match[0].length;
     const ohms = Number(match[1]);
     if (!(ohms > 0)) continue;
+    const token = bareHasResistorContext(prompt, start, end)
+      ? resistanceToken(prompt, start, end, ohms, 'bare')
+      : ambiguousNumberToken(prompt, start, end, ohms);
     candidates.push({
       priority: PRIORITY.bare,
       start,
       end,
       invalid: false,
-      token: resistanceToken(prompt, start, end, ohms, 'bare')
+      token
     });
   }
 }
@@ -508,8 +555,18 @@ function explicitLabelGap(text) {
   return /^[\s:=\u2013\u2014]*$/i.test(text) || /^[\s:=\u2013\u2014]*of[\s:=\u2013\u2014]*$/i.test(text);
 }
 
+function resistanceFollowsLabel(prompt, tokens, label) {
+  const following = tokens.find((token) => token.kind === 'resistance' && token.start >= label.end);
+  if (!following || following.start - label.end > CONTEXT_WINDOW) return false;
+  return explicitLabelGap(prompt.slice(label.end, following.start));
+}
+
 function bindExplicitForwardVoltages(prompt, tokens) {
   for (const label of keywordHits(prompt, FORWARD_LABELS, 'vf')) {
+    // "Vf 330Ω" and "vf330Ω" are the series resistor. An ohm token is never
+    // Vf, and the label does not take a neighboring supply either, so
+    // "LED 5V Vf 330Ω" keeps 5V as the supply and leaves Vf missing.
+    if (resistanceFollowsLabel(prompt, tokens, label)) continue;
     const following = tokens.find((token) => (
       token.kind === 'voltage' && !token.role && token.start >= label.end
     ));
@@ -566,6 +623,7 @@ export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
     } else if (token.kind === 'resistance') token.role = token.pot ? null : 'resistor';
     else if (token.kind === 'current') token.role = 'current';
     else if (token.kind === 'count') token.role = 'count';
+    else if (token.kind === 'ambiguous') token.role = 'ambiguous';
     else token.role = null;
     delete token.hits;
   }

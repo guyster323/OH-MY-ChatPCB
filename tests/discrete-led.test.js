@@ -143,6 +143,94 @@ test('a fractional Vf glued to LED is one series LED, and explicit counts stay i
   assert.equal(components(threeEnglish, 'Device:R').length, 3);
 });
 
+test('count markers draft LEDs and a unitless number is not placed as ohms', async () => {
+  const counted = [
+    ['LED 2 pcs', 2, '300Ω'],
+    ['LED ×3 5V', 3, '300Ω'],
+    ['LED x3', 3, '300Ω'],
+    ['LED 3x', 3, '300Ω'],
+    ['2x 5V LED', 2, '300Ω'],
+    ['3ea LED', 3, '300Ω']
+  ];
+  for (const [prompt, count, resistor] of counted) {
+    const result = await generateLed(prompt);
+    assert.equal(result.spec.discrete.refused, false, `${prompt} ${JSON.stringify(result.spec.discrete.reviewBlockers)}`);
+    assert.equal(result.spec.discrete.count, count, prompt);
+    assert.equal(components(result, 'Device:LED').length, count, prompt);
+    assert.equal(components(result, 'Device:R').length, count, prompt);
+    assert.ok(components(result, 'Device:R').every((part) => part.value === resistor), `${prompt} ${components(result, 'Device:R').map((part) => part.value).join(',')}`);
+    assert.equal(result.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false, prompt);
+    assert.equal(result.schematic.includes('2Ω'), false, prompt);
+    assert.equal(result.schematic.includes('3Ω'), false, prompt);
+  }
+
+  const ambiguous = await generateLed('LED 2 5V');
+  assert.equal(ambiguous.spec.discrete.refused, true);
+  assert.equal(components(ambiguous, 'Device:LED').length, 0);
+  assert.equal(components(ambiguous, 'Device:R').length, 0);
+  assert.equal(ambiguous.schematic.includes('Device:LED'), false);
+  assert.equal(ambiguous.schematic.includes('Device:R'), false);
+  assert.equal(ambiguous.review.status, 'blocked');
+  const ambiguousBlocker = ambiguous.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
+  assert.ok(ambiguousBlocker, JSON.stringify(ambiguous.review.findings.blockers));
+  assert.match(ambiguousBlocker.en, /2 has no unit/);
+  assert.match(ambiguousBlocker.ko, /단위 없는 숫자 2/);
+  assert.equal(ambiguousBlocker.message, ambiguousBlocker.en);
+  assert.equal(ambiguous.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false);
+
+  for (const [prompt, shown] of [
+    ['LED 2.5개', '2.5'],
+    ['LED 2,5개', '2,5'],
+    ['LED 0개', '0'],
+    ['LED -2개', '-2'],
+    ['LED 0 pcs', '0']
+  ]) {
+    const refused = await generateLed(prompt);
+    assert.equal(refused.spec.discrete.refused, true, prompt);
+    assert.equal(components(refused, 'Device:LED').length, 0, prompt);
+    assert.equal(components(refused, 'Device:R').length, 0, prompt);
+    assert.equal(refused.schematic.includes('Device:LED'), false, prompt);
+    assert.equal(refused.review.status, 'blocked', prompt);
+    const blocker = refused.review.findings.blockers.find((finding) => finding.code === 'discrete-led-invalid-count');
+    assert.ok(blocker, `${prompt} ${JSON.stringify(refused.review.findings.blockers)}`);
+    assert.match(blocker.en, new RegExp(`LED count ${shown.replace('.', '\\.')}`), blocker.en);
+    assert.match(blocker.ko, /양의 정수/, blocker.ko);
+    assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
+    assert.equal(refused.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false, prompt);
+  }
+
+  const zeroForward = await generateLed('LED Vf 0');
+  assert.equal(zeroForward.spec.discrete.refused, true);
+  assert.equal(components(zeroForward, 'Device:LED').length, 0);
+  assert.equal(components(zeroForward, 'Device:R').length, 0);
+  const zeroBlocker = zeroForward.review.findings.blockers.find((finding) => finding.code === 'discrete-led-implausible-vf');
+  assert.ok(zeroBlocker, JSON.stringify(zeroForward.review.findings.blockers));
+  assert.match(zeroBlocker.en, /forward voltage 0V is implausible/);
+  assert.equal(zeroForward.review.findings.blockers.some((finding) => finding.code === 'discrete-led-below-vf'), false);
+
+  // Ω never binds as Vf. 330Ω is the resistor and Vf stays the color default.
+  for (const prompt of ['LED Vf 330Ω', 'LED vf330Ω 5V', 'LED 5V Vf 330Ω']) {
+    const ohmForward = await generateLed(prompt);
+    assert.equal(ohmForward.spec.discrete.refused, false, `${prompt} ${JSON.stringify(ohmForward.spec.discrete.reviewBlockers)}`);
+    assert.equal(ohmForward.spec.discrete.count, 1, prompt);
+    assert.equal(ohmForward.spec.discrete.specifiedVf ?? null, null, prompt);
+    assert.equal(ohmForward.spec.discrete.resistorExplicit, true, prompt);
+    assert.equal(components(ohmForward, 'Device:LED').length, 1, prompt);
+    assert.equal(components(ohmForward, 'Device:R')[0].value, '330Ω', prompt);
+    assert.equal(ohmForward.review.findings.blockers.some((finding) => finding.code === 'discrete-led-below-vf'), false, prompt);
+    assert.equal(ohmForward.review.findings.blockers.some((finding) => finding.code === 'discrete-led-implausible-vf'), false, prompt);
+  }
+
+  const koreanResistor = await generateLed('LED 5V 저항 330');
+  assert.equal(koreanResistor.spec.discrete.resistorExplicit, true);
+  assert.equal(components(koreanResistor, 'Device:R')[0].value, '330Ω');
+  assert.equal(components(koreanResistor, 'Device:LED').length, 1);
+
+  const rkm = await generateLed('LED 5V 4k7');
+  assert.equal(rkm.spec.discrete.resistanceOhms, 4700);
+  assert.equal(components(rkm, 'Device:R')[0].value, '4.7kΩ');
+});
+
 test('discrete LED color sets the value and calculates the series resistor unless one was requested', async () => {
   const red = await generateLed('빨간 LED를 5V에 연결해줘');
   assert.equal(components(red, 'Device:LED')[0].value, 'LED Red');
