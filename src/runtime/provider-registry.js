@@ -1,5 +1,16 @@
 import { spawn } from 'node:child_process';
 
+// Same tool constraint the daemon passes to every provider adapter.
+export const PROVIDER_ALLOWED_TOOLS = [
+  'schematic.generate',
+  'project.create',
+  'schematic.patch',
+  'project.inspect',
+  'validate.erc',
+  'validate.drc',
+  'simulate.spice'
+];
+
 const PROVIDERS = [
   {
     id: 'codex',

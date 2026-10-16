@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { parseProviderMessage, runProviderProcess } from './provider-process.js';
-import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { PROVIDER_ALLOWED_TOOLS, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
 import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { publicProposal } from '../workflow/native-proposal-source.js';
@@ -21,8 +21,6 @@ import { assertSafeProjectDir, createNamedProject } from '../workflow/project-wo
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
 import { createChatGPTAuthManager } from './auth/chatgpt-auth.js';
-
-const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
 function emitProgress(ctx, payload) {
   if (typeof ctx?.emit !== 'function') return;
@@ -318,7 +316,8 @@ async function invokeProvider(call, ctx) {
       const response = await callChatGPTResponses({
         prompt: input,
         signal: controller.signal,
-        model: args.model
+        model: args.model,
+        allowedTools: PROVIDER_ALLOWED_TOOLS
       });
       const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
       for (const event of events) emitProviderEvent(ctx, event);

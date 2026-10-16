@@ -1,4 +1,6 @@
-import { loadCredentials, refreshAccessToken, resolveChatGPTSettings, saveCredentials, verifyTokenExpiry } from '../auth/chatgpt-auth.js';
+import { hasChatGPTPlanScope, loadCredentials, refreshAccessToken, resolveChatGPTSettings, saveCredentials, verifyTokenExpiry } from '../auth/chatgpt-auth.js';
+import { validateProviderToolCall } from '../provider-process.js';
+import { PROVIDER_ALLOWED_TOOLS } from '../provider-registry.js';
 
 const RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 const MODELS_ENDPOINT = 'https://api.openai.com/v1/models';
@@ -40,11 +42,16 @@ export async function selectChatGPTModel(accessToken, override) {
   return slugs[0];
 }
 
-export async function callChatGPTResponses({ prompt, onChunk, onError, signal, model } = {}) {
+export async function callChatGPTResponses({ prompt, onChunk, onError, signal, model, allowedTools } = {}) {
   const creds = await loadCredentials();
 
   if (!creds || !creds.access_token) {
     throw new Error('Not signed in to ChatGPT');
+  }
+  if (!hasChatGPTPlanScope(creds)) {
+    const error = new Error('chatgpt.tokens.use.direct permission not granted');
+    error.code = 'scope_not_granted';
+    throw error;
   }
 
   const tokenStatus = verifyTokenExpiry(creds);
@@ -70,10 +77,13 @@ export async function callChatGPTResponses({ prompt, onChunk, onError, signal, m
 
   const settings = await resolveChatGPTSettings({ model });
   const selectedModel = await selectChatGPTModel(accessToken, settings.model);
+  const allowed = normalizeAllowedTools(allowedTools);
 
   const body = {
     model: selectedModel,
     input: prompt,
+    tools: buildChatGPTFunctionTools(allowed),
+    tool_choice: 'auto',
     store: false,
     stream: true
   };
@@ -92,7 +102,8 @@ export async function callChatGPTResponses({ prompt, onChunk, onError, signal, m
     throw await httpError(response);
   }
 
-  const text = await readResponseStream(response);
+  const streamed = await readResponseStream(response);
+  const text = joinProviderText(streamed.text, renderFunctionCalls(streamed.functionCalls, allowed));
   await saveCredentials({ ...activeCreds, access_token: accessToken, last_used_at: Date.now() });
   if (typeof onChunk === 'function' && text) onChunk(text);
   return { completed: true, text, model: selectedModel };
@@ -109,6 +120,214 @@ export function mapChatGPTErrorToCode(error) {
   if (message.includes('Not signed in')) return 'not_signed_in';
 
   return 'network';
+}
+
+// Responses API function names are [A-Za-z0-9_-]+, so dotted ChatPCB tools
+// such as schematic.generate are sent as schematic_generate and mapped back.
+const CHATGPT_TOOL_SCHEMAS = {
+  'schematic.generate': {
+    description: 'Preview a KiCad schematic from a natural-language circuit request. ChatPCB executes this locally.',
+    properties: {
+      prompt: { type: 'string', description: 'Natural-language circuit to draft.' }
+    },
+    required: ['prompt']
+  },
+  'project.create': {
+    description: 'Create an empty named project directory in the ChatPCB workspace.',
+    properties: {
+      projectName: { type: 'string', description: 'Display name for the new project.' }
+    },
+    required: ['projectName']
+  },
+  'schematic.patch': {
+    description: 'Preview a schematic edit from a natural-language request. Do not approve or apply the edit.',
+    properties: {
+      prompt: { type: 'string', description: 'Requested schematic change.' }
+    },
+    required: ['prompt']
+  },
+  'project.inspect': {
+    description: 'Inspect the current KiCad project and return read-only evidence.',
+    properties: {},
+    required: []
+  },
+  'validate.erc': {
+    description: 'Run an electrical rules check (ERC) on the current project.',
+    properties: {},
+    required: []
+  },
+  'validate.drc': {
+    description: 'Run a design rules check (DRC) on the current board.',
+    properties: {},
+    required: []
+  },
+  'simulate.spice': {
+    description: 'Run a SPICE simulation of the current project.',
+    properties: {},
+    required: []
+  }
+};
+
+function normalizeAllowedTools(allowedTools) {
+  const source = allowedTools == null ? PROVIDER_ALLOWED_TOOLS : allowedTools;
+  return [...source];
+}
+
+function buildChatGPTFunctionTools(allowedToolNames) {
+  const seen = new Set();
+  return allowedToolNames.map((name) => {
+    const apiName = toApiToolName(name);
+    if (seen.has(apiName)) {
+      throw new Error(`ChatGPT function name collision for ${name}`);
+    }
+    seen.add(apiName);
+    const spec = CHATGPT_TOOL_SCHEMAS[name];
+    if (!spec) {
+      throw new Error(`No ChatGPT function schema for allowed tool: ${name}`);
+    }
+    return {
+      type: 'function',
+      name: apiName,
+      description: spec.description,
+      parameters: {
+        type: 'object',
+        properties: { ...spec.properties },
+        required: [...spec.required],
+        additionalProperties: false
+      },
+      strict: spec.strict !== false
+    };
+  });
+}
+
+function toApiToolName(name) {
+  return String(name).replaceAll('.', '_');
+}
+
+function fromApiToolName(apiName, allowedToolNames) {
+  for (const name of allowedToolNames) {
+    if (name === apiName || toApiToolName(name) === apiName) return name;
+  }
+  return typeof apiName === 'string' ? apiName : String(apiName ?? '');
+}
+
+function joinProviderText(text, toolText) {
+  if (!toolText) return text;
+  if (!text) return toolText;
+  return `${text}\n${toolText}`;
+}
+
+function renderFunctionCalls(functionCalls, allowedToolNames) {
+  return functionCalls.map((call) => {
+    const apiName = call.name || 'unknown';
+    const payload = {
+      id: call.callId || call.itemId,
+      name: fromApiToolName(apiName, allowedToolNames),
+      args: parseToolArguments(call.arguments, apiName)
+    };
+    validateProviderToolCall(payload, allowedToolNames);
+    return JSON.stringify({ type: 'tool.call', payload });
+  }).join('\n');
+}
+
+function parseToolArguments(raw, apiName) {
+  if (typeof raw !== 'string') {
+    throw invalidToolArguments(apiName, 'arguments must be a JSON string');
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw invalidToolArguments(apiName, error.message);
+  }
+}
+
+function invalidToolArguments(apiName, detail) {
+  const err = new Error(`Invalid JSON arguments for ChatGPT tool call "${apiName}": ${detail}`);
+  err.code = 'invalid_tool_arguments';
+  return err;
+}
+
+function noteOutputItem(state, event) {
+  const item = event?.item;
+  if (!item || item.type !== 'function_call') return;
+  const call = bindFunctionCall(state, [item.id, outputKey(event.output_index)]);
+  assignCallIdentity(call, item);
+  if (event.type === 'response.output_item.done') setFinalArguments(call, item.arguments);
+}
+
+function noteArgumentDelta(state, event) {
+  if (typeof event?.delta !== 'string' || event.delta.length === 0) return;
+  const call = bindFunctionCall(state, [event.item_id, outputKey(event.output_index)]);
+  if (call.argumentsFinal) return;
+  call.arguments += event.delta;
+}
+
+function noteArgumentsDone(state, event) {
+  const call = bindFunctionCall(state, [event.item_id, outputKey(event.output_index)]);
+  if (typeof event?.name === 'string' && event.name) call.name = event.name;
+  setFinalArguments(call, event?.arguments);
+}
+
+function noteCompletedOutput(state, event) {
+  const output = event?.response?.output;
+  if (!Array.isArray(output)) return;
+  output.forEach((item, index) => {
+    if (!item || item.type !== 'function_call') return;
+    const call = bindFunctionCall(state, [item.id, outputKey(index)]);
+    assignCallIdentity(call, item);
+    setFinalArguments(call, item.arguments);
+  });
+}
+
+function bindFunctionCall(state, keys) {
+  const normalized = [];
+  for (const key of keys) {
+    if (key === undefined || key === null || key === '') continue;
+    const text = String(key);
+    if (!normalized.includes(text)) normalized.push(text);
+  }
+  if (normalized.length === 0) normalized.push(`anon:${state.order.length}`);
+
+  let call = null;
+  for (const key of normalized) {
+    const existing = state.calls.get(key);
+    if (existing) {
+      call = existing;
+      break;
+    }
+  }
+  if (!call) {
+    call = {
+      itemId: '',
+      callId: '',
+      name: '',
+      arguments: '',
+      argumentsFinal: false
+    };
+    state.order.push(call);
+  }
+  for (const key of normalized) {
+    const existing = state.calls.get(key);
+    if (!existing || existing === call) state.calls.set(key, call);
+  }
+  return call;
+}
+
+function assignCallIdentity(call, item) {
+  if (typeof item.name === 'string' && item.name) call.name = item.name;
+  if (typeof item.call_id === 'string' && item.call_id) call.callId = item.call_id;
+  if (typeof item.id === 'string' && item.id) call.itemId = item.id;
+}
+
+function outputKey(outputIndex) {
+  return typeof outputIndex === 'number' ? `output:${outputIndex}` : null;
+}
+
+function setFinalArguments(call, argumentsText) {
+  if (typeof argumentsText !== 'string') return;
+  if (argumentsText.length === 0 && call.arguments.length > 0) return;
+  call.arguments = argumentsText;
+  call.argumentsFinal = true;
 }
 
 function catalogSlugs(payload) {
@@ -174,7 +393,7 @@ async function readResponseStream(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const state = { text: '', completed: false };
+  const state = { text: '', completed: false, calls: new Map(), order: [] };
 
   try {
     while (!state.completed) {
@@ -195,7 +414,7 @@ async function readResponseStream(response) {
     throw err;
   }
 
-  return state.text;
+  return { text: state.text, functionCalls: state.order };
 }
 
 function consumeSseBuffer(buffer, state) {
@@ -222,8 +441,21 @@ function interpretSseLine(line, state) {
     state.text += event.delta;
     return;
   }
+  if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
+    noteOutputItem(state, event);
+    return;
+  }
+  if (event.type === 'response.function_call_arguments.delta') {
+    noteArgumentDelta(state, event);
+    return;
+  }
+  if (event.type === 'response.function_call_arguments.done') {
+    noteArgumentsDone(state, event);
+    return;
+  }
   if (event.type === 'response.completed') {
     state.completed = true;
+    noteCompletedOutput(state, event);
     return;
   }
   if (event.type === 'response.failed' || event.type === 'error') {

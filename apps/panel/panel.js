@@ -1313,7 +1313,7 @@ function renderChatGPTAuth() {
     
     let title, body, actions;
     
-    if (code === 'cancelled') {
+    if (code === 'cancelled' || code === 'access_denied') {
       title = t('auth.chatgpt.error.cancelled');
       body = '';
       actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
@@ -1378,7 +1378,7 @@ function updateLiveRegion(payload) {
   } else if (state === 'signed_out') {
     message = t('auth.chatgpt.signed-out.title');
   } else if (state === 'error' && code) {
-    if (code === 'cancelled') message = t('auth.chatgpt.error.cancelled');
+    if (code === 'cancelled' || code === 'access_denied') message = t('auth.chatgpt.error.cancelled');
     else if (code === 'timeout') message = t('auth.chatgpt.error.timeout');
     else if (code === 'not_eligible') message = t('auth.chatgpt.error.not-eligible.title');
     else if (code === 'usage_limit') message = t('auth.chatgpt.error.usage-limit.title');
