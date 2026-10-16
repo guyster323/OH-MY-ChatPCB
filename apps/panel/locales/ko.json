@@ -52,7 +52,7 @@
   "project.name": "프로젝트 이름",
   "composer.label": "회로 요청",
   "composer.send": "보내기",
-  "composer.placeholder": "바꿀 내용을 적거나 답해 주세요.",
+  "composer.placeholder": "채팅으로 답하기",
   "request.idle": "회로 요청을 보내려면 프로젝트를 만드세요.",
   "request.project-busy": "다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.",
   "progress.warn": "주의가 필요해요",

@@ -177,10 +177,6 @@ for (const button of document.querySelectorAll('.flow-btn')) {
     }
     const dialog = document.getElementById(button.dataset.open);
     if (typeof dialog?.showModal === 'function') dialog.showModal();
-    const hint = t(`workflow.copy.${button.dataset.step}.wait`);
-    if (hint && promptEl && !promptEl.disabled && hint !== `workflow.copy.${button.dataset.step}.wait`) {
-      promptEl.placeholder = hint;
-    }
   });
 }
 for (const row of document.querySelectorAll('.lane-row')) {
@@ -1383,9 +1379,6 @@ function syncWorkflow() {
     workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
       ? t('workflow.caption.failed')
       : (mode === 'run' ? copyRun : (mode === 'idle' ? t('workflow.caption.idle') : copyWait));
-  }
-  if (promptEl && mode === 'wait' && !promptEl.disabled && copyWait) {
-    promptEl.placeholder = copyWait;
   }
   if (workflowCliEl) {
     const showCli = mode === 'run' && lastProgressText;

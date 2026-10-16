@@ -52,7 +52,7 @@
   "project.name": "Project name",
   "composer.label": "Circuit request",
   "composer.send": "Send",
-  "composer.placeholder": "Describe a change, or reply…",
+  "composer.placeholder": "Reply in chat…",
   "request.idle": "Create a project to send a circuit request.",
   "request.project-busy": "Another operation is using this project. Try again in a moment.",
   "progress.warn": "Needs attention.",
