@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,51 @@ const MARKER = Symbol.for('chatpcb.isolateHomeHook');
 
 function envPath(value) {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function directoryExists(candidate) {
+  try {
+    return statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+// KiCad library tables live in this directory. Callers must pass the environment
+// from before HOME, APPDATA, and XDG_CONFIG_HOME are redirected. A missing
+// directory is left unset so KiCad keeps its own search path.
+export function resolveRealKicadConfigDir({
+  platform = process.platform,
+  env = process.env,
+  exists = directoryExists
+} = {}) {
+  if (platform === 'win32') {
+    const appData = envPath(env.APPDATA);
+    if (!appData) return null;
+    const dir = path.join(appData, 'kicad');
+    return exists(dir) ? dir : null;
+  }
+  const home = envPath(env.HOME);
+  if (platform === 'darwin') {
+    if (!home) return null;
+    const dir = path.join(home, 'Library', 'Preferences', 'kicad');
+    return exists(dir) ? dir : null;
+  }
+  if (home) {
+    const flatpak = path.join(home, '.var', 'app', 'org.kicad.KiCad', 'config', 'kicad');
+    if (exists(flatpak)) return flatpak;
+  }
+  const xdg = envPath(env.XDG_CONFIG_HOME);
+  const configRoot = xdg || (home ? path.join(home, '.config') : null);
+  if (!configRoot) return null;
+  const dir = path.join(configRoot, 'kicad');
+  return exists(dir) ? dir : null;
+}
+
+function pinRealKicadConfigHome(platform, env, exists) {
+  if (envPath(env.KICAD_CONFIG_HOME)) return;
+  const dir = resolveRealKicadConfigDir({ platform, env, exists });
+  if (dir) env.KICAD_CONFIG_HOME = dir;
 }
 
 // os.homedir() on Windows is USERPROFILE, not HOME. The resolver only needs
@@ -43,9 +88,14 @@ export function isolateProcessHome({
   env = process.env,
   mkdtemp = mkdtempSync,
   temporaryDirectory = tmpdir(),
-  registerCleanup = true
+  registerCleanup = true,
+  exists = directoryExists
 } = {}) {
   if (env === process.env && globalThis[MARKER]) return globalThis[MARKER];
+  // Capture KiCad's config before this home moves. A private copy made later
+  // reads KICAD_CONFIG_HOME from the environment, which would otherwise see
+  // only the empty temporary root.
+  pinRealKicadConfigHome(platform, env, exists);
   const root = mkdtemp(path.join(temporaryDirectory, 'chatpcb-home-'));
   if (platform === 'win32') {
     // ChatPCB config is %APPDATA%\chatpcb. USERPROFILE is only the fallback

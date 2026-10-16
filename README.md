@@ -213,8 +213,6 @@ After sign-out the file holds only that registration. When each value was stored
 
 A key that was never stored is absent. No other key remains. Access tokens, refresh tokens, ID tokens, email, name, account, and subject are removed, and the next authorize request does not send `id_token_hint` or `login_hint`.
 
-로그아웃해도 자격증명 파일은 남습니다. OpenAI 동적 클라이언트 등록이 발급한 `oaiapp_` 클라이언트 id를 다음 로그인에서 다시 쓰기 위해서이며, 이 기기의 호스트 id도 함께 남습니다. 새 등록을 다시 받지 않습니다. 남는 필드는 등록 정보뿐입니다. 저장되어 있었다면 `client_id`, `ext_agent_host_id`, `issuer`, `saved_at`, `last_used_at`이고, 저장되지 않았던 키는 없습니다. 액세스 토큰, 리프레시 토큰, ID 토큰, 이메일, 이름, 계정, subject는 남지 않으며, 다음 로그인 요청에는 `id_token_hint`와 `login_hint`가 없습니다.
-
 ## Browser UI verification
 
 Run this command for the closest repeatable check to a user operating the current panel:
