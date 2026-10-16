@@ -231,6 +231,79 @@ test('count markers draft LEDs and a unitless number is not placed as ohms', asy
   assert.equal(components(rkm, 'Device:R')[0].value, '4.7kΩ');
 });
 
+test('tolerance, labeled and bare resistors, fullwidth digits, and sub-ohm refusals', async () => {
+  const drafted = [
+    ['LED 5V 330Ω±5%', 1, '330Ω'],
+    ['LED 5V 330Ω 5%', 1, '330Ω'],
+    ['LED 5V 4k7 5%', 1, '4.7kΩ'],
+    ['5V LED 330', 1, '330Ω'],
+    ['LED 330', 1, '330Ω'],
+    ['LED 5V 3 leds 470', 3, '470Ω'],
+    ['2 LEDs 5V 330', 2, '330Ω'],
+    ['LED 3개 470', 3, '470Ω'],
+    ['LED 5V 20mA 470', 1, '470Ω'],
+    ['LED 5V R=2', 1, '2Ω'],
+    ['LED 5V R 2', 1, '2Ω'],
+    ['LED R1=330', 1, '330Ω'],
+    ['LED 5V R1 330', 1, '330Ω'],
+    ['LEDx3', 3, '300Ω'],
+    ['LED×3', 3, '300Ω'],
+    ['LED ２개 5V', 2, '300Ω'],
+    ['LED ３３０Ω 5V', 1, '330Ω'],
+    ['two pcs LED', 2, '300Ω'],
+    ['LED two pcs', 2, '300Ω']
+  ];
+  for (const [prompt, count, resistor] of drafted) {
+    const result = await generateLed(prompt);
+    assert.equal(result.spec.kind, 'discrete-led', prompt);
+    assert.equal(result.spec.discrete.refused, false, `${prompt} ${JSON.stringify(result.spec.discrete.reviewBlockers)}`);
+    assert.equal(result.spec.discrete.count, count, prompt);
+    assert.equal(components(result, 'Device:LED').length, count, prompt);
+    assert.equal(components(result, 'Device:R').length, count, prompt);
+    assert.ok(components(result, 'Device:R').every((part) => part.value === resistor), `${prompt} ${components(result, 'Device:R').map((part) => part.value).join(',')}`);
+    assert.equal(result.review.findings.blockers.some((finding) => finding.code === 'discrete-led-ambiguous-number'), false, prompt);
+  }
+
+  const asks = await generateLed('3.2 LED on 5V');
+  assert.equal(asks.spec.discrete.refused, true);
+  assert.equal(components(asks, 'Device:LED').length, 0);
+  assert.equal(asks.review.findings.blockers.some((finding) => finding.code === 'discrete-led-ambiguous-number'), true);
+
+  const fraction = await generateLed('LED 5V 3.2');
+  assert.equal(fraction.spec.discrete.refused, true);
+  assert.match(fraction.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number').ko, /3\.2는/);
+
+  for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0.5Ω', 'LED 5V R47']) {
+    const refused = await generateLed(prompt);
+    assert.equal(refused.spec.discrete.refused, true, prompt);
+    assert.equal(components(refused, 'Device:LED').length, 0, prompt);
+    assert.equal(components(refused, 'Device:R').length, 0, prompt);
+    assert.equal(refused.schematic.includes('Device:LED'), false, prompt);
+    assert.equal(refused.review.status, 'blocked', prompt);
+    const blocker = refused.review.findings.blockers.find((finding) => finding.code === 'discrete-led-resistor-too-small');
+    assert.ok(blocker, `${prompt} ${JSON.stringify(refused.review.findings.blockers)}`);
+    assert.match(blocker.en, /below 1Ω/i, blocker.en);
+    assert.match(blocker.ko, /1Ω/, blocker.ko);
+    assert.equal(blocker.message, blocker.en, prompt);
+  }
+
+  const consonant = await generateLed('LED 0개');
+  const consonantBlocker = consonant.review.findings.blockers.find((finding) => finding.code === 'discrete-led-invalid-count');
+  assert.match(consonantBlocker.ko, /LED 개수 0은 /);
+
+  const vowel = await generateLed('LED 2.5개');
+  const vowelBlocker = vowel.review.findings.blockers.find((finding) => finding.code === 'discrete-led-invalid-count');
+  assert.match(vowelBlocker.ko, /LED 개수 2\.5는 /);
+
+  const one = await generateLed('LED 1');
+  const oneBlocker = one.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
+  assert.match(oneBlocker.ko, /단위 없는 숫자 1은 /);
+
+  const four = await generateLed('LED 4');
+  const fourBlocker = four.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
+  assert.match(fourBlocker.ko, /단위 없는 숫자 4는 /);
+});
+
 test('discrete LED color sets the value and calculates the series resistor unless one was requested', async () => {
   const red = await generateLed('빨간 LED를 5V에 연결해줘');
   assert.equal(components(red, 'Device:LED')[0].value, 'LED Red');

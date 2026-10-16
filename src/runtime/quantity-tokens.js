@@ -19,8 +19,9 @@ const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
 const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
 const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
 const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
-// A bare number is a resistor only when ohm/resistor wording is the text
-// immediately beside it. "LED" itself is not that context.
+// A bare integer of 10 or more is a resistor in ohms. A smaller integer, or any
+// fraction, stays ambiguous unless ohm/resistor wording is beside it. "LED"
+// itself is not that context. An "R=" / "R1" label is collected separately.
 const RESISTOR_CONTEXT_WORD = '(?:\\bohms?\\b|\\bresistors?\\b|저항(?:값|은|는|이|가|을|를|의)?|(?<![가-힣])옴)';
 const RESISTOR_CONTEXT_BEFORE = new RegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
 const RESISTOR_CONTEXT_AFTER = new RegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
@@ -33,8 +34,24 @@ const PRIORITY = {
   ohm: 4,
   suffix: 5,
   current: 6,
-  count: 7,
-  bare: 8
+  tolerance: 7,
+  count: 8,
+  bare: 9
+};
+
+const COUNT_WORD = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12
 };
 
 // Anchored at a token boundary. An unanchored \d+ retries at every offset and
@@ -246,6 +263,13 @@ function collectVoltages(prompt, candidates) {
   }
 }
 
+function isDesignatorAssignment(prompt, end) {
+  const after = prompt.slice(end);
+  if (/^\s*=/.test(after)) return true;
+  // "R1 330" assigns a value. "R47 5V" does not: the next number wears a unit.
+  return /^\s+\d+(?:\.\d+)?(?![\w.])/.test(after);
+}
+
 function collectRkm(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+)([rRkKmM])(\d+)(?![\w])/g;
   for (const match of prompt.matchAll(pattern)) {
@@ -261,6 +285,41 @@ function collectRkm(prompt, candidates) {
       token: resistanceToken(prompt, start, end, ohms, 'rkm')
     });
   }
+  // "R47" is 0.47Ω. "R1=330" and "R1 330" are designators, not 0.1Ω.
+  const leading = /(?<![\w.])[rR](\d+)(?![\w])/g;
+  for (const match of prompt.matchAll(leading)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (isDesignatorAssignment(prompt, end)) continue;
+    const fraction = match[1];
+    const ohms = Number(fraction) / (10 ** fraction.length);
+    if (!Number.isFinite(ohms) || ohms < 0) continue;
+    candidates.push({
+      priority: PRIORITY.rkm,
+      start,
+      end,
+      invalid: false,
+      token: resistanceToken(prompt, start, end, ohms, 'rkm')
+    });
+  }
+}
+
+function collectLabeledResistor(prompt, candidates) {
+  // The designator stays inside the token so "R1" is not its own bare number.
+  const pattern = /(?<![\w.])[Rr](\d+)?(?:\s*=\s*|\s+)(\d+(?:\.\d+)?)(?![\w.])/g;
+  for (const match of prompt.matchAll(pattern)) {
+    const ohms = Number(match[2]);
+    if (!Number.isFinite(ohms) || ohms < 0) continue;
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    candidates.push({
+      priority: PRIORITY.rkm,
+      start,
+      end,
+      invalid: false,
+      token: resistanceToken(prompt, start, end, ohms, 'label')
+    });
+  }
 }
 
 function collectOhm(prompt, candidates) {
@@ -269,7 +328,8 @@ function collectOhm(prompt, candidates) {
   for (const match of prompt.matchAll(pattern)) {
     const multiplier = match[2] ? resistanceMultiplier(match[2]) : 1;
     const ohms = Number(match[1]) * multiplier;
-    if (!(ohms > 0)) continue;
+    // 0Ω is kept so the draft can refuse it instead of ignoring the token.
+    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const matchStart = match.index ?? 0;
     const end = matchStart + match[0].length;
     const start = matchStart + match[0].indexOf(match[1]);
@@ -288,7 +348,7 @@ function collectSuffix(prompt, candidates) {
   for (const match of prompt.matchAll(pattern)) {
     const multiplier = resistanceMultiplier(match[2]);
     const ohms = Number(match[1]) * multiplier;
-    if (!(ohms > 0)) continue;
+    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const start = match.index ?? 0;
     const end = start + match[0].length;
     candidates.push({
@@ -392,16 +452,77 @@ function pushCount(candidates, prompt, match, sign, rawNumber) {
   });
 }
 
+function collectTolerance(prompt, candidates) {
+  // "330Ω±5%" and "4k7 5%" keep the resistor. The percent is not a bare number.
+  const pattern = /(?<![\w.])(?:±\s*)?(\d+(?:\.\d+)?)\s*%/g;
+  for (const match of prompt.matchAll(pattern)) {
+    const percent = Number(match[1]);
+    if (!Number.isFinite(percent)) continue;
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    candidates.push({
+      priority: PRIORITY.tolerance,
+      start,
+      end,
+      invalid: false,
+      token: {
+        value: percent,
+        unit: '%',
+        raw: prompt.slice(start, end),
+        start,
+        end,
+        kind: 'tolerance',
+        form: 'tolerance',
+        range: null,
+        ac: false,
+        dc: false,
+        pot: false
+      }
+    });
+  }
+}
+
 function collectCounts(prompt, candidates) {
   // pcs/pc/ea/개/×/x are counts in either order ("x3", "3x", "3 pcs", "3ea").
   // A fraction, zero, or a leading minus stays a count token so the draft can
   // refuse it. The LED word itself stays integer-only: "3.2 LED" is not 2 LEDs.
+  // "LEDx3" / "LED×3" glue the marker to the word. "two pcs" is a count too.
   const led = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+)\s*(?:[x\u00D7]\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b/gi;
   const marker = /(?<![\w.,+\-\u2212])([+\-\u2212])?(\d+(?:[.,]\d+)?)\s*(?:개|(?:pcs|pc|ea)(?![A-Za-z])|[x\u00D7](?![\w.]))/gi;
   const prefix = /(?<![\w.])[x\u00D7]\s*([+\-\u2212])?(\d+(?:[.,]\d+)?)(?![\w.])/gi;
+  const gluedLed = /(?<![A-Za-z0-9])leds?[x\u00D7](\d+)(?![\w.])/gi;
+  const words = Object.keys(COUNT_WORD).join('|');
+  const wordPcs = new RegExp(`(?<![A-Za-z])(${words})\\s+pcs(?![A-Za-z])`, 'gi');
   for (const match of prompt.matchAll(led)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(marker)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(prefix)) pushCount(candidates, prompt, match, match[1], match[2]);
+  for (const match of prompt.matchAll(gluedLed)) pushCount(candidates, prompt, match, '', match[1]);
+  for (const match of prompt.matchAll(wordPcs)) {
+    const value = COUNT_WORD[match[1].toLowerCase()];
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    candidates.push({
+      priority: PRIORITY.count,
+      start,
+      end,
+      invalid: false,
+      token: {
+        value,
+        unit: 'count',
+        raw: prompt.slice(start, end),
+        start,
+        end,
+        kind: 'count',
+        form: 'count',
+        range: null,
+        ac: false,
+        dc: false,
+        pot: false,
+        validCount: Number.isInteger(value) && value >= 1,
+        countText: String(value)
+      }
+    });
+  }
 }
 
 // "Vf=3.2", "Vf 3.2", and glued "vf3.2" are a forward voltage when labeled Vf.
@@ -446,9 +567,12 @@ function collectBare(prompt, candidates) {
   for (const match of prompt.matchAll(pattern)) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
-    const ohms = Number(match[1]);
+    const rawNumber = match[1];
+    const ohms = Number(rawNumber);
     if (!(ohms > 0)) continue;
-    const token = bareHasResistorContext(prompt, start, end)
+    const integer = /^\d+$/.test(rawNumber);
+    const asResistor = bareHasResistorContext(prompt, start, end) || (integer && ohms >= 10);
+    const token = asResistor
       ? resistanceToken(prompt, start, end, ohms, 'bare')
       : ambiguousNumberToken(prompt, start, end, ohms);
     candidates.push({
@@ -487,15 +611,17 @@ function hasUncoveredVoltage(prompt, spans) {
 }
 
 export function tokenizeQuantities(prompt) {
-  const text = String(prompt ?? '');
+  const text = String(prompt ?? '').normalize('NFKC');
   const candidates = [];
   collectRanges(text, candidates);
   collectGlued(text, candidates);
   collectVoltages(text, candidates);
   collectRkm(text, candidates);
+  collectLabeledResistor(text, candidates);
   collectOhm(text, candidates);
   collectSuffix(text, candidates);
   collectCurrent(text, candidates);
+  collectTolerance(text, candidates);
   collectCounts(text, candidates);
   collectUnitlessForward(text, candidates);
   collectBare(text, candidates);
@@ -608,7 +734,7 @@ function roleForVoltage(prompt, token) {
 }
 
 export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
-  const text = String(prompt ?? '');
+  const text = String(prompt ?? '').normalize('NFKC');
   const tokens = scan.tokens.map((token) => ({ ...token, hits: [] }));
   bindExplicitForwardVoltages(text, tokens);
   for (const keyword of keywordHits(text, SUPPLY_KEYWORDS, 'supply')) bindKeyword(tokens, keyword);

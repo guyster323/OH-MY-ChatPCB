@@ -182,11 +182,12 @@ const LED_COLOR_SPECS = [
 ];
 
 function isSimpleDiscreteLedPrompt(prompt) {
-  const hasLed = /\bleds?\b|엘이디|발광|네오\s*픽셀|neopixel|ws2812|ws2811|sk6812|apa102|\brgb\b/i.test(prompt);
+  // "LEDx3" has no word boundary after LED. "LED×3" still matches \bled\b.
+  const hasLed = /\bleds?(?:x\d+)?\b|엘이디|발광|네오\s*픽셀|neopixel|ws2812|ws2811|sk6812|apa102|\brgb\b/i.test(prompt);
   return hasLed && !DISCRETE_LED_EXCLUDE.test(prompt) && !DISCRETE_LED_BOARD_WORDS.test(prompt);
 }
 
-const RESISTOR_RANK = { rkm: 0, ohm: 1, suffix: 2, bare: 3 };
+const RESISTOR_RANK = { rkm: 0, ohm: 1, suffix: 2, label: 2, bare: 3 };
 
 function voltageContext(prompt, token, voltages) {
   const previous = voltages.filter((other) => other.end <= token.start).at(-1);
@@ -298,7 +299,7 @@ function resolveDiscreteSupply(prompt, scan) {
       supplyVolts: nonPositive.value,
       texts: {
         en: `Refusing to draft an LED circuit because the supply voltage ${shown}V is not positive. The discrete LED generator only supports low-voltage rails up to 24V. No LED, resistor, or power symbol was generated.`,
-        ko: `공급 전압 ${shown}V가 양수가 아니어서 LED 회로를 만들지 않습니다. 이산 LED 생성기는 24V 이하의 저전압만 지원합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+        ko: `공급 전압 ${withJosa(`${shown}V`, '이/가')} 양수가 아니어서 LED 회로를 만들지 않습니다. 이산 LED 생성기는 24V 이하의 저전압만 지원합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
       }
     };
   }
@@ -340,6 +341,32 @@ function resolveDiscreteSupply(prompt, scan) {
 
 function usesKorean(text) {
   return /[가-힣]/.test(String(text ?? ''));
+}
+
+// 0 영, 1 일, 3 삼, 6 육, 7 칠, 8 팔 have a batchim. 2 이, 4 사, 5 오, 9 구 do not.
+// Ω is read 옴. The particle pair is "consonant/vowel" (은/는, 이/가, 을/를, 과/와).
+const DIGIT_BATCHIM = new Set(['0', '1', '3', '6', '7', '8']);
+const LATIN_BATCHIM = new Set(['l', 'm', 'n', 'r', 'z']);
+
+function hasFinalConsonant(value) {
+  const text = String(value ?? '').trim();
+  const last = text.at(-1) ?? '';
+  if (!last) return false;
+  const code = last.codePointAt(0);
+  if (code >= 0xAC00 && code <= 0xD7A3) return (code - 0xAC00) % 28 !== 0;
+  if (last >= '0' && last <= '9') return DIGIT_BATCHIM.has(last);
+  if (last === 'Ω' || last === 'Ω' || last === '%') return true;
+  if (/[A-Za-z]/.test(last)) return LATIN_BATCHIM.has(last.toLowerCase());
+  return false;
+}
+
+function josa(value, pair) {
+  const [consonant, vowel] = pair.split('/');
+  return hasFinalConsonant(value) ? consonant : vowel;
+}
+
+function withJosa(value, pair) {
+  return `${value}${josa(value, pair)}`;
 }
 
 function finishSentence(text) {
@@ -397,7 +424,7 @@ function implausibleForwardMessage(volts) {
   const shown = formatVolts(volts);
   return {
     en: `Refusing to draft an LED circuit because the forward voltage ${shown}V is implausible for an LED. Plausible forward voltages are 0.5V to 5V. No LED, resistor, or power symbol was generated.`,
-    ko: `순방향 전압 ${shown}V는 LED에 타당한 값이 아닙니다. 타당한 순방향 전압은 0.5V에서 5V입니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    ko: `순방향 전압 ${withJosa(`${shown}V`, '은/는')} LED에 타당한 값이 아닙니다. 타당한 순방향 전압은 0.5V에서 5V입니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
   };
 }
 
@@ -405,7 +432,7 @@ function invalidCountMessage(token) {
   const shown = token.countText ?? String(token.value);
   return {
     en: `Refusing to draft an LED circuit because the LED count ${shown} is not a positive whole number. Zero, negative, and fractional counts are rejected. No LED, resistor, or power symbol was generated.`,
-    ko: `LED 개수 ${shown}는 양의 정수가 아닙니다. 0, 음수, 분수는 거부합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    ko: `LED 개수 ${withJosa(shown, '은/는')} 양의 정수가 아닙니다. 0, 음수, 분수는 거부합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
   };
 }
 
@@ -413,7 +440,7 @@ function ambiguousNumberMessage(token) {
   const raw = token.raw;
   return {
     en: `Refusing to draft an LED circuit because ${raw} has no unit. Is it a series resistor (for example 330Ω or 330 ohm) or an LED count (for example 3 pcs)? No LED, resistor, or power symbol was generated.`,
-    ko: `단위 없는 숫자 ${raw}는 저항으로 만들지 않습니다. 직렬 저항인지(330Ω 또는 330옴) LED 개수인지(3개) 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    ko: `단위 없는 숫자 ${withJosa(raw, '은/는')} 저항으로 만들지 않습니다. 직렬 저항인지(330Ω 또는 330옴) LED 개수인지(3개) 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
   };
 }
 
@@ -434,8 +461,9 @@ function joinVoltLabels(volts) {
 function joinVoltLabelsKo(volts) {
   const labels = volts.map((value) => `${formatVolts(value)}V`);
   if (labels.length <= 1) return labels.join('');
-  if (labels.length === 2) return `${labels[0]}와 ${labels[1]}`;
-  return `${labels.slice(0, -1).join(', ')}와 ${labels.at(-1)}`;
+  const last = labels.at(-1);
+  const head = labels.slice(0, -1);
+  return `${head.join(', ')}${josa(head.at(-1), '과/와')} ${last}`;
 }
 
 const LED_COLOR_KO = {
@@ -452,7 +480,7 @@ function belowForwardMessage(supplyVolts, color, specifiedVf) {
     const vf = formatVolts(specifiedVf);
     return {
       en: `Refusing to draft an LED circuit because the supply ${supply}V is not above the specified forward voltage of ${vf}V. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
-      ko: `공급 전압 ${supply}V가 지정한 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. 직렬 전류를 계산할 수 없습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+      ko: `공급 전압 ${withJosa(`${supply}V`, '이/가')} 지정한 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. 직렬 전류를 계산할 수 없습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
     };
   }
   const spec = color ?? LED_COLOR_SPECS[0];
@@ -460,7 +488,7 @@ function belowForwardMessage(supplyVolts, color, specifiedVf) {
   const ko = LED_COLOR_KO[spec.id] ?? LED_COLOR_KO.red;
   return {
     en: `Refusing to draft an LED circuit because the supply ${supply}V is not above LED Vf ${vf}V for a typical ${spec.prose} LED. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
-    ko: `공급 전압 ${supply}V가 ${ko} LED의 일반적인 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. 직렬 전류를 계산할 수 없습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    ko: `공급 전압 ${withJosa(`${supply}V`, '이/가')} ${ko} LED의 일반적인 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. 직렬 전류를 계산할 수 없습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
   };
 }
 
@@ -474,6 +502,22 @@ function supplyNetName(volts) {
 function formatScaled(value) {
   const scaled = Math.round(value * 10) / 10;
   return String(scaled);
+}
+
+function formatSmallOhms(ohms) {
+  if (!Number.isFinite(ohms) || ohms === 0) return '0Ω';
+  const rounded = Math.round(ohms * 1e6) / 1e6;
+  return `${rounded}Ω`;
+}
+
+function resistorTooSmallMessage(token) {
+  const shown = formatSmallOhms(token.value);
+  const raw = String(token.raw);
+  const detail = raw === shown ? shown : `${raw} (${shown})`;
+  return {
+    en: `Refusing to draft an LED circuit because the series resistor ${detail} is below 1Ω. Use a resistor of at least 1Ω. No LED, resistor, or power symbol was generated.`,
+    ko: `직렬 저항 ${withJosa(shown, '은/는')} 1Ω보다 작아서 LED 회로를 만들지 않습니다. 1Ω 이상의 저항을 적어 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
 }
 
 function formatOhms(ohms) {
@@ -603,9 +647,9 @@ function resistorFromSupply({ supplyVolts, vf, color, assumed, specified = false
     ? `LED 색이 지정되지 않아 일반적인 빨간 LED 순방향 전압 ${shownVf}V로 가정합니다. `
     : '';
   const koRounded = `지정한 순방향 전압 ${shownVf}V로 ${formula}를 계산한 뒤 다음 E24 값 ${resistorValue}로 올렸습니다.`;
-  const koExact = `지정한 순방향 전압 ${shownVf}V로 직렬 저항 ${resistorValue}을 ${formula}로 계산했습니다.`;
+  const koExact = `지정한 순방향 전압 ${shownVf}V로 직렬 저항 ${withJosa(resistorValue, '을/를')} ${formula}로 계산했습니다.`;
   const koColorRounded = `${koColor} LED의 일반적인 순방향 전압 ${shownVf}V로 ${formula}를 계산한 뒤 다음 E24 값 ${resistorValue}로 올렸습니다.`;
-  const koColorExact = `${koColor} LED의 일반적인 순방향 전압 ${shownVf}V로 직렬 저항 ${resistorValue}을 ${formula}로 계산했습니다.`;
+  const koColorExact = `${koColor} LED의 일반적인 순방향 전압 ${shownVf}V로 직렬 저항 ${withJosa(resistorValue, '을/를')} ${formula}로 계산했습니다.`;
   const summary = specified
     ? {
       en: `Series resistor ${resistorValue} was calculated as ${formula}${rounding} using the specified forward voltage of ${shownVf}V.`,
@@ -697,7 +741,7 @@ function headroomWarning(channels, supplyVolts, requestedCurrentMa, prompt) {
       channel.resistanceOhms < best.resistanceOhms ? channel : best
     ));
     english.push(`series resistor ${smallest.resistorValue} is below 68Ω`);
-    korean.push(`직렬 저항 ${smallest.resistorValue}은 68Ω보다 작습니다.`);
+    korean.push(`직렬 저항 ${withJosa(smallest.resistorValue, '은/는')} 68Ω보다 작습니다.`);
   }
   if (hot.length > 0) {
     const hottest = hot.reduce((best, item) => (item.milliamps > best.milliamps ? item : best));
@@ -708,7 +752,7 @@ function headroomWarning(channels, supplyVolts, requestedCurrentMa, prompt) {
   if (requestedHigh) {
     const shown = formatCurrent(requestedCurrentMa);
     english.push(`requested current ${shown} is above ${LED_CURRENT_WARN_MA}mA`);
-    korean.push(`요청한 전류 ${shown}가 ${LED_CURRENT_WARN_MA}mA를 넘습니다.`);
+    korean.push(`요청한 전류 ${withJosa(shown, '이/가')} ${LED_CURRENT_WARN_MA}mA를 넘습니다.`);
   }
   korean.push('출시 전에 LED 전류를 확인하세요.');
   return asFinding('discrete-led-headroom', {
@@ -722,7 +766,7 @@ function specifiedForwardTexts(specifiedVf) {
   const shown = formatVolts(specifiedVf);
   return {
     en: `The specified forward voltage of ${shown}V is used instead of the color default.`,
-    ko: `지정한 순방향 전압 ${shown}V를 색상 기본값 대신 사용합니다.`
+    ko: `지정한 순방향 전압 ${withJosa(`${shown}V`, '을/를')} 색상 기본값 대신 사용합니다.`
   };
 }
 
@@ -731,7 +775,7 @@ function keepResistorTexts({ resistorValue, color, ledValue, names, specifiedVf 
   const forward = specifiedForwardTexts(specifiedVf);
   const koColor = color && !names ? `${LED_COLOR_KO[color.id]} LED에 ` : '';
   const en = `Discrete LED draft keeps the requested series resistor ${resistorValue}${colorText}; confirm it for the LED forward voltage and current before release.${forward ? ` ${forward.en}` : ''}`;
-  const ko = `이산 LED 초안은 ${koColor}요청한 직렬 저항 ${resistorValue}을 유지합니다. LED 순방향 전압과 전류를 출시 전에 확인하세요.${forward ? ` ${forward.ko}` : ''}`;
+  const ko = `이산 LED 초안은 ${koColor}요청한 직렬 저항 ${withJosa(resistorValue, '을/를')} 유지합니다. LED 순방향 전압과 전류를 출시 전에 확인하세요.${forward ? ` ${forward.ko}` : ''}`;
   return { en, ko };
 }
 
@@ -820,7 +864,7 @@ function refuseDiscreteLed({ code, texts, prompt, supplyVolts, supplyAssumed = f
 }
 
 export function parseDiscreteLedRequest(prompt) {
-  const text = String(prompt ?? '');
+  const text = String(prompt ?? '').normalize('NFKC');
   if (!isSimpleDiscreteLedPrompt(text)) return null;
   if (text.length > MAX_DISCRETE_LED_PROMPT_CHARS) {
     return refuseDiscreteLed({
@@ -852,7 +896,19 @@ export function parseDiscreteLedRequest(prompt) {
       texts: invalidCountMessage(invalidCount)
     });
   }
-  // A unitless number that is not a count is never drafted as ohms.
+  const tooSmall = scan.tokens.find((token) => (
+    token.role === 'resistor' && Number.isFinite(token.value) && token.value < 1
+  ));
+  if (tooSmall) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-resistor-too-small',
+      prompt: text,
+      supplyVolts: supply.supplyVolts,
+      supplyAssumed: supply.supplyAssumed === true,
+      texts: resistorTooSmallMessage(tooSmall)
+    });
+  }
+  // A unitless number that is not a count and not a resistor stays ambiguous.
   const ambiguousNumber = scan.tokens.find((token) => token.kind === 'ambiguous');
   if (ambiguousNumber) {
     return refuseDiscreteLed({
