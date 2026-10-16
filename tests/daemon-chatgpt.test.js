@@ -213,6 +213,55 @@ test('chatgpt native fallback records provider null and still drafts profile par
   }
 });
 
+const STM32_USER_PROMPT = 'Release profile STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.';
+const STM32_REWRITTEN_PROMPT = 'STM32F103C8T6 board. USB-C is 5V power input only, with an AP2112K 3.3V regulator, UART debug header, reset button, status LED, and an SWD header for firmware download.';
+
+test('provider.invoke keeps the user I2C connector when ChatGPT rewrites the tool prompt', async () => {
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-chatgpt-rewrite-'));
+  const services = await transactionServices({ validateProjectImpl: passingErc });
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  const restoreFetch = stubChatGptFetch(JSON.stringify({
+    type: 'tool.call',
+    payload: {
+      id: 'call_rewrite',
+      name: 'schematic.generate',
+      args: { prompt: STM32_REWRITTEN_PROMPT }
+    }
+  }));
+  try {
+    await withChatGptHome(async () => {
+      const result = await dispatchToolCall({
+        id: 'call_chatgpt_rewrite',
+        name: 'provider.invoke',
+        args: {
+          provider: 'chatgpt',
+          projectDir,
+          prompt: STM32_USER_PROMPT
+        }
+      }, services);
+      assert.equal(result.ok, true, result.error?.message);
+      const toolEvent = result.result.events.find((event) => event.type === 'tool.call');
+      assert.equal(/\bi2c\b/i.test(toolEvent.payload.args.prompt), false);
+      assert.match(toolEvent.payload.args.prompt, /\bswd\b/i);
+      const preview = result.result.toolResults[0].result;
+      assert.equal(preview.requiresApproval, true);
+      const components = preview.components ?? [];
+      assert.equal(
+        components.some((component) => component.value === 'I2C_CONNECTOR' || component.libId === 'ChatPCB:I2C_CONNECTOR'),
+        true
+      );
+      const blockers = preview.review?.findings?.blockers ?? [];
+      assert.equal(blockers.some((finding) => finding.code === 'missing-swd'), false);
+    });
+  } finally {
+    restoreKicadLibraryEnv(previousLibs);
+    restoreFetch();
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
 test('apply succeeds after preview writes lastSource to the conversation file', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-apply-source-'));
   const services = await transactionServices({
