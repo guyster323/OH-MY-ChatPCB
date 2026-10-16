@@ -444,17 +444,28 @@ async function assertValidationState(page, request, expectedState, expectedText)
 }
 
 async function assertSkippedErcBlocked(page) {
-  const blocked = await page.evaluate(() => ({
-    state: document.querySelector('#patch-approval-status')?.dataset.state,
-    text: document.querySelector('#patch-approval-status')?.textContent ?? '',
-    why: document.querySelector('#apply-why')?.textContent ?? '',
-    whyHidden: document.querySelector('#apply-why')?.hidden ?? true,
-    ariaDisabled: document.querySelector('#approve-patch-button')?.getAttribute('aria-disabled'),
-    confirmHidden: document.querySelector('#apply-without-erc-confirm')?.hidden ?? true,
-    overrideHidden: document.querySelector('#approve-patch-without-erc')?.hidden ?? true
-  }));
+  const blocked = await page.evaluate(() => {
+    const card = document.querySelector('#patch-approval-card');
+    const needle = 'ERC was skipped';
+    let noticeCount = 0;
+    const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (!parent || parent.closest('[hidden]')) continue;
+      if ((walker.currentNode.textContent || '').includes(needle)) noticeCount += 1;
+    }
+    return {
+      state: document.querySelector('#patch-approval-status')?.dataset.state,
+      noticeCount,
+      why: document.querySelector('#apply-why')?.textContent ?? '',
+      whyHidden: document.querySelector('#apply-why')?.hidden ?? true,
+      ariaDisabled: document.querySelector('#approve-patch-button')?.getAttribute('aria-disabled'),
+      confirmHidden: document.querySelector('#apply-without-erc-confirm')?.hidden ?? true,
+      overrideHidden: document.querySelector('#approve-patch-without-erc')?.hidden ?? true
+    };
+  });
   assert.equal(blocked.state, 'blocked');
-  assert.match(blocked.text, /ERC was skipped/);
+  assert.equal(blocked.noticeCount, 1);
   assert.equal(blocked.whyHidden, false);
   assert.match(blocked.why, /ERC was skipped/);
   assert.equal(blocked.ariaDisabled, 'true');

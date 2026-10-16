@@ -1149,8 +1149,14 @@ function renderPatchApproval() {
       setPatchStatus('patch.blocked');
       return;
     }
+    if (erc.skipped) {
+      // apply-why already says ERC was skipped. Keep that sentence once.
+      patchApprovalStatusEl.hidden = true;
+      setPatchStatus('patch.apply.skipped');
+      return;
+    }
     patchApprovalStatusEl.hidden = false;
-    setPatchStatus(erc.skipped ? 'patch.apply.skipped' : 'patch.apply.blocked-missing');
+    setPatchStatus('patch.apply.blocked-missing');
     return;
   }
   patchApprovalStatusEl.hidden = false;

@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, window */
+/* global NodeFilter, document, getComputedStyle, window */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -132,6 +132,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(skipped.overrideText, en['patch.apply.without-erc']);
     assert.equal(skipped.whyText, en['patch.apply.skipped']);
     assert.equal(skipped.confirmHidden, true);
+    assert.equal(skipped.skippedNoticeCount, 1);
     assert.match(skipped.ercText, new RegExp(en['erc.skipped']));
     assert.equal(skipped.ercClass.includes('erc-pass'), false);
     assert.equal(skipped.ercClass.includes('erc-skip'), true);
@@ -338,11 +339,23 @@ function showPatch(page, state, click) {
     if (which === 'confirm-override') document.querySelector('#confirm-apply-without-erc').click();
     if (which === 'cancel-override') document.querySelector('#cancel-apply-without-erc').click();
     const sent = window.__sent.map((raw) => JSON.parse(raw)).map((event) => event.payload);
+    const countVisibleText = (root, needle) => {
+      if (!root || !needle) return 0;
+      let count = 0;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const parent = walker.currentNode.parentElement;
+        if (!parent || parent.closest('[hidden]')) continue;
+        if ((walker.currentNode.textContent || '').includes(needle)) count += 1;
+      }
+      return count;
+    };
     return {
       ariaDisabled: button.getAttribute('aria-disabled'),
       disabled: button.disabled,
       whyHidden: why.hidden,
       whyText: why.textContent,
+      skippedNoticeCount: countVisibleText(document.querySelector('#patch-approval-card'), window.t('patch.apply.skipped')),
       overrideHidden: override.hidden,
       overrideDisabled: override.disabled,
       overrideText: override.textContent,
