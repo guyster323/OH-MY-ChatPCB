@@ -30,7 +30,8 @@ const originalFetch = globalThis.fetch;
 const originalEnv = {
   XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
   CHATPCB_CHATGPT_MODEL: process.env.CHATPCB_CHATGPT_MODEL,
-  CHATPCB_CHATGPT_CLIENT_ID: process.env.CHATPCB_CHATGPT_CLIENT_ID
+  CHATPCB_CHATGPT_CLIENT_ID: process.env.CHATPCB_CHATGPT_CLIENT_ID,
+  CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS: process.env.CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS
 };
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -53,6 +54,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     restoreEnv('XDG_CONFIG_HOME');
     restoreEnv('CHATPCB_CHATGPT_MODEL');
     restoreEnv('CHATPCB_CHATGPT_CLIENT_ID');
+    restoreEnv('CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS');
   });
 
   it('accepts a JWKS-signed RS256 ID token', async () => {
@@ -447,7 +449,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
-  it('keeps the issued client id after sign-out and still accepts an override', async () => {
+  it('clears the issued client id on sign-out and still accepts an override', async () => {
     await withConfig(async (dir) => {
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -464,18 +466,14 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
 
         assert.equal((await manager.signOut()).state, 'signed_out');
         assert.equal(await loadCredentials(), null);
-        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_ISSUED.json'), 'utf8'));
-        assert.equal(retained.client_id, 'oaiapp_ISSUED');
-        assert.equal(retained.access_token, undefined);
-        assert.equal(retained.id_token, undefined);
-        assert.equal(retained.email, 'ada@ex.com');
+        assert.deepEqual(await listCredentialFiles(dir), []);
 
         const returned = await manager.startAuth();
         const returnedUrl = new URL(returned.authUrl);
-        assert.equal(returnedUrl.searchParams.get('client_id'), 'oaiapp_ISSUED');
-        assert.equal(returnedUrl.searchParams.has('agent_name_hint'), false);
+        assert.equal(returnedUrl.searchParams.get('client_id'), 'dynamic_agent_client');
+        assert.equal(returnedUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
         assert.equal(returnedUrl.searchParams.has('id_token_hint'), false);
-        assert.equal(returnedUrl.searchParams.get('login_hint'), 'ada@ex.com');
+        assert.equal(returnedUrl.searchParams.has('login_hint'), false);
         await manager.cancelAll();
 
         process.env.CHATPCB_CHATGPT_CLIENT_ID = 'oaiapp_FROM_ENV';
@@ -1366,6 +1364,261 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
+  it('does not restore credentials when sign-out finishes during a Responses call', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials(sampleCreds());
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
+      const gate = deferred();
+      let responsesStarted = false;
+      stubFetch(async (url) => {
+        const target = String(url);
+        if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+        if (target.includes('/v1/responses')) {
+          responsesStarted = true;
+          await gate.promise;
+          return completedStream('hi');
+        }
+        return new Response('no', { status: 404 });
+      });
+      const call = callChatGPTResponses({ prompt: 'x' });
+      try {
+        await waitFor(() => responsesStarted);
+        assert.equal((await manager.signOut()).state, 'signed_out');
+        gate.resolve();
+        const result = await call;
+        assert.equal(result.completed, true);
+        assert.equal(result.text, 'hi');
+        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.equal((await manager.getAuthStatus()).state, 'signed_out');
+      } finally {
+        gate.resolve();
+        await manager.cancelAll();
+      }
+    });
+  });
+
+  it('does not restore credentials when sign-out finishes during token refresh', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials(expiredCreds());
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
+      const gate = deferred();
+      let refreshStarted = false;
+      stubFetch(async (url) => {
+        const target = String(url);
+        if (target.includes('/oauth/token')) {
+          refreshStarted = true;
+          await gate.promise;
+          return jsonResponse({ access_token: 'AT_NEW', refresh_token: 'RT_NEW', expires_in: 3600 });
+        }
+        if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+        if (target.includes('/v1/responses')) return completedStream('hi');
+        return new Response('no', { status: 404 });
+      });
+      const call = callChatGPTResponses({ prompt: 'x' });
+      try {
+        await waitFor(() => refreshStarted);
+        assert.equal((await manager.signOut()).state, 'signed_out');
+        gate.resolve();
+        const result = await call;
+        assert.equal(result.completed, true);
+        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.equal((await manager.getAuthStatus()).state, 'signed_out');
+        assert.equal(await loadCredentials(), null);
+      } finally {
+        gate.resolve();
+        await manager.cancelAll();
+      }
+    });
+  });
+
+  it('drops the issued client id when refresh returns invalid_client and registers again', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials({
+        ...sampleCreds(),
+        client_id: 'oaiapp_OTHER',
+        access_token: 'AT_OTHER',
+        refresh_token: 'RT_OTHER',
+        account: { email: 'other@ex.com' },
+        last_used_at: 1
+      });
+      await saveCredentials(expiredCreds());
+      stubFetch(async (url) => {
+        const target = String(url);
+        if (target.includes('/oauth/token')) {
+          return new Response(JSON.stringify({ error: 'invalid_client', error_description: 'revoked-secret' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' }
+          });
+        }
+        if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+        if (target.includes('/v1/responses')) return completedStream('hi');
+        return new Response('no', { status: 404 });
+      });
+      const result = await callChatGPTResponses({ prompt: 'hi' });
+      assert.equal(result.completed, true);
+      assert.equal((await loadCredentials()).client_id, 'oaiapp_OTHER');
+      const other = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
+      assert.equal(other.access_token, 'AT_OTHER');
+      assert.equal(other.refresh_token, 'RT_OTHER');
+      assert.equal((await listCredentialFiles(dir)).includes('chatgpt-credentials-oaiapp_TEST.json'), false);
+
+      stubFetch(async () => new Response(JSON.stringify({ error: 'invalid_client' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' }
+      }));
+      await assert.rejects(refreshAccessToken('RT_OTHER', 'oaiapp_OTHER'), (err) => {
+        assert.equal(err.code, 'invalid_client');
+        assert.match(err.message, /Token refresh failed: 401 invalid_client/);
+        assert.equal(err.message.includes('revoked-secret'), false);
+        return true;
+      });
+      assert.deepEqual(await listCredentialFiles(dir), []);
+      assert.equal(await loadCredentials(), null);
+
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
+      try {
+        const started = await manager.startAuth();
+        const authUrl = new URL(started.authUrl);
+        assert.equal(authUrl.searchParams.get('client_id'), 'dynamic_agent_client');
+        assert.equal(authUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
+      } finally {
+        await manager.cancelAll();
+      }
+    });
+  });
+
+  it('drops the issued client id when the token endpoint returns invalid_client and registers again', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials(sampleCreds());
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
+      stubFetch(async (url) => {
+        if (String(url).includes('/oauth/token')) {
+          return new Response(JSON.stringify({ error: 'invalid_client' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' }
+          });
+        }
+        return new Response('no', { status: 404 });
+      });
+      try {
+        const started = await manager.startAuth();
+        const authUrl = new URL(started.authUrl);
+        assert.equal(authUrl.searchParams.get('client_id'), 'oaiapp_TEST');
+        assert.equal(authUrl.searchParams.has('agent_name_hint'), false);
+        const page = await httpGet(
+          `${authUrl.searchParams.get('redirect_uri')}?code=CODE&state=${authUrl.searchParams.get('state')}`
+        );
+        assert.match(page.body, /invalid_client/);
+        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.equal(await loadCredentials(), null);
+
+        const again = await manager.startAuth();
+        const againUrl = new URL(again.authUrl);
+        assert.equal(againUrl.searchParams.get('client_id'), 'dynamic_agent_client');
+        assert.equal(againUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
+      } finally {
+        await manager.cancelAll();
+      }
+    });
+  });
+
+  it('times out a hanging Responses request at the configured limit', { timeout: 5000 }, async () => {
+    await withConfig(async (dir) => {
+      assert.equal((await resolveChatGPTSettings()).responsesTimeoutMs, 120_000);
+      await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
+      await writeFile(path.join(dir, 'chatpcb', 'chatgpt.json'), JSON.stringify({ responsesTimeoutMs: 80 }));
+      assert.equal((await resolveChatGPTSettings()).responsesTimeoutMs, 80);
+      process.env.CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS = '40';
+      assert.equal((await resolveChatGPTSettings()).responsesTimeoutMs, 40);
+      assert.equal((await resolveChatGPTSettings({ responsesTimeoutMs: 25 })).responsesTimeoutMs, 25);
+
+      await saveCredentials(sampleCreds());
+      stubFetch((url) => {
+        if (String(url).includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+        return new Promise(() => {});
+      });
+      const started = Date.now();
+      await assert.rejects(callChatGPTResponses({ prompt: 'hi', timeoutMs: 50 }), (err) => {
+        assert.equal(err.code, 'timeout');
+        assert.match(err.message, /ChatGPT responses timed out after 50ms/);
+        return true;
+      });
+      assert.ok(Date.now() - started < 4000);
+      const saved = await loadCredentials();
+      assert.equal(saved.access_token, 'AT');
+      assert.equal(saved.refresh_token, 'RT');
+    });
+  });
+
+  it('shares one in-flight token refresh across concurrent callers', async () => {
+    let calls = 0;
+    const gate = deferred();
+    stubFetch(async () => {
+      calls += 1;
+      await gate.promise;
+      return jsonResponse({ access_token: 'AT_NEW', refresh_token: 'RT_NEW', expires_in: 3600 });
+    });
+    try {
+      const first = refreshAccessToken('RT', 'oaiapp_TEST');
+      const second = refreshAccessToken('RT', 'oaiapp_TEST');
+      const otherToken = refreshAccessToken('RT_OTHER', 'oaiapp_TEST');
+      assert.equal(calls, 2);
+      gate.resolve();
+      const [a, b, c] = await Promise.all([first, second, otherToken]);
+      assert.equal(a, b);
+      assert.equal(a.access_token, 'AT_NEW');
+      assert.equal(a.refresh_token, 'RT_NEW');
+      assert.notEqual(c, a);
+      assert.equal(calls, 2);
+
+      await refreshAccessToken('RT', 'oaiapp_TEST');
+      assert.equal(calls, 3);
+    } finally {
+      gate.resolve();
+    }
+  });
+
+  it('shares one refresh when concurrent provider calls use the same refresh token', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials(expiredCreds());
+      let refreshCalls = 0;
+      const gate = deferred();
+      stubFetch(async (url) => {
+        const target = String(url);
+        if (target.includes('/oauth/token')) {
+          refreshCalls += 1;
+          await gate.promise;
+          return jsonResponse({ access_token: 'AT_NEW', refresh_token: 'RT_NEW', expires_in: 3600 });
+        }
+        if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+        if (target.includes('/v1/responses')) return completedStream('ok');
+        return new Response('no', { status: 404 });
+      });
+      const first = callChatGPTResponses({ prompt: 'a' });
+      try {
+        await waitFor(() => refreshCalls >= 1);
+        const second = callChatGPTResponses({ prompt: 'b' });
+        await delay(50);
+        assert.equal(refreshCalls, 1);
+        gate.resolve();
+        const [a, b] = await Promise.all([first, second]);
+        assert.equal(a.completed, true);
+        assert.equal(b.completed, true);
+        assert.equal(refreshCalls, 1);
+        const saved = await loadCredentials();
+        assert.equal(saved.access_token, 'AT_NEW');
+        assert.equal(saved.refresh_token, 'RT_NEW');
+        assert.equal((await listCredentialFiles(dir)).length, 1);
+      } finally {
+        gate.resolve();
+      }
+    });
+  });
+
   it('reads client id from the environment and config file', async () => {
     await withConfig(async (dir) => {
       await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
@@ -1553,6 +1806,15 @@ function sampleCreds() {
     scope: PLAN_SCOPE,
     scopes: PLAN_SCOPE.split(' '),
     account: { email: 'ada@ex.com' }
+  };
+}
+
+function expiredCreds(overrides = {}) {
+  return {
+    ...sampleCreds(),
+    expires_in: 30,
+    issued_at: Date.now() - 3_600_000,
+    ...overrides
   };
 }
 

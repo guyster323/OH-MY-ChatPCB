@@ -1,9 +1,18 @@
-import { hasChatGPTPlanScope, loadCredentials, refreshAccessToken, resolveChatGPTSettings, saveCredentials, verifyTokenExpiry } from '../auth/chatgpt-auth.js';
+import {
+  currentSessionGeneration,
+  hasChatGPTPlanScope,
+  loadCredentials,
+  refreshAccessToken,
+  resolveChatGPTSettings,
+  saveCredentialsIfCurrent,
+  verifyTokenExpiry
+} from '../auth/chatgpt-auth.js';
 import { validateProviderToolCall } from '../provider-process.js';
 import { PROVIDER_ALLOWED_TOOLS } from '../provider-registry.js';
 
 const RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 const MODELS_ENDPOINT = 'https://api.openai.com/v1/models';
+const DEFAULT_RESPONSES_TIMEOUT_MS = 120_000;
 
 /**
  * Pick a model slug from the signed-in account's catalog (GET /v1/models).
@@ -42,7 +51,15 @@ export async function selectChatGPTModel(accessToken, override) {
   return slugs[0];
 }
 
-export async function callChatGPTResponses({ prompt, onChunk, onError, signal, model, allowedTools } = {}) {
+export async function callChatGPTResponses({
+  prompt,
+  onChunk,
+  onError,
+  signal,
+  model,
+  allowedTools,
+  timeoutMs
+} = {}) {
   const creds = await loadCredentials();
 
   if (!creds || !creds.access_token) {
@@ -54,6 +71,9 @@ export async function callChatGPTResponses({ prompt, onChunk, onError, signal, m
     throw error;
   }
 
+  const generation = currentSessionGeneration();
+  const clientId = creds.client_id;
+  const originalRefresh = creds.refresh_token || '';
   const tokenStatus = verifyTokenExpiry(creds);
   let activeCreds = creds;
   let accessToken = creds.access_token;
@@ -68,16 +88,17 @@ export async function callChatGPTResponses({ prompt, onChunk, onError, signal, m
         expires_in: refreshed.expires_in,
         issued_at: Date.now()
       };
-      await saveCredentials(activeCreds);
+      await persistSession(activeCreds, generation, clientId, [originalRefresh, activeCreds.refresh_token || '']);
       accessToken = refreshed.access_token;
     } catch (error) {
       if (onError) onError({ code: 'refresh_failed', message: error.message });
     }
   }
 
-  const settings = await resolveChatGPTSettings({ model });
+  const settings = await resolveChatGPTSettings({ model, responsesTimeoutMs: timeoutMs });
   const selectedModel = await selectChatGPTModel(accessToken, settings.model);
   const allowed = normalizeAllowedTools(allowedTools);
+  const responseTimeout = positiveTimeout(settings.responsesTimeoutMs) ?? DEFAULT_RESPONSES_TIMEOUT_MS;
 
   const body = {
     model: selectedModel,
@@ -88,25 +109,73 @@ export async function callChatGPTResponses({ prompt, onChunk, onError, signal, m
     stream: true
   };
 
-  const response = await fetch(RESPONSES_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`
-    },
-    body: JSON.stringify(body),
-    signal
+  const streamed = await withResponseTimeout(responseTimeout, signal, async (timedSignal) => {
+    const response = await fetch(RESPONSES_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(body),
+      signal: timedSignal
+    });
+    if (!response.ok) throw await httpError(response);
+    return readResponseStream(response);
   });
-
-  if (!response.ok) {
-    throw await httpError(response);
-  }
-
-  const streamed = await readResponseStream(response);
   const text = joinProviderText(streamed.text, renderFunctionCalls(streamed.functionCalls, allowed));
-  await saveCredentials({ ...activeCreds, access_token: accessToken, last_used_at: Date.now() });
+  await persistSession(
+    { ...activeCreds, access_token: accessToken, last_used_at: Date.now() },
+    generation,
+    clientId,
+    [originalRefresh, activeCreds.refresh_token || '']
+  );
   if (typeof onChunk === 'function' && text) onChunk(text);
   return { completed: true, text, model: selectedModel };
+}
+
+function persistSession(creds, generation, clientId, refreshTokens) {
+  return saveCredentialsIfCurrent(creds, { generation, clientId, refreshTokens });
+}
+
+function positiveTimeout(value) {
+  const ms = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+function responseTimeoutError(timeoutMs) {
+  const error = new Error(`ChatGPT responses timed out after ${timeoutMs}ms`);
+  error.code = 'timeout';
+  error.name = 'TimeoutError';
+  return error;
+}
+
+function combineSignals(signals) {
+  const active = signals.filter(Boolean);
+  if (active.length === 0) return undefined;
+  if (active.length === 1) return active[0];
+  return AbortSignal.any(active);
+}
+
+async function withResponseTimeout(timeoutMs, signal, fn) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const combined = combineSignals([signal, timeoutSignal]);
+  let timer;
+  try {
+    return await new Promise((resolve, reject) => {
+      // Referenced on purpose. An unref'd timer lets the process exit while the
+      // Responses request is still pending (AbortSignal.timeout is unref'd).
+      timer = setTimeout(() => reject(responseTimeoutError(timeoutMs)), timeoutMs);
+      fn(combined).then(resolve, (error) => {
+        if (timeoutSignal.aborted && !signal?.aborted) {
+          reject(responseTimeoutError(timeoutMs));
+          return;
+        }
+        reject(error);
+      });
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function mapChatGPTErrorToCode(error) {

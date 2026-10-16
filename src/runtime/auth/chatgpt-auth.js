@@ -22,26 +22,42 @@ const REDIRECT_URI_PORT_START = 41318;
 const REDIRECT_URI_PORT_MAX_ATTEMPTS = 3;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 10 * 1000;
+const RESPONSES_TIMEOUT_MS = 120 * 1000;
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
 const jwksCache = new Map();
 const CLIENT_ID_ENV = 'CHATPCB_CHATGPT_CLIENT_ID';
 const MODEL_ENV = 'CHATPCB_CHATGPT_MODEL';
+const RESPONSES_TIMEOUT_ENV = 'CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS';
 const HOST_ID_FILE = 'chatgpt-host-id.txt';
+// Bumped on sign-out, a completed sign-in, and when an issued client id is dropped.
+// Late provider saves capture the value at call start and refuse to write after it changes.
+let sessionGeneration = 0;
+let credentialWrite = Promise.resolve();
+// One refresh HTTP call per client id + refresh token while that call is in flight.
+const inflightRefreshes = new Map();
 
 /**
- * Resolve an optional ChatGPT client-id override and the model override.
+ * Resolve an optional ChatGPT client-id override, model override, and
+ * Responses API timeout.
  *
  * Precedence for each value is: explicit option, then environment
- * (`CHATPCB_CHATGPT_CLIENT_ID`, `CHATPCB_CHATGPT_MODEL`), then `chatgpt.json`
- * in the ChatPCB config directory (`clientId`, `model`).
+ * (`CHATPCB_CHATGPT_CLIENT_ID`, `CHATPCB_CHATGPT_MODEL`,
+ * `CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS`), then `chatgpt.json`
+ * in the ChatPCB config directory (`clientId`, `model`, `responsesTimeoutMs`).
  * No client id is required. Sign-in uses OpenAI dynamic client registration
  * unless an override or a saved issued client id is present.
+ * The Responses timeout defaults to 120 seconds.
  */
-export async function resolveChatGPTSettings({ clientId, model } = {}) {
+export async function resolveChatGPTSettings({ clientId, model, responsesTimeoutMs } = {}) {
   const file = await readChatGPTConfig();
   return {
     clientId: firstString(clientId, process.env[CLIENT_ID_ENV], file.clientId),
-    model: firstString(model, process.env[MODEL_ENV], file.model)
+    model: firstString(model, process.env[MODEL_ENV], file.model),
+    responsesTimeoutMs: firstTimeout(
+      responsesTimeoutMs,
+      process.env[RESPONSES_TIMEOUT_ENV],
+      file.responsesTimeoutMs
+    ) ?? RESPONSES_TIMEOUT_MS
   };
 }
 
@@ -266,8 +282,9 @@ export function selectSavedAccount(candidates) {
 }
 
 /**
- * Same ordering as selectSavedAccount, including signed-out registrations that
- * still have an issued client id. Records that only stored dynamic_agent_client
+ * Same ordering as selectSavedAccount, also matching a file that still has an
+ * issued client id but no access token. Sign-out deletes credential files, so
+ * the next sign-in registers again. Records that only stored dynamic_agent_client
  * are not registrations.
  */
 export function selectSavedRegistration(candidates) {
@@ -301,7 +318,21 @@ function compareSavedAccounts(a, b) {
   return String(a.client_id).localeCompare(String(b.client_id));
 }
 
-export async function saveCredentials(creds) {
+export function currentSessionGeneration() {
+  return sessionGeneration;
+}
+
+function bumpSessionGeneration() {
+  sessionGeneration += 1;
+}
+
+function withCredentialWrite(fn) {
+  const run = credentialWrite.then(fn, fn);
+  credentialWrite = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function writeCredentialsFile(creds) {
   if (creds?.client_id === DYNAMIC_CLIENT_ID) {
     throw new Error('Refusing to save dynamic_agent_client as the ChatGPT client id');
   }
@@ -323,20 +354,96 @@ export async function saveCredentials(creds) {
   return stored;
 }
 
-export async function deleteCredentials() {
-  try {
-    const configDir = getConfigDir();
-    if (!existsSync(configDir)) return;
-
-    const files = await readdir(configDir);
-    for (const file of files) {
-      if (isCredentialFile(file) || file === 'chatgpt-credentials.json') {
-        await unlink(join(configDir, file)).catch(() => {});
-      }
-    }
-  } catch {
-    // ignore
+async function restoreCredentialBytes(credPath, previous) {
+  if (previous == null) {
+    await unlink(credPath).catch(() => {});
+    return;
   }
+  await writeFile(credPath, previous, { mode: 0o600 });
+  await chmod(credPath, 0o600);
+}
+
+export async function saveCredentials(creds) {
+  return withCredentialWrite(() => writeCredentialsFile(creds));
+}
+
+/**
+ * Persist a provider-side token update only while `generation` is still the
+ * active session and the stored record is still one of `refreshTokens`.
+ * Sign-out deletes the file and bumps the generation first, so a call that
+ * started earlier cannot recreate the account.
+ */
+export async function saveCredentialsIfCurrent(creds, { generation, clientId, refreshTokens } = {}) {
+  const allowed = new Set(
+    (Array.isArray(refreshTokens) ? refreshTokens : []).filter((value) => typeof value === 'string')
+  );
+  return withCredentialWrite(async () => {
+    if (generation !== sessionGeneration) return false;
+    if (!clientId || creds?.client_id !== clientId) return false;
+    const credPath = getCredentialsPath(clientId);
+    let previous;
+    try {
+      previous = await readFile(credPath);
+    } catch {
+      return false;
+    }
+    let current;
+    try {
+      current = JSON.parse(previous.toString('utf8'));
+    } catch {
+      return false;
+    }
+    if (!current || current.client_id !== clientId || !current.access_token) return false;
+    if (!allowed.has(current.refresh_token || '')) return false;
+    if (generation !== sessionGeneration) return false;
+    await writeCredentialsFile(creds);
+    if (generation !== sessionGeneration) {
+      await restoreCredentialBytes(credPath, previous);
+      return false;
+    }
+    return true;
+  });
+}
+
+async function unlinkAllCredentialFiles() {
+  const configDir = getConfigDir();
+  if (!existsSync(configDir)) return;
+  const files = await readdir(configDir);
+  for (const file of files) {
+    if (!isCredentialFile(file)) continue;
+    await unlink(join(configDir, file)).catch(() => {});
+  }
+}
+
+async function unlinkClientCredentials(clientId) {
+  const configDir = getConfigDir();
+  if (!existsSync(configDir)) return;
+  const canonical = getCredentialsPath(clientId);
+  const files = await readdir(configDir);
+  for (const file of files) {
+    if (!isCredentialFile(file)) continue;
+    const full = join(configDir, file);
+    if (full === canonical) {
+      await unlink(full).catch(() => {});
+      continue;
+    }
+    try {
+      const creds = JSON.parse(await readFile(full, 'utf8'));
+      if (creds?.client_id === clientId) await unlink(full).catch(() => {});
+    } catch {
+      // Leave unreadable files for the other accounts alone.
+    }
+  }
+}
+
+async function dropIssuedClient(clientId) {
+  if (!isReusableClientId(clientId)) return;
+  bumpSessionGeneration();
+  await withCredentialWrite(() => unlinkClientCredentials(clientId));
+}
+
+export async function deleteCredentials() {
+  return withCredentialWrite(unlinkAllCredentialFiles);
 }
 
 function combineSignals(signals) {
@@ -396,9 +503,12 @@ function oauthErrorCode(body) {
   return /^[A-Za-z0-9._-]{1,64}$/.test(raw) ? raw : '';
 }
 
-async function oauthFailureMessage(prefix, response) {
+async function oauthFailure(prefix, response) {
   const code = oauthErrorCode(await response.text().catch(() => ''));
-  return code ? `${prefix}: ${response.status} ${code}` : `${prefix}: ${response.status}`;
+  return {
+    code,
+    message: code ? `${prefix}: ${response.status} ${code}` : `${prefix}: ${response.status}`
+  };
 }
 
 export function clearJwksCache() {
@@ -450,10 +560,23 @@ function assertAudience(payload, expectedClientId) {
   }
 }
 
-export async function refreshAccessToken(refreshToken, clientId, { fetchTimeoutMs = FETCH_TIMEOUT_MS, signal } = {}) {
+export function refreshAccessToken(refreshToken, clientId, { fetchTimeoutMs = FETCH_TIMEOUT_MS, signal } = {}) {
   if (!isReusableClientId(clientId)) {
-    throw new Error('Cannot refresh ChatGPT tokens without an issued client id');
+    return Promise.reject(new Error('Cannot refresh ChatGPT tokens without an issued client id'));
   }
+  const key = `${clientId}\0${refreshToken}`;
+  const existing = inflightRefreshes.get(key);
+  if (existing) return existing;
+
+  // The first caller supplies the timeout and abort signal for the shared request.
+  const promise = requestRefresh(refreshToken, clientId, { fetchTimeoutMs, signal }).finally(() => {
+    if (inflightRefreshes.get(key) === promise) inflightRefreshes.delete(key);
+  });
+  inflightRefreshes.set(key, promise);
+  return promise;
+}
+
+async function requestRefresh(refreshToken, clientId, { fetchTimeoutMs, signal }) {
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -469,7 +592,13 @@ export async function refreshAccessToken(refreshToken, clientId, { fetchTimeoutM
   }, fetchTimeoutMs, 'Token refresh');
 
   if (!response.ok) {
-    throw new Error(await oauthFailureMessage('Token refresh failed', response));
+    const failure = await oauthFailure('Token refresh failed', response);
+    const error = new Error(failure.message);
+    if (failure.code === 'invalid_client') {
+      error.code = 'invalid_client';
+      await dropIssuedClient(clientId);
+    }
+    throw error;
   }
 
   return await response.json();
@@ -640,49 +769,7 @@ function buildStoredCredentials({ issuedClientId, tokens, payload, hostId, scope
   };
 }
 
-function retainRegistration(creds) {
-  const subject = firstString(creds.subject) || subjectFromIdToken(creds.id_token) || undefined;
-  const email = firstString(creds.email, creds.account?.email) || undefined;
-  return {
-    email,
-    issuer: creds.issuer || ISSUER,
-    subject,
-    client_id: creds.client_id,
-    ext_agent_host_id: creds.ext_agent_host_id,
-    token_type: creds.token_type,
-    expires_in: creds.expires_in,
-    scopes: creds.scopes,
-    scope: creds.scope,
-    saved_at: creds.saved_at,
-    issued_at: creds.issued_at,
-    last_used_at: creds.last_used_at,
-    account: creds.account
-  };
-}
 
-async function clearStoredSecrets() {
-  const configDir = getConfigDir();
-  if (!existsSync(configDir)) return;
-  const files = await readdir(configDir);
-  for (const file of files) {
-    if (!isCredentialFile(file)) continue;
-    const full = join(configDir, file);
-    let creds;
-    try {
-      creds = JSON.parse(await readFile(full, 'utf8'));
-    } catch {
-      await unlink(full).catch(() => {});
-      continue;
-    }
-    if (!creds || typeof creds !== 'object' || !isReusableClientId(creds.client_id)) {
-      await unlink(full).catch(() => {});
-      continue;
-    }
-    await saveCredentials(retainRegistration(creds));
-    const canonical = getCredentialsPath(creds.client_id);
-    if (full !== canonical) await unlink(full).catch(() => {});
-  }
-}
 
 export function startAuthFlow({
   clientId,
@@ -823,31 +910,26 @@ export function startAuthFlow({
     }
   }
 
-  async function restoreCredentialFile(credPath, previous) {
-    if (previous == null) {
-      await unlink(credPath).catch(() => {});
-      return;
-    }
-    await writeFile(credPath, previous, { mode: 0o600 });
-    await chmod(credPath, 0o600);
-  }
-
   async function saveIfStillActive(creds, serial) {
-    if (!attemptStillCurrent(serial)) return false;
-    const credPath = getCredentialsPath(creds.client_id || 'default');
-    let previous = null;
-    try {
-      previous = await readFile(credPath);
-    } catch {
-      previous = null;
-    }
-    if (!attemptStillCurrent(serial)) return false;
-    await saveCredentials(creds);
-    if (!attemptStillCurrent(serial)) {
-      await restoreCredentialFile(credPath, previous);
-      return false;
-    }
-    return true;
+    return withCredentialWrite(async () => {
+      if (!attemptStillCurrent(serial)) return false;
+      const credPath = getCredentialsPath(creds.client_id || 'default');
+      let previous = null;
+      try {
+        previous = await readFile(credPath);
+      } catch {
+        previous = null;
+      }
+      if (!attemptStillCurrent(serial)) return false;
+      // A new sign-in retires provider calls that captured the previous generation.
+      bumpSessionGeneration();
+      await writeCredentialsFile(creds);
+      if (!attemptStillCurrent(serial)) {
+        await restoreCredentialBytes(credPath, previous);
+        return false;
+      }
+      return true;
+    });
   }
 
   const handleCallback = (req, res) => trackCallback((async () => {
@@ -929,7 +1011,13 @@ export function startAuthFlow({
       }
 
       if (!tokenResponse.ok) {
-        throw new Error(await oauthFailureMessage('Token exchange failed', tokenResponse));
+        const failure = await oauthFailure('Token exchange failed', tokenResponse);
+        const error = new Error(failure.message);
+        if (failure.code === 'invalid_client') {
+          error.code = 'invalid_client';
+          await dropIssuedClient(issuedClientId);
+        }
+        throw error;
       }
 
       let tokens;
@@ -1308,9 +1396,12 @@ export function createChatGPTAuthManager({
   }
 
   async function signOut() {
+    // Synchronous so an in-flight provider save observes the new generation
+    // before this function waits on network or disk.
+    bumpSessionGeneration();
     for (const flow of activeAuthAttempts.values()) flow.invalidate();
     await closeActiveAttempts();
-    await clearStoredSecrets();
+    await deleteCredentials();
     return { state: 'signed_out' };
   }
 
@@ -1366,6 +1457,15 @@ async function readChatGPTConfig() {
 function firstString(...values) {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function firstTimeout(...values) {
+  for (const value of values) {
+    if (value == null || value === '') continue;
+    const ms = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(ms) && ms > 0) return ms;
   }
   return null;
 }
