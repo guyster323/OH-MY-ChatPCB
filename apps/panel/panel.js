@@ -123,6 +123,14 @@ for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
 }
 for (const button of document.querySelectorAll('.flow-btn')) {
   button.addEventListener('click', () => {
+    if (button.getAttribute('aria-disabled') === 'true' || button.dataset.state === 'locked') {
+      const reason = document.getElementById(button.getAttribute('aria-describedby') || '');
+      if (reason) {
+        reason.hidden = false;
+        reason.focus();
+      }
+      return;
+    }
     const dialog = document.getElementById(button.dataset.open);
     if (typeof dialog?.showModal === 'function') dialog.showModal();
     const hint = t(`workflow.copy.${button.dataset.step}.wait`);
@@ -812,6 +820,41 @@ function syncWorkflow() {
     lane.dataset.active = String(active.startsWith(`${laneId}.`));
     const heading = lane.querySelector('.lane-h');
     if (heading && laneId) heading.textContent = t(`workflow.lane.${laneId}`);
+    const buttons = [...lane.querySelectorAll('.flow-btn[data-step]')];
+    const lockedButtons = buttons.filter((button) => button.dataset.state === 'locked');
+    const reason = laneId ? document.getElementById(`lock-r-${laneId}`) : null;
+    if (lockedButtons.length && reason) {
+      const reasonKey = laneId === 'fab' ? 'workflow.locked.fab' : 'workflow.locked.layout';
+      reason.hidden = false;
+      reason.textContent = t(reasonKey);
+      for (const button of lockedButtons) {
+        button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('aria-describedby', reason.id);
+      }
+      for (const button of buttons) {
+        if (button.dataset.state === 'locked') continue;
+        button.removeAttribute('aria-disabled');
+        button.removeAttribute('aria-describedby');
+      }
+      if (lockedButtons.length === buttons.length) {
+        lane.setAttribute('aria-disabled', 'true');
+        lane.setAttribute('aria-describedby', reason.id);
+      } else {
+        lane.removeAttribute('aria-disabled');
+        lane.removeAttribute('aria-describedby');
+      }
+    } else {
+      lane.removeAttribute('aria-disabled');
+      lane.removeAttribute('aria-describedby');
+      if (reason) {
+        reason.hidden = true;
+        reason.textContent = '';
+      }
+      for (const button of buttons) {
+        button.removeAttribute('aria-disabled');
+        button.removeAttribute('aria-describedby');
+      }
+    }
   }
 
   const progressEl = document.querySelector('#workflow-progress');

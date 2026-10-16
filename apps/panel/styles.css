@@ -110,6 +110,8 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
 .wf-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .eyebrow { font-size: 12px; font-weight: 600; }
 .badge { font-size: 12px; font-weight: 700; }
+.lock-reason { grid-column: 1 / -1; margin: 4px 0 0; padding: 6px 8px; border-radius: 8px; background: #fdf1d9; color: #875400; font-size: 14px; line-height: 1.4; }
+.flow-btn[aria-disabled="true"] { cursor: not-allowed; }
 .flow-btn .px-cut { fill: #334155; }
 .flow-btn[data-state="idle"] { opacity: 0.72; }
 .flow-btn[data-state="locked"] { opacity: 0.34; box-shadow: none; }
