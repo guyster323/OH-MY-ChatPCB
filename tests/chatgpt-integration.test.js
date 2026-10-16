@@ -199,10 +199,15 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
 
       delete process.env.XDG_CONFIG_HOME;
       let escapedHome = realHome;
+      // Windows keeps HOME and resolves %APPDATA%\chatpcb, so the temporary
+      // root is that APPDATA directory. Other platforms move HOME itself.
+      let tempRoot = escapedHome;
       if (process.platform === 'win32') {
         process.env.APPDATA = `${realHome}-chatpcb-appdata`;
+        tempRoot = process.env.APPDATA;
       } else {
         escapedHome = `${realHome}-chatpcb-home`;
+        tempRoot = escapedHome;
         process.env.HOME = escapedHome;
         process.env.USERPROFILE = escapedHome;
       }
@@ -214,7 +219,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       }, escapedHome);
       assert.equal(resolveChatGPTConfigDir(), escaped);
       assert.equal(configPathInside(escaped, realHome), false);
-      assert.equal(assertIsolatedConfigDir(escaped, escapedHome), path.resolve(escaped));
+      assert.equal(assertIsolatedConfigDir(escaped, tempRoot), path.resolve(escaped));
     } finally {
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[key];
