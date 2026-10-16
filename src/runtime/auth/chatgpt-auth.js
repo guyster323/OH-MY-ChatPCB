@@ -1418,7 +1418,7 @@ export function createChatGPTAuthManager({
     return run;
   }
 
-  function reopenAuth(args) {
+  async function reopenAuth(args) {
     const attemptId = args?.attemptId;
     if (!attemptId) return { error: 'attemptId is required' };
     const authFlow = activeAuthAttempts.get(attemptId);
@@ -1427,7 +1427,28 @@ export function createChatGPTAuthManager({
     if (typeof authUrl !== 'string' || !authUrl.startsWith('https://')) {
       return { error: 'Auth attempt not found or expired' };
     }
-    openSystemBrowser(authUrl, { spawnImpl }).catch(() => {});
+    let browserResult;
+    try {
+      browserResult = await openSystemBrowser(authUrl, { spawnImpl });
+    } catch (error) {
+      const wrapped = new Error(error?.message || 'Could not open browser');
+      wrapped.code = error?.code || 'open_failed';
+      wrapped.authUrl = authUrl;
+      throw wrapped;
+    }
+    if (!browserResult?.success) {
+      const cause = browserResult?.error;
+      return {
+        ok: false,
+        authUrl,
+        attemptId,
+        error: {
+          code: 'open_failed',
+          message: cause?.message || 'Could not open browser',
+          authUrl
+        }
+      };
+    }
     return { state: 'waiting', authUrl, attemptId };
   }
 

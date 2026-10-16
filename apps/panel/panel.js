@@ -334,6 +334,11 @@ function handleEnvelope(envelope) {
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
   pendingCalls.delete(id);
 
+  if (callName === 'auth.chatgpt.reopen') {
+    applyChatGPTReopenResult(envelope.payload);
+    return;
+  }
+
   if (!envelope.payload.ok) {
     if (callName === 'schematic.generate') {
       setRequestBusy(false);
@@ -450,7 +455,7 @@ function handleEnvelope(envelope) {
     renderChatGPTAuth();
     return;
   }
-  if (callName === 'auth.chatgpt.start' || callName === 'auth.chatgpt.reopen') {
+  if (callName === 'auth.chatgpt.start') {
     const result = envelope.payload.result;
     chatgptAuthState = {
       ...chatgptAuthState,
@@ -1382,6 +1387,7 @@ function updateLiveRegion(payload) {
     else if (code === 'timeout') message = t('auth.chatgpt.error.timeout');
     else if (code === 'not_eligible') message = t('auth.chatgpt.error.not-eligible.title');
     else if (code === 'usage_limit') message = t('auth.chatgpt.error.usage-limit.title');
+    else if (code === 'open_failed') message = t('auth.chatgpt.error.open-failed');
   }
   
   if (message) {
@@ -1403,8 +1409,65 @@ window.reopenChatGPTSignIn = function() {
   if (!chatgptAuthState.attemptId) return;
   const id = `auth_chatgpt_reopen_${Date.now()}`;
   pendingCalls.set(id, 'auth.chatgpt.reopen');
-  sendToolCall({ id, name: 'auth.chatgpt.reopen', args: { attemptId: chatgptAuthState.attemptId } });
+  try {
+    sendToolCall({ id, name: 'auth.chatgpt.reopen', args: { attemptId: chatgptAuthState.attemptId } });
+  } catch (error) {
+    pendingCalls.delete(id);
+    showChatGPTSignInError(error);
+  }
 };
+
+// auth.chatgpt.reopen either throws or comes back as { ok: false, error } when the browser cannot be opened.
+function applyChatGPTReopenResult(payload) {
+  try {
+    const failure = reopenFailureFrom(payload);
+    if (failure) {
+      showChatGPTSignInError(failure.error, failure.authUrl);
+      return;
+    }
+    const result = payload.result;
+    chatgptAuthState = {
+      ...chatgptAuthState,
+      state: result.state || 'waiting',
+      attemptId: result.attemptId,
+      authUrl: result.authUrl
+    };
+    renderChatGPTAuth();
+  } catch (error) {
+    showChatGPTSignInError(error);
+  }
+}
+
+function reopenFailureFrom(payload) {
+  if (!payload || payload.ok === false) {
+    return { error: payload?.error, authUrl: payload?.authUrl || payload?.error?.authUrl };
+  }
+  const result = payload.result;
+  if (result && result.ok === false) {
+    return { error: result.error, authUrl: result.authUrl || result.error?.authUrl };
+  }
+  return null;
+}
+
+function showChatGPTSignInError(error, authUrl) {
+  const code = chatGPTSignInErrorCode(error);
+  chatgptAuthState = {
+    ...chatgptAuthState,
+    state: 'error',
+    code,
+    authUrl: authUrl || error?.authUrl || chatgptAuthState.authUrl
+  };
+  renderChatGPTAuth();
+  updateLiveRegion({ state: 'error', code });
+}
+
+function chatGPTSignInErrorCode(error) {
+  const code = error && typeof error === 'object' ? error.code : undefined;
+  if (code === 'cancelled' || code === 'access_denied' || code === 'timeout' || code === 'open_failed' || code === 'not_eligible' || code === 'usage_limit') {
+    return code;
+  }
+  return 'open_failed';
+}
 
 window.cancelChatGPTSignIn = function() {
   if (!chatgptAuthState.attemptId) return;

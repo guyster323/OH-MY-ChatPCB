@@ -54,7 +54,9 @@ async function startStaticServer() {
 }
 
 // Opens the real panel with a fake daemon socket. startResult is what auth.chatgpt.start returns.
-async function openChatGPTWaiting(t, { locale, startResult }) {
+// reopenFailure is an { ok: false, error } tool result. reopenResultFailure nests that object in result.
+// reopenThrow makes the socket throw while sending auth.chatgpt.reopen.
+async function openChatGPTWaiting(t, { locale, startResult, reopenFailure, reopenResultFailure, reopenThrow } = {}) {
   const browser = await getBrowser();
   if (!browser) {
     t.skip('No Chromium browser available. Set CHATPCB_BROWSER_PATH or run npx playwright install chromium.');
@@ -65,7 +67,7 @@ async function openChatGPTWaiting(t, { locale, startResult }) {
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.addInitScript((start) => {
+  await page.addInitScript((config) => {
     window.__sent = [];
     class FakeSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
@@ -80,16 +82,42 @@ async function openChatGPTWaiting(t, { locale, startResult }) {
         const envelope = JSON.parse(raw);
         const call = envelope.payload;
         window.__sent.push(call);
+        if (call.name === 'auth.chatgpt.reopen' && config.reopenThrow) {
+          throw new Error(config.reopenThrow);
+        }
+        let ok = true;
         let result = {};
+        let error;
+        let authUrl;
         if (call.name === 'auth.chatgpt.status') result = { state: 'signed_out' };
         if (call.name === 'provider.status') result = { provider: call.args?.provider ?? 'codex', status: 'signed-out' };
-        if (call.name === 'auth.chatgpt.start' || call.name === 'auth.chatgpt.reopen') result = start;
-        queueMicrotask(() => this.emit('message', { data: JSON.stringify({ version: 1, id: `r_${call.id}`, type: 'tool.result', createdAt: new Date().toISOString(), payload: { id: call.id, ok: true, result } }) }));
+        if (call.name === 'auth.chatgpt.start') result = config.start;
+        if (call.name === 'auth.chatgpt.reopen') {
+          if (config.reopenFailure) {
+            ok = false;
+            error = config.reopenFailure.error;
+            authUrl = config.reopenFailure.authUrl;
+            result = undefined;
+          } else if (config.reopenResultFailure) {
+            result = { ok: false, error: config.reopenResultFailure.error, authUrl: config.reopenResultFailure.authUrl };
+          } else {
+            result = config.start;
+          }
+        }
+        const payload = { id: call.id, ok, result };
+        if (error) payload.error = error;
+        if (authUrl) payload.authUrl = authUrl;
+        queueMicrotask(() => this.emit('message', { data: JSON.stringify({ version: 1, id: `r_${call.id}`, type: 'tool.result', createdAt: new Date().toISOString(), payload }) }));
       }
       close() {}
     }
     window.WebSocket = FakeSocket;
-  }, startResult);
+  }, {
+    start: startResult,
+    reopenFailure: reopenFailure ?? null,
+    reopenResultFailure: reopenResultFailure ?? null,
+    reopenThrow: reopenThrow ?? null
+  });
   await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
   await page.selectOption('#provider', 'chatgpt');
   const button = page.locator('.chatgpt-sign-in-btn');
@@ -153,6 +181,77 @@ test('reopen button is disabled with a reason when the sign-in URL is missing', 
     assert.equal(await reopen.getAttribute('aria-describedby'), 'chatgpt-reopen-reason');
     assert.match(await page.locator('#chatgpt-reopen-reason').innerText(), /로그인 페이지 주소를 사용할 수 없어요/);
     assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+const browserOpenError = { code: 'open_failed', message: 'Could not open browser' };
+
+async function assertBrowserOpenError(page, { title, pageErrors }) {
+  const card = page.locator('#chatgpt-auth-card');
+  await card.locator('h2', { hasText: title }).waitFor();
+  assert.equal(await card.evaluate((node) => node.className), 'chatgpt-auth-card error');
+  const text = await card.innerText();
+  assert.ok(text.includes(title), text);
+  assert.match(text, /https:\/\/auth\.openai\.com\//);
+  assert.equal(await card.locator('a[href^="https://auth.openai.com/"]').count(), 1);
+  await page.waitForFunction((expected) => document.querySelector('#auth-live-region')?.textContent?.includes(expected), title);
+  assert.deepEqual(pageErrors, []);
+}
+
+test('reopen shows the browser-open error when the daemon returns ok:false', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'en-US',
+    startResult: waiting,
+    reopenFailure: { error: browserOpenError, authUrl: waiting.authUrl }
+  });
+  if (!opened) return;
+  const { page, context, pageErrors, button } = opened;
+  try {
+    await button.click();
+    const reopen = page.locator('#chatgpt-reopen-button');
+    await reopen.waitFor();
+    await reopen.click();
+    await assertBrowserOpenError(page, { title: "Couldn't open your browser. Use the link below.", pageErrors });
+  } finally {
+    await context.close();
+  }
+});
+
+test('reopen shows the browser-open error when the result is ok:false', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'ko-KR',
+    startResult: waiting,
+    reopenResultFailure: { error: browserOpenError, authUrl: waiting.authUrl }
+  });
+  if (!opened) return;
+  const { page, context, pageErrors, button } = opened;
+  try {
+    await button.click();
+    const reopen = page.locator('#chatgpt-reopen-button');
+    await reopen.waitFor();
+    await reopen.click();
+    await assertBrowserOpenError(page, { title: '브라우저를 열 수 없습니다. 아래 링크를 사용하세요.', pageErrors });
+  } finally {
+    await context.close();
+  }
+});
+
+test('reopen shows the browser-open error when opening the browser throws', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'en-US',
+    startResult: waiting,
+    reopenThrow: 'Could not open browser'
+  });
+  if (!opened) return;
+  const { page, context, pageErrors, button } = opened;
+  try {
+    await button.click();
+    const reopen = page.locator('#chatgpt-reopen-button');
+    await reopen.waitFor();
+    await reopen.click();
+    await assertBrowserOpenError(page, { title: "Couldn't open your browser. Use the link below.", pageErrors });
   } finally {
     await context.close();
   }

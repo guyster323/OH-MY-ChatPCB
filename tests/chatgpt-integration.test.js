@@ -614,12 +614,62 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
     try {
       const started = await manager.startAuth();
-      const reopened = manager.reopenAuth({ attemptId: started.attemptId });
+      const reopened = await manager.reopenAuth({ attemptId: started.attemptId });
       assert.equal(reopened.state, 'waiting');
       assert.equal(reopened.authUrl, started.authUrl);
       assert.match(reopened.authUrl, /^https:\/\/auth\.openai\.com\/api\/accounts\/authorize\?/);
       assert.equal(reopened.authUrl.includes('auth.openai.com/api/accounts/authorize?...'), false);
       assert.equal(calls.at(-1).args.at(-1), started.authUrl);
+    } finally {
+      await manager.cancelAll();
+    }
+  });
+
+  it('reopen reports a browser-open failure instead of dropping it', async () => {
+    let opens = 0;
+    const spawnImpl = () => {
+      opens += 1;
+      if (opens === 1) {
+        const handlers = {};
+        const proc = {
+          on(event, fn) {
+            handlers[event] = fn;
+            return proc;
+          },
+          unref() {}
+        };
+        queueMicrotask(() => handlers.spawn?.());
+        return proc;
+      }
+      if (opens === 2) throw new Error('spawn xdg-open ENOENT');
+      return {
+        on() {
+          throw new Error('browser listener exploded');
+        },
+        unref() {}
+      };
+    };
+    const manager = createChatGPTAuthManager({
+      clientId: 'oaiapp_TEST',
+      spawnImpl,
+      portStart: allocPort(),
+      timeoutMs: 20000
+    });
+    try {
+      const started = await manager.startAuth();
+      const returned = await manager.reopenAuth({ attemptId: started.attemptId });
+      assert.equal(returned.ok, false);
+      assert.equal(returned.error.code, 'open_failed');
+      assert.match(returned.error.message, /xdg-open ENOENT/);
+
+      const dispatched = await dispatchToolCall(
+        { id: 'reopen-fail', name: 'auth.chatgpt.reopen', args: { attemptId: started.attemptId } },
+        { chatgptAuthManager: manager }
+      );
+      assert.equal(dispatched.ok, false);
+      assert.equal(dispatched.error.code, 'open_failed');
+      assert.match(dispatched.error.message, /browser listener exploded/);
+      assert.equal(dispatched.authUrl, started.authUrl);
     } finally {
       await manager.cancelAll();
     }
@@ -654,8 +704,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.match(oldCallback.body, /state mismatch/);
       }
       assert.equal((await httpGet(`http://127.0.0.1:${redirectPort(second.authUrl)}/health`)).status, 404);
-      assert.ok(manager.reopenAuth({ attemptId: first.attemptId }).error);
-      assert.equal(manager.reopenAuth({ attemptId: second.attemptId }).authUrl, second.authUrl);
+      assert.ok((await manager.reopenAuth({ attemptId: first.attemptId })).error);
+      assert.equal((await manager.reopenAuth({ attemptId: second.attemptId })).authUrl, second.authUrl);
     } finally {
       await manager.cancelAll();
     }
@@ -1105,7 +1155,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       const cancelling = manager.cancelAuth({ attemptId: started.attemptId });
       gate.resolve();
       assert.equal((await cancelling).state, 'signed_out');
-      assert.ok(manager.reopenAuth({ attemptId: started.attemptId }).error);
+      assert.ok((await manager.reopenAuth({ attemptId: started.attemptId })).error);
     });
   });
 
@@ -1131,13 +1181,13 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const missing = await httpGet(`${redirect}?error=access_denied`);
         assert.equal(missing.status, 400);
         assert.match(missing.body, /state mismatch/);
-        assert.equal(manager.reopenAuth({ attemptId: started.attemptId }).authUrl, started.authUrl);
+        assert.equal((await manager.reopenAuth({ attemptId: started.attemptId })).authUrl, started.authUrl);
 
         const wrong = await httpGet(`${redirect}?error=access_denied&state=not-the-state&code=SHOULD_NOT_EXCHANGE`);
         assert.equal(wrong.status, 400);
         assert.match(wrong.body, /state mismatch/);
         assert.equal(tokenCalls.length, 0);
-        assert.equal(manager.reopenAuth({ attemptId: started.attemptId }).state, 'waiting');
+        assert.equal((await manager.reopenAuth({ attemptId: started.attemptId })).state, 'waiting');
 
         const page = await httpGet(`${redirect}?code=CODE&state=${state}`);
         assert.match(page.body, /Successfully signed in/);

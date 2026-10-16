@@ -157,9 +157,19 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     case 'auth.chatgpt.reopen': {
       const manager = ctx.chatgptAuthManager;
       if (!manager) return failure('NO_AUTH_SESSION', 'No active auth session');
-      const reopened = manager.reopenAuth(call.args);
-      if (reopened?.error) return failure('NO_AUTH_SESSION', reopened.error);
-      return ok(reopened);
+      try {
+        const reopened = await manager.reopenAuth(call.args);
+        if (reopened?.ok === false) {
+          const error = reopened.error;
+          const message = typeof error === 'string' ? error : (error?.message || 'Could not open browser');
+          const code = typeof error === 'object' && error?.code ? error.code : 'open_failed';
+          return failure(code, message, { authUrl: reopened.authUrl || error?.authUrl });
+        }
+        if (reopened?.error) return failure('NO_AUTH_SESSION', reopened.error);
+        return ok(reopened);
+      } catch (error) {
+        return failure(error.code || 'open_failed', error.message || 'Could not open browser', { authUrl: error.authUrl });
+      }
     }
 
     case 'auth.chatgpt.cancel': {
