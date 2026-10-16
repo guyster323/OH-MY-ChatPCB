@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, window */
+/* global CSSRule, document, getComputedStyle, window */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -49,6 +49,35 @@ const UI_PAIRS = [
   ['success', 'surface'],
   ['danger', 'surface']
 ];
+
+// Ubuntu CI has no Pretendard or Inter. Until the bundled face loads, DejaVu wraps
+// the approval actions onto a second row and the card extends below the dock.
+async function readBundledPretendard() {
+  await document.fonts.load('14px Pretendard');
+  await document.fonts.load('700 15px Pretendard');
+  await document.fonts.ready;
+  const rules = [];
+  for (const sheet of document.styleSheets) {
+    let cssRules;
+    try {
+      cssRules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    for (const rule of cssRules) {
+      if (rule.type !== CSSRule.FONT_FACE_RULE) continue;
+      rules.push({
+        family: rule.style.getPropertyValue('font-family').replaceAll('"', ''),
+        src: rule.style.getPropertyValue('src'),
+        display: rule.style.getPropertyValue('font-display')
+      });
+    }
+  }
+  const faces = [...document.fonts]
+    .filter((face) => face.family.replaceAll('"', '') === 'Pretendard')
+    .map((face) => ({ status: face.status, display: face.display }));
+  return { rules, faces };
+}
 
 // Same launch path as verify:ui. A headless shell is enough when its path is passed as executablePath.
 // A missing browser fails in CI and skips on a local machine.
@@ -253,6 +282,15 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           waitUntil: 'domcontentloaded'
         });
         await page.evaluate(() => window.chatpcbI18n.ready);
+        const bundledFont = await page.evaluate(readBundledPretendard);
+        const face = bundledFont.rules.find((rule) => rule.family === 'Pretendard');
+        assert.ok(face, `${theme}/${lang} Pretendard @font-face`);
+        assert.equal(face.src, 'url("./fonts/PretendardVariable.woff2") format("woff2")', `${theme}/${lang} Pretendard src`);
+        assert.equal(face.display, 'swap', `${theme}/${lang} Pretendard font-display`);
+        assert.ok(
+          bundledFont.faces.some((item) => item.status === 'loaded' && item.display === 'swap'),
+          `${theme}/${lang} bundled Pretendard did not load ${JSON.stringify(bundledFont.faces)}`
+        );
         await page.evaluate(() => {
           window.__chatpcbTest.showPatch({
             project: { displayName: 'demo-board', projectDir: '/tmp/demo-board' },
