@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "eslint . --max-warnings 10",
+    "lint": "eslint . --max-warnings 0",
     "generate:sample": "node ./bin/chatpcb-cli.js generate --project ./workspaces/sample-mcu --prompt \"STM32 board with 3.3V regulator, reset button, I2C sensor connector, UART header, status LED\"",
     "validate:sample": "node ./bin/chatpcb-cli.js validate --project ./workspaces/sample-mcu",
     "simulate:sample": "node ./bin/chatpcb-cli.js simulate --project ./workspaces/sample-mcu",

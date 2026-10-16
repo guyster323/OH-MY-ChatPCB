@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -86,9 +86,10 @@ export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) 
   return resolvedProjectDir;
 }
 
-// realpath the longest existing prefix, then rejoin any missing tail.
-// Ancestors of the trusted root may be symlinks; callers apply link checks
-// only inside the project tree.
+// realpath the longest existing prefix, then rejoin a tail that does not exist
+// yet. A missing component that is already a symlink is dangling: rejoining it
+// lexically would let the target appear later and escape the workspace.
+// Ancestors that realpath can resolve may still be symlinks.
 function canonicalPath(candidate) {
   const missing = [];
   let current = candidate;
@@ -97,13 +98,30 @@ function canonicalPath(candidate) {
       const real = realpathSync(current);
       return missing.reduceRight((dir, name) => path.join(dir, name), real);
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (error?.code !== 'ENOENT') throw unsafeCanonicalError(error);
+      rejectIfDanglingSymlink(current);
       const parent = path.dirname(current);
       if (parent === current) return candidate;
       missing.push(path.basename(current));
       current = parent;
     }
   }
+}
+
+function rejectIfDanglingSymlink(candidate) {
+  let info;
+  try {
+    info = lstatSync(candidate, { throwIfNoEntry: false });
+  } catch (error) {
+    throw unsafeCanonicalError(error);
+  }
+  if (info?.isSymbolicLink()) {
+    throw typedError('UNSAFE_PROJECT_DIR', 'Project directory must not contain a dangling symbolic link.');
+  }
+}
+
+function unsafeCanonicalError(error) {
+  return typedError('UNSAFE_PROJECT_DIR', 'Project directory cannot be resolved safely.', error);
 }
 
 export async function readChatPcbManifest(projectDir) {
@@ -145,8 +163,8 @@ function isProtectedPath(candidate) {
   return protectedPaths.has(candidate);
 }
 
-function typedError(code, message) {
-  const error = new Error(message);
+function typedError(code, message, cause) {
+  const error = cause === undefined ? new Error(message) : new Error(message, { cause });
   error.code = code;
   return error;
 }

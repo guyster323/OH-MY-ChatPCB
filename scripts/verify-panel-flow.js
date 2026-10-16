@@ -67,7 +67,8 @@ async function verifyPanelFlow() {
         provider: 'codex',
         projectDir: created.payload.result.projectDir,
         prompt
-      }
+      },
+      timeoutMs: process.env.CHATPCB_FAKE_KICAD_ERC === '1' ? 30000 : 120000
     });
 
     assert.equal(requested.type, 'tool.result');
@@ -103,6 +104,8 @@ async function verifyPanelFlow() {
           operation: requested.payload.result.operation,
           project: requested.payload.result.files.project,
           erc: requested.payload.result.validation.erc,
+          ercSkipped: requested.payload.result.candidateVerification?.erc?.skipped,
+          drcSkipped: requested.payload.result.candidateVerification?.drc?.skipped,
           reviewStatus: requested.payload.result.review.status,
           freshness: inspected.payload.result.manifest.freshness.status
         },
@@ -116,8 +119,8 @@ async function verifyPanelFlow() {
   }
 }
 
-// CHATPCB_FAKE_KICAD_ERC is set by the panel-flow test. This script is about
-// the websocket project flow, so the fake stands in for candidate ERC and DRC.
+// CHATPCB_FAKE_KICAD_ERC is set by the panel-flow test that does not require
+// KiCad. When it is unset, candidate ERC and DRC use the real kicad-cli.
 function fakeKicadValidationOptions() {
   if (process.env.CHATPCB_FAKE_KICAD_ERC !== '1') return {};
   return {
@@ -136,13 +139,13 @@ function fakeKicadValidationOptions() {
   };
 }
 
-function sendToolCallOverWebSocket({ url, id, name, args }) {
+function sendToolCallOverWebSocket({ url, id, name, args, timeoutMs = 30000 }) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url);
     const timeout = setTimeout(() => {
       socket.close();
       reject(new Error(`panel websocket verification timed out for ${name}`));
-    }, 30000);
+    }, timeoutMs);
 
     socket.addEventListener('open', () => {
       socket.send(JSON.stringify(createEnvelope('tool.call', { id, name, args })));

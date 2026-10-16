@@ -15,17 +15,26 @@ import {
   renderSpiceFixture
 } from '../kicad/project-generator.js';
 import { reviewCircuitReadiness } from './review-project.js';
-import { assertInspectionTree } from './inspection-copy.js';
+import { assertInspectionTree, assertUnlinkedAncestors } from './inspection-copy.js';
+import { assertSafeProjectDir } from './project-workspace.js';
 
-export async function generateMcuPeripheralProject({ projectDir, prompt, projectName = 'chatpcb_mcu_peripheral' }) {
+export async function generateMcuPeripheralProject({
+  projectDir,
+  prompt,
+  projectName = 'chatpcb_mcu_peripheral',
+  allowedWorkspaceRoot
+}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
+  const guard = allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {};
+  // Reject escapes, dangling links, and untrusted symlink ancestors before mkdir.
+  assertSafeProjectDir(projectDir, guard);
+  await assertUnlinkedAncestors(projectDir, guard);
   await mkdir(projectDir, { recursive: true });
-  // Same rule as inspection: links inside the project are rejected, ancestor
-  // aliases of the project root are not.
-  await assertInspectionTree(projectDir);
+  // Re-check the tree that now exists, including workspace confinement, before writing.
+  await assertInspectionTree(projectDir, guard);
   const conversation = await loadCircuitConversation(projectDir).catch(() => null);
   const spec = applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation);
   const schematic = buildMcuSchematicAst(spec);

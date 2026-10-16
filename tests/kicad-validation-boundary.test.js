@@ -74,7 +74,7 @@ test('provider validation aliases cannot override trusted KiCad configuration', 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-for (const kind of ['root', 'child-directory', 'report-file']) {
+for (const kind of ['root', 'ancestor', 'child-directory', 'report-file']) {
   test('inspection rejects ' + kind + ' links before toolchain or validation', async (t) => {
     const { root, projectDir } = await fixture();
     const outside = path.join(root, 'outside');
@@ -84,10 +84,12 @@ for (const kind of ['root', 'child-directory', 'report-file']) {
     let inspected = projectDir;
     let linkPath;
     try {
-      if (kind === 'root') {
+      if (kind === 'root' || kind === 'ancestor') {
+        // The ancestor alias lives inside the temp project, so it is not an
+        // ancestor of os.tmpdir() or of a configured workspace root.
         linkPath = path.join(root, 'alias');
-        await symlink(projectDir, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
-        inspected = linkPath;
+        await symlink(kind === 'root' ? projectDir : root, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+        inspected = kind === 'root' ? linkPath : path.join(linkPath, 'project');
       } else {
         linkPath = path.join(projectDir, kind === 'report-file' ? 'chatpcb-erc.json' : 'library');
         await symlink(kind === 'report-file' ? marker : outside, linkPath,
@@ -399,26 +401,39 @@ test('patch candidate ERC excludes the original project from KiCad discovery', a
 });
 
 test('inspection and generation allow a symlink ancestor and still reject links inside the project', async (t) => {
+  // macOS layout: /var -> /private/var, and os.tmpdir() is /var/folders/...
   const base = await mkdtemp(path.join(tmpdir(), 'chatpcb-alias-ancestor-'));
-  const real = path.join(base, 'real');
-  const alias = path.join(base, 'alias');
+  const realVar = path.join(base, 'private', 'var');
+  const varLink = path.join(base, 'var');
   const outside = path.join(base, 'outside');
-  await mkdir(real);
+  const folders = path.join(realVar, 'folders');
+  await mkdir(folders, { recursive: true });
   await mkdir(outside);
-  const projectDir = path.join(alias, 'project');
+  const tempThroughLink = path.join(varLink, 'folders');
+  const projectDir = path.join(tempThroughLink, 'project');
   const previousLibs = setKicadLibraryEnv({
     symbols: FIXTURE_LIBS.symbols,
     footprints: FIXTURE_LIBS.footprints
   });
+  const previousTemp = {
+    TMPDIR: process.env.TMPDIR,
+    TMP: process.env.TMP,
+    TEMP: process.env.TEMP
+  };
   let linkInside;
   try {
-    await symlink(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    await symlink(realVar, varLink, process.platform === 'win32' ? 'junction' : 'dir');
+    process.env.TMPDIR = tempThroughLink;
+    process.env.TMP = tempThroughLink;
+    process.env.TEMP = tempThroughLink;
+    assert.equal(path.resolve(tmpdir()), path.resolve(tempThroughLink));
+
     const generated = await generateMcuPeripheralProject({
       projectDir,
       prompt: 'RP2040 board with USB-C power and I2C connector.'
     });
     assert.match(generated.files.schematic, /\.kicad_sch$/);
-    assert.match(await readFile(path.join(real, 'project', 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8'), /\(kicad_sch/);
+    assert.match(await readFile(path.join(folders, 'project', 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8'), /\(kicad_sch/);
 
     const inspected = await inspectProject({
       projectDir,
@@ -428,20 +443,20 @@ test('inspection and generation allow a symlink ancestor and still reject links 
     });
     assert.equal(inspected.ok, true);
 
-    assert.equal(assertSafeProjectDir(projectDir, { allowedWorkspaceRoot: real }), path.resolve(projectDir));
+    assert.equal(assertSafeProjectDir(projectDir, { allowedWorkspaceRoot: folders }), path.resolve(projectDir));
     const confined = await dispatchToolCall(
       { name: 'project.inspect', args: { projectDir } },
       {
-        allowedWorkspaceRoot: real,
+        allowedWorkspaceRoot: folders,
         inspectProjectImpl: async () => ({ ok: true, inspection: { projectDigest: 'aliased' } })
       }
     );
     assert.equal(confined.ok, true);
     assert.equal(confined.result.inspection.projectDigest, 'aliased');
 
-    const escape = path.join(real, 'escape');
+    const escape = path.join(realVar, 'escape');
     await symlink(outside, escape, process.platform === 'win32' ? 'junction' : 'dir');
-    assert.throws(() => assertSafeProjectDir(escape, { allowedWorkspaceRoot: real }), { code: 'UNSAFE_PROJECT_DIR' });
+    assert.throws(() => assertSafeProjectDir(escape, { allowedWorkspaceRoot: realVar }), { code: 'UNSAFE_PROJECT_DIR' });
     await rm(escape, { force: true, recursive: true });
 
     linkInside = path.join(projectDir, 'linked-library');
@@ -464,10 +479,53 @@ test('inspection and generation allow a symlink ancestor and still reject links 
     if (error.code === 'EPERM' || error.code === 'ENOTSUP') t.skip('Symlink creation unavailable');
     else throw error;
   } finally {
+    for (const key of ['TMPDIR', 'TMP', 'TEMP']) {
+      if (previousTemp[key] === undefined) delete process.env[key];
+      else process.env[key] = previousTemp[key];
+    }
     restoreKicadLibraryEnv(previousLibs);
     if (linkInside) await rm(linkInside, { force: true, recursive: true });
-    await rm(alias, { force: true, recursive: true });
     await rm(base, { force: true, recursive: true });
+  }
+});
+
+test('a symlink ancestor of the allowed workspace root is allowed', async (t) => {
+  const sandbox = await mkdtemp(path.join(tmpdir(), 'chatpcb-workspace-ancestor-'));
+  const realMount = path.join(sandbox, 'mnt');
+  const diskLink = path.join(sandbox, 'disk');
+  const otherLink = path.join(sandbox, 'other');
+  const realWork = path.join(realMount, 'work');
+  await mkdir(realWork, { recursive: true });
+  const workspace = path.join(diskLink, 'work');
+  const projectDir = path.join(workspace, 'project');
+  const previousLibs = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
+  try {
+    await symlink(realMount, diskLink, process.platform === 'win32' ? 'junction' : 'dir');
+    await symlink(realMount, otherLink, process.platform === 'win32' ? 'junction' : 'dir');
+    const generated = await generateMcuPeripheralProject({
+      projectDir,
+      prompt: 'RP2040 board with USB-C power and I2C connector.',
+      allowedWorkspaceRoot: workspace
+    });
+    assert.match(generated.files.schematic, /\.kicad_sch$/);
+    assert.match(await readFile(path.join(realWork, 'project', 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8'), /\(kicad_sch/);
+
+    const evil = path.join(otherLink, 'work', 'evil');
+    await assert.rejects(generateMcuPeripheralProject({
+      projectDir: evil,
+      prompt: 'RP2040 board with USB-C power and I2C connector.',
+      allowedWorkspaceRoot: workspace
+    }), { code: 'UNSAFE_INSPECTION_LINK' });
+    await assert.rejects(() => access(path.join(realWork, 'evil')));
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'ENOTSUP') t.skip('Symlink creation unavailable');
+    else throw error;
+  } finally {
+    restoreKicadLibraryEnv(previousLibs);
+    await rm(sandbox, { force: true, recursive: true });
   }
 });
 

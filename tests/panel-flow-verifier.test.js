@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
+import { resolveKicadCli } from '../src/kicad/kicad-cli.js';
 import {
   findInstalledSymbolLibraryDirectory,
   UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE,
@@ -19,6 +20,21 @@ function childEnvWithFixtureSymbols() {
   const env = { ...process.env, KICAD_SYMBOL_DIR: FIXTURE_LIBS.symbols };
   delete env.KICAD10_SYMBOL_DIR;
   delete env.FORCE_COLOR;
+  return env;
+}
+
+function realKicadCliSkipReason() {
+  if (process.env.CHATPCB_KICAD_CLI_DISABLE) return 'CHATPCB_KICAD_CLI_DISABLE is set';
+  const resolved = resolveKicadCli();
+  if (!resolved.path) return 'kicad-cli is not available';
+  return false;
+}
+
+function childEnvWithRealKicad() {
+  const env = childEnvWithFixtureSymbols();
+  env.KICAD_FOOTPRINT_DIR = FIXTURE_LIBS.footprints;
+  delete env.CHATPCB_FAKE_KICAD_ERC;
+  delete env.CHATPCB_KICAD_CLI_DISABLE;
   return env;
 }
 
@@ -51,8 +67,31 @@ test('panel user-flow verifier completes the daemon websocket project request', 
   assert.equal(result.operation, 'generated');
   assert.match(result.project, /\.kicad_pro$/);
   assert.equal(typeof result.erc.errorCount, 'number');
+  assert.equal(result.ercSkipped, false);
+  assert.equal(result.drcSkipped, false);
   assert.equal(typeof result.reviewStatus, 'string');
   assert.equal('dirtyHost' in result, false);
+});
+
+test('panel user-flow verifier runs real KiCad ERC and DRC when kicad-cli is available', {
+  skip: realKicadCliSkipReason()
+}, async () => {
+  const { stdout } = await execFileAsync(process.execPath, ['./scripts/verify-panel-flow.js'], {
+    timeout: 180_000,
+    env: childEnvWithRealKicad()
+  });
+  const result = JSON.parse(stdout);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.service, 'chatpcb-agentd');
+  assert.equal(result.verified, 'named project.create and project.request websocket flow');
+  assert.equal(result.operation, 'generated');
+  assert.match(result.project, /\.kicad_pro$/);
+  assert.equal(typeof result.erc.errorCount, 'number');
+  assert.equal(typeof result.erc.warningCount, 'number');
+  assert.equal(result.ercSkipped, false);
+  assert.equal(result.drcSkipped, false);
+  assert.equal(typeof result.reviewStatus, 'string');
 });
 
 test('panel user-flow verifier exits before running when no symbol library is configured', async () => {
