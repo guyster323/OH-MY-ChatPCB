@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -817,6 +818,66 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         logs.restore();
         await manager.cancelAll();
       }
+    });
+  });
+
+  it('lets a one-shot process exit during grace while the expired page still answers', async () => {
+    await withConfig(async () => {
+      const { spawnImpl } = fakeSpawn();
+      const flow = startAuthFlow({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort(),
+        timeoutMs: 50,
+        graceMs: 60000
+      });
+      try {
+        let rejection;
+        try {
+          await flow.promise;
+        } catch (error) {
+          rejection = error;
+        }
+        assert.equal(rejection?.code, 'timeout');
+        const port = redirectPort(flow.authUrl);
+        const page = await httpGet(`http://127.0.0.1:${port}/auth/callback?code=LATE&state=nope`);
+        assert.equal(page.status, 410);
+        assert.match(page.body, /This sign-in attempt expired/);
+        assert.match(page.body, /Nothing was saved/);
+        assert.equal(await canListen(port), false);
+      } finally {
+        await flow.cancel();
+      }
+    });
+
+    await withConfig(async (dir) => {
+      const portStart = allocPort();
+      const scriptPath = path.join(dir, 'auth-grace-exit.mjs');
+      const authModuleUrl = new URL('../src/runtime/auth/chatgpt-auth.js', import.meta.url).href;
+      await writeFile(scriptPath, graceExitScript({ authModuleUrl, portStart }));
+      const started = Date.now();
+      const child = spawn(process.execPath, [scriptPath], {
+        env: {
+          ...process.env,
+          CHATPCB_CHATGPT_AUTH_TIMEOUT_MS: '50',
+          CHATPCB_CHATGPT_AUTH_GRACE_MS: '60000',
+          XDG_CONFIG_HOME: dir
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      const result = await childClose(child, 4000);
+      const elapsed = Date.now() - started;
+      const output = `stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`;
+      assert.equal(result.timedOut, false, `child still running after ${elapsed}ms (grace is 60000); ${output}`);
+      assert.equal(result.code, 0, `exit ${result.code} signal ${result.signal}; ${output}`);
+      assert.equal(stdout.trim(), 'RESULT expired', output);
+      assert.ok(elapsed < 3000, `child exited in ${elapsed}ms; grace is 60000ms`);
     });
   });
 
@@ -2735,6 +2796,69 @@ function httpGet(url) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function graceExitScript({ authModuleUrl, portStart }) {
+  return `import { startAuthFlow, useFallbackAuthEndpoints } from ${JSON.stringify(authModuleUrl)};
+
+useFallbackAuthEndpoints();
+globalThis.fetch = async () => {
+  throw new Error('fetch disabled');
+};
+
+const flow = startAuthFlow({
+  clientId: 'oaiapp_TEST',
+  portStart: ${Number(portStart)},
+  spawnImpl() {
+    const handlers = {};
+    const proc = {
+      on(event, fn) {
+        handlers[event] = fn;
+        return proc;
+      },
+      unref() {}
+    };
+    queueMicrotask(() => handlers.spawn?.());
+    return proc;
+  }
+});
+
+try {
+  await flow.promise;
+  console.log('RESULT success');
+  process.exitCode = 1;
+} catch (error) {
+  if (error && error.code === 'timeout') console.log('RESULT expired');
+  else {
+    console.log('RESULT ' + ((error && (error.code || error.message)) || 'error'));
+    process.exitCode = 1;
+  }
+}
+`;
+}
+
+function childClose(child, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let killed = false;
+    const finish = (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, signal, timedOut: killed });
+    };
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill();
+    }, timeoutMs);
+    child.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', finish);
+  });
 }
 
 async function withConfig(fn) {

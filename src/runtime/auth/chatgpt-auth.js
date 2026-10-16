@@ -26,8 +26,10 @@ const REDIRECT_URI_PORT_MAX_ATTEMPTS = 3;
 // Long enough for a real ChatGPT login. timeoutMs and
 // CHATPCB_CHATGPT_AUTH_TIMEOUT_MS override this when they are positive integers.
 const AUTH_TIMEOUT_MS = 15 * 60 * 1000;
-// After the attempt expires, the same callback port stays open so a late
-// browser redirect gets an expired page instead of a refused connection.
+// After the attempt expires, the callback port stays open for as long as this
+// process stays up, so a late browser redirect gets an expired page instead of
+// a refused connection. The listener is detached from the event loop then: a
+// one-shot CLI must be able to exit, while a daemon still answers on its own.
 const AUTH_GRACE_MS = 10 * 60 * 1000;
 const AUTH_TIMEOUT_ENV = 'CHATPCB_CHATGPT_AUTH_TIMEOUT_MS';
 const AUTH_GRACE_ENV = 'CHATPCB_CHATGPT_AUTH_GRACE_MS';
@@ -1130,6 +1132,7 @@ export function startAuthFlow({
   let actualPort = null;
   let timeoutHandle = null;
   let graceHandle = null;
+  const openSockets = new Set();
   let expiresAtIso = null;
   let authUrl = null;
   let hostId = null;
@@ -1197,6 +1200,34 @@ export function startAuthFlow({
     }
   };
 
+  const unrefHandle = (handle) => {
+    if (handle && typeof handle.unref === 'function') handle.unref();
+  };
+
+  const trackSocket = (socket) => {
+    openSockets.add(socket);
+    socket.once('close', () => openSockets.delete(socket));
+    // A connection that arrives after expiry must not pin a CLI that is
+    // already on its way out. The daemon's own handles keep the page reachable.
+    if (phase === 'expired') unrefHandle(socket);
+  };
+
+  // The listening socket and any keep-alive connection would hold a one-shot
+  // process until the grace period ends. Drop those refs. The socket stays
+  // open, so a daemon still serves the expired page on its own handles.
+  const detachGraceListener = () => {
+    const listening = server;
+    if (!listening || phase !== 'expired') return;
+    listening.keepAliveTimeout = 1;
+    unrefHandle(listening);
+    for (const socket of openSockets) {
+      if (!socket.destroyed) unrefHandle(socket);
+    }
+    if (typeof listening.closeIdleConnections === 'function') {
+      try { listening.closeIdleConnections(); } catch { /* already closing */ }
+    }
+  };
+
   // Stop accepting a code, but keep the loopback socket open for a late redirect.
   const expireAttempt = () => {
     if (phase !== 'waiting') return;
@@ -1223,9 +1254,10 @@ export function startAuthFlow({
       if (phase !== 'expired') return;
       cleanup({ force: true }).finally(notifyGraceClosed);
     }, authGraceMs);
-    // The open callback socket keeps the process up while it can answer a late
-    // redirect. This close timer must not keep the process alive on its own.
+    // The close timer must not keep the process alive on its own, and neither
+    // may the listening socket or an idle keep-alive connection.
     if (typeof graceHandle.unref === 'function') graceHandle.unref();
+    detachGraceListener();
   };
 
   // Bumps the attempt generation synchronously so a late token response cannot save.
@@ -1507,6 +1539,7 @@ export function startAuthFlow({
         finish({ code: 'server_error', message: err.message }).catch(() => {});
       });
     });
+    testServer.on('connection', trackSocket);
     let decided = false;
     const decide = (fn, value) => {
       if (decided) return;
