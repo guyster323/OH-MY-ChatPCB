@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { cliIsFlatpakKicad, isFlatpakPath, isKicadDirectoryEnv } from './flatpak.js';
+
 const WINDOWS_CANDIDATES = [
   'C:/Program Files/KiCad/10.0/bin/kicad-cli.exe',
   'C:/Program Files/KiCad/9.0/bin/kicad-cli.exe',
@@ -28,7 +30,19 @@ function warnIfKicadCliDisabled(env) {
   console.error('kicad-cli disabled by CHATPCB_KICAD_CLI_DISABLE');
 }
 
-export function resolveKicadCli({
+export function resolveKicadCli(options = {}) {
+  const resolved = findKicadCli(options);
+  if (!resolved.path) return resolved;
+  if (cliIsFlatpakKicad(resolved.path, {
+    env: options.env ?? process.env,
+    platform: options.platform ?? process.platform
+  })) {
+    return { path: resolved.path, source: 'flatpak' };
+  }
+  return resolved;
+}
+
+function findKicadCli({
   explicitPath,
   env = process.env,
   platform = process.platform,
@@ -123,7 +137,7 @@ export async function runKicadCli(args, options = {}) {
   return runCommand(resolved.path, args, {
     cwd: options.cwd,
     timeoutMs: options.timeoutMs ?? 120000,
-    env: kicadCliChildEnv(resolved.path, options.env ?? process.env)
+    env: kicadCliChildEnv(options.env ?? process.env, { flatpak: resolved.source === 'flatpak' })
   }).then((result) => ({ ...result, command: resolved.path, source: resolved.source }));
 }
 
@@ -131,87 +145,16 @@ export async function runKicadCli(args, options = {}) {
 // KICAD*_DIR from that runtime makes kicad-cli report lib_symbol_issues for
 // libraries it already has under /app/extensions. Node still reads those
 // directories to embed symbols; only the CLI child drops them.
-const MAX_FLATPAK_WRAPPER_BYTES = 64 * 1024;
-const KICAD_DIRECTORY_ENV = /^KICAD\d*(?:_[A-Z0-9]+)+_DIR$/;
-
-export function kicadCliChildEnv(cliPath, baseEnv, io) {
-  const env = { ...baseEnv };
-  if (!flatpakKicadWrapper(cliPath, io)) return env;
-  const flatpakDir = `${path.sep}flatpak${path.sep}`;
-  for (const key of Object.keys(env)) {
-    const value = env[key];
-    if (KICAD_DIRECTORY_ENV.test(key) && typeof value === 'string' && value.includes(flatpakDir)) {
-      delete env[key];
+export function kicadCliChildEnv(env = {}, { flatpak = false } = {}) {
+  const child = { ...env };
+  if (!flatpak) return child;
+  for (const key of Object.keys(child)) {
+    const value = child[key];
+    if (isKicadDirectoryEnv(key) && typeof value === 'string' && isFlatpakPath(value)) {
+      delete child[key];
     }
   }
-  return env;
-}
-
-function stripShellComment(line) {
-  if (/^\s*#!/.test(line)) return line;
-  let quote = null;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (quote) {
-      if (char === '\\' && quote === '"') {
-        index += 1;
-        continue;
-      }
-      if (char === quote) quote = null;
-      continue;
-    }
-    if (char === '"' || char === '\'') {
-      quote = char;
-      continue;
-    }
-    if (char === '#') return line.slice(0, index);
-  }
-  return line;
-}
-
-function scriptUsesFlatpakKicad(text) {
-  const code = String(text).split(/\r?\n/).map((line) => stripShellComment(line)).join('\n');
-  return code.includes('flatpak run') && code.includes('kicad-cli');
-}
-
-function closeQuietly(closeSync, fd) {
-  try {
-    closeSync(fd);
-  } catch (error) {
-    return error;
-  }
-  return undefined;
-}
-
-// Shell wrappers are small and start with a shebang. Do not slurp a kicad-cli binary.
-function readWrapperScript(cliPath, io = {}) {
-  const statSync = io.statSync ?? fs.statSync;
-  const openSync = io.openSync ?? fs.openSync;
-  const readSync = io.readSync ?? fs.readSync;
-  const closeSync = io.closeSync ?? fs.closeSync;
-  const stat = statSync(cliPath);
-  if (!stat?.isFile?.() || stat.size > MAX_FLATPAK_WRAPPER_BYTES || stat.size < 2) return null;
-  const fd = openSync(cliPath, 'r');
-  try {
-    const header = Buffer.alloc(2);
-    const headerBytes = readSync(fd, header, 0, 2, 0);
-    if (headerBytes < 2 || header.toString('utf8', 0, headerBytes) !== '#!') return null;
-    const body = Buffer.alloc(stat.size);
-    const bodyBytes = readSync(fd, body, 0, stat.size, 0);
-    return body.toString('utf8', 0, bodyBytes);
-  } finally {
-    closeQuietly(closeSync, fd);
-  }
-}
-
-export function flatpakKicadWrapper(cliPath, io = {}) {
-  if ((io.platform ?? process.platform) === 'win32') return false;
-  try {
-    const text = readWrapperScript(cliPath, io);
-    return text != null && scriptUsesFlatpakKicad(text);
-  } catch {
-    return false;
-  }
+  return child;
 }
 
 export function runCommand(command, args, { cwd = process.cwd(), timeoutMs = 120000, env } = {}) {
