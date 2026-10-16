@@ -7,10 +7,20 @@ import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
+import { resolveChatGPTConfigDir } from '../src/runtime/auth/chatgpt-auth.js';
 import { isolateProcessHome } from './setup/isolate-home.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const hookUrl = pathToFileURL(path.join(repoRoot, 'tests/setup/isolate-home.mjs')).href;
+const configDirUrl = pathToFileURL(path.join(repoRoot, 'src/runtime/auth/chatgpt-auth.js')).href;
+
+function pathInside(child, parent) {
+  const fromParent = path.relative(path.resolve(parent), path.resolve(child));
+  return fromParent !== ''
+    && fromParent !== '..'
+    && !fromParent.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(fromParent);
+}
 
 // The first statement must be the home-hook import. Normalize a leading BOM
 // and CR/LF so git autocrlf does not hide that import, then require the
@@ -26,21 +36,30 @@ export function sourceImportsHomeHook(source) {
 }
 
 test('isolate-home hook sets a private home before the entry module and removes it on exit', () => {
-  const parentHome = process.env.HOME;
+  const parentHome = Object.hasOwn(process.env, 'HOME') ? process.env.HOME : null;
+  const parentUserProfile = Object.hasOwn(process.env, 'USERPROFILE') ? process.env.USERPROFILE : null;
   const parentHomeExisted = typeof parentHome === 'string' && existsSync(parentHome);
   const script = `
     import { existsSync } from 'node:fs';
     import { tmpdir, userInfo } from 'node:os';
     import path from 'node:path';
-    const root = process.env.HOME;
-    await import(${JSON.stringify(hookUrl)});
+    const homeAtStart = Object.hasOwn(process.env, 'HOME') ? process.env.HOME : null;
+    const userProfileAtStart = Object.hasOwn(process.env, 'USERPROFILE') ? process.env.USERPROFILE : null;
+    const appDataAtStart = Object.hasOwn(process.env, 'APPDATA') ? process.env.APPDATA : null;
+    const { isolateProcessHome } = await import(${JSON.stringify(hookUrl)});
+    const { resolveChatGPTConfigDir } = await import(${JSON.stringify(configDirUrl)});
+    const root = isolateProcessHome();
     console.log(JSON.stringify({
       root,
-      same: process.env.HOME === root,
-      userProfile: process.env.USERPROFILE,
-      appData: process.env.APPDATA,
+      homeAtStart,
+      homeAfter: Object.hasOwn(process.env, 'HOME') ? process.env.HOME : null,
+      userProfileAtStart,
+      userProfileAfter: Object.hasOwn(process.env, 'USERPROFILE') ? process.env.USERPROFILE : null,
+      appDataAtStart,
+      appDataAfter: Object.hasOwn(process.env, 'APPDATA') ? process.env.APPDATA : null,
       localAppData: Object.hasOwn(process.env, 'LOCALAPPDATA') ? process.env.LOCALAPPDATA : null,
       xdg: Object.hasOwn(process.env, 'XDG_CONFIG_HOME') ? process.env.XDG_CONFIG_HOME : null,
+      configDir: resolveChatGPTConfigDir(),
       exists: existsSync(root),
       realHome: userInfo().homedir,
       underTmp: typeof root === 'string' && (root === tmpdir() || root.startsWith(tmpdir() + path.sep))
@@ -57,17 +76,30 @@ test('isolate-home hook sets a private home before the entry module and removes 
   assert.equal(child.status, 0, child.stderr || child.stdout);
   const info = JSON.parse(child.stdout.trim().split('\n').at(-1));
   assert.equal(info.exists, true);
-  assert.equal(info.same, true);
   assert.equal(info.underTmp, true);
   assert.notEqual(path.resolve(info.root), path.resolve(info.realHome));
   assert.notEqual(path.resolve(info.root), path.resolve(userInfo().homedir));
-  assert.equal(info.userProfile, info.root);
-  assert.equal(info.appData, path.join(info.root, 'AppData', 'Roaming'));
+  // --import already redirected APPDATA, and the second import must not move it.
+  assert.equal(info.appDataAtStart, path.join(info.root, 'AppData', 'Roaming'));
+  assert.equal(info.appDataAfter, info.appDataAtStart);
+  assert.equal(info.homeAfter, info.homeAtStart);
+  assert.equal(info.userProfileAfter, info.userProfileAtStart);
+  assert.equal(pathInside(info.configDir, info.root), true);
   if (process.platform === 'win32') {
-    const inherited = Object.hasOwn(process.env, 'LOCALAPPDATA') ? process.env.LOCALAPPDATA : null;
-    assert.equal(info.localAppData, inherited);
+    assert.equal(info.homeAtStart, parentHome);
+    assert.equal(info.userProfileAtStart, parentUserProfile);
+    const inheritedLocal = Object.hasOwn(process.env, 'LOCALAPPDATA') ? process.env.LOCALAPPDATA : null;
+    assert.equal(info.localAppData, inheritedLocal);
+    assert.equal(info.configDir, path.join(info.appDataAfter, 'chatpcb'));
   } else {
+    assert.equal(info.homeAtStart, info.root);
+    assert.equal(info.userProfileAtStart, info.root);
     assert.equal(info.localAppData, path.join(info.root, 'AppData', 'Local'));
+    if (process.platform === 'darwin') {
+      assert.equal(info.configDir, path.join(info.root, 'Library', 'Application Support', 'chatpcb'));
+    } else {
+      assert.equal(info.configDir, path.join(info.root, '.config', 'chatpcb'));
+    }
   }
   if (process.platform === 'darwin' || process.platform === 'win32') {
     const inherited = Object.hasOwn(process.env, 'XDG_CONFIG_HOME') ? process.env.XDG_CONFIG_HOME : null;
@@ -122,12 +154,19 @@ test('sourceImportsHomeHook matches only the exact home-hook specifier', () => {
   );
 });
 
-test('isolateProcessHome leaves LOCALAPPDATA inherited on win32', () => {
+test('isolateProcessHome leaves HOME, USERPROFILE, and LOCALAPPDATA inherited on win32', () => {
   const homeBefore = process.env.HOME;
+  const userProfileBefore = process.env.USERPROFILE;
   const localBefore = process.env.LOCALAPPDATA;
   const temporaryDirectory = path.join(tmpdir(), 'chatpcb-win32-inject');
-  const inherited = 'C:\\Users\\dev\\AppData\\Local';
-  const env = { LOCALAPPDATA: inherited, XDG_CONFIG_HOME: 'C:\\keep-xdg' };
+  const inheritedHome = 'C:\\Users\\dev';
+  const inheritedLocal = 'C:\\Users\\dev\\AppData\\Local';
+  const env = {
+    HOME: inheritedHome,
+    USERPROFILE: inheritedHome,
+    LOCALAPPDATA: inheritedLocal,
+    XDG_CONFIG_HOME: 'C:\\keep-xdg'
+  };
   let prefix = '';
   const root = isolateProcessHome({
     platform: 'win32',
@@ -147,17 +186,28 @@ test('isolateProcessHome leaves LOCALAPPDATA inherited on win32', () => {
   });
   assert.equal(prefix, path.join(temporaryDirectory, 'chatpcb-home-'));
   assert.equal(root, `${prefix}fixed`);
-  assert.equal(env.HOME, root);
-  assert.equal(env.USERPROFILE, root);
+  assert.equal(env.HOME, inheritedHome);
+  assert.equal(env.USERPROFILE, inheritedHome);
   assert.equal(env.APPDATA, path.join(root, 'AppData', 'Roaming'));
-  assert.equal(env.LOCALAPPDATA, inherited);
+  assert.equal(env.LOCALAPPDATA, inheritedLocal);
   assert.equal(env.XDG_CONFIG_HOME, 'C:\\keep-xdg');
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'win32', env }),
+    path.join(root, 'AppData', 'Roaming', 'chatpcb')
+  );
+  assert.equal(pathInside(resolveChatGPTConfigDir({ platform: 'win32', env }), root), true);
+  assert.equal(Object.hasOwn(bare, 'HOME'), false);
+  assert.equal(Object.hasOwn(bare, 'USERPROFILE'), false);
   assert.equal(Object.hasOwn(bare, 'LOCALAPPDATA'), false);
-  assert.equal(bare.HOME, bareRoot);
-  assert.equal(bare.USERPROFILE, bareRoot);
   assert.equal(bare.APPDATA, path.join(bareRoot, 'AppData', 'Roaming'));
   assert.equal(Object.hasOwn(bare, 'XDG_CONFIG_HOME'), false);
+  assert.equal(
+    resolveChatGPTConfigDir({ platform: 'win32', env: bare }),
+    path.join(bareRoot, 'AppData', 'Roaming', 'chatpcb')
+  );
+  assert.equal(pathInside(resolveChatGPTConfigDir({ platform: 'win32', env: bare }), bareRoot), true);
   assert.equal(process.env.HOME, homeBefore);
+  assert.equal(process.env.USERPROFILE, userProfileBefore);
   assert.equal(process.env.LOCALAPPDATA, localBefore);
 });
 
@@ -176,10 +226,14 @@ test('isolateProcessHome redirects LOCALAPPDATA off win32', () => {
     assert.equal(env.USERPROFILE, root, platform);
     assert.equal(env.APPDATA, path.join(root, 'AppData', 'Roaming'), platform);
     assert.equal(env.LOCALAPPDATA, path.join(root, 'AppData', 'Local'), platform);
+    const configDir = resolveChatGPTConfigDir({ platform, env, home: root });
+    assert.equal(pathInside(configDir, root), true, platform);
     if (platform === 'darwin') {
       assert.equal(env.XDG_CONFIG_HOME, 'inherit-xdg', platform);
+      assert.equal(configDir, path.join(root, 'Library', 'Application Support', 'chatpcb'), platform);
     } else {
       assert.equal(env.XDG_CONFIG_HOME, path.join(root, '.config'), platform);
+      assert.equal(configDir, path.join(root, '.config', 'chatpcb'), platform);
     }
   }
   assert.equal(process.env.HOME, homeBefore);
