@@ -52,6 +52,9 @@
     for (const el of document.querySelectorAll('[data-i18n-title]')) {
       el.setAttribute('title', t(el.getAttribute('data-i18n-title')));
     }
+    for (const el of document.querySelectorAll('[data-i18n-help]')) {
+      el.dataset.help = t(el.getAttribute('data-i18n-help'));
+    }
     const select = document.querySelector('#lang');
     if (select && select.value !== lang) select.value = lang;
   }

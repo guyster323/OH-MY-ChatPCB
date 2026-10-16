@@ -2,15 +2,15 @@ const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
 const PROGRESS_COPY = {
-  conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
-  provider: { title: 'CLI와 대화 중', sprite: 'cli' },
-  tool: { title: 'CLI가 도구를 호출했어요', sprite: 'tool' },
-  preview: { title: '회로 초안을 그리는 중', sprite: 'draft' },
-  ready: { title: '적용을 기다리고 있어요', sprite: 'preview' },
-  apply: { title: '스키매틱에 넣는 중', sprite: 'apply' },
-  done: { title: '완료', sprite: 'done' },
+  conversation: { titleKey: 'progress.conversation', sprite: 'think' },
+  provider: { titleKey: 'progress.provider', sprite: 'cli' },
+  tool: { titleKey: 'progress.tool', sprite: 'tool' },
+  preview: { titleKey: 'progress.preview', sprite: 'draft' },
+  ready: { titleKey: 'progress.ready', sprite: 'preview' },
+  apply: { titleKey: 'progress.apply', sprite: 'apply' },
+  done: { titleKey: 'progress.done', sprite: 'done' },
   warn: { titleKey: 'progress.warn', sprite: 'preview' },
-  fail: { title: '이번엔 적용하지 못했어요', sprite: 'fail' }
+  fail: { titleKey: 'progress.fail', sprite: 'fail' }
 };
 const WORKFLOW_ORDER = [
   'circuit.concept', 'circuit.parts', 'circuit.draft', 'circuit.edit', 'circuit.review',
@@ -94,6 +94,8 @@ let lastProgressText = '';
 let lastWorkflowActive = 'circuit.concept';
 let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutReviewed: false };
 let connectionStatusKey = 'connection.connecting';
+let requestStatusKey = 'request.idle';
+let requestStatusVars = null;
 const laneOpen = new Map();
 const pendingCalls = new Map();
 const workflowCaptionEl = document.querySelector('#workflow-caption');
@@ -107,6 +109,7 @@ window.chatpcbI18n?.onChange(() => {
   setConnectionStatus(connectionStatusKey, statusEl?.dataset.state);
   syncWorkflow();
   renderPatchApproval();
+  if (requestStatusKey) requestStatusEl.textContent = t(requestStatusKey, requestStatusVars);
 });
 
 newProjectFormEl.addEventListener('submit', (event) => {
@@ -229,7 +232,7 @@ function createProject() {
   const projectName = projectNameEl.value.trim();
   if (!workspaceRoot || !projectName) return;
 
-  renderRequestStatus({ state: 'running', summary: 'Creating project…' });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.creating' });
   const id = `project_create_${Date.now()}`;
   activeProjectCreateId = id;
   pendingCalls.set(id, 'project.create');
@@ -238,12 +241,12 @@ function createProject() {
 
 async function sendProjectRequest() {
   if (!activeProject) {
-    renderRequestStatus({ state: 'failed', summary: 'Create a project before sending a circuit request.' });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.need-project' });
     return;
   }
   const prompt = promptEl.value.trim();
   if (!prompt) {
-    renderRequestStatus({ state: 'failed', summary: 'Circuit request is required.' });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.prompt-required' });
     return;
   }
   if (activeRequestId) return;
@@ -256,18 +259,12 @@ async function sendProjectRequest() {
     return;
   }
   if (status?.unavailable) {
-    renderRequestStatus({
-      state: 'failed',
-      summary: 'KiCad host is unavailable or not responding. Reopen the embedded panel or retry after KiCad is ready.'
-    });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.kicad-unavailable' });
     setRequestBusy(false);
     return;
   }
   if (status?.dirty && status.linkState !== 'unlinked') {
-    renderRequestStatus({
-      state: 'failed',
-      summary: 'KiCad changes need attention. Save or discard them in KiCad, then press Send again or I saved — recheck.'
-    });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.kicad-dirty' });
     showConflict();
     setRequestBusy(false);
     return;
@@ -275,8 +272,8 @@ async function sendProjectRequest() {
 
   hideConflict();
   lastProgressStage = 'conversation';
-  lastProgressText = 'Send 했어요. 데몬과 CLI 응답을 기다립니다.';
-  renderRequestStatus({ state: 'running', summary: 'Running request…' });
+  lastProgressText = t('progress.sent');
+  renderRequestStatus({ state: 'running', summaryKey: 'request.running' });
   clearProgress();
   appendProgress({ stage: 'conversation', text: lastProgressText });
   const id = `project_request_${Date.now()}`;
@@ -313,7 +310,7 @@ function sendToolCall(payload) {
     socket.send(JSON.stringify(envelope));
   } else {
     pendingCalls.delete(payload.id);
-    renderRequestStatus({ state: 'failed', summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.', technicalDetail: 'chatpcb-agentd is not connected.' });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.failed', technicalDetail: t('request.daemon-offline') });
     if (payload.name === 'project.request') setRequestBusy(false);
   }
 }
@@ -336,10 +333,10 @@ function handleEnvelope(envelope) {
   if (!envelope.payload.ok) {
     if (callName === 'schematic.generate') {
       setRequestBusy(false);
-      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? 'Tool call failed.' });
+      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? t('request.tool-failed') });
       renderRequestStatus({
         state: 'failed',
-        summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+        summaryKey: 'request.failed',
         technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
       });
       return;
@@ -384,7 +381,7 @@ function handleEnvelope(envelope) {
       } else {
         renderRequestStatus({
           state: 'failed',
-          summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+          summaryKey: 'request.failed',
           technicalDetail
         });
       }
@@ -395,7 +392,7 @@ function handleEnvelope(envelope) {
     }
     if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
       clearPatchApproval();
-      renderRequestStatus({ state: 'failed', summary: 'Patch approval could not be completed.', technicalDetail: envelope.payload.error?.message ?? 'Patch tool call failed.' });
+      renderRequestStatus({ state: 'failed', summaryKey: 'request.patch-failed', technicalDetail: envelope.payload.error?.message ?? t('request.patch-tool-failed') });
     }
     return;
   }
@@ -440,7 +437,7 @@ function handleEnvelope(envelope) {
   if (callName === 'provider.status') {
     const provider = envelope.payload.result;
     providerStatusEl.removeAttribute('data-i18n');
-    providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
+    providerStatusEl.textContent = t('provider.status-line', { provider: provider.provider, status: provider.status });
     providerStatusEl.dataset.status = provider.status;
   }
 }
@@ -455,7 +452,7 @@ function activateProject(project) {
   conversationCardEl.hidden = false;
   setRequestBusy(Boolean(activeRequestId));
   projectNameEl.value = '';
-  renderRequestStatus({ state: 'ready', summary: 'Project ready. Describe the circuit you want to create.' });
+  renderRequestStatus({ state: 'ready', summaryKey: 'request.project-ready' });
   inspectActiveProject();
   syncWorkflow();
 }
@@ -469,12 +466,14 @@ function resetProjectResults() {
   }
   artifactListEl.replaceChildren();
   reviewPanelEl.hidden = true;
-  reviewStatusEl.textContent = 'Pending';
+  reviewStatusEl.dataset.i18n = 'review.pending';
+  reviewStatusEl.textContent = t('review.pending');
   delete reviewStatusEl.dataset.status;
   for (const list of [reviewBlockersEl, reviewWarningsEl, reviewNotesEl, reviewFixesEl]) list.replaceChildren();
   validationStatusEl.dataset.state = 'idle';
-  validationStatusEl.textContent = 'Not run';
-  validationTimestampEl.textContent = '';
+  validationStatusEl.dataset.i18n = 'validation.idle';
+  validationStatusEl.textContent = t('validation.idle');
+  validationTimestampEl.replaceChildren();
   inspectionState = { projectDir: null, requestId: null, result: null };
   inspectionCardEl.hidden = true;
   renderInspection({});
@@ -485,9 +484,9 @@ function resetProjectResults() {
   clearProgress();
   kiCadLinkCardEl.hidden = true;
   kiCadLinkEl.dataset.state = 'available';
-  kiCadLinkEl.textContent = '';
+  kiCadLinkEl.replaceChildren();
   kiCadFallbackEl.hidden = true;
-  kiCadFallbackEl.textContent = '';
+  kiCadFallbackEl.replaceChildren();
   lastRequestResult = null;
   lastProgressStage = null;
   lastProgressText = '';
@@ -537,7 +536,7 @@ function renderConversation(result) {
         if (row.reason) {
           const reason = document.createElement('span');
           reason.className = 'spec-reason';
-          reason.textContent = ` / ${row.reason}`;
+          reason.textContent = t('spec.reason', { reason: row.reason });
           detail.append(reason);
         }
         list.append(term, detail);
@@ -576,16 +575,15 @@ function renderConversation(result) {
 function renderProjectRequest(result) {
   renderConversation(result);
   if (result?.operation === 'clarify') {
-    renderRequestStatus({
-      state: 'ready',
-      summary: result.nextQuestion ?? 'Reply in chat to continue. Missing capabilities are part of the product flow.'
-    });
+    renderRequestStatus(result.nextQuestion
+      ? { state: 'ready', summary: result.nextQuestion }
+      : { state: 'ready', summaryKey: 'request.clarify-fallback' });
     return;
   }
   if (result?.requiresApproval && result.patchId) {
     setPatchApproval(result);
-    appendProgress({ stage: 'ready', text: '미리보기가 끝났어요. 적용을 누르면 파일이 바뀝니다.' });
-    renderRequestStatus({ state: 'ready', summary: '회로 초안이 준비됐어요. 스키매틱에 적용할까요?' });
+    appendProgress({ stage: 'ready', text: t('request.preview-done') });
+    renderRequestStatus({ state: 'ready', summaryKey: 'request.preview-ready' });
     renderReview(result.review);
     renderArtifacts(result.files);
     renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
@@ -596,16 +594,21 @@ function renderProjectRequest(result) {
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
   const validationFailed = result.validation?.ok === false;
   const requestFailed = result.rolledBack || validationFailed;
+  const completedDetail = result.operation === 'patched' ? t('request.completed-updated') : t('request.completed-generated');
   const summary = result.rolledBack
-    ? 'ERC validation failed; the previous project files were restored.'
+    ? t('request.rollback')
     : validationFailed
-      ? 'ERC validation failed. Review the validation details before continuing.'
-      : `Completed: ${result.operation === 'patched' ? 'Updated project.' : 'Generated project.'}`;
+      ? t('request.validation-failed')
+      : t('request.completed', { detail: completedDetail });
   if (!result.rolledBack) workflowFlags.circuitApplied = true;
   if (!requestFailed && result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
     workflowFlags.circuitReviewed = true;
   }
-  renderRequestStatus({ state: requestFailed ? 'failed' : 'completed', summary });
+  renderRequestStatus(result.rolledBack
+    ? { state: 'failed', summaryKey: 'request.rollback' }
+    : validationFailed
+      ? { state: 'failed', summaryKey: 'request.validation-failed' }
+      : { state: 'completed', summaryKey: 'request.completed', summaryVars: { detail: completedDetail } });
   appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
 
   const projectFile = findProjectFile(result.files);
@@ -643,9 +646,13 @@ function renderInspection(result = {}) {
   const drc = result.validation?.drc;
   inspectionFreshnessEl.dataset.state = status;
   inspectionFreshnessEl.textContent = status;
+  inspectionDigestEl.removeAttribute('data-i18n');
+  inspectionArtifactCountEl.removeAttribute('data-i18n');
+  inspectionErcEl.removeAttribute('data-i18n');
+  inspectionDrcEl.removeAttribute('data-i18n');
   inspectionFreshnessEl.title = freshness.reason ?? '';
-  inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : '—';
-  inspectionArtifactCountEl.textContent = `${Number.isInteger(artifactCount) ? artifactCount : 0} artifacts`;
+  inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : t('inspection.empty');
+  inspectionArtifactCountEl.textContent = t('inspection.artifacts', { count: Number.isInteger(artifactCount) ? artifactCount : 0 });
   inspectionErcEl.textContent = renderInspectionValidation('ERC', erc);
   inspectionDrcEl.textContent = renderInspectionValidation('DRC', drc);
   inspectionState.result = result;
@@ -658,14 +665,19 @@ function renderInspectionFailure() {
 }
 
 function renderInspectionValidation(label, result) {
-  if (!result) return `${label} —`;
+  if (!result) return t('inspection.dash', { label });
   const reason = result.reason;
-  if (result.skipped) return `${label} skipped [${reason?.code ?? 'UNKNOWN'}]: ${reason?.message ?? 'No reason was provided.'}`;
-  if (result.ok === false && reason) return `${label} failed [${reason.code ?? 'UNKNOWN'}]: ${reason.message ?? 'No reason was provided.'}`;
+  const message = reason?.message ?? t('inspection.no-reason');
+  if (result.skipped) {
+    return t('inspection.erc-skipped', { label, code: reason?.code ?? 'UNKNOWN', message });
+  }
+  if (result.ok === false && reason) {
+    return t('inspection.erc-failed', { label, code: reason.code ?? 'UNKNOWN', message: reason.message ?? t('inspection.no-reason') });
+  }
   const summary = label === 'ERC' ? result.erc ?? result : result.drc ?? result;
   return label === 'ERC'
-    ? `ERC ${summary.errorCount ?? 0}/${summary.warningCount ?? 0}`
-    : `DRC ${summary.violationCount ?? 0}/${summary.unconnectedCount ?? 0}`;
+    ? t('inspection.erc-counts', { errors: summary.errorCount ?? 0, warnings: summary.warningCount ?? 0 })
+    : t('inspection.drc-counts', { violations: summary.violationCount ?? 0, unconnected: summary.unconnectedCount ?? 0 });
 }
 
 function setPatchApproval(preview) {
@@ -675,17 +687,17 @@ function setPatchApproval(preview) {
   const delay = Number(preview.expiresAt) - Date.now();
   if (Number.isFinite(delay) && delay > 0) {
     patchApprovalState.timeout = setTimeout(() => {
-      clearPatchApproval('Patch preview expired.');
+      clearPatchApproval('patch.expired');
     }, delay);
   }
   renderPatchApproval();
 }
 
-function clearPatchApproval(message = 'No patch preview active.') {
+function clearPatchApproval(messageKey = 'patch.idle') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
   patchApprovalStatusEl.dataset.state = 'idle';
-  patchApprovalStatusEl.textContent = message;
+  setPatchStatus(messageKey);
   approvePatchButtonEl.disabled = true;
   approvePatchButtonEl.removeAttribute('aria-disabled');
   approvePatchButtonEl.removeAttribute('aria-describedby');
@@ -696,14 +708,19 @@ function clearPatchApproval(message = 'No patch preview active.') {
   cancelPatchButtonEl.disabled = true;
   if (applyWhyEl) {
     applyWhyEl.hidden = true;
-    applyWhyEl.textContent = '';
+    applyWhyEl.replaceChildren();
   }
   if (patchErcEl) {
     patchErcEl.hidden = true;
     patchErcEl.removeAttribute('role');
     patchErcEl.replaceChildren();
   }
-  if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
+  if (patchApprovalCardEl) patchApprovalCardEl.hidden = messageKey === 'patch.idle';
+}
+
+function setPatchStatus(key) {
+  patchApprovalStatusEl.dataset.i18n = key;
+  patchApprovalStatusEl.textContent = t(key);
 }
 
 function numericCount(value) {
@@ -866,29 +883,29 @@ function renderPatchApproval() {
     approvePatchButtonEl.removeAttribute('aria-describedby');
     if (applyWhyEl) {
       applyWhyEl.hidden = true;
-      applyWhyEl.textContent = '';
+      applyWhyEl.replaceChildren();
     }
   }
   renderErcBox(erc, active);
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
-    patchApprovalStatusEl.textContent = 'Approval unavailable: stale evidence. Inspect the project again before approving.';
+    setPatchStatus('patch.stale');
     return;
   }
   if (!active) return;
   if (freshness === 'legacy-unverified') {
     patchApprovalStatusEl.dataset.state = 'warning';
-    patchApprovalStatusEl.textContent = 'Approval allowed with legacy-unverified evidence; exact patch hashes will still be verified.';
+    setPatchStatus('patch.legacy');
     return;
   }
   if (freshness === 'missing' || !freshness) {
     patchApprovalStatusEl.dataset.state = 'warning';
-    patchApprovalStatusEl.textContent = 'Approval allowed with no manifest evidence; exact patch hashes will still be verified.';
+    setPatchStatus('patch.missing-evidence');
     return;
   }
   patchApprovalStatusEl.dataset.state = 'ready';
-  patchApprovalStatusEl.textContent = t('patch.ready');
+  setPatchStatus('patch.ready');
 }
 
 function askChatpcbToFixErc() {
@@ -904,8 +921,8 @@ function askChatpcbToFixErc() {
 function approvePatch() {
   if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
   if (approvePatchButtonEl.getAttribute('aria-disabled') === 'true' || ercBlockState().passed !== true) return;
-  appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
-  renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
+  appendProgress({ stage: 'apply', text: t('request.apply-progress') });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
@@ -916,8 +933,8 @@ function approvePatchWithoutErc() {
   if (!patchApprovalState.patchId) return;
   const erc = ercBlockState();
   if (erc.skipped !== true || erc.failed || erc.passed === true) return;
-  appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
-  renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
+  appendProgress({ stage: 'apply', text: t('request.apply-progress') });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId, ercOverride: 'skipped' } });
@@ -928,7 +945,7 @@ function cancelPatch() {
   const id = `patch_cancel_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.cancel');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
-  clearPatchApproval('Patch preview cancelled.');
+  clearPatchApproval('patch.cancelled');
 }
 
 function workflowIndex(id) {
@@ -1093,7 +1110,7 @@ function syncWorkflow() {
     const stateLabel = t(`workflow.state.${workflowStateKey(state)}`);
     const labelEl = button.querySelector('.step-label');
     if (labelEl) labelEl.textContent = stepLabel;
-    button.setAttribute('aria-label', `${laneLabel} · ${stepLabel} — ${stateLabel}`);
+    button.setAttribute('aria-label', t('workflow.step.aria', { lane: laneLabel, step: stepLabel, state: stateLabel }));
     if (state === 'wait' || state === 'run') button.setAttribute('aria-current', 'step');
     else button.removeAttribute('aria-current');
     renderStepIcon(button.querySelector('.step-icon'), state);
@@ -1130,7 +1147,7 @@ function syncWorkflow() {
     } else {
       if (reason) {
         reason.hidden = true;
-        reason.textContent = '';
+        reason.replaceChildren();
       }
       for (const button of buttons) {
         button.removeAttribute('aria-disabled');
@@ -1195,10 +1212,17 @@ function syncWorkflow() {
   }
 }
 
-function renderRequestStatus({ state, summary, technicalDetail = '' }) {
+function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '' }) {
   requestStatusEl.dataset.state = state;
   requestStatusEl.removeAttribute('data-i18n');
-  requestStatusEl.textContent = summary;
+  if (summaryKey) {
+    requestStatusKey = summaryKey;
+    requestStatusVars = summaryVars ?? null;
+    requestStatusEl.textContent = t(summaryKey, summaryVars);
+  } else {
+    requestStatusKey = null;
+    requestStatusEl.textContent = summary;
+  }
   requestTechnicalDetailEl.textContent = technicalDetail;
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;
   syncWorkflow();
@@ -1243,8 +1267,8 @@ function appendProgress(payload = {}) {
   img.height = 32;
   const body = document.createElement('div');
   const title = document.createElement('strong');
-  const titleText = copy.titleKey ? t(copy.titleKey) : copy.title;
-  if (copy.titleKey) title.dataset.i18n = copy.titleKey;
+  const titleText = t(copy.titleKey);
+  title.dataset.i18n = copy.titleKey;
   title.textContent = titleText;
   body.append(title);
   if (payload.text) {
@@ -1267,7 +1291,8 @@ function offerNativeDraft() {
   conversationOptionsEl.replaceChildren();
   const button = document.createElement('button');
   button.type = 'button';
-  button.textContent = '이 구성으로 초안 만들기';
+  button.dataset.i18n = 'draft.create';
+  button.textContent = t('draft.create');
   button.dataset.recommended = 'true';
   button.addEventListener('click', requestNativeDraft);
   conversationOptionsEl.append(button);
@@ -1277,8 +1302,8 @@ function requestNativeDraft() {
   if (!activeProject) return;
   setRequestBusy(true);
   conversationOptionsEl.replaceChildren();
-  renderRequestStatus({ state: 'running', summary: 'Running request…' });
-  appendProgress({ stage: 'preview', text: '로컬에서 회로 초안을 그리는 중.' });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.running' });
+  appendProgress({ stage: 'preview', text: t('request.draft-progress') });
   const id = `schematic_generate_${Date.now()}`;
   pendingCalls.set(id, 'schematic.generate');
   sendToolCall({
@@ -1298,21 +1323,22 @@ function clearProgress() {
 }
 
 function renderValidation({ ok, erc, skipped, reason, completedAt, exitCode, stderr, formatUpgrade } = {}) {
+  validationStatusEl.removeAttribute('data-i18n');
   const resolvedReason = reason ?? erc?.reason;
   const skippedFlag = skipped === true || erc?.skipped === true;
   const reasonText = validationReason({ reason: resolvedReason, exitCode, stderr, formatUpgrade });
-  const counts = `${erc?.errorCount ?? 0} errors, ${erc?.warningCount ?? 0} warnings`;
+  const counts = t('validation.counts', { errors: erc?.errorCount ?? 0, warnings: erc?.warningCount ?? 0 });
 
   if (skippedFlag) {
     const unavailable = resolvedReason?.code === 'KICAD_CLI_UNAVAILABLE';
     validationStatusEl.dataset.state = unavailable ? 'unavailable' : 'skipped';
-    validationStatusEl.textContent = `${unavailable ? 'ERC unavailable' : 'ERC skipped'}: ${reasonText}`;
+    validationStatusEl.textContent = t(unavailable ? 'validation.unavailable' : 'validation.skipped', { reason: reasonText });
   } else if (ok === false) {
     validationStatusEl.dataset.state = 'failed';
-    validationStatusEl.textContent = `ERC failed: ${reasonText} (${counts} reported)`;
+    validationStatusEl.textContent = t('validation.failed', { reason: reasonText, counts });
   } else if (!erc) {
     validationStatusEl.dataset.state = 'unavailable';
-    validationStatusEl.textContent = `ERC unavailable: ${reasonText}`;
+    validationStatusEl.textContent = t('validation.unavailable', { reason: reasonText });
   } else {
     validationStatusEl.dataset.state = erc.errorCount === 0 ? 'passed' : 'failed';
     validationStatusEl.textContent = counts;
@@ -1325,22 +1351,24 @@ function validationReason({ reason, exitCode, stderr, formatUpgrade }) {
   if (typeof reason?.message === 'string' && reason.message.trim()) return reason.message.trim();
   if (typeof stderr === 'string' && stderr.trim()) return stderr.trim();
   if (typeof formatUpgrade?.stderr === 'string' && formatUpgrade.stderr.trim()) return formatUpgrade.stderr.trim();
-  if (Number.isInteger(exitCode) && exitCode !== 0) return `KiCad ERC exited with code ${exitCode}.`;
-  if (formatUpgrade?.ok === false) return `KiCad schematic format upgrade exited with code ${formatUpgrade.exitCode ?? 'unknown'}.`;
+  if (Number.isInteger(exitCode) && exitCode !== 0) return t('validation.exit', { code: exitCode });
+  if (formatUpgrade?.ok === false) return t('validation.upgrade', { code: formatUpgrade.exitCode ?? t('validation.unknown-code') });
   if (typeof reason?.code === 'string' && reason.code) return reason.code.replaceAll('_', ' ').toLowerCase();
-  return 'ERC validation did not complete successfully.';
+  return t('validation.incomplete');
 }
 
 function renderKiCadLink({ linkState, projectPath, dirty = false }) {
   kiCadLinkEl.dataset.state = linkState;
-  kiCadLinkEl.textContent = dirty ? `Unsaved KiCad changes: ${projectPath}` : `${linkState}: ${projectPath}`;
+  kiCadLinkEl.textContent = dirty
+    ? t('kicad.unsaved', { path: projectPath })
+    : t('kicad.link', { state: linkState, path: projectPath });
 }
 
 function renderArtifacts(files = {}) {
   artifactListEl.replaceChildren();
   for (const [kind, file] of Object.entries(files)) {
     const item = document.createElement('li');
-    item.textContent = `${kind}: ${file}`;
+    item.textContent = t('artifacts.item', { kind, file });
     artifactListEl.append(item);
   }
 }
@@ -1348,6 +1376,7 @@ function renderArtifacts(files = {}) {
 function renderReview(review) {
   if (!review) return;
   reviewPanelEl.hidden = false;
+  reviewStatusEl.removeAttribute('data-i18n');
   reviewStatusEl.textContent = reviewStatusText(review);
   reviewStatusEl.dataset.status = review.status;
   renderFindingList(reviewBlockersEl, review.findings?.blockers);
@@ -1358,9 +1387,9 @@ function renderReview(review) {
 
 function reviewStatusText(review) {
   if (review.statusLabel) return review.statusLabel;
-  if (review.status === 'ready-for-release') return 'Ready for release';
-  if (review.status === 'ready-for-prototype-review') return 'Ready for prototype review';
-  return 'Blocked';
+  if (review.status === 'ready-for-release') return t('review.ready-release');
+  if (review.status === 'ready-for-prototype-review') return t('review.ready-prototype');
+  return t('review.blocked');
 }
 
 function renderFindingList(listEl, findings = []) {
@@ -1370,17 +1399,25 @@ function renderFindingList(listEl, findings = []) {
     item.textContent = finding.message ?? String(finding);
     listEl.append(item);
   }
-  if (findings.length === 0) listEl.append(Object.assign(document.createElement('li'), { textContent: 'None' }));
+  if (findings.length === 0) {
+    const empty = document.createElement('li');
+    empty.textContent = t('review.none');
+    listEl.append(empty);
+  }
 }
 
 function renderFixList(listEl, fixes = []) {
   listEl.replaceChildren();
   for (const fix of fixes) {
     const item = document.createElement('li');
-    item.textContent = `${fix.title}: ${fix.summary}`;
+    item.textContent = t('review.fix', { title: fix.title, summary: fix.summary });
     listEl.append(item);
   }
-  if (fixes.length === 0) listEl.append(Object.assign(document.createElement('li'), { textContent: 'No fixes proposed' }));
+  if (fixes.length === 0) {
+    const empty = document.createElement('li');
+    empty.textContent = t('review.no-fixes');
+    listEl.append(empty);
+  }
 }
 
 function findProjectFile(files = {}) {
@@ -1402,7 +1439,7 @@ function findProjectFileFromList() {
 }
 
 function showKiCadFallback(projectFile) {
-  kiCadFallbackEl.textContent = `Open this .kicad_pro file from KiCad: ${projectFile}. The browser panel cannot reload KiCad.`;
+  kiCadFallbackEl.textContent = t('kicad.fallback', { file: projectFile });
   kiCadFallbackEl.hidden = false;
 }
 
@@ -1473,7 +1510,7 @@ function handleHostMessage(message) {
       hideConflict();
       renderKiCadLink({ linkState: 'unlinked', projectPath: findProjectFileFromList() ?? activeProject.projectDir });
     } else if (dirty || message.linkState === 'conflict') {
-      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
+      clearPatchApproval('patch.dirty');
       showConflict();
     } else {
       hideConflict();
@@ -1491,7 +1528,7 @@ function handleHostMessage(message) {
   }
   if (message.type === 'project.reload') {
     if (message.linkState === 'conflict') {
-      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
+      clearPatchApproval('patch.dirty');
       showConflict();
       return;
     }

@@ -9,6 +9,7 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 
 const panelRoot = path.resolve(import.meta.dirname, '../apps/panel');
+const panelLocale = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
 const projectDir = '/tmp/chatpcb-panel-secret-project-path';
 const englishBusy = 'Another operation is using this project. Try again in a moment.';
 const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
@@ -70,16 +71,16 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
     await assertBusyState(page, koreanBusy);
 
     await sendPrompt(page, 'show draft');
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).waitFor();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).waitFor();
 
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).click();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).click();
     await waitForBusyCycle(page, 4);
     await assertBusyState(page, englishBusy);
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).waitFor();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Send' }).isEnabled(), true);
 
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).click();
-    await page.getByText('회로 초안이 준비됐어요. 스키매틱에 적용할까요?').waitFor();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).click();
+    await page.getByText(panelLocale['request.preview-ready']).waitFor();
     await page.waitForFunction(() => {
       const button = document.querySelector('#approve-patch-button');
       return button && button.disabled === false;

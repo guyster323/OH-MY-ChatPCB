@@ -122,7 +122,7 @@ try {
 
   await page.getByLabel('Circuit request').fill(protocolFailurePrompt);
   await page.getByRole('button', { name: 'Send' }).click();
-  await page.getByRole('status', { name: 'Request status' }).filter({ hasText: '요청을 처리하지 못했습니다' }).waitFor();
+  await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'could not be completed' }).waitFor();
 
   const failure = await page.evaluate(() => ({
     summary: document.querySelector('#request-status')?.textContent,
@@ -402,6 +402,7 @@ async function assertValidationState(page, request, expectedState, expectedText)
   const requestStatus = await page.locator('#request-status').textContent();
   if (
     requestStatus === 'Patch preview is ready for approval.'
+    || /Apply it to the schematic\?/.test(requestStatus ?? '')
     || /스키매틱에 적용/.test(requestStatus ?? '')
   ) {
     await page.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');

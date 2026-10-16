@@ -48,10 +48,12 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /hostPathMatchesActive/);
   assert.match(script, /startConflictWatch/);
   assert.match(script, /visibilitychange/);
-  assert.match(script, /Circuit request is required/);
+  const en = JSON.parse(await readFile('apps/panel/locales/en.json', 'utf8'));
+  const ko = JSON.parse(await readFile('apps/panel/locales/ko.json', 'utf8'));
+  assert.equal(en['request.prompt-required'], 'Circuit request is required.');
   assert.match(script, /operation === 'clarify'/);
   assert.match(script, /linkState !== 'unlinked'/);
-  assert.match(script, /KiCad changes need attention/);
+  assert.match(en['request.kicad-dirty'], /KiCad changes need attention/);
   assert.match(script, /showModal/);
   assert.match(script, /hostPathMatchesActive\(pendingHostStatus\.projectPath\)/);
   assert.match(script, /dataset\.help/);
@@ -78,7 +80,7 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /appendProgress/);
   assert.match(script, /new-project-again/);
   assert.match(script, /offerNativeDraft/);
-  assert.match(script, /이 구성으로 초안 만들기/);
+  assert.equal(ko['draft.create'], '이 구성으로 초안 만들기');
   assert.match(script, /schematic\.generate/);
 });
 
