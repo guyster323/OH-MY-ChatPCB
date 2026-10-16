@@ -7,9 +7,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium } from 'playwright';
-
-import { chromeLaunchOptions, findChrome, isUiHeadless } from './lib/find-chrome.js';
+import { isUiHeadless } from './lib/find-chrome.js';
+import { launchPanelBrowser } from './lib/launch-panel-browser.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -43,14 +42,16 @@ async function main() {
     return;
   }
   const requestTimeoutMs = resolveVerifyUiTimeoutMs();
-  // Reject a headed headless-shell launch before the workspace, server, or daemon start.
-  const browserLaunch = await resolveBrowserLaunch();
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
-  const staticServer = await startStaticServer(panelRoot);
-  const daemon = await startUiDaemon();
-  const browser = await chromium.launch(browserLaunch);
+  // Reject a missing browser or a headed headless-shell before the workspace, server, or daemon start.
+  const browser = await launchVerifyUiBrowser();
+  let workspaceRoot;
+  let staticServer;
+  let daemon;
 
   try {
+    workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
+    staticServer = await startStaticServer(panelRoot);
+    daemon = await startUiDaemon();
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -377,11 +378,32 @@ async function main() {
 
     console.log(JSON.stringify({ ok: true, verified: 'named project Send-only request and separate status cards', browser: browser.browserType().name() }, null, 2));
   } finally {
-    await browser.close();
-    await daemon.close();
-    await staticServer.close();
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await browser?.close();
+    await daemon?.close();
+    await staticServer?.close();
+    if (workspaceRoot) await rm(workspaceRoot, { force: true, recursive: true });
   }
+}
+
+// verify:ui stays fail-closed when Chrome is missing, including outside CI.
+export async function launchVerifyUiBrowser({
+  env = process.env,
+  findChrome,
+  launch,
+  headless = isUiHeadless(env),
+  args
+} = {}) {
+  return launchPanelBrowser({
+    skip(message) {
+      throw new Error(message);
+    }
+  }, {
+    env,
+    headless,
+    ...(findChrome ? { findChrome } : {}),
+    ...(launch ? { launch } : {}),
+    ...(args ? { args } : {})
+  });
 }
 
 async function revealProjectSetup(page) {
@@ -603,14 +625,6 @@ async function fakeProviderTranscript({ input }) {
       })
     ]
   };
-}
-
-async function resolveBrowserLaunch() {
-  const found = await findChrome();
-  if (!found.path) {
-    throw new Error(found.reason);
-  }
-  return chromeLaunchOptions(found, { headless: isUiHeadless() });
 }
 
 async function startStaticServer(rootDir) {

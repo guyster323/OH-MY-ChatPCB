@@ -6,8 +6,58 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 import { resolveVerifyUiTimeoutMs, waitForCompletedOrFailFast } from '../scripts/verify-panel-ui.js';
+
+test('verify ui browser launch uses the injected executable, not google-chrome', async () => {
+  const { launchVerifyUiBrowser } = await import('../scripts/verify-panel-ui.js');
+  const launches = [];
+  const browser = { launched: true };
+  const opened = await launchVerifyUiBrowser({
+    env: {},
+    findChrome: async () => ({ path: '/tmp/chatpcb-fake-chrome', source: 'env' }),
+    launch: async (options) => {
+      launches.push(options);
+      return browser;
+    }
+  });
+
+  assert.equal(opened, browser);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].executablePath, '/tmp/chatpcb-fake-chrome');
+  assert.notEqual(launches[0].executablePath, '/usr/bin/google-chrome');
+
+  const source = await readFile(new URL('../scripts/verify-panel-ui.js', import.meta.url), 'utf8');
+  assert.equal(source.includes('chromium.launch'), false);
+  assert.equal(source.includes('/usr/bin/google-chrome'), false);
+  assert.match(source, /await launchVerifyUiBrowser\(/);
+
+  const headedLaunches = [];
+  await assert.rejects(
+    () => launchVerifyUiBrowser({
+      env: {},
+      headless: false,
+      findChrome: async () => ({ path: '/tmp/headless-shell', source: 'playwright-headless-shell' }),
+      launch: async (options) => {
+        headedLaunches.push(options);
+        return browser;
+      }
+    }),
+    /headed mode needs full Chromium or Chrome/
+  );
+  assert.deepEqual(headedLaunches, []);
+
+  await assert.rejects(
+    () => launchVerifyUiBrowser({
+      env: {},
+      findChrome: async () => ({ path: null, source: 'unavailable', reason: 'stubbed: no Chrome' }),
+      launch: async () => {
+        throw new Error('should not launch');
+      }
+    }),
+    /stubbed: no Chrome/
+  );
+});
 
 test('panel browser UI verification script is exposed through npm', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));

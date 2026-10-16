@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-import { chromeLaunchOptions, findChrome as findInstalledChrome } from '../../scripts/lib/find-chrome.js';
+import { chromeLaunchOptions, findChrome as findInstalledChrome } from './find-chrome.js';
 
 // Same launch path as verify:ui. A headless shell is enough when its path is passed as executablePath.
 // A missing browser fails in CI and skips on a local machine.

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
 
-import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 
 const PANEL_ROOT = resolve('apps/panel');
 const TYPES = {

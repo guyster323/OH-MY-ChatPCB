@@ -1,4 +1,4 @@
-/* global document, window, EventTarget */
+/* global document, window */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
 
-import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';

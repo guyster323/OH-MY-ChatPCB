@@ -6,7 +6,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
 
-import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 
 const LOGO_SHA256 = '568ce2e8701934856aaafc0ed1c3d0300f6c2ff384d0ae743dd1dea08570e12c';
 const PANEL_ROOT = resolve('apps/panel');

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
 
-import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
 

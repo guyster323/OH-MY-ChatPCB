@@ -6,7 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 
-import { launchPanelBrowser } from './helpers/launch-panel-browser.js';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 
 const panelRoot = path.resolve(import.meta.dirname, '../apps/panel');
 const panelLocale = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
