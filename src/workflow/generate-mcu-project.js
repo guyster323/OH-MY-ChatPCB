@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { normalizeCircuitSpec } from '../runtime/circuit-spec.js';
+import { applyDiscreteLedSpec, normalizeCircuitSpec } from '../runtime/circuit-spec.js';
 import { applyBoardProfile } from '../runtime/board-profiles.js';
 import { applyProductDraft } from '../runtime/product-catalog.js';
 import { loadCircuitConversation } from '../runtime/request-conversation.js';
@@ -22,8 +22,9 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
   }
 
   const conversation = await loadCircuitConversation(projectDir).catch(() => null);
-  const spec = applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation);
-  const schematic = buildMcuSchematicAst(spec);
+  const drafted = applyDiscreteLedSpec(applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation));
+  const schematic = buildMcuSchematicAst(drafted);
+  const spec = attachDiscretePartManifest(drafted, schematic);
   const baseName = sanitizeProjectName(projectName);
   const boardFileName = `${baseName}.kicad_pcb`;
   const hasBoardDraft = Boolean(spec.boardProfile?.id && spec.boardProfile?.pcbDraft !== false);
@@ -84,6 +85,31 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
       'Run SPICE simulation for supported power and simple analog subcircuits.'
     ]
   };
+}
+
+function attachDiscretePartManifest(spec, schematic) {
+  if (spec.kind !== 'discrete-led') return spec;
+  const parts = (schematic.components ?? []).map((component) => ({
+    ref: component.ref,
+    libId: component.libId,
+    value: component.value,
+    ...(component.description ? { description: component.description } : {}),
+    role: discretePartRole(component)
+  }));
+  return {
+    ...spec,
+    partManifest: { parts }
+  };
+}
+
+function discretePartRole(component) {
+  const libId = String(component.libId ?? '');
+  if (libId === 'Device:LED') return 'led';
+  if (libId === 'Device:R') return 'resistor';
+  if (libId === 'power:GND') return 'ground';
+  if (libId.startsWith('power:+') || libId === 'power:PWR_FLAG') return 'supply';
+  if (libId.startsWith('Connector')) return 'power-connector';
+  return 'part';
 }
 
 function manufacturingMetadataFor(boardFileName) {

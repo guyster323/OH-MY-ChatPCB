@@ -183,6 +183,9 @@ function boardPlacementFor(componentModel, index, profileMode) {
 }
 
 export function buildMcuSchematicAst(spec) {
+  if (spec.kind === 'discrete-led') {
+    return buildDiscreteLedSchematicAst(spec);
+  }
   if (spec.boardProfile?.kind === 'bms') {
     return buildBmsSchematicAst(spec);
   }
@@ -319,8 +322,8 @@ export function buildMcuSchematicAst(spec) {
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'decoupling-network')) {
     components.push(
-      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
-      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Buck output 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
+      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU +3V3 pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
+      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Buck output 10uF capacitor on the +3V3 rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
       ...(profileMode
         ? [
             component('C3', 'Device:C', 'Buck input 10uF capacitor on VBUS.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['VBUS', 'GND'], connectedPins: ['VBUS', 'GND'], pinNets: { 1: 'VBUS', 2: 'GND' } }),
@@ -441,6 +444,93 @@ export function buildMcuSchematicAst(spec) {
     nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT', ...components.flatMap((item) => item.connectedPins ?? [])]).map((name) => ({
       name,
       explanation: explainNet(name)
+    }))
+  };
+}
+
+const DISCRETE_RAIL_SYMBOLS = new Set(['+3V3', '+5V', '+12V']);
+
+function discreteSupplySymbol(supplyNet) {
+  if (DISCRETE_RAIL_SYMBOLS.has(supplyNet)) {
+    return {
+      ref: '#PWR01',
+      libId: `power:${supplyNet}`,
+      value: supplyNet,
+      explanation: `${supplyNet} power symbol for the discrete LED supply rail.`
+    };
+  }
+  return {
+    ref: '#FLG1',
+    libId: 'power:PWR_FLAG',
+    value: 'PWR_FLAG',
+    explanation: `Power flag for the ${supplyNet} supply rail.`
+  };
+}
+
+function discreteLedNetExplanation(name, supplyNet) {
+  if (name === 'GND') return 'Ground return for the LED cathode and the supply connector.';
+  if (name === supplyNet) return `${supplyNet} supply rail for the discrete LED circuit.`;
+  if (name === 'LED' || /^LED\d+$/.test(name)) {
+    return `${name} anode node between the series resistor and the LED.`;
+  }
+  return explainNet(name);
+}
+
+function buildDiscreteLedSchematicAst(spec) {
+  const discrete = spec.discrete ?? {};
+  const supplyNet = discrete.supplyNet || '+5V';
+  const resistorValue = discrete.resistorValue || '330Ω';
+  const count = Math.max(1, discrete.count || 1);
+  const ledValue = discrete.ledValue || 'LED';
+  const ledNets = Array.from({ length: count }, (_, index) => (count === 1 ? 'LED' : `LED${index + 1}`));
+  const supplySymbol = discreteSupplySymbol(supplyNet);
+  const components = [
+    component('J1', 'Connector_Generic:Conn_01x02', `Power input for the ${supplyNet} LED circuit.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
+      value: supplyNet,
+      description: supplyNet,
+      pins: [supplyNet, 'GND'],
+      connectedPins: [supplyNet, 'GND'],
+      pinNets: { 1: supplyNet, 2: 'GND' }
+    })
+  ];
+  ledNets.forEach((ledNet, index) => {
+    const number = index + 1;
+    components.push(
+      component('R' + number, 'Device:R', `Series resistor ${resistorValue} between ${supplyNet} and ${ledNet}.`, 'Resistor_SMD:R_0603_1608Metric', {
+        value: resistorValue,
+        pins: [supplyNet, ledNet],
+        connectedPins: [supplyNet, ledNet],
+        pinNets: { 1: supplyNet, 2: ledNet }
+      }),
+      component('D' + number, 'Device:LED', `${ledValue}. Pin 1 is the cathode to GND and pin 2 is the anode.`, 'LED_SMD:LED_0603_1608Metric', {
+        value: ledValue,
+        description: ledValue,
+        pins: ['GND', ledNet],
+        connectedPins: ['GND', ledNet],
+        pinNets: { 1: 'GND', 2: ledNet }
+      })
+    );
+  });
+  components.push(
+    component('#PWR02', 'power:GND', 'Ground return for the LED cathode and the supply connector.', '', {
+      value: 'GND',
+      pins: ['GND'],
+      connectedPins: ['GND'],
+      pinNets: { 1: 'GND' }
+    }),
+    component(supplySymbol.ref, supplySymbol.libId, supplySymbol.explanation, '', {
+      value: supplySymbol.value,
+      description: supplySymbol.value,
+      pins: [supplyNet],
+      connectedPins: [supplyNet],
+      pinNets: { 1: supplyNet }
+    })
+  );
+  return {
+    components,
+    nets: [supplyNet, ...ledNets, 'GND'].map((name) => ({
+      name,
+      explanation: discreteLedNetExplanation(name, supplyNet)
     }))
   };
 }
@@ -681,7 +771,13 @@ function adbms6830PinConnections() {
 
 export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchematicAst(spec) }) {
   const uuid = randomUUID();
-  const notes = spec.boardProfile?.kind === 'isolated-dcdc'
+  const notes = spec.kind === 'discrete-led'
+    ? [
+        `ChatPCB generated discrete LED draft: ${spec.title}`,
+        ...(spec.discrete?.reviewNotes ?? []).map((note) => note.message),
+        'Review all symbols, footprints, net labels, and design rules before production.'
+      ]
+    : spec.boardProfile?.kind === 'isolated-dcdc'
     ? [
         `ChatPCB generated isolated DC-DC draft: ${spec.title}`,
         `Input ${spec.boardProfile?.ratings?.vin ?? 'unspecified'} to output ${spec.boardProfile?.ratings?.vout ?? 'unspecified'}.`,
@@ -762,6 +858,24 @@ ${fixtureSymbols()
 }
 
 export function renderSpiceFixture(spec) {
+  if (spec.kind === 'discrete-led') {
+    const volts = spec.discrete?.supplyVolts ?? 5;
+    const ohms = spec.discrete?.resistanceOhms ?? 330;
+    const count = Math.max(1, spec.discrete?.count || 1);
+    const vf = spec.discrete?.color?.vf ?? spec.discrete?.calculation?.vf ?? 2;
+    const lines = [
+      `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
+      '* Discrete LED and series resistor. Confirm LED current before release.',
+      `VSUP vsup 0 DC ${volts}`
+    ];
+    for (let index = 1; index <= count; index += 1) {
+      const node = count === 1 ? 'led' : `led${index}`;
+      lines.push(`RLED${index} vsup ${node} ${ohms}`);
+      lines.push(`DLED${index} ${node} 0 DLED`);
+    }
+    lines.push(`.model DLED D(Vfwd=${vf})`, '.op', '.end', '');
+    return lines.join('\n');
+  }
   if (spec.boardProfile?.kind === 'isolated-dcdc') {
     return [
       `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
@@ -802,11 +916,12 @@ export function renderSpiceFixture(spec) {
   ].join('\n');
 }
 
-function component(ref, libId, explanation, footprint, { connectedPins, pinNets, pins, value } = {}) {
+function component(ref, libId, explanation, footprint, { connectedPins, pinNets, pins, value, description } = {}) {
   return {
     ref,
     libId,
     value: value ?? libId.split(':')[1],
+    description,
     footprint,
     explanation,
     pins,
@@ -851,8 +966,14 @@ function explainNet(name) {
   switch (name) {
     case 'VBUS':
       return 'Primary 5V input rail.';
+    case '+5V':
+      return '+5V supply rail.';
+    case '+12V':
+      return '+12V supply rail.';
+    case 'LED':
+      return 'LED anode node between the series resistor and the LED.';
     case '+3V3':
-      return 'Regulated 3.3V rail for MCU and peripherals.';
+      return 'Regulated +3V3 rail for MCU and peripherals.';
     case 'GND':
       return 'Common return reference for generated circuitry.';
     case 'SCL':
@@ -1795,7 +1916,10 @@ function renderSymbolInstance(componentModel, x, y, baseName) {
     (property "Footprint" "${escapeSchText(componentModel.footprint)}" (at ${sch(x)} ${sch(y + 12.70)} 0)
       (effects (font (size ${sch(1.27)} ${sch(1.27)})) hide)
     )
-    (instances
+${componentModel.description ? `    (property "Description" "${escapeSchText(componentModel.description)}" (at ${sch(x)} ${sch(y + 15.24)} 0)
+      (effects (font (size ${sch(1.27)} ${sch(1.27)})) hide)
+    )
+` : ''}    (instances
       (project "${escapeSchText(baseName)}"
         (path "/${uuid}"
           (reference "${escapeSchText(componentModel.ref)}")
@@ -1835,6 +1959,12 @@ function officialPinDefinitionsFor(libId) {
         pinDef('11', -2.54, -12.7, 90)
       ];
     case 'power:PWR_FLAG':
+      return [pinDef('1', 0, 0, 90)];
+    case 'power:+3V3':
+    case 'power:+5V':
+    case 'power:+12V':
+      return [pinDef('1', 0, 0, 270)];
+    case 'power:GND':
       return [pinDef('1', 0, 0, 90)];
     case 'Switch:SW_Push':
       return [pinDef('1', -5.08, 0, 0), pinDef('2', 5.08, 0, 180)];
@@ -1943,6 +2073,14 @@ function symbolPinsFor(libId) {
       return ['VBUS', 'GND', '+3V3'];
     case 'power:PWR_FLAG':
       return ['VBUS'];
+    case 'power:+3V3':
+      return ['+3V3'];
+    case 'power:+5V':
+      return ['+5V'];
+    case 'power:+12V':
+      return ['+12V'];
+    case 'power:GND':
+      return ['GND'];
     case 'ChatPCB:MCU_PLACEHOLDER':
     case 'ChatPCB:ESP32_S3_WROOM_1':
     case 'ChatPCB:STM32G0B1CBT6':
