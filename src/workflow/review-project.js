@@ -32,11 +32,13 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   const generatedNets = new Set((spec.schematic?.nets ?? []).map((net) => net.name));
   const generatedComponents = spec.schematic?.components ?? [];
 
-  if (spec.mcu?.package === 'unspecified') {
+  const discreteLed = spec.kind === 'discrete-led';
+
+  if (!discreteLed && spec.mcu?.package === 'unspecified') {
     addFinding(findings.blockers, 'mcu-part-missing', `Choose the exact ${spec.mcu.family} part or module before release.`);
   }
 
-  if (generatedComponents.some((component) => component.libId === 'ChatPCB:MCU_PLACEHOLDER')) {
+  if (!discreteLed && generatedComponents.some((component) => component.libId === 'ChatPCB:MCU_PLACEHOLDER')) {
     addFinding(findings.warnings, 'fixture-symbols', 'The schematic still uses ChatPCB fixture symbols instead of production KiCad library symbols.');
   }
 
@@ -136,6 +138,40 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     addFinding(findings.notes, `design-${note.slice(0, 24)}`, note);
   }
 
+  if (discreteLed) {
+    const notes = spec.discrete?.reviewNotes;
+    if (Array.isArray(notes) && notes.length > 0) {
+      for (const note of notes) {
+        addFinding(findings.notes, note.code, note);
+      }
+    } else if (!spec.discrete?.refused) {
+      const resistor = spec.discrete?.resistorValue ?? 'unspecified';
+      const resistorKo = spec.discrete?.resistorValue ?? '지정되지 않음';
+      addFinding(findings.notes, 'discrete-led', forPrompt(
+        `Discrete LED draft uses series resistor ${resistor}; confirm it for the LED forward voltage and current before release.`,
+        `이산 LED 초안은 직렬 저항 ${resistorKo}을 사용합니다. LED 순방향 전압과 전류를 출시 전에 확인하세요.`,
+        spec.sourcePrompt
+      ));
+    }
+    for (const blocker of spec.discrete?.reviewBlockers ?? []) {
+      if (blocker?.code && blocker?.message) {
+        addFinding(findings.blockers, blocker.code, blocker);
+      }
+    }
+    for (const warning of spec.discrete?.reviewWarnings ?? []) {
+      if (warning?.code && warning?.message) {
+        addFinding(findings.warnings, warning.code, warning);
+      }
+    }
+    if (!spec.discrete?.refused) {
+      addFinding(
+        findings.warnings,
+        'discrete-led-draft',
+        discreteDraftCaution(spec)
+      );
+    }
+  }
+
   if (spec.boardProfile?.id) {
     const profileMessage = spec.boardProfile.kind === 'bms'
       ? `Using schematic-only ${spec.mcu.family} BMS example profile: ${spec.boardProfile.id}.`
@@ -169,7 +205,11 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
       addFinding(findings.blockers, 'footprint-library-unresolved', 'Footprint library links are unresolved; footprints must resolve before JLCPCB release.');
     }
   } else {
-    addFinding(findings.notes, 'validation-needed', 'Run ERC after reviewing or applying changes.');
+    addFinding(findings.notes, 'validation-needed', forPrompt(
+      'Run ERC after reviewing or applying changes.',
+      '변경을 검토하거나 적용한 뒤에 ERC를 실행하세요.',
+      spec.sourcePrompt
+    ));
   }
 
   if (findings.blockers.length > 0) {
@@ -233,6 +273,9 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     }
   }
 
+  // The same sentence must not appear twice. Blockers outrank warnings, and warnings outrank notes.
+  dedupeFindingMessages(findings);
+
   const status = statusFor(findings, validation);
 
   return {
@@ -244,10 +287,87 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   };
 }
 
-function addFinding(target, code, message) {
-  if (!target.some((finding) => finding.code === code)) {
-    target.push({ code, message });
+function specifiedLedCurrentLabel(spec) {
+  const milliamps = spec.discrete?.requestedCurrentMa;
+  if (!Number.isFinite(milliamps) || !(milliamps > 0)) return null;
+  return `${Math.round(milliamps * 1000) / 1000}mA`;
+}
+
+function discreteDraftCaution(spec) {
+  const usesSpecifiedVf = Number.isFinite(spec.discrete?.specifiedVf);
+  const current = specifiedLedCurrentLabel(spec);
+  if (current && usesSpecifiedVf) {
+    return forPrompt(
+      `Discrete LED drafts use the specified ${current} and the specified forward voltage; confirm the resistor and supply before release.`,
+      `이산 LED 초안은 지정한 ${current}와 지정한 순방향 전압을 사용합니다. 저항과 공급 전압을 출시 전에 확인하세요.`,
+      spec.sourcePrompt
+    );
   }
+  if (current) {
+    return forPrompt(
+      `Discrete LED drafts use the specified ${current} and a typical LED forward voltage; confirm the resistor and supply before release.`,
+      `이산 LED 초안은 지정한 ${current}와 일반적인 LED 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.`,
+      spec.sourcePrompt
+    );
+  }
+  if (usesSpecifiedVf) {
+    return forPrompt(
+      'Discrete LED drafts assume 10mA and use the specified forward voltage; confirm the resistor and supply before release.',
+      '이산 LED 초안은 10mA와 지정한 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
+      spec.sourcePrompt
+    );
+  }
+  return forPrompt(
+    'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.',
+    '이산 LED 초안은 10mA와 일반적인 LED 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
+    spec.sourcePrompt
+  );
+}
+
+function promptUsesKorean(text) {
+  return /[가-힣]/.test(String(text ?? ''));
+}
+
+function finishPromptSentence(text) {
+  const value = String(text ?? '').trim();
+  if (!value || /[.。]$/.test(value)) return value;
+  return `${value}.`;
+}
+
+function forPrompt(en, ko, prompt) {
+  const finishedEn = finishPromptSentence(en);
+  const finishedKo = finishPromptSentence(ko);
+  return {
+    en: finishedEn,
+    ko: finishedKo,
+    message: promptUsesKorean(prompt) ? finishedKo : finishedEn
+  };
+}
+
+function addFinding(target, code, localized) {
+  if (target.some((finding) => finding.code === code)) return;
+  if (localized && typeof localized === 'object') {
+    const finding = { code, message: String(localized.message ?? '') };
+    if (typeof localized.en === 'string' && typeof localized.ko === 'string') {
+      finding.en = localized.en;
+      finding.ko = localized.ko;
+    }
+    target.push(finding);
+    return;
+  }
+  target.push({ code, message: localized });
+}
+
+function dedupeFindingMessages(findings) {
+  const seen = new Set();
+  const keepUnique = (items) => items.filter((item) => {
+    if (seen.has(item.message)) return false;
+    seen.add(item.message);
+    return true;
+  });
+  findings.blockers = keepUnique(findings.blockers);
+  findings.warnings = keepUnique(findings.warnings);
+  findings.notes = keepUnique(findings.notes);
 }
 
 function summarizeParts(parts) {
@@ -265,7 +385,7 @@ function summarizeCalculations(calculations) {
 }
 
 function statusFor(findings, validation) {
-  if (findings.blockers.length > 0) {
+  if ((validation?.erc?.errorCount ?? 0) > 0 || findings.blockers.length > 0) {
     return 'blocked';
   }
 

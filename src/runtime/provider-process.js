@@ -52,7 +52,8 @@ export async function runProviderProcess({
   killGraceMs = DEFAULT_KILL_GRACE_MS,
   reportDiagnostic = reportProviderDiagnostic,
   spawnImpl = spawn,
-  writeFileImpl = writeFile
+  writeFileImpl = writeFile,
+  tempDirectory
 }) {
   if (!command) {
     throw new Error('Provider command is required.');
@@ -75,7 +76,10 @@ export async function runProviderProcess({
     let finalArgs = args;
 
     if (usePromptFile) {
-      tempPromptDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-'));
+      const promptRoot = typeof tempDirectory === 'string' && tempDirectory.trim()
+        ? tempDirectory.trim()
+        : tmpdir();
+      tempPromptDir = await mkdtemp(path.join(promptRoot, 'chatpcb-prompt-'));
       if (cancelled()) throw cancelError();
       const tempPromptFile = path.join(tempPromptDir, `prompt-${randomUUID()}.txt`);
       await writeFileImpl(tempPromptFile, input || '', { encoding: 'utf8', mode: 0o600 });
