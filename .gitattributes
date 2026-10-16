@@ -1,0 +1,7 @@
+# Official ChatGPT mark. A Windows checkout must not rewrite LF to CRLF.
+apps/panel/assets/*.svg binary
+# Bundled webfont. Keep the bytes identical on every checkout.
+apps/panel/fonts/* binary
+# Generated CSS and locale catalogs are compared and parsed as LF text.
+apps/panel/styles/tokens.css text eol=lf
+apps/panel/locales/*.json text eol=lf
