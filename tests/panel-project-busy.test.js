@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -20,14 +21,16 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
   }
 
   const calls = [];
-  const daemon = await startMockDaemon((call) => {
-    calls.push(call);
-    return responseFor(call, calls);
-  });
-  const staticServer = await startStaticServer(panelRoot);
+  let daemon;
+  let staticServer;
   const pageErrors = [];
 
   try {
+    daemon = await startMockDaemon((call) => {
+      calls.push(call);
+      return responseFor(call, calls);
+    });
+    staticServer = await startStaticServer(panelRoot);
     const page = await browser.newPage();
     page.on('pageerror', (error) => pageErrors.push(error.message));
     await page.addInitScript((url) => {
@@ -95,9 +98,19 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
     assert.equal(calls.filter((call) => call.name === 'schematic.generate').length, 2);
     assert.deepEqual(pageErrors, []);
   } finally {
-    await browser.close();
+    await closePanelHarness({ browser, daemon, staticServer });
+  }
+});
+
+test('daemon teardown survives the browser resetting the upgraded socket', async () => {
+  const daemon = await startMockDaemon(() => ({ ok: true, result: {} }));
+  try {
+    const socket = await connectRawWebSocket(daemon.url);
+    daemon.prepareClose();
+    socket.resetAndDestroy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
     await daemon.close();
-    await staticServer.close();
   }
 });
 
@@ -198,9 +211,67 @@ async function launchPanelBrowser() {
   }
 }
 
+function isPeerDisconnect(error) {
+  return error?.code === 'ECONNRESET' || error?.code === 'EPIPE' || error?.code === 'ECONNABORTED';
+}
+
+async function closePanelHarness({ browser, daemon, staticServer }) {
+  // Mark the daemon closing before the browser exits. Chrome often RSTs the
+  // upgraded socket while Playwright is still shutting the process down.
+  daemon?.prepareClose();
+  try {
+    await browser?.close();
+  } finally {
+    await daemon?.close();
+    await staticServer?.close();
+  }
+}
+
+async function connectRawWebSocket(url) {
+  const { port } = new URL(url);
+  const key = Buffer.from(randomUUID()).toString('base64');
+  const socket = net.connect(Number(port), '127.0.0.1');
+  socket.on('error', () => {});
+  await new Promise((resolve, reject) => {
+    socket.once('connect', () => {
+      socket.write([
+        'GET /ws HTTP/1.1',
+        'Host: 127.0.0.1',
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        `Sec-WebSocket-Key: ${key}`,
+        'Sec-WebSocket-Version: 13',
+        '',
+        ''
+      ].join('\r\n'));
+    });
+    socket.once('data', () => resolve());
+    socket.once('error', reject);
+  });
+  return socket;
+}
+
 async function startMockDaemon(handler) {
   const server = createServer();
+  const sockets = new Set();
+  let closing = false;
   server.on('upgrade', (request, socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    // Node detaches its HTTP error listener before emitting 'upgrade'.
+    // A peer RST is then an unhandled 'error' event (read ECONNRESET).
+    // That happens when the browser exits, so ignore it only while closing.
+    let handledError = false;
+    socket.on('error', (error) => {
+      sockets.delete(socket);
+      if (handledError) return;
+      handledError = true;
+      if (!socket.destroyed) socket.destroy();
+      if (closing && isPeerDisconnect(error)) return;
+      setImmediate(() => {
+        throw error;
+      });
+    });
     if (request.url !== '/ws') {
       socket.destroy();
       return;
@@ -217,6 +288,7 @@ async function startMockDaemon(handler) {
     ].join('\r\n'));
     let buffer = Buffer.alloc(0);
     socket.on('data', (chunk) => {
+      if (socket.destroyed) return;
       buffer = Buffer.concat([buffer, chunk]);
       while (buffer.length >= 2) {
         const opcode = buffer[0] & 0x0f;
@@ -241,11 +313,11 @@ async function startMockDaemon(handler) {
           for (let index = 0; index < data.length; index += 1) data[index] ^= mask[index % 4];
         }
         if (opcode === 0x8) {
-          socket.end(encodeFrame(0x8, data));
+          if (!socket.destroyed) socket.end(encodeFrame(0x8, data));
           return;
         }
         if (opcode === 0x9) {
-          socket.write(encodeFrame(0xA, data));
+          if (!socket.destroyed) socket.write(encodeFrame(0xA, data));
           continue;
         }
         if (opcode !== 0x1) continue;
@@ -258,6 +330,7 @@ async function startMockDaemon(handler) {
         if (envelope.type !== 'tool.call') continue;
         const call = envelope.payload ?? {};
         const body = handler(call);
+        if (socket.destroyed) return;
         socket.write(encodeFrame(0x1, JSON.stringify({
           version: 1,
           id: `evt_${randomUUID()}`,
@@ -279,7 +352,16 @@ async function startMockDaemon(handler) {
   const address = server.address();
   return {
     url: `ws://127.0.0.1:${address.port}/ws`,
-    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    prepareClose() {
+      closing = true;
+    },
+    close() {
+      closing = true;
+      for (const socket of [...sockets]) socket.destroy();
+      return new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   };
 }
 
@@ -328,7 +410,11 @@ async function startStaticServer(rootDir) {
   const address = server.address();
   return {
     url: `http://127.0.0.1:${address.port}`,
-    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+      // Drop keep-alive sockets the page may still hold so close does not wait on them.
+      server.closeAllConnections();
+    })
   };
 }
 
