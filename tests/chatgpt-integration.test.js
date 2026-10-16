@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
@@ -7,6 +8,7 @@ import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
+import vm from 'node:vm';
 
 import { dispatchToolCall, startDaemon } from '../src/runtime/agent-daemon.js';
 import {
@@ -2110,6 +2112,32 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     assert.equal(calls[0].command === 'cmd', false);
   });
 
+  it('escapes https auth links and rejects non-https URLs', async () => {
+    const { chatgptAuthHref } = loadPanelAuthHref();
+    const href = chatgptAuthHref('https://auth.openai.com/a?x=1&y=2&q="><script>');
+    assert.match(href, /^https:\/\/auth\.openai\.com\//);
+    assert.match(href, /&amp;/);
+    assert.equal(href.includes('"'), false);
+    assert.equal(href.includes('<'), false);
+    assert.equal(href.includes('>'), false);
+    assert.equal(chatgptAuthHref('http://auth.openai.com/a'), null);
+    assert.equal(chatgptAuthHref('javascript:alert(1)'), null);
+    assert.equal(chatgptAuthHref('pending'), null);
+
+    const panel = await readFile(new URL('../apps/panel/panel.js', import.meta.url), 'utf8');
+    assert.match(panel, /chatgptAuthHref\(chatgptAuthState\.authUrl\)/);
+    assert.equal(panel.includes('href="${chatgptAuthState.authUrl'), false);
+    const en = JSON.parse(await readFile(new URL('../apps/panel/locales/en.json', import.meta.url), 'utf8'));
+    const ko = JSON.parse(await readFile(new URL('../apps/panel/locales/ko.json', import.meta.url), 'utf8'));
+    assert.equal(en['auth.chatgpt.button'], 'Continue with ChatGPT');
+    assert.equal(ko['auth.chatgpt.button'], 'Continue with ChatGPT');
+    assert.equal(en['auth.chatgpt.waiting.reopen'], 'Open sign-in page again');
+    assert.equal(ko['auth.chatgpt.waiting.reopen'], '로그인 페이지 다시 열기');
+    assert.equal(en['auth.chatgpt.opens-browser'], '(opens in your browser)');
+    assert.equal(ko['auth.chatgpt.opens-browser'], '(브라우저에서 열림)');
+    assert.equal(panel.includes('LOGO?'), false);
+  });
+
   it('selects the most recently used account, then email', async () => {
     await withConfig(async () => {
       const configDir = resolveChatGPTConfigDir();
@@ -3732,6 +3760,36 @@ async function withConfig(fn) {
 async function writeCred(configDir, creds) {
   const safe = String(creds.client_id).replace(/[^a-zA-Z0-9_-]/g, '_');
   await writeFile(path.join(configDir, `chatgpt-credentials-${safe}.json`), JSON.stringify(creds));
+}
+
+function loadPanelAuthHref() {
+  const source = readFileSyncPanel();
+  const code = `${extractFunction(source, 'escapeHtml')}\n${extractFunction(source, 'chatgptAuthHref')}\nglobalThis.api = { escapeHtml, chatgptAuthHref };`;
+  const sandbox = { URL };
+  vm.runInNewContext(code, sandbox);
+  return sandbox.api;
+}
+
+function readFileSyncPanel() {
+  return readFileSync(new URL('../apps/panel/panel.js', import.meta.url), 'utf8');
+}
+
+function extractFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) throw new Error(`missing ${name}`);
+  let depth = 0;
+  let started = false;
+  for (let i = start; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '{') {
+      depth += 1;
+      started = true;
+    } else if (char === '}') {
+      depth -= 1;
+      if (started && depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unclosed ${name}`);
 }
 
 function openDaemonSocket(daemon) {

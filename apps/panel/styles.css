@@ -13,6 +13,20 @@ h1 { font-size: 16px; }
 h2 { font-size: 12px; }
 h3 { font-size: 11px; }
 #connection-status, #provider-status, label, time { color: #607086; font-size: 11px; }
+#connection-status.daemon-connection { font-weight: 650; letter-spacing: 0.01em; }
+#connection-status.daemon-connection::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #94a3b8;
+  vertical-align: middle;
+}
+#connection-status.daemon-connection[data-state="open"]::before { background: #047857; }
+#connection-status.daemon-connection[data-state="closed"]::before,
+#connection-status.daemon-connection[data-state="error"]::before { background: #9f1239; }
 .provider-control, label { display: grid; gap: 3px; min-width: 0; }
 .provider-control { justify-items: end; min-width: 120px; }
 .pro-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #334155; }
@@ -36,6 +50,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .patch-cta-hero { display: flex; gap: 10px; align-items: center; }
 .patch-cta-hero h2 { font-size: 14px; }
 #patch-approval-lead { color: #334155; font-size: 12px; line-height: 1.4; }
+.patch-source { margin: 0; font-size: 11px; font-weight: 700; color: #0f766e; }
+.patch-parts { margin: 0; padding-left: 18px; font-size: 12px; color: #334155; }
+.patch-source[hidden], .patch-parts[hidden] { display: none; }
 #approve-patch-button { background: #0f766e; border-color: #0f766e; min-height: 36px; }
 #cancel-patch-button { background: #fff; color: #334155; border-color: #94a3b8; }
 .request-progress { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 72px; overflow: auto; flex: 0 0 auto; }
@@ -194,8 +211,90 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
   .spec-reason, .spec-footer { color: #cbd6e2; }
   .panel-dialog { background: #1c242c; border-color: #34414d; color: #e8edf3; }
   .patch-approval-card { background: #14261d; }
+  .patch-source { color: #5eead4; }
+  .patch-parts { color: #cbd6e2; }
   .request-progress li { background: #11161b; }
   .request-progress li[data-stage="warn"] strong { color: #fbbf24; }
   .request-progress p, #patch-approval-lead, .dialog-hint { color: #cbd6e2; }
   #cancel-patch-button { background: #1c242c; color: #e8edf3; border-color: #465563; }
 }
+
+/* ChatGPT Auth Card */
+.chatgpt-auth-card { 
+  border: 1px solid #d9dee7; 
+  border-radius: 8px; 
+  background: #fff; 
+  padding: 14px; 
+  max-width: 480px; 
+  margin: 0 auto;
+}
+.chatgpt-auth-card[hidden] { display: none; }
+.chatgpt-auth-card h2 { font-size: 15px; margin-bottom: 6px; }
+.chatgpt-auth-card p { font-size: 13px; line-height: 1.4; color: #4a5668; margin: 6px 0; }
+.chatgpt-auth-card.error { border-color: #b42318; }
+.chatgpt-auth-card.error h2 { color: #b42318; }
+.chatgpt-sign-in-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 14px;
+  border-radius: 6px;
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.chatgpt-sign-in-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+.chatgpt-auth-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.chatgpt-auth-actions button { min-height: 32px; padding: 0 12px; }
+.chatgpt-switch-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #c9d7ea;
+  border-radius: 8px;
+  background: #f3f8fd;
+  padding: 6px 8px;
+}
+.chatgpt-switch-offer p { flex: 1 1 160px; font-size: 12px; line-height: 1.35; color: #1c242c; }
+.chatgpt-switch-offer-actions { display: flex; gap: 6px; }
+.chatgpt-switch-offer-actions button { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.chatgpt-secondary-btn {
+  background: #fff;
+  color: #4a5668;
+  border: 1px solid #4a5668;
+}
+.chatgpt-auth-card .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #4a5668;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .chatgpt-auth-card { background: #1c242c; border-color: #34414d; }
+  .chatgpt-auth-card p { color: #cbd6e2; }
+  .chatgpt-switch-offer { background: #172433; border-color: #34506d; }
+  .chatgpt-switch-offer p { color: #e8edf3; }
+  .chatgpt-secondary-btn { background: #1c242c; color: #e8edf3; border-color: #465563; }
+}
+

@@ -37,7 +37,7 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
       window.CHATPCB_DAEMON_WS_URL = url;
     }, daemon.url);
     await page.goto(`${staticServer.url}/index.html`);
-    await page.getByText('Connected', { exact: true }).waitFor();
+    await page.getByText('Daemon connected', { exact: true }).waitFor();
     await page.evaluate(() => {
       window.__busyCycle = 0;
       window.__sawRunning = false;

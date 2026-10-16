@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
-    <link rel="stylesheet" href="./styles.css?v=20261016-warn" />
+    <link rel="stylesheet" href="./styles.css?v=20261016-siwc-grok" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
           <h1>ChatPCB</h1>
-          <p id="connection-status">Connecting</p>
+          <p id="connection-status" class="daemon-connection" data-role="daemon" data-state="connecting">Connecting</p>
         </div>
         <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time.">
           <input id="pro-mode" type="checkbox" />
@@ -24,10 +24,25 @@
             <option value="claude">Claude Code</option>
             <option value="copilot">Copilot CLI</option>
             <option value="grok">Grok Build</option>
+            <option value="chatgpt">ChatGPT (sign-in)</option>
           </select>
           <span id="provider-status">Provider pending</span>
         </label>
       </header>
+
+      <div id="chatgpt-switch-offer" class="chatgpt-switch-offer" hidden role="group" aria-labelledby="chatgpt-switch-offer-text">
+        <p id="chatgpt-switch-offer-text"></p>
+        <div class="chatgpt-switch-offer-actions">
+          <button type="button" id="chatgpt-switch-offer-accept"></button>
+          <button type="button" id="chatgpt-switch-offer-dismiss" class="chatgpt-secondary-btn"></button>
+        </div>
+      </div>
+
+      <div id="auth-live-region" role="status" aria-live="polite" class="sr-only"></div>
+
+      <section id="chatgpt-auth-card" class="chatgpt-auth-card" hidden aria-labelledby="chatgpt-auth-title">
+        <!-- Auth card content will be dynamically rendered by panel.js -->
+      </section>
 
       <section class="project-setup" aria-labelledby="project-setup-title">
         <h2 id="project-setup-title">Start a project</h2>
@@ -125,7 +140,13 @@
               <p id="patch-approval-lead">적용을 누르기 전에는 스키매틱 파일이 바뀌지 않습니다.</p>
             </div>
           </div>
+          <p id="patch-approval-source" class="patch-source" hidden></p>
+          <ul id="patch-approval-parts" class="patch-parts" hidden></ul>
           <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
+          <details id="patch-approval-technical-details" hidden>
+            <summary>Technical details</summary>
+            <pre id="patch-approval-technical-detail"></pre>
+          </details>
           <div class="patch-approval-actions">
             <button id="approve-patch-button" type="button" disabled aria-label="Approve">스키매틱에 적용</button>
             <button id="cancel-patch-button" type="button" disabled aria-label="Cancel">적용하지 않기</button>
@@ -210,6 +231,6 @@
       </section>
     </dialog>
 
-    <script src="./panel.js?v=20261016-warn"></script>
+    <script src="./panel.js?v=20261016-siwc-grok"></script>
   </body>
 </html>
