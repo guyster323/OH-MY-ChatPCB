@@ -2,7 +2,7 @@ export function boardPadGeometry(padBlock, footprintPosition = {}) {
   const shape = padBlock.match(/^\s*\(pad\s+"[^"]*"\s+\S+\s+(\S+)/);
   const localAt = padBlock.match(/\(at\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)(?:\s+(-?\d+(?:\.\d+)?))?/);
   const size = padBlock.match(/\(size\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/);
-  const layers = padBlock.match(/\(layers\s+([^\)]+)\)/);
+  const layers = padBlock.match(/\(layers\s+([^)]+)\)/);
   if (!shape || !localAt || !size || !layers) {
     return null;
   }

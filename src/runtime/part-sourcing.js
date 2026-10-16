@@ -225,7 +225,7 @@ export function formatPartHelp(item, ko = true) {
   ].join('\n');
 }
 
-export function partsToExamples(items, { koLabels = true } = {}) {
+export function partsToExamples(items) {
   return items.map((item) => ({
     id: item.mpn,
     labelKo: `${item.mpn} · $${item.unitPriceUsd.toFixed(2)}`,

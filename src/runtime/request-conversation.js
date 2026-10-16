@@ -361,7 +361,7 @@ export function startCircuitConversation(prompt, spec, { proMode = false } = {})
   };
 }
 
-function nextOpen(conversation, spec) {
+function nextOpen(conversation, _spec) {
   const detection = detectProductRequest(conversation.sourcePrompt);
   return openFields(detection, conversation.answers, { proMode: conversation.proMode === true });
 }
@@ -518,8 +518,12 @@ export async function loadCircuitConversation(projectDir) {
   }
 }
 
+export function serializeCircuitConversation(conversation) {
+  return `${JSON.stringify(conversation, null, 2)}\n`;
+}
+
 export async function saveCircuitConversation(projectDir, conversation) {
-  await writeFile(path.join(projectDir, CONVERSATION_FILE), `${JSON.stringify(conversation, null, 2)}\n`, 'utf8');
+  await writeFile(path.join(projectDir, CONVERSATION_FILE), serializeCircuitConversation(conversation), 'utf8');
 }
 
 export async function enrichConversationSourcing(conversation) {
@@ -585,7 +589,7 @@ export async function enrichConversationSourcing(conversation) {
   };
 }
 
-export async function continueCircuitConversation({ projectDir, prompt, spec, proMode = false }) {
+export async function continueCircuitConversation({ projectDir, prompt, spec, proMode = false, persist = true } = {}) {
   const existing = await loadCircuitConversation(projectDir);
   let next;
   if (existing?.status === 'awaiting-input') {
@@ -611,6 +615,6 @@ export async function continueCircuitConversation({ projectDir, prompt, spec, pr
     next = startCircuitConversation(prompt, spec, { proMode });
   }
   next = await enrichConversationSourcing(next);
-  await saveCircuitConversation(projectDir, next);
+  if (persist) await saveCircuitConversation(projectDir, next);
   return next;
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createPatchApprovalRegistry } from '../runtime/patch-approval-registry.js';
 import { createProjectMutexRegistry } from '../runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../runtime/transaction-journal.js';
-import { createCandidateValidator, createNativeProposal, disposeNativeProposal, publicProposal } from './native-proposal-source.js';
+import { createCandidateValidator, createNativeProposal, disposeNativeProposal, proposalSource, publicProposal } from './native-proposal-source.js';
 import { applyProjectTransaction } from './project-transaction.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
@@ -66,7 +66,8 @@ function previewFrom(plan) {
     afterProjectDigest: plan.afterProjectDigest,
     beforeTransactionDigest: plan.baseTransactionDigest,
     afterTransactionDigest: plan.afterTransactionDigest,
-    validation: plan.validation
+    validation: plan.validation,
+    source: plan.source
   };
 }
 
@@ -114,7 +115,9 @@ export async function createSchematicPatchPlan({
   validateBoardImpl = validateBoard,
   validateCandidateImpl,
   context,
-  signal
+  signal,
+  conversationBytes,
+  source
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
@@ -122,6 +125,8 @@ export async function createSchematicPatchPlan({
     projectName,
     context,
     signal,
+    conversationBytes,
+    source: proposalSource(source),
     validateCandidateImpl: validateCandidateImpl ?? createCandidateValidator({
       validateProjectImpl,
       validateBoardImpl
