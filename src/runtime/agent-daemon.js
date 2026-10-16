@@ -444,12 +444,16 @@ async function invokeProvider(call, ctx) {
     try {
       if (provider === 'chatgpt') {
         let response;
+        const modifyExisting = projectExists === true && allowGenerate === false;
         try {
           response = await callChatGPTResponses({
             prompt: input,
             signal: controller.signal,
             model: args.model,
-            allowedTools: PROVIDER_ALLOWED_TOOLS
+            allowedTools: modifyExisting ? promptTools : PROVIDER_ALLOWED_TOOLS,
+            toolChoice: modifyExisting ? ToolName.SCHEMATIC_PATCH : 'auto',
+            maxTurns: 4,
+            executeTool: (toolCall) => executeChatGptReadOnlyTool(toolCall, ctx, projectDir, args.selection)
           });
         } catch (error) {
           // stderr is what the daemon launcher appends to daemon.log.
@@ -457,7 +461,13 @@ async function invokeProvider(call, ctx) {
           throw error;
         }
         const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
-        transcript = { exitCode: 0, events, stderr: '', tracePath: null };
+        transcript = {
+          exitCode: 0,
+          events,
+          stderr: '',
+          tracePath: null,
+          readOnlyResults: response.readOnlyResults ?? []
+        };
       } else {
         transcript = await runProviderProcessImpl({
           command: availability.resolvedPath || availability.command || definition.command,
@@ -492,9 +502,31 @@ async function invokeProvider(call, ctx) {
 
     const toolResults = [];
     const disallowedCalls = [];
+    const loopResults = new Map((transcript.readOnlyResults ?? []).map((item) => [item.id, item]));
     for (const event of transcript.events) {
       throwIfProviderRunAborted(providerControllers, invocationId, controller);
       if (event.type !== 'tool.call') continue;
+
+      const loopResult = loopResults.get(event.payload.id);
+      if (loopResult && READ_ONLY_PROVIDER_TOOLS.has(event.payload.name)) {
+        const output = loopResult.output ?? {};
+        if (output.ok === false) {
+          toolResults.push({
+            id: event.payload.id,
+            ok: false,
+            error: output.error ?? { code: 'TOOL_FAILED', message: 'Read-only tool failed' },
+            name: event.payload.name
+          });
+        } else {
+          toolResults.push({
+            id: event.payload.id,
+            ok: true,
+            result: output.result ?? output,
+            name: event.payload.name
+          });
+        }
+        continue;
+      }
 
       if (!knownChatPcbTools.has(event.payload.name)) {
         toolResults.push({
@@ -679,6 +711,18 @@ async function requestProject(call, ctx) {
 
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
       let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
+      if (!preview && hasSpec && args.provider === 'chatgpt' && providerReturnedOnlyReadOnly(providerResult)) {
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        providerResult = await invokeProvider({
+          ...call,
+          args: {
+            ...args,
+            prompt: `${generatePrompt}\n\n${SCHEMATIC_PATCH_NUDGE}`
+          }
+        }, providerCtx);
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        preview = lastMutatingResult(providerResult.toolResults);
+      }
       let usedBuiltinDraft = false;
       if (!preview) {
         throwIfProviderCancelled(ctx.providerControllers, invocationId);
@@ -919,6 +963,58 @@ function lastMutatingResult(toolResults) {
   return lastMutatingTool(toolResults)?.result ?? null;
 }
 
+const READ_ONLY_PROVIDER_TOOLS = new Set([
+  ToolName.PROJECT_INSPECT,
+  ToolName.VALIDATE_ERC,
+  ToolName.VALIDATE_DRC,
+  ToolName.SIMULATE_SPICE
+]);
+const SCHEMATIC_PATCH_NUDGE = 'Call schematic.patch now for this existing project. Put the requested change in args.prompt. Do not call project.inspect or another read-only tool again.';
+
+function providerReturnedOnlyReadOnly(providerResult) {
+  const calls = (providerResult?.events ?? []).filter((event) => event?.type === 'tool.call');
+  if (calls.length === 0) return false;
+  return calls.every((event) => READ_ONLY_PROVIDER_TOOLS.has(event?.payload?.name));
+}
+
+async function executeChatGptReadOnlyTool(call, ctx, projectDir, selection) {
+  const name = call?.name;
+  try {
+    if (name === ToolName.SIMULATE_SPICE) {
+      const result = await simulateProject({
+        projectDir,
+        ngspicePath: ctx.ngspicePath,
+        ...(ctx.runCommandImpl ? { runCommandImpl: ctx.runCommandImpl } : {})
+      });
+      return { ok: true, result: publicSimulateResult(result) };
+    }
+    if (READ_ONLY_PROVIDER_TOOLS.has(name) && name !== ToolName.SIMULATE_SPICE) {
+      const inspect = ctx.inspectProjectImpl ?? inspectProject;
+      const result = await inspect({
+        projectDir,
+        kicadCliPath: ctx.kicadCliPath,
+        ...(ctx.allowedWorkspaceRoot ? { allowedWorkspaceRoot: ctx.allowedWorkspaceRoot } : {}),
+        validateProjectImpl: ctx.validateProjectImpl,
+        validateBoardImpl: ctx.validateBoardImpl,
+        ...(selection !== undefined ? { selection } : {})
+      });
+      return { ok: true, result };
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'DISALLOWED_TOOL',
+        message: `${name ?? 'tool'} is not executed inside the provider loop`
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: { code: error?.code ?? 'TOOL_FAILED', message: error?.message ?? 'Tool failed' }
+    };
+  }
+}
+
 function chatGptFallbackReason(providerResult) {
   const calls = (providerResult?.events ?? []).filter((event) => event?.type === 'tool.call');
   if (calls.length === 0) return 'provider returned no tool call';
@@ -954,7 +1050,7 @@ async function providerLaunchContext({
   inspectionContext,
   inspectResult
 }) {
-  if (provider !== 'grok') return { projectDir };
+  if (provider !== 'grok' && provider !== 'chatgpt') return { projectDir };
 
   let exists = projectExists === true;
   if (allowGenerate === false) exists = true;

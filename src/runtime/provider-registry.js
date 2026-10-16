@@ -383,7 +383,7 @@ export function buildProviderPrompt({
       allowedTools.includes(ToolName.SCHEMATIC_PATCH)
         ? 'args.prompt must be a complete circuit description that keeps the existing design and applies the user request. projectName is optional.'
         : 'args.prompt must describe the circuit to generate.',
-      'Do not emit tool.result. The local daemon executes tools and returns results.',
+      'Do not emit tool.result. Emit one mutating tool call. The daemon previews that call and does not send tool results back.',
       'Do not explore, read, or modify project files.',
       'Do not include API keys, tokens, or credentials in output.'
     ]
@@ -392,7 +392,7 @@ export function buildProviderPrompt({
       'Respond with normal assistant text for reasoning or status.',
       'When you need ChatPCB to act, emit exactly one JSON Lines object on its own line:',
       toolCallShape,
-      'Do not emit tool.result. The local daemon executes tools and returns results.',
+      'Do not emit tool.result. Read-only tools are executed locally, and only those results are sent back on a later turn. Call schematic.patch or schematic.generate to change the design; that call ends the turn.',
       'Do not include API keys, tokens, or credentials in output.'
     ];
 
@@ -414,7 +414,7 @@ export function buildProviderPrompt({
     projectDir ? `Project directory: ${projectDir}` : 'Project directory: not provided'
   );
 
-  if (provider === 'grok' && inspectionContext) {
+  if ((provider === 'grok' || provider === 'chatgpt') && inspectionContext) {
     lines.push(
       '',
       'Existing project inspection context (already collected by the daemon; do not explore files):',

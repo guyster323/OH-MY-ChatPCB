@@ -8,7 +8,7 @@ import {
   saveCredentialsIfCurrent,
   verifyTokenExpiry
 } from '../auth/chatgpt-auth.js';
-import { validateProviderToolCall } from '../provider-process.js';
+import { parseProviderMessage, validateProviderToolCall } from '../provider-process.js';
 import { PROVIDER_ALLOWED_TOOLS } from '../../shared/constants.js';
 
 const RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
@@ -58,6 +58,15 @@ export async function callChatGPTResponses(options = {}) {
   }
 }
 
+const READ_ONLY_TOOLS = new Set([
+  'project.inspect',
+  'validate.erc',
+  'validate.drc',
+  'simulate.spice'
+]);
+const HARD_TURN_CAP = 4;
+const TOOL_OUTPUT_LIMIT = 16_000;
+
 async function callChatGPTResponsesUnlogged({
   prompt,
   onChunk,
@@ -65,7 +74,10 @@ async function callChatGPTResponsesUnlogged({
   signal,
   model,
   allowedTools,
-  timeoutMs
+  timeoutMs,
+  executeTool,
+  maxTurns,
+  toolChoice
 } = {}) {
   const creds = await loadCredentials();
 
@@ -108,23 +120,72 @@ async function callChatGPTResponsesUnlogged({
   const selectedModel = await selectChatGPTModel(accessToken, settings.model);
   const allowed = normalizeAllowedTools(allowedTools);
   const responseTimeout = positiveTimeout(settings.responsesTimeoutMs) ?? DEFAULT_RESPONSES_TIMEOUT_MS;
+  const tools = buildChatGPTFunctionTools(allowed);
+  const choice = resolveToolChoice(toolChoice);
+  const turnCap = resolveTurnCap(maxTurns, executeTool);
+  const content = typeof prompt === 'string' ? prompt : String(prompt ?? '');
+  const input = [{ role: 'user', content }];
+  let finalProse = '';
+  let finalCalls = [];
+  let finalOutputs = [];
 
-  const body = buildResponsesRequest(selectedModel, prompt, buildChatGPTFunctionTools(allowed));
-
-  const streamed = await withResponseTimeout(responseTimeout, signal, async (timedSignal) => {
-    const response = await fetch(RESPONSES_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`
-      },
-      body: JSON.stringify(body),
-      signal: timedSignal
+  for (let turn = 0; turn < turnCap; turn += 1) {
+    if (signal?.aborted) throw signal.reason ?? new Error('ChatGPT request aborted');
+    const body = buildResponsesRequest(selectedModel, input, tools, choice);
+    const streamed = await withResponseTimeout(responseTimeout, signal, async (timedSignal) => {
+      const response = await fetch(RESPONSES_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(body),
+        signal: timedSignal
+      });
+      if (!response.ok) throw await httpError(response, accessToken);
+      return readResponseStream(response);
     });
-    if (!response.ok) throw await httpError(response, accessToken);
-    return readResponseStream(response);
-  });
-  const text = joinProviderText(streamed.text, renderFunctionCalls(streamed.functionCalls, allowed));
+    const turnCalls = collectTurnCalls(streamed, allowed);
+    const prose = stripToolCallLines(streamed.text);
+    const mutating = turnCalls.filter((call) => !READ_ONLY_TOOLS.has(call.name));
+    // A mutating call is previewed by the daemon. Do not execute it here.
+    if (mutating.length > 0) {
+      finalCalls = mutating;
+      finalProse = prose;
+      break;
+    }
+    if (typeof executeTool !== 'function' || turnCalls.length === 0) {
+      finalCalls = turnCalls;
+      finalProse = prose;
+      break;
+    }
+    const outputs = [];
+    for (const call of turnCalls) {
+      outputs.push({ call, output: await executeTool(call) });
+    }
+    if (turn + 1 >= turnCap) {
+      finalCalls = turnCalls;
+      finalProse = prose;
+      finalOutputs = outputs;
+      break;
+    }
+    for (const { call, output } of outputs) {
+      const callId = call.callId || call.id;
+      input.push({
+        type: 'function_call',
+        call_id: callId,
+        name: toApiToolName(call.name),
+        arguments: call.argumentsText
+      });
+      input.push({
+        type: 'function_call_output',
+        call_id: callId,
+        output: clipToolOutput(output)
+      });
+    }
+  }
+
+  const text = joinProviderText(finalProse, renderCollectedCalls(finalCalls, allowed));
   await persistSession(
     { ...activeCreds, access_token: accessToken, last_used_at: Date.now() },
     generation,
@@ -136,7 +197,16 @@ async function callChatGPTResponsesUnlogged({
     : selectedModel;
   logChatGptUsage(reportedModel, streamed.usage, accessToken);
   if (typeof onChunk === 'function' && text) onChunk(text);
-  return { completed: true, text, model: selectedModel };
+  return {
+    completed: true,
+    text,
+    model: selectedModel,
+    readOnlyResults: finalOutputs.map(({ call, output }) => ({
+      id: call.id,
+      name: call.name,
+      output
+    }))
+  };
 }
 
 // Same stderr channel as the project.request decision line. Only the model
@@ -171,16 +241,85 @@ function persistSession(creds, generation, clientId, refreshTokens) {
 // conversation, max_output_tokens, max_tool_calls, metadata, moderation,
 // prompt, prompt_cache_retention, safety_identifier, temperature,
 // top_logprobs, top_p, truncation, user, previous_response_id).
-function buildResponsesRequest(model, prompt, tools) {
-  const content = typeof prompt === 'string' ? prompt : String(prompt ?? '');
+function buildResponsesRequest(model, input, tools, toolChoice = 'auto') {
   return {
     model,
-    input: [{ role: 'user', content }],
+    input,
     tools,
-    tool_choice: 'auto',
+    tool_choice: toolChoice,
     store: false,
     stream: true
   };
+}
+
+function resolveToolChoice(toolChoice) {
+  if (toolChoice == null || toolChoice === 'auto') return 'auto';
+  if (typeof toolChoice === 'object') return toolChoice;
+  return { type: 'function', name: toApiToolName(toolChoice) };
+}
+
+function resolveTurnCap(maxTurns, executeTool) {
+  if (typeof executeTool !== 'function') return 1;
+  const requested = Number.isInteger(maxTurns) && maxTurns > 0 ? maxTurns : HARD_TURN_CAP;
+  return Math.min(requested, HARD_TURN_CAP);
+}
+
+function collectTurnCalls(streamed, allowed) {
+  if (streamed.functionCalls.length > 0) {
+    return streamed.functionCalls.map((call) => normalizeNativeCall(call, allowed));
+  }
+  return parseProviderMessage(streamed.text, allowed)
+    .filter((event) => event.type === 'tool.call')
+    .map((event) => ({
+      id: event.payload.id,
+      callId: event.payload.id,
+      name: event.payload.name,
+      args: event.payload.args,
+      argumentsText: JSON.stringify(event.payload.args ?? {})
+    }));
+}
+
+function normalizeNativeCall(call, allowed) {
+  const apiName = call.name || 'unknown';
+  const argumentsText = typeof call.arguments === 'string' && call.arguments.length > 0 ? call.arguments : '{}';
+  const args = parseToolArguments(argumentsText, apiName);
+  const name = fromApiToolName(apiName, allowed);
+  const id = call.callId || call.itemId || '';
+  validateProviderToolCall({ id, name, args }, allowed);
+  return {
+    id,
+    callId: call.callId || id,
+    itemId: call.itemId || '',
+    name,
+    args,
+    argumentsText
+  };
+}
+
+function renderCollectedCalls(calls, allowed) {
+  return renderFunctionCalls(calls.map((call) => ({
+    name: call.name,
+    callId: call.callId || call.id,
+    itemId: call.itemId || call.id,
+    arguments: call.argumentsText
+  })), allowed);
+}
+
+function stripToolCallLines(text) {
+  return String(text ?? '').split(/\r?\n/).filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) return true;
+    try {
+      return JSON.parse(trimmed)?.type !== 'tool.call';
+    } catch {
+      return true;
+    }
+  }).join('\n');
+}
+
+function clipToolOutput(output) {
+  const text = typeof output === 'string' ? output : JSON.stringify(output ?? null);
+  return clip(text, TOOL_OUTPUT_LIMIT);
 }
 
 function positiveTimeout(value) {

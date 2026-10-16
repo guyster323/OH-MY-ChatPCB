@@ -46,6 +46,31 @@ function previewManifest(plan) {
   return { parts };
 }
 
+function findRemovalBlocker(plan) {
+  const blockers = plan?.review?.findings?.blockers ?? [];
+  return blockers.find((finding) => (
+    finding?.code === 'existing-components-removed' || finding?.id === 'existing-components-removed'
+  )) ?? null;
+}
+
+function removalFailure(plan) {
+  const blocker = findRemovalBlocker(plan);
+  return {
+    requiresApproval: false,
+    approved: true,
+    applied: false,
+    rolledBack: false,
+    files: plan?.targetFiles ?? {},
+    changedFiles: plan?.changedFiles ?? [],
+    diff: plan?.diff ?? '',
+    ...(plan ? { validation: plan.validation, review: plan.review } : {}),
+    reason: {
+      code: 'EXISTING_COMPONENTS_REMOVED',
+      message: blocker?.message ?? 'Existing components were removed. Apply stays closed unless the request explicitly deletes those parts. 기존 부품이 빠졌습니다. 요청에 해당 부품 삭제를 명시하지 않으면 적용할 수 없습니다.'
+    }
+  };
+}
+
 function previewFrom(plan) {
   const preview = publicProposal(plan);
   const manifest = previewManifest(plan);
@@ -199,8 +224,21 @@ export async function applySchematicPatch({
 
   if (!approved) {
     const preview = previewFrom(plan);
+    const blocker = findRemovalBlocker(plan);
+    if (blocker) {
+      preview.requiresApproval = false;
+      preview.reason = {
+        code: 'EXISTING_COMPONENTS_REMOVED',
+        message: blocker.message
+      };
+    }
     if (ownsPlan) await disposeNativeProposal(plan);
     return preview;
+  }
+
+  if (findRemovalBlocker(plan)) {
+    if (ownsPlan) await disposeNativeProposal(plan);
+    return removalFailure(plan);
   }
 
   if (expectedPatchId && expectedPatchId !== plan.proposalId && expectedPatchId !== plan.patchId) {

@@ -888,9 +888,11 @@ test('daemon ignores disallowed provider-emitted project.create calls and falls 
         ]
       })
     );
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
-    assert.equal(result.result.operation, 'patched');
+    // Short modify on an applied board stays fail-closed. Regenerating from
+    // "Add a reset button" would drop parts the request did not restate.
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     await assert.rejects(() => readdir(path.join(outside, 'Escaped-Board')), { code: 'ENOENT' });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -940,8 +942,9 @@ test('daemon retries with corrective note when provider emits only disallowed ca
       }
     );
 
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     assert.equal(callCount, 2);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -979,9 +982,9 @@ test('daemon ignores disallowed schematic.generate on existing project and falls
       })
     );
 
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
-    assert.equal(result.result.operation, 'patched');
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
@@ -1498,8 +1501,9 @@ test('daemon ignores disallowed provider calls with inspect and succeeds via fal
         validateBoardImpl: passingDrc
       }
     );
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     assert.equal(callCount, 2);
 
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
@@ -3450,9 +3454,9 @@ test('daemon ignores disallowed calls from real child process provider and retri
       }
     );
 
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
-    assert.equal(result.result.operation, 'patched');
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     assert.equal(callCount, 2);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
