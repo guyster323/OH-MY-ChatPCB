@@ -2370,7 +2370,9 @@ test('daemon websocket transports approved patch results with large diffs', asyn
     port: 0,
     dispatchOptions: {
       transactionStateRoot: stateRoot,
-      verifyAppliedProjectImpl: passingVerify
+      verifyAppliedProjectImpl: passingVerify,
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc
     }
   });
 

@@ -1172,7 +1172,9 @@ function publicTransaction(record) {
 
 function publicSimulateResult(result) {
   if (!result || typeof result !== 'object') return result;
-  const { stdout, stderr, ...rest } = result;
+  const rest = { ...result };
+  delete rest.stdout;
+  delete rest.stderr;
   return rest;
 }
 

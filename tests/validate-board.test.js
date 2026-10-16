@@ -15,7 +15,7 @@ async function makeProject({ board = true } = {}) {
 }
 
 function successfulRunner(report) {
-  return async (args, options) => {
+  return async (args, _options) => {
     const reportPath = args[args.indexOf('--output') + 1];
     await writeFile(reportPath, JSON.stringify(report), 'utf8');
     return {

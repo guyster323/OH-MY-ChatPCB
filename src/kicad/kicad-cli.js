@@ -20,6 +20,14 @@ const LINUX_CANDIDATES = [
   '/usr/local/bin/kicad-cli'
 ];
 
+let kicadCliDisableWarned = false;
+
+function warnIfKicadCliDisabled(env) {
+  if (env.CHATPCB_KICAD_CLI_DISABLE !== '1' || kicadCliDisableWarned) return;
+  kicadCliDisableWarned = true;
+  console.error('kicad-cli disabled by CHATPCB_KICAD_CLI_DISABLE');
+}
+
 export function resolveKicadCli({
   explicitPath,
   env = process.env,
@@ -28,6 +36,13 @@ export function resolveKicadCli({
   exists = fs.existsSync,
   excludeProjectDir
 } = {}) {
+  // Tests set this so discovery cannot fall through to a host kicad-cli.
+  // Operators who leave it set get one stderr warning and unavailable checks.
+  if (env.CHATPCB_KICAD_CLI_DISABLE === '1') {
+    warnIfKicadCliDisabled(env);
+    return { path: null, source: 'unavailable' };
+  }
+
   if (explicitPath && exists(explicitPath)) {
     return { path: explicitPath, source: 'explicit' };
   }
