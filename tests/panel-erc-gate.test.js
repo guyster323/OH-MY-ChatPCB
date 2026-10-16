@@ -190,6 +190,54 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(faked.sent.length, 1);
     assert.equal(Object.hasOwn(faked.sent[0].args, 'passed'), false);
     assert.equal(Object.hasOwn(faked.sent[0].args, 'ercOverride'), false);
+
+    const ko = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/ko.json'), 'utf8'));
+    const missingRecord = await showPatch(page, {
+      validation: {},
+      inspection: {
+        manifest: {
+          freshness: { status: 'missing', code: 'NO_MANIFEST', reason: 'No ChatPCB manifest exists.' }
+        },
+        validation: {}
+      }
+    });
+    assert.equal(missingRecord.freshnessText, 'missing');
+    assert.equal(missingRecord.freshnessTitle, en['inspection.freshness.no-manifest']);
+    await page.evaluate(() => window.chatpcbI18n.setLang('ko'));
+    const koFreshness = await page.evaluate(() => ({
+      title: document.querySelector('#inspection-freshness').title,
+      text: document.querySelector('#inspection-freshness').textContent
+    }));
+    assert.equal(koFreshness.text, 'missing');
+    assert.equal(koFreshness.title, ko['inspection.freshness.no-manifest']);
+    await page.evaluate(() => window.chatpcbI18n.setLang('en'));
+
+    const matched = await showPatch(page, {
+      validation: passedValidation,
+      inspection: {
+        manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
+        validation: {}
+      }
+    });
+    assert.equal(matched.freshnessText, 'current');
+    assert.equal(matched.freshnessTitle, en['inspection.freshness.match']);
+
+    const mismatched = await showPatch(page, {
+      validation: {},
+      inspection: {
+        manifest: {
+          freshness: {
+            status: 'stale',
+            code: 'DIGEST_MISMATCH',
+            reason: 'Evidence digest abc does not match saved project digest def.'
+          }
+        },
+        validation: {}
+      }
+    });
+    assert.equal(mismatched.freshnessText, 'stale');
+    assert.equal(mismatched.freshnessTitle, en['inspection.freshness.mismatch']);
+    assert.equal(mismatched.freshnessTitle.includes('abc'), false);
   } finally {
     await browser.close();
     await new Promise((resolveClose) => server.close(resolveClose));
@@ -222,6 +270,8 @@ function showPatch(page, state, click) {
       riskText: document.querySelector('#apply-without-erc-risk').textContent,
       ercText: document.querySelector('#patch-erc').textContent,
       ercRole: document.querySelector('#patch-erc').getAttribute('role'),
+      freshnessText: document.querySelector('#inspection-freshness')?.textContent ?? '',
+      freshnessTitle: document.querySelector('#inspection-freshness')?.title ?? '',
       sent
     };
   }, { state, click });

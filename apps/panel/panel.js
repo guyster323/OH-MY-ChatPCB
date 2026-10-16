@@ -119,6 +119,7 @@ window.chatpcbI18n?.onChange(() => {
   renderPatchApproval();
   if (requestStatusKey) requestStatusEl.textContent = t(requestStatusKey, requestStatusVars);
   if (lastProviderStatus) renderProviderStatus(lastProviderStatus);
+  if (inspectionState.result) renderInspection(inspectionState.result);
 });
 
 newProjectFormEl.addEventListener('submit', (event) => {
@@ -710,6 +711,45 @@ function inspectActiveProject() {
   sendToolCall({ id, name: 'project.inspect', args: { projectDir } });
 }
 
+const FRESHNESS_CODES = {
+  NO_MANIFEST: 'no-manifest',
+  LEGACY_SCHEMA: 'legacy',
+  NO_DIGEST: 'no-digest',
+  DIGEST_MISMATCH: 'mismatch',
+  MATCH: 'match',
+  INSPECTION_UNAVAILABLE: 'unavailable'
+};
+
+const FRESHNESS_REASONS = {
+  'No ChatPCB manifest exists.': 'no-manifest',
+  'Schema version 1 has no artifact-bound evidence.': 'legacy',
+  'Schema version 2 has no project digest.': 'no-digest',
+  'Evidence matches the saved project artifacts.': 'match',
+  'Evidence matches.': 'match',
+  'Inspection was unavailable.': 'unavailable',
+  'Legacy evidence.': 'legacy',
+  'Evidence no longer matches.': 'mismatch',
+  'No manifest yet.': 'no-manifest'
+};
+
+function freshnessTitleKey(freshness) {
+  const fromCode = FRESHNESS_CODES[freshness?.code];
+  if (fromCode) return fromCode;
+  const reason = typeof freshness?.reason === 'string' ? freshness.reason : '';
+  if (FRESHNESS_REASONS[reason]) return FRESHNESS_REASONS[reason];
+  if (reason.startsWith('Evidence digest ')) return 'mismatch';
+  if (freshness?.status === 'stale') return 'mismatch';
+  if (freshness?.status === 'current') return 'match';
+  if (freshness?.status === 'legacy-unverified') return 'legacy';
+  if (freshness?.status === 'missing') return 'no-manifest';
+  return 'unknown';
+}
+
+function freshnessTitle(freshness) {
+  const text = t(`inspection.freshness.${freshnessTitleKey(freshness)}`);
+  return text.startsWith('inspection.freshness.') ? t('inspection.freshness.unknown') : text;
+}
+
 function renderInspection(result = {}) {
   const freshness = result.manifest?.freshness ?? {};
   const status = ['current', 'stale', 'legacy-unverified', 'missing'].includes(freshness.status)
@@ -725,7 +765,7 @@ function renderInspection(result = {}) {
   inspectionArtifactCountEl.removeAttribute('data-i18n');
   inspectionErcEl.removeAttribute('data-i18n');
   inspectionDrcEl.removeAttribute('data-i18n');
-  inspectionFreshnessEl.title = freshness.reason ?? '';
+  inspectionFreshnessEl.title = freshnessTitle(freshness);
   inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : t('inspection.empty');
   inspectionArtifactCountEl.textContent = t('inspection.artifacts', { count: Number.isInteger(artifactCount) ? artifactCount : 0 });
   inspectionErcEl.textContent = renderInspectionValidation('ERC', erc);
@@ -736,7 +776,7 @@ function renderInspection(result = {}) {
 
 function renderInspectionFailure() {
   inspectionCardEl.hidden = false;
-  renderInspection({ manifest: { freshness: { status: 'missing', reason: 'Inspection was unavailable.' } } });
+  renderInspection({ manifest: { freshness: { status: 'missing', code: 'INSPECTION_UNAVAILABLE', reason: 'Inspection was unavailable.' } } });
 }
 
 function renderInspectionValidation(label, result) {

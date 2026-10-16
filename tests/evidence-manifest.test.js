@@ -22,7 +22,9 @@ test('schema v2 evidence becomes stale when the saved project digest changes', (
     }]
   });
   assert.deepEqual(evidenceFreshness({ manifest, projectDigest: 'new' }), {
-    status: 'stale', reason: 'Evidence digest 432401d78c6e802fe1867edd4961b6c76a6e4b55e2a6ed441847d5e479ed2d1c does not match saved project digest new.'
+    status: 'stale',
+    code: 'DIGEST_MISMATCH',
+    reason: 'Evidence digest 432401d78c6e802fe1867edd4961b6c76a6e4b55e2a6ed441847d5e479ed2d1c does not match saved project digest new.'
   });
 });
 
@@ -71,6 +73,8 @@ test('v2 manifest digest uses code-point ordering for mixed-case artifact paths'
 
   assert.equal(projectDigestForArtifacts(manifest.artifacts), projectDigest);
   assert.deepEqual(evidenceFreshness({ manifest, projectDigest }), {
-    status: 'current', reason: 'Evidence matches the saved project artifacts.'
+    status: 'current',
+    code: 'MATCH',
+    reason: 'Evidence matches the saved project artifacts.'
   });
 });
