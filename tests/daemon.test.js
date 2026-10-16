@@ -3164,3 +3164,48 @@ test('daemon ignores disallowed calls from real child process provider and retri
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
+
+test('real provider child process reports DISALLOWED_TOOL and UNKNOWN_TOOL', async () => {
+  const fakeProviderPath = path.join(import.meta.dirname, 'fixtures', 'fake-provider-tool-codes.mjs');
+
+  const result = await dispatchToolCall(
+    {
+      id: 'call_provider_tool_codes',
+      name: 'provider.invoke',
+      args: { provider: 'codex', prompt: 'Rollback the last transaction.' }
+    },
+    {
+      checkProviderAvailabilityImpl: async () => ({
+        provider: 'codex',
+        command: process.execPath,
+        available: true,
+        status: 'available'
+      }),
+      getProviderDefinitionImpl: () => ({
+        id: 'codex',
+        label: 'Codex CLI',
+        command: process.execPath,
+        args: [fakeProviderPath],
+        description: 'Test provider'
+      })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.events[0].payload.text, 'Generating circuit draft...');
+  assert.deepEqual(
+    result.result.events.filter((event) => event.type === 'tool.call').map((event) => event.payload.name),
+    ['project.transaction.rollback', 'board.autoroute']
+  );
+  assert.equal(result.result.toolResults.length, 2);
+
+  const byId = new Map(result.result.toolResults.map((toolResult) => [toolResult.id, toolResult]));
+  const disallowed = byId.get('call_disallowed');
+  const unknown = byId.get('call_unknown');
+  assert.equal(disallowed.ok, false);
+  assert.equal(disallowed.error.code, 'DISALLOWED_TOOL');
+  assert.equal(disallowed.error.message, 'project.transaction.rollback is not in the allowed tool list');
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.error.code, 'UNKNOWN_TOOL');
+  assert.equal(unknown.error.message, 'Unknown ChatPCB tool: board.autoroute');
+});

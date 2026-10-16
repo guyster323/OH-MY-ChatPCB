@@ -4,7 +4,7 @@ import { cp, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
+import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
 import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
@@ -21,6 +21,8 @@ import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
+
+const knownChatPcbTools = new Set(KNOWN_CHATPCB_TOOLS);
 
 function computeAllowedToolsForContext({ allowGenerate = false, allowCreate = false } = {}) {
   const tools = new Set(
@@ -306,6 +308,15 @@ async function dispatchSchematicPatch(args, ctx) {
   }
 }
 
+function recoverParsedProviderFailure(error) {
+  if (error?.code !== 'UNKNOWN_TOOL' || !Array.isArray(error.parsedEvents)) return null;
+  return {
+    exitCode: Number.isInteger(error.providerExitCode) ? error.providerExitCode : 0,
+    stderr: typeof error.providerStderr === 'string' ? error.providerStderr : '',
+    events: error.parsedEvents
+  };
+}
+
 async function invokeProvider(call, ctx) {
   const {
     runProviderProcessImpl,
@@ -369,17 +380,26 @@ async function invokeProvider(call, ctx) {
       text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
     });
     let alreadyStreamed = false;
-    const transcript = await runProviderProcessImpl({
-      command: definition.command,
-      args: definition.args,
-      input,
-      allowedToolNames: PROVIDER_ALLOWED_TOOLS,
-      signal: controller.signal,
-      onEvent: (event) => {
-        alreadyStreamed = true;
-        emitProviderEvent(ctx, event);
-      }
-    });
+    let transcript;
+    try {
+      transcript = await runProviderProcessImpl({
+        command: definition.command,
+        args: definition.args,
+        input,
+        allowedToolNames: PROVIDER_ALLOWED_TOOLS,
+        signal: controller.signal,
+        onEvent: (event) => {
+          alreadyStreamed = true;
+          emitProviderEvent(ctx, event);
+        }
+      });
+    } catch (error) {
+      // Unknown tool names reject the child transcript. Keep the parsed events
+      // so a known tool from the same process still reaches DISALLOWED_TOOL.
+      const recovered = recoverParsedProviderFailure(error);
+      if (!recovered) throw error;
+      transcript = recovered;
+    }
     throwIfProviderRunAborted(providerControllers, invocationId, controller);
     if (!alreadyStreamed) {
       for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
@@ -394,6 +414,14 @@ async function invokeProvider(call, ctx) {
     for (const event of transcript.events) {
       throwIfProviderRunAborted(providerControllers, invocationId, controller);
       if (event.type !== 'tool.call') continue;
+
+      if (!knownChatPcbTools.has(event.payload.name)) {
+        toolResults.push({
+          id: event.payload.id,
+          ...failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${event.payload.name}`)
+        });
+        continue;
+      }
 
       let disallowedReason = null;
       if (forceProjectDir && event.payload.name === 'project.create') {

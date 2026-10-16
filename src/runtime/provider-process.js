@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { PROVIDER_ALLOWED_TOOLS } from '../shared/constants.js';
+import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS } from '../shared/constants.js';
 import { createEnvelope } from './envelope.js';
+
+const knownChatPcbTools = new Set(KNOWN_CHATPCB_TOOLS);
 
 export function runProviderProcess({
   command,
@@ -37,6 +39,21 @@ export function runProviderProcess({
     let settled = false;
 
     const allowedTools = new Set(allowedToolNames);
+    const unknownToolErrors = [];
+
+    // Unknown names stay coded as UNKNOWN_TOOL, but the child is allowed to
+    // finish so a known call in the same output still reaches the daemon.
+    const captureProviderLine = (line) => {
+      try {
+        appendProviderLine(events, line, allowedTools, onEvent);
+      } catch (error) {
+        if (error?.code !== 'UNKNOWN_TOOL') throw error;
+        unknownToolErrors.push(error);
+        const payload = error.toolCall;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+        events.push(createEnvelope('tool.call', payload));
+      }
+    };
 
     const timer = setTimeout(() => {
       if (settled) return;
@@ -70,9 +87,10 @@ export function runProviderProcess({
       stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) {
         try {
-          appendProviderLine(events, line, allowedTools, onEvent);
+          captureProviderLine(line);
         } catch (error) {
           fail(error);
+          return;
         }
       }
     });
@@ -96,11 +114,19 @@ export function runProviderProcess({
       signal?.removeEventListener('abort', abortProvider);
       if (stdoutBuffer.trim()) {
         try {
-          appendProviderLine(events, stdoutBuffer, allowedTools, onEvent);
+          captureProviderLine(stdoutBuffer);
         } catch (error) {
           reject(error);
           return;
         }
+      }
+      if (unknownToolErrors.length > 0) {
+        const error = unknownToolErrors[0];
+        error.parsedEvents = events.slice();
+        error.providerExitCode = exitCode ?? 0;
+        error.providerStderr = redactProviderText(stderr.join(''));
+        reject(error);
+        return;
       }
       const transcript = {
         exitCode,
@@ -244,6 +270,13 @@ function redactValue(value) {
   return value;
 }
 
+function unknownProviderToolError(payload) {
+  const error = new Error(`Unsupported provider tool call: ${payload.name}`);
+  error.code = 'UNKNOWN_TOOL';
+  error.toolCall = payload;
+  return error;
+}
+
 function validateProviderToolCall(payload, allowedTools) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Provider tool.call payload must be an object.');
@@ -253,8 +286,12 @@ function validateProviderToolCall(payload, allowedTools) {
     throw new Error('Provider tool.call payload requires an id.');
   }
 
-  if (typeof payload.name !== 'string' || !allowedTools.has(payload.name)) {
+  if (typeof payload.name !== 'string' || payload.name.length === 0) {
     throw new Error(`Unsupported provider tool call: ${payload.name}`);
+  }
+
+  if (!allowedTools.has(payload.name) && !knownChatPcbTools.has(payload.name)) {
+    throw unknownProviderToolError(payload);
   }
 
   if (payload.args !== undefined && (!payload.args || typeof payload.args !== 'object' || Array.isArray(payload.args))) {

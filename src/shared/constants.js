@@ -32,3 +32,11 @@ export const PROVIDER_ALLOWED_TOOLS = [
   ToolName.VALIDATE_DRC,
   ToolName.SIMULATE_SPICE
 ];
+
+// Every tool the daemon can dispatch. Provider output may name these even when
+// they are outside PROVIDER_ALLOWED_TOOLS; the daemon decides DISALLOWED_TOOL.
+export const KNOWN_CHATPCB_TOOLS = [
+  ...Object.values(ToolName),
+  'project.transaction.status',
+  'project.transaction.rollback'
+];
