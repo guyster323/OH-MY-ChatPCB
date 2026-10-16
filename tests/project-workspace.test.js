@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { realpathSync as nodeRealpathSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -185,6 +186,40 @@ test('non-directory project parent becomes UNSAFE_PROJECT_DIR', async () => {
         return true;
       }
     );
+  } finally {
+    await rm(base, { force: true, recursive: true });
+  }
+});
+
+test('non-directory project parent becomes UNSAFE_PROJECT_DIR when realpath reports ENOENT', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'chatpcb-enotdir-enoent-'));
+  const workspaceRoot = path.join(base, 'ws');
+  const file = path.join(workspaceRoot, 'not-a-directory');
+  const projectDir = path.join(file, 'project');
+  await mkdir(workspaceRoot);
+  await writeFile(file, 'x');
+  let reportedEnoent = false;
+  const fsImpl = {
+    realpathSync(candidate) {
+      if (path.resolve(candidate) === path.resolve(projectDir)) {
+        reportedEnoent = true;
+        const error = new Error('ENOENT: no such file or directory, realpath');
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return nodeRealpathSync(candidate);
+    }
+  };
+
+  try {
+    assert.throws(
+      () => assertSafeProjectDir(projectDir, { allowedWorkspaceRoot: workspaceRoot, fsImpl }),
+      (error) => {
+        assertUnsafeCanonical(error, 'ENOTDIR', base, projectDir, file);
+        return true;
+      }
+    );
+    assert.equal(reportedEnoent, true);
   } finally {
     await rm(base, { force: true, recursive: true });
   }
