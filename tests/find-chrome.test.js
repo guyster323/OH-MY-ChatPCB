@@ -442,13 +442,18 @@ test('win32 lookup finds chrome-headless-shell.exe in a browsers directory', asy
   }
 });
 
-test('a non-executable headless shell file is not a browser', async () => {
+test('a non-executable headless shell file is not a browser', {
+  skip: process.platform === 'win32'
+    ? 'Windows has no executable bit; win32 requires the .exe name instead'
+    : false
+}, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-headless-shell-mode-'));
   const shell = headlessShell(root, '1223');
   try {
     await mkdir(path.dirname(shell), { recursive: true });
     await writeFile(shell, '');
     await chmod(shell, 0o644);
+    assert.equal(await isExecutableFile(shell), false);
     const found = await findChrome({
       env: { PLAYWRIGHT_BROWSERS_PATH: root },
       platform: 'linux',
@@ -464,6 +469,84 @@ test('a non-executable headless shell file is not a browser', async () => {
     assert.match(found.reason, /--only-shell/);
     assert.match(found.reason, /CHATPCB_CHROME_PATH/);
     assert.match(found.reason, /chrome-headless-shell/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('win32 requires the .exe name instead of an executable bit', async () => {
+  const extensionless = path.win32.join('C:\\ms-playwright', 'chrome-headless-shell-win64', 'chrome-headless-shell');
+  const executable = path.win32.join('C:\\ms-playwright', 'chrome-headless-shell-win64', 'chrome-headless-shell.EXE');
+  const rejected = await findChrome({
+    env: { PLAYWRIGHT_BROWSERS_PATH: 'C:\\ms-playwright-empty' },
+    platform: 'win32',
+    arch: 'x64',
+    playwrightExecutablePath: '',
+    playwrightHeadlessShellPath: extensionless,
+    listDir: async () => [],
+    exists: async (candidate) => candidate === extensionless
+  });
+
+  assert.equal(rejected.path, null);
+  assert.equal(rejected.source, 'unavailable');
+  assert.match(rejected.reason, /chrome-headless-shell/);
+  assert.match(rejected.reason, /npx playwright install chromium/);
+  assert.match(rejected.reason, /--only-shell/);
+  assert.match(rejected.reason, /CHATPCB_CHROME_PATH/);
+
+  const accepted = await findChrome({
+    env: { PLAYWRIGHT_BROWSERS_PATH: path.join(tmpdir(), 'chatpcb-no-such-browsers') },
+    platform: 'win32',
+    arch: 'arm64',
+    playwrightExecutablePath: '',
+    playwrightHeadlessShellPath: executable,
+    listDir: async () => {
+      throw new Error('registry path should win before the cache is scanned');
+    },
+    exists: async (candidate) => candidate === executable
+  });
+  assert.equal(accepted.path, executable);
+  assert.equal(accepted.source, 'playwright-headless-shell');
+
+  const override = await findChrome({
+    env: { CHATPCB_CHROME_PATH: 'D:\\Tools\\chrome' },
+    platform: 'win32',
+    arch: 'x64',
+    playwrightExecutablePath: '',
+    exists: async () => true
+  });
+  assert.equal(override.path, null);
+  assert.match(override.reason, /CHATPCB_CHROME_PATH is set but is not an executable file: D:\\Tools\\chrome/);
+
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-headless-shell-win-mode-'));
+  const shell = path.join(
+    root,
+    'chromium_headless_shell-1223',
+    'chrome-headless-shell-win64',
+    'chrome-headless-shell.exe'
+  );
+  try {
+    await mkdir(path.dirname(shell), { recursive: true });
+    await writeFile(shell, '');
+    await chmod(shell, 0o644);
+    const found = await findChrome({
+      env: { PLAYWRIGHT_BROWSERS_PATH: root },
+      platform: 'win32',
+      arch: 'x64',
+      playwrightExecutablePath: '',
+      playwrightHeadlessShellPath: '',
+      exists: async (candidate) => {
+        if (candidate !== shell) return false;
+        try {
+          return (await stat(candidate)).isFile();
+        } catch {
+          return false;
+        }
+      }
+    });
+
+    assert.equal(found.path, shell);
+    assert.equal(found.source, 'playwright-headless-shell');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -549,31 +632,7 @@ test(`Playwright ${playwrightVersion} headless shell registry contract`, async (
 });
 
 test('headless shell lookup uses the default ms-playwright cache when PLAYWRIGHT_BROWSERS_PATH is unset', async () => {
-  const home = await mkdtemp(path.join(tmpdir(), 'chatpcb-home-cache-'));
-  const shell = path.join(
-    home,
-    '.cache',
-    'ms-playwright',
-    'chromium_headless_shell-1223',
-    'chrome-headless-shell-linux64',
-    'chrome-headless-shell'
-  );
-  try {
-    await writeExecutable(shell);
-    const found = await findChrome({
-      env: { HOME: home, XDG_CACHE_HOME: '', PLAYWRIGHT_BROWSERS_PATH: '' },
-      platform: 'linux',
-      arch: 'x64',
-      playwrightExecutablePath: '',
-      playwrightHeadlessShellPath: '',
-      exists: async (candidate) => candidate === shell && await isExecutableFile(candidate)
-    });
-
-    assert.equal(found.path, shell);
-    assert.equal(found.source, 'playwright-headless-shell');
-  } finally {
-    await rm(home, { recursive: true, force: true });
-  }
+  await assertDefaultCache(linuxDefaultCache);
 });
 
 test('a missing Playwright registry falls back to chromium_headless_shell-* under PLAYWRIGHT_BROWSERS_PATH', async () => {
@@ -599,33 +658,7 @@ test('a missing Playwright registry falls back to chromium_headless_shell-* unde
 });
 
 test('a throwing Playwright registry falls back to the default ms-playwright cache', async () => {
-  const home = await mkdtemp(path.join(tmpdir(), 'chatpcb-registry-home-'));
-  const shell = path.join(
-    home,
-    '.cache',
-    'ms-playwright',
-    'chromium_headless_shell-1223',
-    'chrome-headless-shell-linux64',
-    'chrome-headless-shell'
-  );
-  try {
-    await writeExecutable(shell);
-    const found = await findChrome({
-      env: { HOME: home, XDG_CACHE_HOME: '', PLAYWRIGHT_BROWSERS_PATH: '' },
-      platform: 'linux',
-      arch: 'x64',
-      playwrightExecutablePath: '',
-      readPlaywrightHeadlessShellRegistry: () => {
-        throw new Error('playwright registry internals missing');
-      },
-      exists: async (candidate) => candidate === shell && await isExecutableFile(candidate)
-    });
-
-    assert.equal(found.path, shell);
-    assert.equal(found.source, 'playwright-headless-shell');
-  } finally {
-    await rm(home, { recursive: true, force: true });
-  }
+  await assertDefaultCache(linuxDefaultCache, { throwingRegistry: true });
 });
 
 test('registry and cache misses leave no headless shell', async () => {
@@ -748,5 +781,166 @@ async function isExecutableFile(candidate) {
     return (await stat(candidate)).isFile();
   } catch {
     return false;
+  }
+}
+
+const linuxDefaultCache = {
+  platform: 'linux',
+  arch: 'x64',
+  env(home) {
+    return {
+      HOME: home,
+      USERPROFILE: path.join(home, 'Profile'),
+      LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+      XDG_CACHE_HOME: '',
+      PLAYWRIGHT_BROWSERS_PATH: ''
+    };
+  },
+  shell(home) {
+    return path.join(
+      home,
+      '.cache',
+      'ms-playwright',
+      'chromium_headless_shell-1223',
+      'chrome-headless-shell-linux64',
+      'chrome-headless-shell'
+    );
+  }
+};
+
+function cacheLayout({ label, platform, arch, env, segments }) {
+  return {
+    label,
+    platform,
+    arch,
+    env,
+    shell(home) {
+      return path.join(home, ...segments);
+    }
+  };
+}
+
+const otherOsDefaultCaches = [
+  cacheLayout({
+    label: 'darwin arm64',
+    platform: 'darwin',
+    arch: 'arm64',
+    env(home) {
+      return {
+        HOME: home,
+        USERPROFILE: path.join(home, 'Profile'),
+        LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+        XDG_CACHE_HOME: path.join(home, '.cache'),
+        PLAYWRIGHT_BROWSERS_PATH: ''
+      };
+    },
+    segments: [
+      'Library',
+      'Caches',
+      'ms-playwright',
+      'chromium_headless_shell-1223',
+      'chrome-headless-shell-mac-arm64',
+      'chrome-headless-shell'
+    ]
+  }),
+  cacheLayout({
+    label: 'darwin x64',
+    platform: 'darwin',
+    arch: 'x64',
+    env(home) {
+      return {
+        HOME: home,
+        USERPROFILE: path.join(home, 'Profile'),
+        LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+        XDG_CACHE_HOME: path.join(home, '.cache'),
+        PLAYWRIGHT_BROWSERS_PATH: ''
+      };
+    },
+    segments: [
+      'Library',
+      'Caches',
+      'ms-playwright',
+      'chromium_headless_shell-1223',
+      'chrome-headless-shell-mac-x64',
+      'chrome-headless-shell'
+    ]
+  }),
+  cacheLayout({
+    label: 'win32 x64',
+    platform: 'win32',
+    arch: 'x64',
+    env(home) {
+      return {
+        HOME: path.join(home, 'Home'),
+        USERPROFILE: path.join(home, 'Profile'),
+        LOCALAPPDATA: path.join(home, 'LocalAppData'),
+        XDG_CACHE_HOME: path.join(home, '.cache'),
+        PLAYWRIGHT_BROWSERS_PATH: ''
+      };
+    },
+    segments: [
+      'LocalAppData',
+      'ms-playwright',
+      'chromium_headless_shell-1223',
+      'chrome-headless-shell-win64',
+      'chrome-headless-shell.exe'
+    ]
+  }),
+  cacheLayout({
+    label: 'win32 arm64',
+    platform: 'win32',
+    arch: 'arm64',
+    env(home) {
+      return {
+        USERPROFILE: home,
+        XDG_CACHE_HOME: path.join(home, '.cache'),
+        PLAYWRIGHT_BROWSERS_PATH: ''
+      };
+    },
+    segments: [
+      'AppData',
+      'Local',
+      'ms-playwright',
+      'chromium_headless_shell-1223',
+      'chrome-headless-shell-win64',
+      'chrome-headless-shell.exe'
+    ]
+  })
+];
+
+for (const layout of otherOsDefaultCaches) {
+  test(`headless shell lookup uses the default ms-playwright cache on ${layout.label} when PLAYWRIGHT_BROWSERS_PATH is unset`, async () => {
+    await assertDefaultCache(layout);
+  });
+
+  test(`a throwing Playwright registry falls back to the default ms-playwright cache on ${layout.label}`, async () => {
+    await assertDefaultCache(layout, { throwingRegistry: true });
+  });
+}
+
+async function assertDefaultCache(layout, { throwingRegistry = false } = {}) {
+  const home = await mkdtemp(path.join(tmpdir(), `chatpcb-default-cache-${layout.platform}-`));
+  const shell = layout.shell(home);
+  try {
+    await writeExecutable(shell);
+    const found = await findChrome({
+      env: layout.env(home),
+      platform: layout.platform,
+      arch: layout.arch,
+      playwrightExecutablePath: '',
+      ...(throwingRegistry
+        ? {
+          readPlaywrightHeadlessShellRegistry() {
+            throw new Error('playwright registry internals missing');
+          }
+        }
+        : { playwrightHeadlessShellPath: '' }),
+      exists: async (candidate) => candidate === shell && await isExecutableFile(candidate)
+    });
+
+    assert.equal(found.path, shell);
+    assert.equal(found.source, 'playwright-headless-shell');
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
 }

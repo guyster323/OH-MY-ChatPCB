@@ -52,7 +52,7 @@ export async function findChrome({
 } = {}) {
   const override = envOverride(env);
   if (override) {
-    if (await canExecute(override.path, exists)) {
+    if (await canExecute(override.path, exists, platform)) {
       return { path: override.path, source: 'env' };
     }
     return {
@@ -63,13 +63,13 @@ export async function findChrome({
   }
 
   const bundled = playwrightChromiumPath(playwrightExecutablePath);
-  if (await canExecute(bundled, exists)) {
+  if (await canExecute(bundled, exists, platform)) {
     return { path: bundled, source: 'playwright' };
   }
 
   const candidates = platformCandidates(platform, env);
   for (const candidate of candidates) {
-    if (await canExecute(candidate, exists)) {
+    if (await canExecute(candidate, exists, platform)) {
       return { path: candidate, source: platform };
     }
   }
@@ -150,7 +150,7 @@ async function findHeadlessShell({ env, platform, arch, explicitPath, readRegist
     : await registryHeadlessShellPath({ env, platform, arch, exists, listDir, readRegistry });
   if (registryPath) {
     checked.push(registryPath);
-    if (await canExecute(registryPath, exists)) return { path: registryPath, checked };
+    if (await canExecute(registryPath, exists, platform)) return { path: registryPath, checked };
   }
 
   const scanned = await scanHeadlessShellCache({ env, platform, arch, exists, listDir });
@@ -160,7 +160,7 @@ async function findHeadlessShell({ env, platform, arch, explicitPath, readRegist
 
 async function scanHeadlessShellCache({ env, platform, arch, exists, listDir }) {
   const checked = [];
-  const root = browsersCacheDir(env);
+  const root = browsersCacheDir(env, platform);
   if (!root) return { path: null, checked };
   let names;
   try {
@@ -175,7 +175,7 @@ async function scanHeadlessShellCache({ env, platform, arch, exists, listDir }) 
     for (const parts of headlessShellLayouts(platform, arch)) {
       const candidate = path.join(root, dirName, ...parts);
       checked.push(candidate);
-      if (await canExecute(candidate, exists)) return { path: candidate, checked };
+      if (await canExecute(candidate, exists, platform)) return { path: candidate, checked };
     }
   }
   return { path: null, checked };
@@ -249,7 +249,7 @@ function readPrivateRegistryHeadlessShellPath() {
   }
 }
 
-function browsersCacheDir(env) {
+function browsersCacheDir(env, platform) {
   const configured = stringValue(env.PLAYWRIGHT_BROWSERS_PATH);
   if (configured === '0') {
     try {
@@ -263,7 +263,7 @@ function browsersCacheDir(env) {
     const base = stringValue(env.INIT_CWD) || process.cwd();
     return path.resolve(base, configured);
   }
-  return defaultMsPlaywrightDir(env, process.platform);
+  return defaultMsPlaywrightDir(env, platform);
 }
 
 function defaultMsPlaywrightDir(env, platform) {
@@ -340,8 +340,10 @@ function unique(values) {
   return result;
 }
 
-async function canExecute(candidate, exists) {
+async function canExecute(candidate, exists, platform) {
   if (typeof candidate !== 'string' || candidate === '') return false;
+  // Windows has no executable-permission bit. A browser there is a *.exe file.
+  if (platform === 'win32' && path.win32.extname(candidate).toLowerCase() !== '.exe') return false;
   try {
     return Boolean(await exists(candidate));
   } catch {
