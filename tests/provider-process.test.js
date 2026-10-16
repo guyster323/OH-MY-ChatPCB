@@ -13,8 +13,10 @@ import {
   killProviderGroupNow,
   noteActiveProviderGroup,
   parseProcStatStartTime,
+  processGroupAlive,
   providerProcessCommand,
   pruneDeadProviderGroups,
+  quoteWindowsCommand,
   runProviderProcess
 } from '../src/runtime/provider-process.js';
 import { PROMPT_FILE_PLACEHOLDER } from '../src/runtime/provider-registry.js';
@@ -609,8 +611,8 @@ test('Windows shim caret-escapes cmd metacharacters and double-escapes batch shi
   const args = ['a&b', 'c^d', 'e%f', 'two words', 'say "hi"', '100% done', 'a|b', ''];
   // cmd /d /s /c does not collapse %%. Match cross-spawn: caret-escape meta chars,
   // and escape .cmd/.bat arguments twice because cmd re-parses batch arguments.
-  const doubleEscaped = '"grok.cmd ^^^"a^^^&b^^^" ^^^"c^^^^d^^^" ^^^"e^^^%f^^^" ^^^"two^^^ words^^^" ^^^"say^^^ \\^^^"hi\\^^^"^^^" ^^^"100^^^%^^^ done^^^" ^^^"a^^^|b^^^" ^^^"^^^""';
-  const singleEscaped = '"grok ^"a^&b^" ^"c^^d^" ^"e^%f^" ^"two^ words^" ^"say^ \\^"hi\\^"^" ^"100^%^ done^" ^"a^|b^" ^"^""';
+  const doubleEscaped = '"grok.cmd ^^^"a^^^&b^^^" ^^^"c^^^^d^^^" ^^^"e^^^%f^^^" ^^^"two^^^ words^^^" ^^^"say^^^ \\^^^"hi\\^^^"^^^" ^^^"100^^^%^^^ done^^^" ^^^"a^^^|b^^^" """';
+  const singleEscaped = '"grok ^"a^&b^" ^"c^^d^" ^"e^%f^" ^"two^ words^" ^"say^ \\^"hi\\^"^" ^"100^%^ done^" ^"a^|b^" """';
 
   const shim = providerProcessCommand('grok.cmd', args, 'win32');
   assert.equal(shim.windowsShim, true);
@@ -636,6 +638,77 @@ test('Windows shim caret-escapes cmd metacharacters and double-escapes batch shi
   const posix = providerProcessCommand('grok.cmd', ['a&b'], 'linux');
   assert.equal(posix.windowsShim, false);
   assert.deepEqual(posix.args, ['a&b']);
+});
+
+test('quoteWindowsCommand quotes an argument only when cmd would reparse it', () => {
+  // Plain tokens stay bare so a batch shim's %1 is hello, not "hello".
+  assert.equal(
+    quoteWindowsCommand('fake-provider.cmd', ['hello', 'two words']),
+    '"fake-provider.cmd hello ^^^"two^^^ words^^^""'
+  );
+  assert.equal(
+    quoteWindowsCommand('grok.cmd', ['--output-format', 'json', '--permission-mode', 'plan']),
+    '"grok.cmd --output-format json --permission-mode plan"'
+  );
+  assert.equal(quoteWindowsCommand('grok.cmd', ['']), '"grok.cmd """');
+  assert.equal(quoteWindowsCommand('grok', ['']), '"grok """');
+
+  // % is caret-escaped, not doubled: cmd /d /s /c does not collapse %%.
+  // .cmd/.bat arguments are escaped twice because the shim re-parses them.
+  assert.equal(
+    quoteWindowsCommand('grok.cmd', ['100%', 'a&b']),
+    '"grok.cmd ^^^"100^^^%^^^" ^^^"a^^^&b^^^""'
+  );
+  assert.equal(
+    quoteWindowsCommand('grok', ['100%', 'a&b']),
+    '"grok ^"100^%^" ^"a^&b^""'
+  );
+  assert.equal(
+    quoteWindowsCommand('grok.cmd', ['board 100% done & "ok"']),
+    '"grok.cmd ^^^"board^^^ 100^^^%^^^ done^^^ ^^^&^^^ \\^^^"ok\\^^^"^^^""'
+  );
+  assert.equal(quoteWindowsCommand('grok.cmd', ['100%']).includes('%%'), false);
+
+  const shim = providerProcessCommand('fake-provider.cmd', ['hello', 'two words'], 'win32');
+  assert.equal(shim.args[3], '"fake-provider.cmd hello ^^^"two^^^ words^^^""');
+});
+
+test('processGroupAlive treats EPERM as a group that cannot be signalled', () => {
+  const killError = (code) => () => {
+    const error = new Error(`kill ${code}`);
+    error.code = code;
+    throw error;
+  };
+
+  const eperm = (pid, signal) => {
+    assert.equal(pid, -42);
+    assert.equal(signal, 0);
+    killError('EPERM')();
+  };
+  assert.equal(processGroupAlive(42, { kill: eperm, platform: 'darwin' }), false);
+  assert.equal(processGroupAlive(42, { kill: eperm, platform: 'linux' }), false);
+  assert.equal(processGroupAlive(42, { kill: killError('ESRCH'), platform: 'darwin' }), false);
+
+  let probed = false;
+  assert.equal(processGroupAlive(7, {
+    kill(pid, signal) {
+      probed = true;
+      assert.equal(pid, -7);
+      assert.equal(signal, 0);
+    },
+    platform: 'darwin'
+  }), true);
+  assert.equal(probed, true);
+  // An unexpected probe error is not proof the group exited.
+  assert.equal(processGroupAlive(42, { kill: killError('EACCES'), platform: 'darwin' }), true);
+  let windowsProbed = false;
+  assert.equal(processGroupAlive(42, {
+    kill() {
+      windowsProbed = true;
+    },
+    platform: 'win32'
+  }), false);
+  assert.equal(windowsProbed, false);
 });
 
 test('aborts during prompt write without spawning', async () => {
@@ -1191,7 +1264,7 @@ async function assertLeaderlessGroupKilled(signal) {
     pids = JSON.parse(await readFile(pidFile, 'utf8'));
     assert.equal(typeof pids.provider, 'number');
     assert.equal(typeof pids.grandchild, 'number');
-    assert.throws(() => process.kill(pids.provider, 0), { code: 'ESRCH' });
+    assert.throws(() => process.kill(pids.provider, 0), (error) => processProbeExited(error));
     process.kill(pids.grandchild, 0);
 
     const exited = waitForProcessExit(parent, 2000);
@@ -1284,7 +1357,8 @@ try {
     try {
       process.kill(-pids.provider, 0);
     } catch (error) {
-      if (error.code === 'ESRCH') {
+      // EPERM matches processGroupAlive: the group id is not signallable.
+      if (error.code === 'ESRCH' || error.code === 'EPERM') {
         groupGone = true;
         break;
       }
@@ -1363,7 +1437,7 @@ function waitForLeader(pid) {
       if (pgrp !== pid) throw new Error('sleeper is not a process group leader');
       return;
     } catch (error) {
-      if (error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
+      if (error.code !== 'ESRCH' && error.code !== 'ENOENT' && error.code !== 'EPERM') throw error;
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   }
@@ -1391,8 +1465,9 @@ try {
   const liveAfter = activeProviderGroupIds().includes(sleeper.pid);
   const scheduledWhileLive = providerGroupPruneScheduled();
   process.kill(-sleeper.pid, 'SIGKILL');
-  // setTimeout, not a blocking wait: the sleeper is this process's child, and a
-  // zombie still answers kill(-pid, 0) until the event loop reaps it.
+  // setTimeout, not a blocking wait, so this process can reap its child.
+  // Linux kill(-pid, 0) succeeds for a zombie until that reap. macOS returns
+  // EPERM for the same zombie; processGroupAlive treats EPERM as not signallable.
   const groupGone = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => resolve(false), 2000);
     const poll = () => {
@@ -1401,7 +1476,7 @@ try {
         setTimeout(poll, 20);
       } catch (error) {
         clearTimeout(timer);
-        if (error.code === 'ESRCH') resolve(true);
+        if (error.code === 'ESRCH' || error.code === 'EPERM') resolve(true);
         else reject(error);
       }
     };
@@ -1477,7 +1552,7 @@ async function waitForGroupLeader(pid) {
       const pgrp = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[2]);
       if (pgrp === pid) return;
     } catch (error) {
-      if (error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
+      if (error.code !== 'ESRCH' && error.code !== 'ENOENT' && error.code !== 'EPERM') throw error;
     }
     await delay(20);
   }
@@ -1677,18 +1752,25 @@ async function waitForJson(filePath) {
   throw new Error(`Timed out waiting for ${filePath}`);
 }
 
+function processProbeExited(error) {
+  // ESRCH: no such process. EPERM: macOS kill(pid, 0) and kill(-pgid, 0) report
+  // this for a zombie or an exited member that cannot be reaped. processGroupAlive
+  // treats that group as not signallable, so the probe counts as gone.
+  return error?.code === 'ESRCH' || error?.code === 'EPERM';
+}
+
 async function assertPidGone(pid) {
   const started = Date.now();
   while (Date.now() - started < 2000) {
     try {
       process.kill(pid, 0);
     } catch (error) {
-      assert.equal(error.code, 'ESRCH');
-      return;
+      if (processProbeExited(error)) return;
+      throw error;
     }
     await delay(25);
   }
-  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  assert.throws(() => process.kill(pid, 0), (error) => processProbeExited(error));
 }
 
 function forceKillTree(pid) {

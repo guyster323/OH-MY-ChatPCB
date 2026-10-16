@@ -818,7 +818,7 @@ export function killProviderGroupNow(pid) {
   try {
     process.kill(-pid, 'SIGKILL');
   } catch (error) {
-    if (error?.code === 'ESRCH') return;
+    if (error?.code === 'ESRCH' || error?.code === 'EPERM') return;
     // The group is not signalable. Shutdown still has to finish.
   }
 }
@@ -831,7 +831,10 @@ function signalProcessGroup(child, signal) {
   try {
     process.kill(-child.pid, signal);
   } catch (error) {
-    if (error?.code === 'ESRCH') return;
+    // EPERM: the id exists but no member can be signalled. Do not fall back
+    // to the leader pid; macOS reports this for a zombie group, and that pid
+    // may already belong to someone else.
+    if (error?.code === 'ESRCH' || error?.code === 'EPERM') return;
     try {
       child.kill(signal);
     } catch {
@@ -840,13 +843,25 @@ function signalProcessGroup(child, signal) {
   }
 }
 
-function processGroupAlive(pid) {
-  if (!pid || process.platform === 'win32') return false;
+// kill defaults to process.kill so tests can inject EPERM without a process group.
+export function processGroupAlive(pid, { kill = process.kill, platform = process.platform } = {}) {
+  if (!pid || platform === 'win32') return false;
   try {
-    process.kill(-pid, 0);
+    kill(-pid, 0);
     return true;
   } catch (error) {
-    return error?.code !== 'ESRCH';
+    // ESRCH: the process group is gone.
+    // EPERM: the group id still exists, but no member can be signalled. macOS
+    // returns this when the group has only zombie or exited members that cannot
+    // be reaped, and when a member has called setsid() and sits in another
+    // session. A signal cannot reach a live child in that group.
+    // Prune treats the id as finished. Keeping it would leak the tracking entry
+    // (the timer never goes idle) and, once the pid is reused, could SIGKILL an
+    // unrelated group. macOS has no start-time check to tell that group apart.
+    // Any other probe error still counts as alive, so a transient failure does
+    // not abandon a group that might still accept a signal.
+    if (error?.code === 'ESRCH' || error?.code === 'EPERM') return false;
+    return true;
   }
 }
 
@@ -905,8 +920,11 @@ function delay(ms) {
 // cmd.exe metacharacters. %% is not collapsed to % on `cmd /d /s /c`, so % is caret-escaped.
 // Same set cross-spawn uses, including space and backtick.
 const CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
+// Quote only these. A plain token such as "hello" must stay bare: a batch file's
+// %1 keeps the quote characters, so always-quoting turns hello into "hello".
+const WINDOWS_ARG_NEEDS_QUOTES = /[\s()[\]%!^"`<>&|;,*?]/;
 
-function quoteWindowsCommand(command, args) {
+export function quoteWindowsCommand(command, args) {
   // Batch shims re-parse arguments, so .cmd/.bat arguments are escaped twice.
   const doubleEscape = /\.(?:cmd|bat)$/i.test(command);
   const shellCommand = [
@@ -922,11 +940,17 @@ function escapeCmdCommand(command) {
 }
 
 function escapeCmdArgument(arg, doubleEscape) {
-  let text = `${arg}`;
+  const text = `${arg}`;
+  if (text.length === 0) return '""';
+  if (!WINDOWS_ARG_NEEDS_QUOTES.test(text)) return text;
+
+  let escaped = text;
   // Match cross-spawn: double backslashes that sit before a quote or the end of the string.
-  text = text.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"');
-  text = text.replace(/(?=(\\+?)?)\1$/, '$1$1');
-  text = `"${text}"`.replace(CMD_META_CHARS, '^$1');
-  if (doubleEscape) text = text.replace(CMD_META_CHARS, '^$1');
-  return text;
+  escaped = escaped.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"');
+  escaped = escaped.replace(/(?=(\\+?)?)\1$/, '$1$1');
+  escaped = `"${escaped}"`.replace(CMD_META_CHARS, '^$1');
+  // A .cmd/.bat shim re-parses the command line, so one caret level is consumed
+  // before the target (Node, for a grok shim) sees % and other metacharacters.
+  if (doubleEscape) escaped = escaped.replace(CMD_META_CHARS, '^$1');
+  return escaped;
 }
