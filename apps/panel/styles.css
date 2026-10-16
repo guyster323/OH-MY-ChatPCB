@@ -37,6 +37,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .patch-cta-hero h2 { font-size: 14px; }
 #patch-approval-lead { color: #334155; font-size: 12px; line-height: 1.4; }
 #approve-patch-button { background: #0f766e; border-color: #0f766e; min-height: 36px; }
+#approve-patch-button[aria-disabled="true"] { background: #eef1f9; color: #545b78; border-color: #e0e4f1; cursor: not-allowed; }
+#apply-why { margin: 0; color: #545b78; font-size: 14px; line-height: 1.4; }
+.erc { display: grid; gap: 4px; padding: 8px; border-radius: 8px; background: #fdeaec; color: #b4232f; }
+.erc.erc-pass { background: #e6f5ec; color: #16703f; }
+.erc-h { display: flex; justify-content: space-between; font-weight: 700; font-size: 14px; }
+.erc ul { display: grid; gap: 2px; margin: 0; padding-left: 1.1em; }
+.erc li { font-size: 14px; }
 #cancel-patch-button { background: #fff; color: #334155; border-color: #94a3b8; }
 .request-progress { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 72px; overflow: auto; flex: 0 0 auto; }
 .request-progress li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 8px; align-items: start; border-radius: 8px; padding: 6px 8px; background: #f8fafc; }

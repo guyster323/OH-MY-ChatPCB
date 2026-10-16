@@ -21,7 +21,10 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="inspection-drc"/);
   assert.match(html, /id="approve-patch-button"/);
   assert.match(html, /id="request-progress"/);
-  assert.match(html, /스키매틱에 적용/);
+  assert.match(html, /Apply to schematic/);
+  assert.match(html, /id="apply-why"/);
+  assert.match(html, /id="fix-patch-button"/);
+  assert.match(html, /aria-label="Approve"/);
   assert.match(html, /sprites\/preview\.png/);
   assert.match(html, /id="kicad-link"/);
   assert.match(html, /id="recheck-kicad-button"/);

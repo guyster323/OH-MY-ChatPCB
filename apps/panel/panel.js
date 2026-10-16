@@ -69,6 +69,9 @@ const patchApprovalCardEl = document.querySelector('#patch-approval-card');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
+const fixPatchButtonEl = document.querySelector('#fix-patch-button');
+const applyWhyEl = document.querySelector('#apply-why');
+const patchErcEl = document.querySelector('#patch-erc');
 const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
 const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
@@ -96,6 +99,7 @@ connect();
 syncWorkflow();
 window.chatpcbI18n?.onChange(() => {
   syncWorkflow();
+  renderPatchApproval();
 });
 
 newProjectFormEl.addEventListener('submit', (event) => {
@@ -115,6 +119,7 @@ openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
+fixPatchButtonEl?.addEventListener('click', askChatpcbToFixErc);
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
@@ -607,8 +612,120 @@ function clearPatchApproval(message = 'No patch preview active.') {
   patchApprovalStatusEl.dataset.state = 'idle';
   patchApprovalStatusEl.textContent = message;
   approvePatchButtonEl.disabled = true;
+  approvePatchButtonEl.removeAttribute('aria-disabled');
+  approvePatchButtonEl.removeAttribute('aria-describedby');
   cancelPatchButtonEl.disabled = true;
+  if (applyWhyEl) {
+    applyWhyEl.hidden = true;
+    applyWhyEl.textContent = '';
+  }
+  if (patchErcEl) {
+    patchErcEl.hidden = true;
+    patchErcEl.removeAttribute('role');
+    patchErcEl.replaceChildren();
+  }
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
+}
+
+function numericCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function ercMessagesFrom(source) {
+  if (!source || typeof source !== 'object') return [];
+  const messages = [];
+  for (const list of [source.errors, source.violations, source.messages]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (typeof item === 'string' && item.trim()) {
+        messages.push(item.trim());
+        continue;
+      }
+      if (!item || typeof item !== 'object') continue;
+      if (item.severity && item.severity !== 'error') continue;
+      const text = item.message || item.description || item.text;
+      if (typeof text === 'string' && text.trim()) messages.push(text.trim());
+    }
+  }
+  return messages;
+}
+
+function readErcSource(source) {
+  if (!source || typeof source !== 'object') return null;
+  const erc = source.erc && typeof source.erc === 'object' ? source.erc : null;
+  const nested = erc?.erc && typeof erc.erc === 'object' ? erc.erc : null;
+  const skipped = source.skipped === true || erc?.skipped === true;
+  const errorCount = numericCount(nested?.errorCount ?? erc?.errorCount ?? source.errorCount);
+  let ok;
+  if (source.ok === false || erc?.ok === false || nested?.ok === false) ok = false;
+  else if (source.ok === true || erc?.ok === true || nested?.ok === true) ok = true;
+  const messages = [...ercMessagesFrom(nested), ...ercMessagesFrom(erc), ...ercMessagesFrom(source)];
+  if (messages.length === 0 && ok === false) {
+    const reason = source.reason?.message || erc?.reason?.message || nested?.reason?.message;
+    if (typeof reason === 'string' && reason.trim()) messages.push(reason.trim());
+  }
+  return { skipped, errorCount, ok, messages: [...new Set(messages)] };
+}
+
+function ercBlockState() {
+  const sources = [
+    lastRequestResult?.validation,
+    inspectionState.result?.validation,
+    inspectionState.result?.validation?.erc
+  ];
+  let failed = false;
+  let count = 0;
+  const messages = [];
+  let sawPass = false;
+  for (const source of sources) {
+    const erc = readErcSource(source);
+    if (!erc || erc.skipped) continue;
+    if (erc.errorCount > 0 || erc.ok === false) {
+      failed = true;
+      count = Math.max(count, erc.errorCount);
+      for (const message of erc.messages) {
+        if (!messages.includes(message)) messages.push(message);
+      }
+    } else if (erc.ok !== false && erc.errorCount === 0) {
+      sawPass = true;
+    }
+  }
+  return { failed, count, messages, passed: !failed && sawPass };
+}
+
+function renderErcBox(erc, active) {
+  if (!patchErcEl) return;
+  if (!active || !erc || (!erc.failed && !erc.passed)) {
+    patchErcEl.hidden = true;
+    patchErcEl.removeAttribute('role');
+    patchErcEl.replaceChildren();
+    return;
+  }
+  patchErcEl.hidden = false;
+  patchErcEl.classList.toggle('erc-pass', !erc.failed);
+  patchErcEl.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'erc-h';
+  const title = document.createElement('span');
+  title.textContent = t('erc.title');
+  const summary = document.createElement('span');
+  summary.textContent = erc.failed ? t('erc.errors', { count: erc.count }) : t('erc.passed');
+  head.append(title, summary);
+  patchErcEl.append(head);
+  if (!erc.failed) {
+    patchErcEl.removeAttribute('role');
+    return;
+  }
+  patchErcEl.setAttribute('role', 'alert');
+  const list = document.createElement('ul');
+  const items = erc.messages.length ? erc.messages : [t('patch.apply.blocked-erc', { count: erc.count })];
+  for (const message of items) {
+    const item = document.createElement('li');
+    item.textContent = message;
+    list.append(item);
+  }
+  patchErcEl.append(list);
 }
 
 function renderPatchApproval() {
@@ -616,9 +733,27 @@ function renderPatchApproval() {
   const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
   const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
   const active = Boolean(patchApprovalState.patchId) && unexpired;
-  approvePatchButtonEl.disabled = !active || !approvedEvidence;
+  const erc = ercBlockState();
+  const evidenceBlocked = !active || !approvedEvidence;
+  approvePatchButtonEl.disabled = evidenceBlocked;
   cancelPatchButtonEl.disabled = !active;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = !active;
+  if (active && erc.failed) {
+    approvePatchButtonEl.setAttribute('aria-disabled', 'true');
+    approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
+    if (applyWhyEl) {
+      applyWhyEl.hidden = false;
+      applyWhyEl.textContent = t('patch.apply.blocked-erc', { count: erc.count });
+    }
+  } else {
+    approvePatchButtonEl.removeAttribute('aria-disabled');
+    approvePatchButtonEl.removeAttribute('aria-describedby');
+    if (applyWhyEl) {
+      applyWhyEl.hidden = true;
+      applyWhyEl.textContent = '';
+    }
+  }
+  renderErcBox(erc, active);
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
@@ -640,8 +775,19 @@ function renderPatchApproval() {
   patchApprovalStatusEl.textContent = 'Patch preview is ready for approval.';
 }
 
+function askChatpcbToFixErc() {
+  if (!promptEl) return;
+  const erc = ercBlockState();
+  const detail = erc.messages.length
+    ? erc.messages.join('\n')
+    : t('patch.apply.blocked-erc', { count: erc.count });
+  promptEl.value = `${t('patch.fix')}\n${detail}`;
+  if (!promptEl.disabled) promptEl.focus();
+}
+
 function approvePatch() {
   if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
+  if (approvePatchButtonEl.getAttribute('aria-disabled') === 'true' || ercBlockState().failed) return;
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
   const id = `patch_approve_${Date.now()}`;
@@ -1228,6 +1374,42 @@ function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
 }
+
+window.__chatpcbTest = {
+  showPatch(state = {}) {
+    const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
+    activeProject = project;
+    activeProjectNameEl.textContent = project.displayName || '';
+    activeProjectDirectoryEl.textContent = project.projectDir || '';
+    if (activeProjectDirectoryEl) activeProjectDirectoryEl.title = project.projectDir || '';
+    activeProjectEl.hidden = false;
+    if (projectSetupEl) projectSetupEl.hidden = true;
+    setRequestBusy(false);
+    lastRequestResult = {
+      operation: state.operation || 'generated',
+      validation: state.validation || null,
+      conversation: state.conversation || null
+    };
+    if (state.conversation) renderConversation({ ...lastRequestResult, ...state.conversation });
+    inspectionState = {
+      projectDir: project.projectDir,
+      requestId: 'test',
+      result: state.inspection ?? {
+        manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
+        validation: state.validation || null
+      }
+    };
+    if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
+    patchApprovalState = {
+      patchId: state.patchId ?? 'patch_test',
+      expiresAt: state.expiresAt ?? (Date.now() + 600000),
+      timeout: null
+    };
+    if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+    renderPatchApproval();
+    syncWorkflow();
+  }
+};
 
 async function awaitStatus(statusPromise) {
   let timeout;
