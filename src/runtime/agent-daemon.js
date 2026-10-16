@@ -1,6 +1,6 @@
 import http from 'node:http';
-import { createHash } from 'node:crypto';
-import { cp, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { cp, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -42,6 +42,28 @@ function emitProgress(ctx, payload) {
 
 function progressCopy(prompt, ko, en) {
   return /[가-힣]/.test(prompt ?? '') ? ko : en;
+}
+
+// Set only after this request has acquired the project mutex. Nested preview
+// re-enters the same project; external apply/patch calls do not see the symbol.
+const projectLockHeld = Symbol('projectLockHeld');
+const RESTORE_STAGING_PREFIX = '.chatpcb-staging-';
+const RESTORE_BACKUP_PREFIX = '.chatpcb-backup-';
+
+function runWithProjectLock(ctx, projectDir, work) {
+  if (ctx?.[projectLockHeld] === true) return work();
+  if (!ctx?.projectMutexRegistry?.runExclusive) return work();
+  return ctx.projectMutexRegistry.runExclusive({ projectDir }, work);
+}
+
+function resolveSnapshotFs(ctx) {
+  const injected = ctx?.snapshotFs ?? {};
+  return {
+    cp: injected.cp ?? cp,
+    rename: injected.rename ?? rename,
+    rm: injected.rm ?? rm,
+    mkdtemp: injected.mkdtemp ?? mkdtemp
+  };
 }
 
 function providerDisallowedMessage(prompt, disallowedCalls) {
@@ -111,6 +133,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     runCommandImpl,
     verifyAppliedProjectImpl
   };
+  if (dispatchOptions[projectLockHeld] === true) ctx[projectLockHeld] = true;
 
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
@@ -178,7 +201,9 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
         const extra = { conversation: error.conversation };
         if (error?.technicalDetail) extra.technicalDetail = error.technicalDetail;
-        return failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
+        const failed = failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
+        if (typeof error?.snapshotPath === 'string') failed.error.snapshotPath = error.snapshotPath;
+        return failed;
       }
 
     case 'provider.cancel':
@@ -469,125 +494,205 @@ async function requestProject(call, ctx) {
     ? prompt
     : (conversation?.generatePrompt ?? prompt);
   
-  let providerResult;
-  let firstPreview = null;
-  let retryAttempted = false;
-  const invocationId = args.invocationId ?? call.id;
-  const provisionalPlans = [];
-  ctx.provisionalPlans = provisionalPlans;
-  const providerCtx = {
-    ...ctx,
-    allowGenerate: !hasSpec,
-    forceProjectDir: true,
-    projectExists: hasSpec,
-    retainProviderController: true
-  };
+  const callerHolds = typeof ctx.projectMutexRegistry.callerHolds === 'function'
+    ? await ctx.projectMutexRegistry.callerHolds({ projectDir })
+    : false;
+  return ctx.projectMutexRegistry.runExclusive({ projectDir, reentrant: true }, async () => {
+    // Nested preview skips the lock only when this request acquired it.
+    // A caller that already holds the project still sees PROJECT_BUSY from preview.
+    if (!callerHolds) ctx[projectLockHeld] = true;
+    let providerResult;
+    let firstPreview = null;
+    let retryAttempted = false;
+    const invocationId = args.invocationId ?? call.id;
+    const provisionalPlans = [];
+    ctx.provisionalPlans = provisionalPlans;
+    const providerCtx = {
+      ...ctx,
+      allowGenerate: !hasSpec,
+      forceProjectDir: true,
+      projectExists: hasSpec,
+      retainProviderController: true
+    };
+    if (!callerHolds) providerCtx[projectLockHeld] = true;
 
-  let snapshot = null;
-  try {
-    snapshot = hasSpec ? await snapshotProject(projectDir) : null;
-    throwIfProviderCancelled(ctx.providerControllers, invocationId);
-    providerResult = await invokeProvider({
-      ...call,
-      args: { ...args, prompt: generatePrompt }
-    }, providerCtx);
-
-    throwIfProviderCancelled(ctx.providerControllers, invocationId);
-    firstPreview = lastMutatingResult(providerResult.toolResults);
-
-    if (providerResult.disallowedCalls?.length > 0 && !retryAttempted && !firstPreview) {
+    let snapshot = null;
+    let keepSnapshot = false;
+    const fsOps = resolveSnapshotFs(ctx);
+    try {
+      snapshot = hasSpec ? await snapshotProject(projectDir, fsOps) : null;
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
-      retryAttempted = true;
-      const correctiveNote = hasSpec
-        ? `The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.`
-        : `Use schematic.generate for new projects (not project.create inside project.request).`;
-      
       providerResult = await invokeProvider({
         ...call,
-        args: { ...args, prompt: `${generatePrompt}\n\nNote: ${correctiveNote}` }
+        args: { ...args, prompt: generatePrompt }
       }, providerCtx);
-      throwIfProviderCancelled(ctx.providerControllers, invocationId);
-    }
 
-    throwIfProviderCancelled(ctx.providerControllers, invocationId);
-    let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
-    if (!preview) {
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
-      emitProgress(ctx, {
-        stage: 'preview',
-        sprite: 'draft',
-        text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
-      });
-      const generated = await previewNativeChange({
-        projectDir,
-        prompt: generatePrompt,
-        context: args.selection
-      }, ctx);
-      if (!generated.ok) {
-        if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
-          const disallowedError = new Error(providerDisallowedMessage(prompt, providerResult.disallowedCalls));
-          disallowedError.code = 'PROVIDER_DISALLOWED_TOOL';
-          disallowedError.conversation = conversation;
-          disallowedError.technicalDetail = providerResult.disallowedCalls.map((dc) => `${dc.name}: ${dc.reason}`).join('; ');
-          throw disallowedError;
-        }
-        const error = new Error(generated.error.message);
-        error.code = generated.error.code;
-        throw error;
+      firstPreview = lastMutatingResult(providerResult.toolResults);
+
+      if (providerResult.disallowedCalls?.length > 0 && !retryAttempted && !firstPreview) {
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        retryAttempted = true;
+        const correctiveNote = hasSpec
+          ? `The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.`
+          : `Use schematic.generate for new projects (not project.create inside project.request).`;
+
+        providerResult = await invokeProvider({
+          ...call,
+          args: { ...args, prompt: `${generatePrompt}\n\nNote: ${correctiveNote}` }
+        }, providerCtx);
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
       }
-      preview = generated.result;
-    }
 
-    throwIfProviderCancelled(ctx.providerControllers, invocationId);
-    if (preview?.requiresApproval) {
-      emitProgress(ctx, {
-        stage: 'ready',
-        sprite: 'preview',
-        text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
-      });
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
+      if (!preview) {
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        emitProgress(ctx, {
+          stage: 'preview',
+          sprite: 'draft',
+          text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
+        });
+        const generated = await previewNativeChange({
+          projectDir,
+          prompt: generatePrompt,
+          context: args.selection
+        }, ctx);
+        if (!generated.ok) {
+          if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
+            const disallowedError = new Error(providerDisallowedMessage(prompt, providerResult.disallowedCalls));
+            disallowedError.code = 'PROVIDER_DISALLOWED_TOOL';
+            disallowedError.conversation = conversation;
+            disallowedError.technicalDetail = providerResult.disallowedCalls.map((dc) => `${dc.name}: ${dc.reason}`).join('; ');
+            throw disallowedError;
+          }
+          const error = new Error(generated.error.message);
+          error.code = generated.error.code;
+          throw error;
+        }
+        preview = generated.result;
+      }
+
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      if (preview?.requiresApproval) {
+        emitProgress(ctx, {
+          stage: 'ready',
+          sprite: 'preview',
+          text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
+        });
+      }
+      return {
+        ...preview,
+        operation: hasSpec ? 'patched' : 'generated',
+        providerEvents: providerResult.events,
+        conversation
+      };
+    } catch (error) {
+      // PROJECT_BUSY means another transaction holds the project and may be writing.
+      let thrown = error;
+      if (snapshot && error?.code !== 'PROJECT_BUSY') {
+        try {
+          await restoreProjectSnapshot(snapshot, projectDir, fsOps);
+        } catch (restoreError) {
+          keepSnapshot = true;
+          thrown = projectSnapshotRestoreError(error, restoreError, snapshot, conversation);
+        }
+      }
+      try {
+        await disposeProvisionalPlans(provisionalPlans, ctx.patchApprovalRegistry, projectDir);
+      } catch (disposeError) {
+        if (!thrown?.snapshotPath) throw disposeError;
+      }
+      if (thrown?.code === 'PROJECT_BUSY') throw thrown;
+      if (thrown?.snapshotPath) throw thrown;
+      const wrapped = thrown instanceof Error ? thrown : new Error(String(thrown?.message ?? thrown));
+      wrapped.code = thrown?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
+      wrapped.conversation = conversation;
+      if (thrown?.technicalDetail) wrapped.technicalDetail = thrown.technicalDetail;
+      throw wrapped;
+    } finally {
+      if (snapshot?.root && !keepSnapshot) await fsOps.rm(snapshot.root, { force: true, recursive: true });
+      releaseProviderInvocation(ctx.providerControllers, invocationId);
     }
-    return {
-      ...preview,
-      operation: hasSpec ? 'patched' : 'generated',
-      providerEvents: providerResult.events,
-      conversation
-    };
-  } catch (error) {
-    // PROJECT_BUSY means another transaction holds the project and may be writing.
-    if (snapshot && error?.code !== 'PROJECT_BUSY') {
-      await restoreProjectSnapshot(snapshot, projectDir);
-    }
-    await disposeProvisionalPlans(provisionalPlans, ctx.patchApprovalRegistry, projectDir);
-    if (error?.code === 'PROJECT_BUSY') throw error;
-    const wrapped = error instanceof Error ? error : new Error(String(error?.message ?? error));
-    wrapped.code = error?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
-    wrapped.conversation = conversation;
-    if (error?.technicalDetail) wrapped.technicalDetail = error.technicalDetail;
-    throw wrapped;
-  } finally {
-    if (snapshot?.root) await rm(snapshot.root, { force: true, recursive: true });
-    releaseProviderInvocation(ctx.providerControllers, invocationId);
-  }
+  });
 }
 
-async function snapshotProject(projectDir) {
-  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-snapshot-'));
+async function snapshotProject(projectDir, fsOps = resolveSnapshotFs()) {
+  const root = await fsOps.mkdtemp(path.join(tmpdir(), 'chatpcb-project-snapshot-'));
   try {
     const copy = path.join(root, 'project');
-    await cp(projectDir, copy, { recursive: true });
+    await fsOps.cp(projectDir, copy, { recursive: true });
     return { root, copy };
   } catch (error) {
-    await rm(root, { force: true, recursive: true });
+    await fsOps.rm(root, { force: true, recursive: true });
     throw error;
   }
 }
 
-async function restoreProjectSnapshot(snapshot, projectDir) {
-  const currentEntries = await readdir(path.resolve(projectDir), { withFileTypes: true });
-  for (const entry of currentEntries) {
-    await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
+function projectSnapshotRestoreError(original, restoreError, snapshot, conversation) {
+  const originalMessage = original instanceof Error ? original.message : String(original?.message ?? original);
+  const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError?.message ?? restoreError);
+  const error = new Error(
+    `${originalMessage} Failed to restore the project snapshot: ${restoreMessage} Snapshot kept at ${snapshot.root}.`
+  );
+  error.code = original?.code ?? 'PROVIDER_FAILED';
+  error.snapshotPath = snapshot.root;
+  error.conversation = conversation ?? original?.conversation;
+  if (original?.technicalDetail) error.technicalDetail = original.technicalDetail;
+  error.cause = restoreError;
+  return error;
+}
+
+// Copy onto a sibling, then swap directory names. A failed copy never deletes
+// the live project. A failed rename puts the original directory back.
+async function restoreProjectSnapshot(snapshot, projectDir, fsOps = resolveSnapshotFs()) {
+  const resolved = path.resolve(projectDir);
+  const parent = path.dirname(resolved);
+  const base = path.basename(resolved);
+  const token = randomUUID();
+  const staging = path.join(parent, `${RESTORE_STAGING_PREFIX}${base}-${token}`);
+  const backup = path.join(parent, `${RESTORE_BACKUP_PREFIX}${base}-${token}`);
+  const moved = { project: false, staging: false };
+
+  try {
+    await fsOps.cp(snapshot.copy, staging, { recursive: true });
+    await fsOps.rename(resolved, backup);
+    moved.project = true;
+    await fsOps.rename(staging, resolved);
+    moved.staging = true;
+    await fsOps.rm(backup, { recursive: true, force: true });
+  } catch (error) {
+    try {
+      await rollbackProjectRestore({ fsOps, projectDir: resolved, staging, backup, moved });
+    } catch (rollbackError) {
+      rollbackError.cause = error;
+      throw rollbackError;
+    }
+    throw error;
   }
-  await cp(snapshot.copy, projectDir, { recursive: true });
+}
+
+async function rollbackProjectRestore({ fsOps, projectDir, staging, backup, moved }) {
+  if (moved.staging && moved.project) {
+    await fsOps.rename(projectDir, staging);
+    try {
+      await fsOps.rename(backup, projectDir);
+    } catch (error) {
+      try {
+        await fsOps.rename(staging, projectDir);
+      } catch {
+        // The pre-restore directory is still at `backup`.
+      }
+      throw new Error(`${error.message} Original project remains at ${backup}.`, { cause: error });
+    }
+    await fsOps.rm(staging, { recursive: true, force: true }).catch(() => {});
+    return;
+  }
+  if (moved.project) {
+    await fsOps.rename(backup, projectDir);
+    moved.project = false;
+  }
+  await fsOps.rm(staging, { recursive: true, force: true }).catch(() => {});
 }
 
 async function disposeProvisionalPlans(plans, registry, projectDir) {
@@ -859,7 +964,7 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
   });
   let plan;
   try {
-    plan = await ctx.projectMutexRegistry.runExclusive({ projectDir }, () => createSchematicPatchPlan({
+    plan = await runWithProjectLock(ctx, projectDir, () => createSchematicPatchPlan({
       projectDir,
       prompt,
       projectName,
@@ -907,9 +1012,7 @@ async function dispatchCopiedValidation(kind, call, ctx) {
 
 async function ensureReconciled(projectDir, ctx) {
   if (!projectDir || !ctx.transactionJournal) return;
-  const run = ctx.projectMutexRegistry?.runExclusive
-    ? (work) => ctx.projectMutexRegistry.runExclusive({ projectDir }, work)
-    : (work) => work();
+  const run = (work) => runWithProjectLock(ctx, projectDir, work);
   await run(async () => {
     const key = ctx.projectMutexRegistry?.canonicalKey
       ? await ctx.projectMutexRegistry.canonicalKey(projectDir)

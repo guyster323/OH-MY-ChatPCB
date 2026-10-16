@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, appendFile, cp, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -1450,6 +1450,232 @@ test('daemon removes provider-created files when restoring after an exceptional 
     await assert.rejects(() => access(candidateDir), { code: 'ENOENT' });
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon keeps the project and snapshot when restore copy fails', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-cp-fail-'));
+  let rejected;
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const originalFiles = await Promise.all(
+      Object.values(generated.files).map(async (file) => [file, await readFile(file)])
+    );
+
+    rejected = await dispatchToolCall(
+      {
+        id: 'call_restore_cp_fails',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          throw new Error('provider exploded before restore');
+        },
+        snapshotFs: {
+          cp: async (source, dest, options) => {
+            if (String(dest).includes('.chatpcb-staging-')) {
+              throw new Error('injected cp failure');
+            }
+            return cp(source, dest, options);
+          }
+        }
+      }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.equal(typeof rejected.error.snapshotPath, 'string');
+    assert.ok(rejected.error.message.includes(rejected.error.snapshotPath));
+    assert.match(rejected.error.message, /injected cp failure/);
+    assert.match(rejected.error.message, /provider exploded before restore/);
+    for (const [file, content] of originalFiles) {
+      assert.deepEqual(await readFile(file), content);
+    }
+    assert.ok((await readdir(root)).length > 0);
+    const snapshotSpec = path.join(rejected.error.snapshotPath, 'project', path.basename(generated.files.spec));
+    assert.equal(await readFile(snapshotSpec, 'utf8'), await readFile(generated.files.spec, 'utf8'));
+    const base = path.basename(root);
+    const leftovers = (await readdir(path.dirname(root))).filter((name) => name.includes(base) && name !== base);
+    assert.deepEqual(leftovers, []);
+  } finally {
+    if (rejected?.error?.snapshotPath) await rm(rejected.error.snapshotPath, { recursive: true, force: true });
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon puts the project back when the restore rename fails and keeps the snapshot', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-rename-fail-'));
+  let rejected;
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const before = await readFile(generated.files.spec, 'utf8');
+
+    rejected = await dispatchToolCall(
+      {
+        id: 'call_restore_rename_fails',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          await writeFile(generated.files.spec, `${before}\nmutated during request\n`, 'utf8');
+          throw new Error('provider exploded after mutating the project');
+        },
+        snapshotFs: {
+          rename: async (source, dest) => {
+            if (String(source).includes('.chatpcb-staging-')) {
+              throw new Error('injected rename failure');
+            }
+            return rename(source, dest);
+          }
+        }
+      }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.equal(typeof rejected.error.snapshotPath, 'string');
+    assert.ok(rejected.error.message.includes(rejected.error.snapshotPath));
+    assert.match(rejected.error.message, /injected rename failure/);
+    assert.match(await readFile(generated.files.spec, 'utf8'), /mutated during request/);
+    assert.equal(await readFile(path.join(rejected.error.snapshotPath, 'project', path.basename(generated.files.spec)), 'utf8'), before);
+    const base = path.basename(root);
+    const leftovers = (await readdir(path.dirname(root))).filter((name) => name.includes(base) && name !== base);
+    assert.deepEqual(leftovers, []);
+  } finally {
+    if (rejected?.error?.snapshotPath) await rm(rejected.error.snapshotPath, { recursive: true, force: true });
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('schematic apply issued during a failing project.request runs after it and keeps its changes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-request-apply-serialize-'));
+  const services = await transactionServices();
+  const order = [];
+  let releaseProvider = () => {};
+  const providerGate = new Promise((resolve) => {
+    releaseProvider = resolve;
+  });
+  let markProviderEntered = () => {};
+  const providerEntered = new Promise((resolve) => {
+    markProviderEntered = resolve;
+  });
+  let requestPromise;
+  let applyPromise;
+  let observedBusy = false;
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const originalSpec = await readFile(generated.files.spec, 'utf8');
+    const preview = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: {
+        projectDir: root,
+        prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.'
+      }
+    }, services);
+    assert.equal(preview.ok, true);
+    assert.equal(preview.result.requiresApproval, true);
+    assert.equal(await readFile(generated.files.spec, 'utf8'), originalSpec);
+
+    const applyArgs = {
+      name: 'schematic.patch',
+      args: { projectDir: root, approved: true, patchId: preview.result.patchId }
+    };
+    requestPromise = dispatchToolCall(
+      {
+        id: 'call_failing_request_while_apply_waits',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        ...services,
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          markProviderEntered();
+          await providerGate;
+          throw new Error('provider failed while a schematic apply was in flight');
+        },
+        snapshotFs: {
+          rename: async (source, dest) => {
+            order.push('restore');
+            return rename(source, dest);
+          }
+        }
+      }
+    );
+
+    applyPromise = (async () => {
+      await providerEntered;
+      const during = await dispatchToolCall(applyArgs, services);
+      assert.equal(during.ok, false);
+      assert.equal(during.error.code, 'PROJECT_BUSY');
+      observedBusy = true;
+      const deadline = Date.now() + 60000;
+      while (Date.now() < deadline) {
+        const result = await dispatchToolCall(applyArgs, services);
+        if (result.error?.code === 'PROJECT_BUSY') {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          continue;
+        }
+        if (!result.ok || result.result?.applied !== true) {
+          throw new Error(`schematic apply did not stick: ${result.error?.code ?? ''} ${result.error?.message ?? ''}`.trim());
+        }
+        order.push('applied');
+        return result;
+      }
+      throw new Error('schematic apply did not run after the failing project.request');
+    })();
+
+    await providerEntered;
+    await waitFor(() => observedBusy, 5000);
+    assert.equal(await readFile(generated.files.spec, 'utf8'), originalSpec);
+    releaseProvider();
+
+    const failed = await requestPromise;
+    const applied = await applyPromise;
+    assert.equal(failed.ok, false);
+    assert.match(failed.error.message, /provider failed while a schematic apply was in flight/);
+    assert.equal(failed.error.snapshotPath, undefined);
+    assert.equal(applied.result.applied, true);
+    assert.ok(order.indexOf('restore') >= 0);
+    assert.ok(order.indexOf('applied') > order.indexOf('restore'));
+    const finalSpec = await readFile(generated.files.spec, 'utf8');
+    assert.notEqual(finalSpec, originalSpec);
+    assert.equal(await readFile(generated.files.spec, 'utf8'), finalSpec);
+  } finally {
+    releaseProvider();
+    await Promise.allSettled([requestPromise, applyPromise].filter(Boolean));
+    services.patchApprovalRegistry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
 
