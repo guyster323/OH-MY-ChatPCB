@@ -414,6 +414,28 @@ function ambiguousNumberMessage(token) {
   };
 }
 
+function formatMilliampLabel(milliamps) {
+  const rounded = Math.round(Number(milliamps) * 1000) / 1000;
+  return `${rounded}mA`;
+}
+
+function invalidCurrentMessage(token) {
+  const shown = formatMilliampLabel(token.value);
+  const compact = String(token.raw).replace(/\s+/g, '');
+  const detail = compact.toLowerCase() === shown.toLowerCase() ? shown : `${compact} (${shown})`;
+  return {
+    en: `Refusing to draft an LED circuit because the LED current ${detail} is outside the supported range. Use a current above 0mA and at most 100mA. No LED, resistor, or power symbol was generated.`,
+    ko: `LED 전류 ${withJosa(shown, '이/가')} 지원 범위를 벗어나서 회로를 만들지 않습니다. 0mA보다 크고 100mA 이하인 전류만 쓸 수 있습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
+}
+
+function ledPackageTexts(code) {
+  return {
+    en: `LED package ${code} is recorded for this LED. It is not an LED count or a series resistor.`,
+    ko: `LED 패키지 ${withJosa(code, '을/를')} 기록했습니다. 개수나 직렬 저항으로 보지 않습니다.`
+  };
+}
+
 function ambiguousSupplyMessage(volts) {
   return {
     en: `Refusing to draft an LED circuit because several supply voltages were given (${joinVoltLabels(volts)}). Which supply should the LED use? No LED, resistor, or power symbol was generated.`,
@@ -696,6 +718,15 @@ function formatCurrent(milliamps) {
   return `${rounded}mA`;
 }
 
+function formatActualCurrent(milliamps) {
+  if (milliamps >= 1000) {
+    const amps = Math.round(milliamps / 10) / 100;
+    return `${amps}A`;
+  }
+  const rounded = Math.round(milliamps * 100) / 100;
+  return `${rounded}mA`;
+}
+
 function headroomWarning(channels, supplyVolts, requestedCurrentMa, prompt) {
   const usable = channels.filter((channel) => headroomMillivolts(supplyVolts, channel.vf) > 0);
   const low = usable.filter((channel) => headroomMillivolts(supplyVolts, channel.vf) < HEADROOM_WARN_MV);
@@ -740,6 +771,27 @@ function headroomWarning(channels, supplyVolts, requestedCurrentMa, prompt) {
   }, prompt);
 }
 
+function currentMismatchWarning(channels, supplyVolts, requestedCurrentMa, prompt) {
+  if (!(requestedCurrentMa > 0)) return null;
+  const actuals = [];
+  const seen = new Set();
+  for (const channel of channels) {
+    const milliamps = channelCurrentMilliamps(supplyVolts, channel);
+    if (Math.abs(milliamps - requestedCurrentMa) / requestedCurrentMa <= 0.2) continue;
+    const label = formatActualCurrent(milliamps);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    actuals.push(label);
+  }
+  if (actuals.length === 0) return null;
+  const stated = formatMilliampLabel(requestedCurrentMa);
+  const listed = actuals.join(', ');
+  return asFinding('discrete-led-current-mismatch', {
+    en: `Warning: the series resistor draws ${listed}, which differs from the stated current ${stated} by more than 20%.`,
+    ko: `직렬 저항으로 계산한 전류 ${withJosa(listed, '은/는')} 지정한 전류 ${withJosa(stated, '과/와')} 20%를 넘게 다릅니다.`
+  }, prompt);
+}
+
 function specifiedForwardTexts(specifiedVf) {
   if (!Number.isFinite(specifiedVf)) return null;
   const shown = formatVolts(specifiedVf);
@@ -767,7 +819,7 @@ function conservativeVfMessage(rangeRaw, volts, rangeMin) {
   };
 }
 
-function buildDiscreteReviewNotes({ prompt, color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels, supplyAssumed, specifiedVf, vfRangeRaw, vfRangeMin }) {
+function buildDiscreteReviewNotes({ prompt, color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels, supplyAssumed, specifiedVf, vfRangeRaw, vfRangeMin, ledPackage }) {
   const notes = [];
   if (perColor && resistorExplicit) {
     const names = channels.map((channel) => channel.ledValue).join(', ');
@@ -790,6 +842,9 @@ function buildDiscreteReviewNotes({ prompt, color, ledValue, resistorExplicit, r
     }), prompt));
   } else {
     notes.push(asFinding('discrete-led', calculation.summary, prompt));
+  }
+  if (ledPackage) {
+    notes.push(asFinding('discrete-led-package', ledPackageTexts(ledPackage), prompt));
   }
   if (quantityCapped) {
     notes.push(asFinding('discrete-led-quantity-capped', {
@@ -838,7 +893,8 @@ function refuseDiscreteLed({ code, texts, prompt, supplyVolts, supplyAssumed = f
     unsupported: [],
     reviewWarnings: [],
     reviewBlockers: [asFinding(code, texts, prompt)],
-    reviewNotes: []
+    reviewNotes: [],
+    package: null
   };
 }
 
@@ -887,6 +943,18 @@ export function parseDiscreteLedRequest(prompt) {
       texts: resistorTooSmallMessage(tooSmall)
     });
   }
+  const invalidCurrent = scan.tokens.find((token) => (
+    token.role === 'current' && (!(token.value > 0) || token.value > 100)
+  ));
+  if (invalidCurrent) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-invalid-current',
+      prompt: text,
+      supplyVolts: supply.supplyVolts,
+      supplyAssumed: supply.supplyAssumed === true,
+      texts: invalidCurrentMessage(invalidCurrent)
+    });
+  }
   // A unitless number that is not a count and not a resistor stays ambiguous.
   const ambiguousNumber = scan.tokens.find((token) => token.kind === 'ambiguous');
   if (ambiguousNumber) {
@@ -900,6 +968,7 @@ export function parseDiscreteLedRequest(prompt) {
   }
   const supplyVolts = supply.supplyVolts;
   const supplyAssumed = supply.supplyAssumed === true;
+  const ledPackage = scan.tokens.find((token) => token.role === 'package')?.packageCode ?? null;
   const forward = specifiedForward(scan.tokens);
   const specifiedVf = forward?.volts ?? null;
   const colors = findLedColors(text);
@@ -967,20 +1036,28 @@ export function parseDiscreteLedRequest(prompt) {
     unsupported,
     supplyAssumed,
     specifiedVf: Number.isFinite(specifiedVf) ? specifiedVf : null,
-    requestedCurrentMa: Number.isFinite(requestedCurrentMa) ? requestedCurrentMa : null
+    requestedCurrentMa: Number.isFinite(requestedCurrentMa) ? requestedCurrentMa : null,
+    package: ledPackage
   };
   const reviewNotes = buildDiscreteReviewNotes({
     ...parsed,
     prompt: text,
+    ledPackage,
     vfRangeRaw: forward?.rangeRaw ?? null,
     vfRangeMin: forward?.rangeMin ?? null
   });
-  const warning = headroomWarning(parsed.channels, supplyVolts, requestedCurrentMa, text);
+  const reviewWarnings = [];
+  const headroom = headroomWarning(parsed.channels, supplyVolts, requestedCurrentMa, text);
+  if (headroom) reviewWarnings.push(headroom);
+  if (resistorExplicit) {
+    const mismatch = currentMismatchWarning(parsed.channels, supplyVolts, requestedCurrentMa, text);
+    if (mismatch) reviewWarnings.push(mismatch);
+  }
   return {
     ...parsed,
     reviewNotes,
     reviewBlockers: [],
-    reviewWarnings: warning ? [warning] : []
+    reviewWarnings
   };
 }
 
@@ -994,6 +1071,7 @@ export function applyDiscreteLedSpec(spec) {
     return {
       ...spec,
       kind: 'discrete-led',
+      package: parsed.package ?? null,
       interfaces: [],
       peripherals: [],
       power: {
@@ -1006,6 +1084,7 @@ export function applyDiscreteLedSpec(spec) {
   return {
     ...spec,
     kind: 'discrete-led',
+    package: parsed.package ?? null,
     interfaces: [],
     peripherals: parsed.channels.map((channel) => ({
       kind: 'status-led',

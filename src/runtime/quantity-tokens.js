@@ -19,8 +19,9 @@ const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
 const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
 const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
 const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
-// A bare integer of 10 or more is a resistor in ohms. A smaller integer, or any
-// fraction, stays ambiguous unless ohm/resistor wording is beside it. "LED"
+// A bare integer is a resistor only when it is an E24 value of at least 100
+// and not an LED package code. 10–99, non-E24 values, package codes, and
+// fractions stay ambiguous unless ohm/resistor wording is beside them. "LED"
 // itself is not that context. An "R=" / "R1" label is collected separately.
 const RESISTOR_CONTEXT_WORD = '(?:\\bohms?\\b|\\bresistors?\\b|저항(?:값|은|는|이|가|을|를|의)?|(?<![가-힣])옴)';
 const RESISTOR_CONTEXT_BEFORE = new RegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
@@ -34,10 +35,49 @@ const PRIORITY = {
   ohm: 4,
   suffix: 5,
   current: 6,
+  // Same rank as tolerance. Both beat a count, so "5050 LED" is a package.
+  package: 7,
   tolerance: 7,
   count: 8,
   bare: 9
 };
+
+// Two-digit E24 mantissas. 100, 220, 330, 470, 1000, and 4700 are in the series.
+const E24_RESISTOR_MANTISSA = Object.freeze([
+  10, 11, 12, 13, 15, 16, 18, 20, 22, 24, 27, 30, 33, 36, 39, 43, 47, 51, 56, 62, 68, 75, 82, 91
+]);
+
+// LED and chip packages. The only list: bare package codes are never resistors.
+export const LED_PACKAGE_CODES = Object.freeze([
+  '0201', '0402', '0603', '0805', '1005', '1206', '1210', '1608', '1812', '2010',
+  '2012', '2016', '2019', '2020', '2216', '2512', '2525', '2727', '2835', '3014',
+  '3016', '3020', '3030', '3216', '3225', '3232', '3528', '3535', '3838', '4014',
+  '4040', '5025', '5050', '5054', '5630', '5730', '5733', '6332', '7020', '7070'
+]);
+const LED_PACKAGE_SET = new Set(LED_PACKAGE_CODES);
+const LED_NEAR = '(?:\\bleds?\\b|엘이디|발광(?:\\s*다이오드)?)';
+const SMD_NEAR = '(?:\\bsmds?\\b|\\bsmts?\\b|\\bchip\\b|\\bpackages?\\b|패키지)';
+
+export function isStandardE24Ohms(ohms) {
+  if (!Number.isInteger(ohms) || ohms < 100) return false;
+  let value = ohms;
+  while (value >= 100 && value % 10 === 0) value /= 10;
+  return E24_RESISTOR_MANTISSA.includes(value);
+}
+
+function isBareE24Resistor(rawNumber) {
+  if (!/^[1-9]\d*$/.test(rawNumber)) return false;
+  if (LED_PACKAGE_SET.has(rawNumber)) return false;
+  return isStandardE24Ohms(Number(rawNumber));
+}
+
+function packageNextToLed(prompt, start, end) {
+  const before = prompt.slice(Math.max(0, start - 48), start);
+  const after = prompt.slice(end, end + 48);
+  const beforeLed = new RegExp(`${LED_NEAR}(?:\\s+${SMD_NEAR})?\\s*$`, 'i');
+  const afterLed = new RegExp(`^\\s*(?:${SMD_NEAR}\\s+)?${LED_NEAR}`, 'i');
+  return beforeLed.test(before) || afterLed.test(after);
+}
 
 const COUNT_WORD = {
   one: 1,
@@ -377,21 +417,49 @@ function resistanceToken(prompt, start, end, ohms, form) {
   };
 }
 
+function roundMilliamps(value) {
+  return Math.round(value * 1e6) / 1e6;
+}
+
+function scaleCurrent(amount, unitText) {
+  const unit = String(unitText).replace(/\s+/g, '').toLowerCase();
+  if (unit.includes('밀리') || unit.includes('milli') || unit.startsWith('m')) {
+    return { milliamps: roundMilliamps(amount), unit: 'mA' };
+  }
+  // U+00B5 MICRO SIGN and U+03BC GREEK SMALL MU. NFKC folds the micro sign to mu.
+  if (unit.startsWith('u') || unit.startsWith('\u00B5') || unit.startsWith('\u03BC')) {
+    return { milliamps: roundMilliamps(amount / 1000), unit: 'uA' };
+  }
+  return { milliamps: roundMilliamps(amount * 1000), unit: 'A' };
+}
+
 function collectCurrent(prompt, candidates) {
   // Hangul is not a word character, so \b never matches after 밀리암페어.
+  // Bare "A" is last so "mA" and "uA" keep their prefixes. 0mA stays a current.
   const boundary = '(?![A-Za-z0-9_])';
-  const milli = new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*(?:m\\s*a|ma|milli\\s*amps?|milliamps?|milliamperes?|밀리\\s*암페어)${boundary}`, 'gi');
-  const amps = new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*(?:amps?|amperes?|암페어)${boundary}`, 'gi');
-  for (const match of prompt.matchAll(milli)) {
-    pushCurrent(candidates, prompt, match, Number(match[1]), 'mA');
-  }
-  for (const match of prompt.matchAll(amps)) {
-    pushCurrent(candidates, prompt, match, Number(match[1]) * 1000, 'A');
+  const unit = [
+    'milli\\s*amps?',
+    'milliamps?',
+    'milliamperes?',
+    '밀리\\s*암페어',
+    '(?:u|\\u00B5|\\u03BC)\\s*a',
+    'm\\s*a',
+    'amperes?',
+    'amps?',
+    '암페어',
+    'a'
+  ].join('|');
+  const pattern = new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
+  for (const match of prompt.matchAll(pattern)) {
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount < 0) continue;
+    const scaled = scaleCurrent(amount, match[2]);
+    pushCurrent(candidates, prompt, match, scaled.milliamps, scaled.unit);
   }
 }
 
 function pushCurrent(candidates, prompt, match, milliamps, unit) {
-  if (!(milliamps > 0)) return;
+  if (!Number.isFinite(milliamps) || milliamps < 0) return;
   const start = match.index ?? 0;
   const end = start + match[0].length;
   candidates.push({
@@ -656,6 +724,37 @@ function ambiguousNumberToken(prompt, start, end, value) {
   };
 }
 
+function collectPackages(prompt, candidates) {
+  const pattern = /(?<![\w.])(\d{4})(?![\w.])/g;
+  for (const match of prompt.matchAll(pattern)) {
+    const code = match[1];
+    if (!LED_PACKAGE_SET.has(code)) continue;
+    const start = match.index ?? 0;
+    const end = start + code.length;
+    if (!packageNextToLed(prompt, start, end)) continue;
+    candidates.push({
+      priority: PRIORITY.package,
+      start,
+      end,
+      invalid: false,
+      token: {
+        value: Number(code),
+        unit: 'package',
+        raw: code,
+        start,
+        end,
+        kind: 'package',
+        form: 'package',
+        range: null,
+        ac: false,
+        dc: false,
+        pot: false,
+        packageCode: code
+      }
+    });
+  }
+}
+
 function collectBare(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+\.\d+|\d+)(?![\w]|\.\d)/g;
   for (const match of prompt.matchAll(pattern)) {
@@ -664,8 +763,8 @@ function collectBare(prompt, candidates) {
     const rawNumber = match[1];
     const ohms = Number(rawNumber);
     if (!(ohms > 0)) continue;
-    const integer = /^\d+$/.test(rawNumber);
-    const asResistor = bareHasResistorContext(prompt, start, end) || (integer && ohms >= 10);
+    if (LED_PACKAGE_SET.has(rawNumber) && packageNextToLed(prompt, start, end)) continue;
+    const asResistor = bareHasResistorContext(prompt, start, end) || isBareE24Resistor(rawNumber);
     const token = asResistor
       ? resistanceToken(prompt, start, end, ohms, 'bare')
       : ambiguousNumberToken(prompt, start, end, ohms);
@@ -717,6 +816,7 @@ export function tokenizeQuantities(prompt) {
   collectCurrent(text, candidates);
   collectTolerance(text, candidates);
   collectCounts(text, candidates);
+  collectPackages(text, candidates);
   collectUnitlessForward(text, candidates);
   collectBare(text, candidates);
 
@@ -840,7 +940,8 @@ export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
         token.implausible = outside != null;
         if (outside != null) token.implausibleValue = outside;
       }
-    } else if (token.kind === 'resistance') token.role = token.pot ? null : 'resistor';
+    } else if (token.kind === 'package') token.role = 'package';
+    else if (token.kind === 'resistance') token.role = token.pot ? null : 'resistor';
     else if (token.kind === 'current') token.role = 'current';
     else if (token.kind === 'count') token.role = 'count';
     else if (token.kind === 'ambiguous') token.role = 'ambiguous';

@@ -342,6 +342,116 @@ test('a specified LED current sizes the series resistor', async () => {
   assert.equal(warning.message, warning.en);
 });
 
+test('LED package codes, bare E24 resistors, and current units fail closed', async () => {
+  const packages = [
+    ['5050 LED 5V', '5050', 5, '300Ω', false],
+    ['LED 2835 5V', '2835', 5, '300Ω', false],
+    ['SMD 0603 LED', '0603', 5, '300Ω', true],
+    ['3528 LED 12V', '3528', 12, '1kΩ', false]
+  ];
+  for (const [prompt, code, supply, resistor, assumed] of packages) {
+    const result = await generateLed(prompt);
+    assert.equal(result.spec.kind, 'discrete-led', prompt);
+    assert.equal(result.spec.package, code, prompt);
+    assert.equal(result.spec.discrete.package, code, prompt);
+    assert.equal(result.spec.discrete.refused, false, `${prompt} ${JSON.stringify(result.spec.discrete.reviewBlockers)}`);
+    assert.equal(result.spec.discrete.count, 1, prompt);
+    assert.equal(result.spec.discrete.quantityCapped, false, prompt);
+    assert.equal(result.spec.discrete.supplyVolts, supply, prompt);
+    assert.equal(result.spec.discrete.supplyAssumed, assumed, prompt);
+    assert.equal(result.spec.discrete.resistorExplicit, false, prompt);
+    assert.equal(components(result, 'Device:LED').length, 1, prompt);
+    assert.equal(components(result, 'Device:R').length, 1, prompt);
+    assert.equal(components(result, 'Device:R')[0].value, resistor, prompt);
+    const note = result.review.findings.notes.find((item) => item.code === 'discrete-led-package');
+    assert.ok(note, `${prompt} ${JSON.stringify(result.review.findings.notes)}`);
+    assert.match(note.en, new RegExp(`LED package ${code}`), note.en);
+    assert.match(note.ko, new RegExp(code), note.ko);
+    assert.match(result.schematic, new RegExp(code), prompt);
+    assert.equal(result.review.findings.notes.some((item) => item.code === 'discrete-led-quantity-capped'), false, prompt);
+  }
+
+  const bareResistor = await generateLed('LED 100');
+  assert.equal(bareResistor.spec.discrete.refused, false);
+  assert.equal(bareResistor.spec.package ?? null, null);
+  assert.equal(components(bareResistor, 'Device:LED').length, 1);
+  assert.equal(components(bareResistor, 'Device:R')[0].value, '100Ω');
+
+  const kept = await generateLed('LED 5V 3 leds 470');
+  assert.equal(kept.spec.discrete.count, 3);
+  assert.equal(components(kept, 'Device:LED').length, 3);
+  assert.ok(components(kept, 'Device:R').every((part) => part.value === '470Ω'));
+
+  for (const prompt of ['LED 12 5V', 'LED 5V 12', 'LED 10', 'LED 333', 'LED 123', 'LED 5V 2019']) {
+    const refused = await generateLed(prompt);
+    assert.equal(refused.spec.discrete.refused, true, `${prompt} drafted ${refused.spec.discrete.resistorValue}`);
+    assert.equal(components(refused, 'Device:LED').length, 0, prompt);
+    assert.equal(components(refused, 'Device:R').length, 0, prompt);
+    assert.equal(refused.schematic.includes('Device:LED'), false, prompt);
+    assert.equal(refused.review.status, 'blocked', prompt);
+    const blocker = refused.review.findings.blockers.find((item) => item.code === 'discrete-led-ambiguous-number');
+    assert.ok(blocker, `${prompt} ${JSON.stringify(refused.review.findings.blockers)}`);
+  }
+
+  const currents = [
+    ['LED 5V 0.02A', 20, '150Ω'],
+    ['LED 5V 0.02 A', 20, '150Ω'],
+    ['LED 5V 20000uA', 20, '150Ω'],
+    ['LED 5V 20000 uA', 20, '150Ω'],
+    ['LED 5V 20uA', 0.02, '150kΩ'],
+    ['LED 5V 20\u00B5A', 0.02, '150kΩ'],
+    ['LED 5V 20\u03BCA', 0.02, '150kΩ']
+  ];
+  for (const [prompt, milliamps, resistor] of currents) {
+    const result = await generateLed(prompt);
+    assert.equal(result.spec.discrete.refused, false, `${prompt} ${JSON.stringify(result.spec.discrete.reviewBlockers)}`);
+    assert.equal(result.spec.discrete.requestedCurrentMa, milliamps, prompt);
+    assert.equal(result.spec.discrete.resistorExplicit, false, prompt);
+    assert.equal(components(result, 'Device:LED').length, 1, prompt);
+    assert.equal(components(result, 'Device:R').length, 1, prompt);
+    assert.equal(components(result, 'Device:R')[0].value, resistor, prompt);
+    assert.equal(result.review.status, 'ready-for-prototype-review', prompt);
+  }
+
+  for (const [prompt, shown] of [['LED 5V 500mA', '500mA'], ['LED 5V 0mA', '0mA'], ['LED 5V 0.5A', '500mA']]) {
+    const refused = await generateLed(prompt);
+    assert.equal(refused.spec.discrete.refused, true, prompt);
+    assert.equal(components(refused, 'Device:LED').length, 0, prompt);
+    assert.equal(components(refused, 'Device:R').length, 0, prompt);
+    assert.equal(refused.schematic.includes('Device:LED'), false, prompt);
+    assert.equal(refused.review.status, 'blocked', prompt);
+    const blocker = refused.review.findings.blockers.find((item) => item.code === 'discrete-led-invalid-current');
+    assert.ok(blocker, `${prompt} ${JSON.stringify(refused.review.findings.blockers)}`);
+    assert.match(blocker.en, new RegExp(shown), blocker.en);
+    assert.match(blocker.ko, new RegExp(shown), blocker.ko);
+    assert.equal(blocker.message, blocker.en, prompt);
+  }
+
+  const cappedCurrent = await generateLed('LED 5V 100mA');
+  assert.equal(cappedCurrent.spec.discrete.refused, false);
+  assert.equal(components(cappedCurrent, 'Device:R')[0].value, '30Ω');
+  const hotCurrent = cappedCurrent.review.findings.warnings.find((item) => item.code === 'discrete-led-headroom');
+  assert.ok(hotCurrent, JSON.stringify(cappedCurrent.review.findings.warnings));
+  assert.match(hotCurrent.en, /100mA is above 30mA/);
+
+  const clash = await generateLed('LED 5V 20mA 330Ω');
+  assert.equal(clash.spec.discrete.refused, false);
+  assert.equal(clash.spec.discrete.resistorExplicit, true);
+  assert.equal(components(clash, 'Device:LED').length, 1);
+  assert.equal(components(clash, 'Device:R')[0].value, '330Ω');
+  const mismatch = clash.review.findings.warnings.find((item) => item.code === 'discrete-led-current-mismatch');
+  assert.ok(mismatch, JSON.stringify(clash.review.findings.warnings));
+  assert.match(mismatch.en, /9\.09mA/);
+  assert.match(mismatch.ko, /9\.09mA/);
+  assert.match(mismatch.en, /more than 20%/);
+  assert.match(clash.schematic, /9\.09mA/);
+  assert.equal(clash.review.status, 'ready-for-prototype-review');
+
+  const agree = await generateLed('LED 5V 20mA 150Ω');
+  assert.equal(components(agree, 'Device:R')[0].value, '150Ω');
+  assert.equal(agree.review.findings.warnings.some((item) => item.code === 'discrete-led-current-mismatch'), false);
+});
+
 test('discrete LED color sets the value and calculates the series resistor unless one was requested', async () => {
   const red = await generateLed('빨간 LED를 5V에 연결해줘');
   assert.equal(components(red, 'Device:LED')[0].value, 'LED Red');
