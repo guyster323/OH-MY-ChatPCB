@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
-import { findChrome } from './lib/find-chrome.js';
+import { executablePathForLaunch, findChrome } from './lib/find-chrome.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -545,9 +545,10 @@ async function launchBrowser() {
   if (!found.path) {
     throw new Error(found.reason);
   }
+  const executablePath = executablePathForLaunch(found);
   return chromium.launch({
     headless: process.env.CHATPCB_UI_HEADLESS !== '0',
-    executablePath: found.path
+    ...(executablePath ? { executablePath } : {})
   });
 }
 
@@ -656,13 +657,26 @@ function parseTimeoutMs(raw, label) {
 function isCliEntry() {
   const entry = process.argv[1];
   if (!entry) return false;
-  // argv[1] keeps the path used to launch node, including a symlink. The module
-  // URL is the real file. Compare canonical paths so a symlink still runs main.
+  // argv[1] is the path passed to node. It may be a symlink, or the same file
+  // without a .js/.mjs suffix (`node scripts/verify-panel-ui` still loads this
+  // module). realpathSync.native keeps Windows drive-letter case stable.
+  let modulePath;
   try {
-    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+    modulePath = realpathSync.native(fileURLToPath(import.meta.url));
   } catch {
     return false;
   }
+  const moduleWithoutExtension = modulePath.replace(/\.(?:js|mjs)$/i, '');
+  for (const candidate of [entry, `${entry}.js`, `${entry}.mjs`]) {
+    let resolved;
+    try {
+      resolved = realpathSync.native(candidate);
+    } catch {
+      continue;
+    }
+    if (resolved === modulePath || resolved === moduleWithoutExtension) return true;
+  }
+  return false;
 }
 
 if (isCliEntry()) {

@@ -165,6 +165,8 @@ npm run verify:ui
 
 It starts an isolated `chatpcb-agentd`, serves `apps/panel/index.html`, opens the panel in a local Chromium-compatible browser, creates a Korean-named project, enters a request, presses **Send**, and verifies the request, ERC, review, artifact, KiCad-link, dirty-conflict, reload-acknowledgement, rollback, and safe-error states.
 
+The browser is `CHATPCB_CHROME_PATH` or `CHATPCB_BROWSER_PATH` when that points at an executable, then Playwright's full Chromium, then a system Chrome, Chromium, or Edge install, then Playwright's headless shell. Install one with `npx playwright install chromium`, or install only the headless shell with `npx playwright install chromium --only-shell`. The shell is enough: when it is the only browser, verification lets Playwright launch it with no `executablePath`. The shell is read from Playwright's registry, or from `chromium_headless_shell-*` under `PLAYWRIGHT_BROWSERS_PATH` or the default `ms-playwright` cache. If none of those is available, the command fails and browser-backed tests skip with the same install instructions.
+
 ## Computer Use verification status
 
 The default interactive check is the ChatPCB-enabled schematic editor, not the browser fallback. After `npm run daemon` and `npm run launch:kicad`, drive the right-side panel with `orca computer` as described in `.grok/skills/kicad-panel-computer-use/SKILL.md` (`npm run verify:kicad` prints that gate). Create a named project, `set-value` the circuit request, press **Send**, and confirm the request is not `Circuit prompt is required`. Confirm **KiCad changes need attention** while the editor is `[Unsaved]`, then that it clears after a real save plus **I saved — recheck**.

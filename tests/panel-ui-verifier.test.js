@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
-import { findChrome } from '../scripts/lib/find-chrome.js';
+import { executablePathForLaunch, findChrome } from '../scripts/lib/find-chrome.js';
 import { resolveVerifyUiTimeoutMs, waitForCompletedOrFailFast } from '../scripts/verify-panel-ui.js';
 
 test('panel browser UI verification script is exposed through npm', async () => {
@@ -18,6 +18,19 @@ test('panel browser UI verification script is exposed through npm', async () => 
     packageJson.scripts['verify:ui'],
     'node ./scripts/verify-panel-ui.js'
   );
+});
+
+test('verify UI script reaches main when invoked without a file extension', async () => {
+  const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+  const result = spawnSync(process.execPath, ['scripts/verify-panel-ui'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: { ...process.env, CHATPCB_VERIFY_UI_DRY_RUN: '1' },
+    timeout: 15_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  assert.equal(result.stdout, 'chatpcb-verify-ui-dry-run\n');
 });
 
 test('verify UI script reaches main when invoked through a symlink', async () => {
@@ -188,9 +201,10 @@ async function launchChrome(t) {
     t.skip(found.reason);
     return null;
   }
+  const executablePath = executablePathForLaunch(found);
   return chromium.launch({
     headless: true,
-    executablePath: found.path,
+    ...(executablePath ? { executablePath } : {}),
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   });
 }
