@@ -311,6 +311,86 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
+  it('normalizes an uppercase urn:uuid host id and persists the canonical form', async () => {
+    const cases = [
+      'URN:UUID:123E4567-E89B-42D3-A456-426614174000',
+      'urn:uuid:123E4567-E89B-42D3-A456-426614174000'
+    ];
+    const canonical = 'urn:uuid:123e4567-e89b-42d3-a456-426614174000';
+    for (const stored of cases) {
+      await withConfig(async (dir) => {
+        const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+        await mkdir(path.dirname(hostPath), { recursive: true });
+        await writeFile(hostPath, `${stored}\n`, { mode: 0o644 });
+        await saveCredentials({
+          ...sampleCreds(),
+          ext_agent_host_id: stored
+        });
+
+        assert.equal(await getOrCreateHostId(), canonical);
+        assert.equal(await readFile(hostPath, 'utf8'), canonical);
+        assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+        const names = await readdir(path.dirname(hostPath));
+        assert.equal(names.some((name) => name.endsWith('.tmp')), false);
+        assert.equal((await loadCredentials()).client_id, 'oaiapp_TEST');
+        assert.equal((await loadCredentials()).ext_agent_host_id, stored);
+
+        assert.equal(await getOrCreateHostId(), canonical);
+        assert.equal(await readFile(hostPath, 'utf8'), canonical);
+      });
+    }
+  });
+
+  it('drops registrations that do not match a regenerated host id', async () => {
+    await withConfig(async (dir) => {
+      const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+      await mkdir(path.dirname(hostPath), { recursive: true });
+      const oldHost = 'host_fa1d4d58b406ac26b8f63419552b90f4';
+      await writeFile(hostPath, oldHost, { mode: 0o600 });
+      await saveCredentials({
+        ...sampleCreds(),
+        client_id: 'oaiapp_OLD',
+        ext_agent_host_id: oldHost,
+        account: { email: 'old@ex.com' },
+        last_used_at: 30
+      });
+      await saveCredentials({
+        ...sampleCreds(),
+        client_id: 'oaiapp_OTHER',
+        ext_agent_host_id: 'urn:uuid:123e4567-e89b-42d3-a456-426614174000',
+        account: { email: 'other@ex.com' },
+        last_used_at: 20
+      });
+      await saveCredentials({
+        ...sampleCreds(),
+        client_id: 'oaiapp_NONE',
+        account: { email: 'none@ex.com' },
+        last_used_at: 10
+      });
+
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
+      try {
+        const started = await manager.startAuth();
+        const authUrl = new URL(started.authUrl);
+        const next = authUrl.searchParams.get('ext_agent_host_id');
+        assert.match(next, HOST_ID_V4);
+        assert.notEqual(next, oldHost);
+        assert.equal(await readFile(hostPath, 'utf8'), next);
+        assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+        const names = await readdir(path.dirname(hostPath));
+        assert.equal(names.some((name) => name.endsWith('.tmp')), false);
+        assert.equal(await loadCredentials(), null);
+        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.equal(await getOrCreateHostId(), next);
+        assert.equal(authUrl.searchParams.get('client_id'), 'dynamic_agent_client');
+        assert.equal(authUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
+      } finally {
+        await manager.cancelAll();
+      }
+    });
+  });
+
   it('preserves a valid existing host id', async () => {
     const values = [
       'urn:uuid:123e4567-e89b-42d3-a456-426614174000',
@@ -533,7 +613,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
-  it('clears the issued client id on sign-out and still accepts an override', async () => {
+  it('keeps the issued client id after sign-out and still accepts an override', async () => {
     await withConfig(async (dir) => {
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -545,19 +625,50 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const authUrl = new URL(started.authUrl);
         nonceRef.nonce = authUrl.searchParams.get('nonce');
         const redirect = authUrl.searchParams.get('redirect_uri');
+        const hostId = authUrl.searchParams.get('ext_agent_host_id');
         await httpGet(`${redirect}?code=CODE&state=${authUrl.searchParams.get('state')}&client_id=oaiapp_ISSUED`);
         assert.equal((await loadCredentials()).client_id, 'oaiapp_ISSUED');
 
+        await saveCredentials({
+          client_id: 'oaiapp_OTHER',
+          access_token: 'AT_OTHER',
+          refresh_token: 'RT_OTHER',
+          id_token: 'header.payload.sig',
+          expires_in: 3600,
+          issued_at: 1,
+          scope: 'openid',
+          scopes: ['openid'],
+          token_type: 'Bearer',
+          email: 'other@ex.com',
+          subject: 'user_other',
+          ext_agent_host_id: hostId,
+          account: { email: 'other@ex.com' },
+          last_used_at: 1
+        });
+
         assert.equal((await manager.signOut()).state, 'signed_out');
         assert.equal(await loadCredentials(), null);
-        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.equal((await manager.getAuthStatus()).state, 'signed_out');
+        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_ISSUED.json'), 'utf8'));
+        assert.equal(retained.client_id, 'oaiapp_ISSUED');
+        assert.equal(retained.ext_agent_host_id, hostId);
+        assert.equal(retained.email, 'ada@ex.com');
+        assert.equal(retained.subject, 'user_123');
+        assert.equal(retained.account.email, 'ada@ex.com');
+        assertSessionCleared(retained);
+        const other = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
+        assert.equal(other.client_id, 'oaiapp_OTHER');
+        assert.equal(other.ext_agent_host_id, hostId);
+        assert.equal(other.email, 'other@ex.com');
+        assertSessionCleared(other);
 
         const returned = await manager.startAuth();
         const returnedUrl = new URL(returned.authUrl);
-        assert.equal(returnedUrl.searchParams.get('client_id'), 'dynamic_agent_client');
-        assert.equal(returnedUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
+        assert.equal(returnedUrl.searchParams.get('client_id'), 'oaiapp_ISSUED');
+        assert.equal(returnedUrl.searchParams.has('agent_name_hint'), false);
         assert.equal(returnedUrl.searchParams.has('id_token_hint'), false);
-        assert.equal(returnedUrl.searchParams.has('login_hint'), false);
+        assert.equal(returnedUrl.searchParams.get('login_hint'), 'ada@ex.com');
+        assert.equal(returnedUrl.searchParams.get('ext_agent_host_id'), hostId);
         await manager.cancelAll();
 
         process.env.CHATPCB_CHATGPT_CLIENT_ID = 'oaiapp_FROM_ENV';
@@ -1523,7 +1634,11 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const result = await call;
         assert.equal(result.completed, true);
         assert.equal(result.text, 'hi');
-        assert.deepEqual(await listCredentialFiles(dir), []);
+        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+        assert.equal(retained.client_id, 'oaiapp_TEST');
+        assert.equal(retained.account.email, 'ada@ex.com');
+        assertSessionCleared(retained);
+        assert.equal(await loadCredentials(), null);
         assert.equal((await manager.getAuthStatus()).state, 'signed_out');
       } finally {
         gate.resolve();
@@ -1557,7 +1672,11 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         gate.resolve();
         const result = await call;
         assert.equal(result.completed, true);
-        assert.deepEqual(await listCredentialFiles(dir), []);
+        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+        assert.equal(retained.client_id, 'oaiapp_TEST');
+        assert.equal(retained.access_token === 'AT_NEW', false);
+        assert.equal(retained.refresh_token === 'RT_NEW', false);
+        assertSessionCleared(retained);
         assert.equal((await manager.getAuthStatus()).state, 'signed_out');
         assert.equal(await loadCredentials(), null);
       } finally {
@@ -1618,6 +1737,46 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const authUrl = new URL(started.authUrl);
         assert.equal(authUrl.searchParams.get('client_id'), 'dynamic_agent_client');
         assert.equal(authUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
+      } finally {
+        await manager.cancelAll();
+      }
+    });
+  });
+
+  it('drops the issued client id when the authorize callback returns invalid_client and registers again', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials(sampleCreds());
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
+      const tokenCalls = [];
+      stubFetch(async (url) => {
+        tokenCalls.push(String(url));
+        return new Response('no', { status: 404 });
+      });
+      try {
+        const started = await manager.startAuth();
+        const authUrl = new URL(started.authUrl);
+        assert.equal(authUrl.searchParams.get('client_id'), 'oaiapp_TEST');
+        assert.equal(authUrl.searchParams.has('agent_name_hint'), false);
+        const redirect = authUrl.searchParams.get('redirect_uri');
+        const state = authUrl.searchParams.get('state');
+
+        const wrongState = await httpGet(`${redirect}?error=invalid_client&state=not-the-state`);
+        assert.match(wrongState.body, /state mismatch/);
+        assert.equal((await loadCredentials()).client_id, 'oaiapp_TEST');
+        assert.equal(tokenCalls.length, 0);
+
+        const page = await httpGet(`${redirect}?error=invalid_client&state=${state}&code=SHOULD_NOT_EXCHANGE`);
+        assert.match(page.body, /sign in again/i);
+        assert.equal(/cancelled/i.test(page.body), false);
+        assert.equal(tokenCalls.length, 0);
+        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.equal(await loadCredentials(), null);
+
+        const again = await manager.startAuth();
+        const againUrl = new URL(again.authUrl);
+        assert.equal(againUrl.searchParams.get('client_id'), 'dynamic_agent_client');
+        assert.equal(againUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
       } finally {
         await manager.cancelAll();
       }
@@ -2125,6 +2284,17 @@ async function waitFor(predicate) {
     if (Date.now() - start > 3000) throw new Error('timed out waiting for condition');
     await delay(5);
   }
+}
+
+function assertSessionCleared(creds) {
+  assert.equal(creds.access_token, undefined);
+  assert.equal(creds.refresh_token, undefined);
+  assert.equal(creds.id_token, undefined);
+  assert.equal(creds.token_type, undefined);
+  assert.equal(creds.expires_in, undefined);
+  assert.equal(creds.issued_at, undefined);
+  assert.equal(creds.scope, undefined);
+  assert.equal(creds.scopes, undefined);
 }
 
 async function listCredentialFiles(dir) {

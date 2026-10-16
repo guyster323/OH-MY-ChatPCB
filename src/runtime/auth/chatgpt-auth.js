@@ -165,7 +165,7 @@ async function publishNewHostId(filePath) {
       const raced = await readTrimmedFile(filePath);
       if (isValidHostId(raced)) {
         await chmod(filePath, 0o600).catch(() => {});
-        return raced;
+        return canonicalHostId(raced);
       }
       if (raced) return replaceInvalidHostId(filePath);
     }
@@ -185,20 +185,50 @@ async function replaceInvalidHostId(filePath) {
     const current = await readTrimmedFile(filePath);
     if (isValidHostId(current)) {
       await chmod(filePath, 0o600).catch(() => {});
-      return current;
+      return canonicalHostId(current);
     }
     await rename(tempPath, filePath);
   } finally {
     await unlink(tempPath).catch(() => {});
   }
   await chmod(filePath, 0o600);
+  await dropRegistrationsForNewHost(hostId);
   return hostId;
+}
+
+function canonicalHostId(value) {
+  // OpenAI treats the urn:uuid prefix and hex digits as case-insensitive.
+  if (typeof value === 'string' && UUID_HOST_ID.test(value)) return value.toLowerCase();
+  return value;
+}
+
+async function storeCanonicalHostId(filePath, canonical) {
+  const tempPath = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    await writeFile(tempPath, canonical, { mode: 0o600 });
+    await chmod(tempPath, 0o600);
+    const current = await readTrimmedFile(filePath);
+    if (canonicalHostId(current) !== canonical) {
+      if (isValidHostId(current)) {
+        await chmod(filePath, 0o600).catch(() => {});
+        return canonicalHostId(current);
+      }
+      return replaceInvalidHostId(filePath);
+    }
+    if (current !== canonical) await rename(tempPath, filePath);
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+  await chmod(filePath, 0o600);
+  return canonical;
 }
 
 /**
  * Stable opaque host id, generated once per machine and reused.
  * Generated ids are `urn:uuid:<UUIDv4>`. A stored id is kept only when
  * {@link isValidHostId} accepts it; anything else is replaced.
+ * A valid `urn:uuid` is stored in lowercase. Replacing an invalid id
+ * deletes saved registrations whose `ext_agent_host_id` is not the new id.
  * The file is owner-only (0600). A missing file is published with an atomic
  * link so concurrent creators never observe a partial write. An invalid
  * file is replaced with an atomic rename.
@@ -207,8 +237,12 @@ export async function getOrCreateHostId() {
   const filePath = getHostIdPath();
   const existing = await readTrimmedFile(filePath);
   if (isValidHostId(existing)) {
-    await chmod(filePath, 0o600).catch(() => {});
-    return existing;
+    const canonical = canonicalHostId(existing);
+    if (canonical === existing) {
+      await chmod(filePath, 0o600).catch(() => {});
+      return existing;
+    }
+    return storeCanonicalHostId(filePath, canonical);
   }
 
   await mkdir(dirname(filePath), { recursive: true });
@@ -333,10 +367,10 @@ export function selectSavedAccount(candidates) {
 }
 
 /**
- * Same ordering as selectSavedAccount, also matching a file that still has an
- * issued client id but no access token. Sign-out deletes credential files, so
- * the next sign-in registers again. Records that only stored dynamic_agent_client
- * are not registrations.
+ * Same ordering as selectSavedAccount, including a signed-out registration
+ * that still has an issued client id and no access token. Sign-out keeps
+ * that registration so the next sign-in reuses the client id. Records that
+ * only stored dynamic_agent_client are not registrations.
  */
 export function selectSavedRegistration(candidates) {
   const usable = [];
@@ -420,9 +454,10 @@ export async function saveCredentials(creds) {
 
 /**
  * Persist a provider-side token update only while `generation` is still the
- * active session and the stored record is still one of `refreshTokens`.
- * Sign-out deletes the file and bumps the generation first, so a call that
- * started earlier cannot recreate the account.
+ * active session and the stored record still has one of `refreshTokens`.
+ * Sign-out bumps the generation before it clears tokens, so a call that
+ * started earlier cannot write tokens back. A stored record with no access
+ * token is left unchanged.
  */
 export async function saveCredentialsIfCurrent(creds, { generation, clientId, refreshTokens } = {}) {
   const allowed = new Set(
@@ -491,6 +526,83 @@ async function dropIssuedClient(clientId) {
   if (!isReusableClientId(clientId)) return;
   bumpSessionGeneration();
   await withCredentialWrite(() => unlinkClientCredentials(clientId));
+}
+
+async function dropRegistrationsForNewHost(newHostId) {
+  await withCredentialWrite(async () => {
+    const configDir = getConfigDir();
+    if (!existsSync(configDir)) return;
+    let names;
+    try {
+      names = await readdir(configDir);
+    } catch {
+      return;
+    }
+    const staleClientIds = [];
+    for (const name of names) {
+      if (!isCredentialFile(name)) continue;
+      try {
+        const creds = JSON.parse(await readFile(join(configDir, name), 'utf8'));
+        if (!isReusableClientId(creds?.client_id)) continue;
+        if (creds.ext_agent_host_id === newHostId) continue;
+        staleClientIds.push(creds.client_id);
+      } catch {
+        // Leave unreadable files for the other accounts alone.
+      }
+    }
+    if (staleClientIds.length === 0) return;
+    bumpSessionGeneration();
+    for (const clientId of staleClientIds) {
+      await unlinkClientCredentials(clientId);
+    }
+  });
+}
+
+/**
+ * Registration kept across sign-out. OpenAI expects the same issued client id
+ * on the next sign-in for this account, with no new dynamic registration and
+ * no agent_name_hint. The ID token is dropped, so the next authorize request
+ * omits id_token_hint. Email and subject stay for login_hint and account match.
+ */
+function retainRegistration(creds) {
+  const subject = firstString(creds.subject) || subjectFromIdToken(creds.id_token) || undefined;
+  const email = firstString(creds.email, creds.account?.email) || undefined;
+  return {
+    email,
+    issuer: creds.issuer || undefined,
+    subject,
+    client_id: creds.client_id,
+    ext_agent_host_id: creds.ext_agent_host_id,
+    saved_at: creds.saved_at,
+    last_used_at: creds.last_used_at,
+    account: creds.account
+  };
+}
+
+async function clearStoredSession() {
+  await withCredentialWrite(async () => {
+    const configDir = getConfigDir();
+    if (!existsSync(configDir)) return;
+    const files = await readdir(configDir);
+    for (const file of files) {
+      if (!isCredentialFile(file)) continue;
+      const full = join(configDir, file);
+      let creds;
+      try {
+        creds = JSON.parse(await readFile(full, 'utf8'));
+      } catch {
+        await unlink(full).catch(() => {});
+        continue;
+      }
+      if (!creds || typeof creds !== 'object' || Array.isArray(creds) || !isReusableClientId(creds.client_id)) {
+        await unlink(full).catch(() => {});
+        continue;
+      }
+      await writeCredentialsFile(retainRegistration(creds));
+      const canonical = getCredentialsPath(creds.client_id);
+      if (full !== canonical) await unlink(full).catch(() => {});
+    }
+  });
 }
 
 export async function deleteCredentials() {
@@ -1019,6 +1131,21 @@ export function startAuthFlow({
     }
 
     if (error) {
+      if (error === 'invalid_client') {
+        await dropIssuedClient(pendingClientId);
+        const message = 'ChatGPT client is no longer valid. Sign in again.';
+        try {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(createErrorPage(
+            `Sign-in error: ${message}`,
+            '로그인 오류: ChatGPT 클라이언트가 더 이상 유효하지 않습니다. 다시 로그인해 주세요.'
+          ));
+        } catch {
+          // The listener may already be closing.
+        }
+        await finish({ code: 'invalid_client', message });
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(createErrorPage('Sign-in was cancelled', '로그인이 취소되었습니다'));
       const denied = error === 'access_denied';
@@ -1343,6 +1470,9 @@ export function createChatGPTAuthManager({
 
   async function beginStart(args, emitFn) {
     await closeActiveAttempts();
+    // Replacing an invalid host id drops registrations for the old host
+    // before a client id is chosen for this attempt.
+    await getOrCreateHostId();
     const active = await loadCredentials();
     const registration = active ?? await loadSavedRegistration();
     const settings = await resolveChatGPTSettings({
@@ -1469,11 +1599,12 @@ export function createChatGPTAuthManager({
 
   async function signOut() {
     // Synchronous so an in-flight provider save observes the new generation
-    // before this function waits on network or disk.
+    // before this function waits on network or disk. Tokens are cleared
+    // after that bump; the issued client id stays for the next sign-in.
     bumpSessionGeneration();
     for (const flow of activeAuthAttempts.values()) flow.invalidate();
     await closeActiveAttempts();
-    await deleteCredentials();
+    await clearStoredSession();
     return { state: 'signed_out' };
   }
 
