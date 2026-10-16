@@ -1,9 +1,9 @@
 import { createHash, createPublicKey, createVerify, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import http from 'node:http';
-import { homedir, userInfo } from 'node:os';
+import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 
 // Fallback when OpenID discovery is missing or rejected. These match
@@ -38,7 +38,6 @@ const RESPONSES_TIMEOUT_MS = 120 * 1000;
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
 const OIDC_DISCOVERY_TTL_MS = 60 * 60 * 1000;
 const OIDC_FAILURE_TTL_MS = 60 * 1000;
-const TEST_CONFIG_CODE = 'CHATPCB_TEST_CONFIG_HOME';
 const REQUIRED_OIDC_ENDPOINTS = ['authorization_endpoint', 'token_endpoint', 'jwks_uri'];
 const jwksCache = new Map();
 let oidcCache = null;
@@ -123,37 +122,6 @@ export function openSystemBrowser(url, { platform = process.platform, spawnImpl 
   });
 }
 
-function runningUnderNodeTest() {
-  if (process.env.NODE_TEST_CONTEXT) return true;
-  const args = [...process.execArgv, ...process.argv];
-  return args.some((arg) => arg === '--test' || arg.startsWith('--test='));
-}
-
-function assertTestConfigNotInRealHome(dir) {
-  if (!runningUnderNodeTest()) return;
-  let realHome;
-  try {
-    realHome = userInfo().homedir;
-  } catch {
-    return;
-  }
-  if (!realHome) return;
-  const resolvedDir = resolve(dir);
-  const resolvedHome = resolve(realHome);
-  const fromHome = relative(resolvedHome, resolvedDir);
-  const insideHome = fromHome === '' || (fromHome !== '' && !fromHome.startsWith('..') && !isAbsolute(fromHome));
-  if (!insideHome) return;
-  const error = new Error(
-    `Refusing ChatPCB config directory ${resolvedDir} because it is inside the real home ${resolvedHome} while running under node --test. Point HOME at a temporary directory, APPDATA on Windows, or an absolute XDG_CONFIG_HOME on Linux.`
-  );
-  error.code = TEST_CONFIG_CODE;
-  throw error;
-}
-
-function rethrowIfTestConfigGuard(error) {
-  if (error?.code === TEST_CONFIG_CODE) throw error;
-}
-
 function envPath(value) {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -189,9 +157,7 @@ export function resolveChatGPTConfigDir({
 }
 
 function getConfigDir() {
-  const dir = resolveChatGPTConfigDir();
-  assertTestConfigNotInRealHome(dir);
-  return dir;
+  return resolveChatGPTConfigDir();
 }
 
 function getCredentialsPath(clientId = 'default') {
@@ -442,8 +408,7 @@ async function readCredentialRecords() {
 export async function loadCredentials() {
   try {
     return selectSavedAccount(await readCredentialRecords());
-  } catch (error) {
-    rethrowIfTestConfigGuard(error);
+  } catch {
     return null;
   }
 }
@@ -451,8 +416,7 @@ export async function loadCredentials() {
 async function loadSavedRegistration() {
   try {
     return selectSavedRegistration(await readCredentialRecords());
-  } catch (error) {
-    rethrowIfTestConfigGuard(error);
+  } catch {
     return null;
   }
 }
@@ -2145,8 +2109,7 @@ async function readChatGPTConfig() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return parsed;
-  } catch (error) {
-    rethrowIfTestConfigGuard(error);
+  } catch {
     return {};
   }
 }

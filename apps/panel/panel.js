@@ -831,10 +831,7 @@ function draftSourceLabel(source) {
 }
 
 function draftParts(preview) {
-  const components = Array.isArray(preview?.components) ? preview.components : [];
-  if (components.length > 0) return components;
-  const manifestParts = preview?.manifest?.parts;
-  return Array.isArray(manifestParts) ? manifestParts : [];
+  return Array.isArray(preview?.components) ? preview.components : [];
 }
 
 function renderDraftEvidence(preview) {

@@ -37,7 +37,7 @@ import { createEnvelope } from '../src/runtime/envelope.js';
 import { parseProviderMessage, validateProviderToolCall } from '../src/runtime/provider-process.js';
 import { PROVIDER_ALLOWED_TOOLS } from '../src/shared/constants.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
-import { applyIsolatedConfigEnv, isolateHome } from './isolate-home.js';
+import { applyIsolatedConfigEnv, assertIsolatedConfigDir, isolateHome } from './isolate-home.js';
 
 const originalFetch = globalThis.fetch;
 const originalEnv = {
@@ -133,7 +133,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     assert.equal(configPathInside(hostPath, realHome), false);
   });
 
-  it('refuses a ChatPCB config directory inside the real home under node --test', async () => {
+  it('refuses a ChatPCB config directory inside the real home from the test helper', () => {
     const realHome = userInfo().homedir;
     const saved = {
       HOME: process.env.HOME,
@@ -156,31 +156,30 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       const nativeDir = expectedDir({}, realHome);
       assert.equal(resolveChatGPTConfigDir(), nativeDir);
       assert.equal(configPathInside(nativeDir, realHome), true);
-      await assert.rejects(loadCredentials(), (error) => {
+      assert.throws(() => assertIsolatedConfigDir(nativeDir, realHome), (error) => {
         assert.equal(error.code, 'CHATPCB_TEST_CONFIG_HOME');
         assert.ok(error.message.includes(path.resolve(nativeDir)));
         assert.match(error.message, /real home/);
-        assert.match(error.message, /node --test/);
         return true;
       });
 
       // Blank and relative XDG values stay on the native directory, so the
-      // guard still rejects the real home on every OS.
+      // helper still rejects the real home on every OS.
       for (const xdg of ['', '  ', 'rel/cfg']) {
         process.env.XDG_CONFIG_HOME = xdg;
         const ignored = expectedDir({ XDG_CONFIG_HOME: xdg }, realHome);
         assert.equal(ignored, nativeDir, JSON.stringify(xdg));
         assert.equal(resolveChatGPTConfigDir(), nativeDir);
         assert.equal(configPathInside(ignored, realHome), true);
-        await assert.rejects(
-          loadCredentials(),
+        assert.throws(
+          () => assertIsolatedConfigDir(ignored, realHome),
           (error) => error.code === 'CHATPCB_TEST_CONFIG_HOME'
         );
       }
 
       // An absolute XDG path outside the profile overrides only where the
       // resolver honors XDG. macOS and Windows keep the native directory
-      // inside the real home, and the guard still fires.
+      // inside the real home, and the helper still refuses it.
       const outsideXdg = `${realHome}-chatpcb-sibling`;
       process.env.XDG_CONFIG_HOME = outsideXdg;
       const xdgDir = expectedDir({ XDG_CONFIG_HOME: outsideXdg }, realHome);
@@ -188,14 +187,14 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       if (process.platform === 'darwin' || process.platform === 'win32') {
         assert.equal(xdgDir, nativeDir);
         assert.equal(configPathInside(xdgDir, realHome), true);
-        await assert.rejects(
-          loadCredentials(),
+        assert.throws(
+          () => assertIsolatedConfigDir(xdgDir, realHome),
           (error) => error.code === 'CHATPCB_TEST_CONFIG_HOME'
         );
       } else {
         assert.equal(path.isAbsolute(outsideXdg), true);
         assert.equal(configPathInside(xdgDir, realHome), false);
-        assert.equal(await loadCredentials(), null);
+        assert.equal(assertIsolatedConfigDir(xdgDir, outsideXdg), path.resolve(xdgDir));
       }
 
       delete process.env.XDG_CONFIG_HOME;
@@ -215,7 +214,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       }, escapedHome);
       assert.equal(resolveChatGPTConfigDir(), escaped);
       assert.equal(configPathInside(escaped, realHome), false);
-      assert.equal(await loadCredentials(), null);
+      assert.equal(assertIsolatedConfigDir(escaped, escapedHome), path.resolve(escaped));
     } finally {
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[key];
