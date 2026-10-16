@@ -28,6 +28,7 @@
   "erc.title": "ERC",
   "erc.errors": "오류 {count}개",
   "erc.passed": "ERC 통과",
+  "erc.current-file": "현재 회로도에는 ERC 오류가 {count}개 있어요. 이 패치는 ERC를 통과해서 적용할 수 있어요.",
   "erc.skipped": "ERC 건너뜀",
   "auth.chatgpt.title": "ChatGPT 요금제로 ChatPCB 사용하기",
   "auth.chatgpt.body": "로그인은 시스템 브라우저에서 진행돼요. ChatPCB에는 비밀번호를 입력하지 마세요.",

@@ -28,6 +28,7 @@
   "erc.title": "ERC",
   "erc.errors": "{count} errors",
   "erc.passed": "ERC passed",
+  "erc.current-file": "The open schematic still has {count} ERC errors. This patch passed ERC and can be applied.",
   "erc.skipped": "ERC skipped",
   "auth.chatgpt.title": "Use ChatPCB with your ChatGPT plan",
   "auth.chatgpt.body": "You'll sign in using your system browser. Never enter your password in ChatPCB.",

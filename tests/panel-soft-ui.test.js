@@ -48,6 +48,122 @@ const UI_PAIRS = [
   ['danger', 'surface']
 ];
 
+test('Apply stays enabled when the candidate ERC passes and the open file still fails ERC', async (t) => {
+  let browser;
+  try {
+    browser = await chromium.launch({
+      executablePath: chromium.executablePath(),
+      headless: true
+    });
+  } catch (error) {
+    if (process.env.CI) throw error;
+    t.skip(`Chromium unavailable: ${error.message}`);
+    return;
+  }
+
+  const server = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, 'http://127.0.0.1');
+      let pathname = normalize(decodeURIComponent(url.pathname));
+      if (pathname === '/' || pathname === sep) pathname = '/index.html';
+      const file = resolve(PANEL_ROOT, `.${pathname}`);
+      if (file !== PANEL_ROOT && !file.startsWith(PANEL_ROOT + sep)) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+      const body = await readFile(file);
+      res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
+      res.end(body);
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  const port = server.address().port;
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 420, height: 800 } });
+    await page.addInitScript(() => {
+      window.__CHATPCB_TEST_MODE__ = true;
+      window.__sent = [];
+      window.__sockets = [];
+      class FakeSocket extends EventTarget {
+        constructor(url) {
+          super();
+          this.url = url;
+          this.readyState = 0;
+          window.__sockets.push(this);
+        }
+        send(data) {
+          window.__sent.push(String(data));
+        }
+        close() {
+          this.readyState = 3;
+        }
+      }
+      FakeSocket.CONNECTING = 0;
+      FakeSocket.OPEN = 1;
+      FakeSocket.CLOSING = 2;
+      FakeSocket.CLOSED = 3;
+      window.WebSocket = FakeSocket;
+    });
+    await page.goto(`http://127.0.0.1:${port}/index.html?lang=en&chatpcbTest=1`, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => window.chatpcbI18n.ready);
+    const result = await page.evaluate(() => {
+      for (const socket of window.__sockets) socket.readyState = 1;
+      window.__sent.length = 0;
+      window.__chatpcbTest.showPatch({
+        validation: {
+          ok: true,
+          skipped: false,
+          erc: { errorCount: 0, warningCount: 0 }
+        },
+        candidateVerification: {
+          erc: { ok: true, skipped: false, status: 'passed', erc: { errorCount: 0, warningCount: 0 } }
+        },
+        inspection: {
+          manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
+          validation: {
+            ok: false,
+            erc: {
+              ok: false,
+              errorCount: 2,
+              violations: [
+                { message: 'Pin 3 of U2 (EN) is not connected' },
+                { message: 'Power input +3V3 is not driven' }
+              ]
+            }
+          }
+        }
+      });
+      const button = document.querySelector('#approve-patch-button');
+      const why = document.querySelector('#apply-why');
+      button.click();
+      const sent = window.__sent.map((raw) => JSON.parse(raw)).map((event) => event.payload);
+      const info = document.querySelector('#patch-erc-info');
+      return {
+        disabled: button.disabled,
+        ariaDisabled: button.getAttribute('aria-disabled'),
+        whyHidden: why.hidden,
+        infoHidden: info ? info.hidden : null,
+        infoRole: info ? info.getAttribute('role') : null,
+        sent: sent.length
+      };
+    });
+    assert.equal(result.disabled, false);
+    assert.equal(result.ariaDisabled, null);
+    assert.equal(result.whyHidden, true);
+    assert.equal(result.sent, 1);
+    assert.equal(result.infoHidden, false);
+    assert.notEqual(result.infoRole, 'alert');
+  } finally {
+    await browser.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
+});
+
 test('en and ko panel locales have the same keys', async () => {
   const en = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/en.json'), 'utf8'));
   const ko = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/ko.json'), 'utf8'));

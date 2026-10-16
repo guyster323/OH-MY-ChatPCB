@@ -772,15 +772,21 @@ function ercSourceHasSignal(source) {
   return Number(source.errorCount) > 0;
 }
 
-// The patch preview is the ERC recorded for this approval. A later project
-// inspection with an empty validation object must not replace it.
-function preferredErcSource() {
+// Apply follows only the candidate patch: candidateVerification.erc, or the
+// preview validation when that is the recorded candidate result. The open
+// file's inspection ERC must not block a patch that fixes those errors.
+function candidateErcSource() {
   const requestErc = lastRequestResult?.candidateVerification?.erc;
   if (ercSourceHasSignal(requestErc)) return requestErc;
   const requestValidation = lastRequestResult?.validation;
   if (ercSourceHasSignal(requestValidation)) return requestValidation;
+  return null;
+}
+
+function inspectionErcSource() {
   const inspection = inspectionState.result?.validation;
-  if (ercSourceHasSignal(inspection?.erc)) return inspection.erc;
+  if (!inspection || typeof inspection !== 'object') return null;
+  if (ercSourceHasSignal(inspection.erc)) return inspection.erc;
   if (ercSourceHasSignal(inspection)) return inspection;
   return null;
 }
@@ -809,7 +815,31 @@ function classifyPanelErc(source) {
 }
 
 function ercBlockState() {
-  return classifyPanelErc(preferredErcSource());
+  return classifyPanelErc(candidateErcSource());
+}
+
+function renderCurrentFileErc(candidate, active) {
+  const info = document.querySelector('#patch-erc-info');
+  if (!info) return;
+  const current = classifyPanelErc(inspectionErcSource());
+  const show = Boolean(active) && candidate?.passed === true && current.failed === true;
+  info.hidden = !show;
+  info.removeAttribute('role');
+  if (!show) {
+    info.replaceChildren();
+    return;
+  }
+  const summary = document.createElement('p');
+  summary.textContent = t('erc.current-file', { count: current.count });
+  info.replaceChildren(summary);
+  if (!current.messages.length) return;
+  const list = document.createElement('ul');
+  for (const message of current.messages) {
+    const item = document.createElement('li');
+    item.textContent = message;
+    list.append(item);
+  }
+  info.append(list);
 }
 
 function renderErcBox(erc, active) {
@@ -887,6 +917,7 @@ function renderPatchApproval() {
     }
   }
   renderErcBox(erc, active);
+  renderCurrentFileErc(erc, active);
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
