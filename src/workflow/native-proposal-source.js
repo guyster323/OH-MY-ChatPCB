@@ -5,8 +5,17 @@ import path from 'node:path';
 
 import { collectTransactionSnapshot, transactionArtifactKind } from '../evidence/transaction-inventory.js';
 import { CONVERSATION_FILE } from '../runtime/request-conversation.js';
+import {
+  applyMergedProjectEdit,
+  classifyExistingProjectRequest,
+  deletionAuthorized,
+  modifyRefusalMessage,
+  removalFinding,
+  removalGuardApplies,
+  removedComponents
+} from './existing-project-edit.js';
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
-import { assertSafeProjectDir } from './project-workspace.js';
+import { assertSafeProjectDir, readChatPcbManifest } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
@@ -192,6 +201,17 @@ function candidatePassed(verification, required) {
   if (required.erc && verification.erc.status !== 'passed') return false;
   if (required.drc && verification.drc.status !== 'passed') return false;
   return true;
+}
+
+function reviewWithRemovalGuard(review, beforeSpec, afterSpec, prompt) {
+  const removed = removedComponents(beforeSpec, afterSpec);
+  if (removed.length === 0 || deletionAuthorized(prompt, removed)) return review;
+  if (!removalGuardApplies(prompt, beforeSpec)) return review;
+  const finding = removalFinding(removed);
+  review.findings.blockers.push(finding);
+  review.status = 'blocked';
+  review.statusLabel = 'Blocked';
+  return review;
 }
 
 function componentsFrom(spec) {
@@ -380,7 +400,20 @@ export async function createNativeProposal({
     await materializeCandidate(beforeSnapshot, candidateDir);
     throwIfAborted(signal);
 
-    const proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
+    const existingSpec = await readChatPcbManifest(candidateDir);
+    const decision = classifyExistingProjectRequest(prompt, existingSpec);
+    let proposed;
+    if (decision.mode === 'refuse') {
+      throw coded('PROVIDER_NO_PATCH', modifyRefusalMessage());
+    } else if (decision.mode === 'merge') {
+      proposed = await applyMergedProjectEdit({
+        projectDir: candidateDir,
+        existingSpec,
+        edit: decision.edit
+      });
+    } else {
+      proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
+    }
     throwIfAborted(signal);
     if (conversationBytes?.length) {
       await writeFile(path.join(candidateDir, CONVERSATION_FILE), conversationBytes);
@@ -460,10 +493,10 @@ export async function createNativeProposal({
         erc: ercReport(isLegacyErcResult(rawVerification) ? rawVerification : rawVerification?.erc),
         drc: isLegacyErcResult(rawVerification) ? undefined : rawVerification?.drc
       },
-      review: reviewCircuitReadiness({
+      review: reviewWithRemovalGuard(reviewCircuitReadiness({
         spec: proposed.spec,
         validation: isLegacyErcResult(rawVerification) ? rawVerification : rawVerification?.erc
-      })
+      }), existingSpec, proposed.spec, prompt)
     };
   } catch (error) {
     await rm(tempDir, { force: true, recursive: true });

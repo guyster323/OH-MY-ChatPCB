@@ -190,6 +190,20 @@ function boardPlacementFor(componentModel, index, profileMode) {
     : { x: 25 + (index % 5) * 22, y: 25 + Math.floor(index / 5) * 18, rotation: 0 };
 }
 
+function statusLedResistorValue(spec) {
+  const peripheral = (spec?.peripherals ?? []).find((item) => item?.kind === 'status-led-resistor');
+  if (typeof peripheral?.value === 'string' && peripheral.value.trim()) return peripheral.value.trim();
+  return '1k';
+}
+
+function spiceResistorOhms(value) {
+  const text = String(value ?? '').trim();
+  const kilo = text.match(/^(\d+(?:\.\d+)?)\s*k/i);
+  if (kilo) return String(Math.round(Number(kilo[1]) * 1000));
+  const ohms = text.match(/^(\d+(?:\.\d+)?)/);
+  return ohms ? String(Math.round(Number(ohms[1]))) : '1000';
+}
+
 export function buildMcuSchematicAst(spec) {
   if (spec.kind === 'discrete-led') {
     return buildDiscreteLedSchematicAst(spec);
@@ -354,7 +368,7 @@ export function buildMcuSchematicAst(spec) {
         pins: ['+3V3', 'GND'],
         connectedPins: ['+3V3', 'GND'],
         pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined,
-        value: '1k'
+        value: statusLedResistorValue(spec)
       })
     );
   }
@@ -982,7 +996,7 @@ export function renderSpiceFixture(spec) {
     'RREG vbus v3v3 1',
     'DREG v3v3 0 DCLAMP',
     '.model DCLAMP D(BV=3.3 IBV=1m)',
-    hasLed ? 'RLED v3v3 led 1000' : '* RLED omitted: no status LED requested',
+    hasLed ? `RLED v3v3 led ${spiceResistorOhms(statusLedResistorValue(spec))}` : '* RLED omitted: no status LED requested',
     hasLed ? 'DLED led 0 DRED' : '* DLED omitted: no status LED requested',
     hasLed ? '.model DRED D(Vfwd=1.9)' : '* LED model omitted',
     hasButton ? 'RBUTTON v3v3 button 10000' : '* RBUTTON omitted: no button requested',

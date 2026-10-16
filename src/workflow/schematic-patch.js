@@ -32,12 +32,38 @@ function patchFailure(code, message, plan) {
   };
 }
 
+function findRemovalBlocker(plan) {
+  const blockers = plan?.review?.findings?.blockers ?? [];
+  return blockers.find((finding) => (
+    finding?.code === 'existing-components-removed' || finding?.id === 'existing-components-removed'
+  )) ?? null;
+}
+
 function candidateAllowsApply(plan) {
+  if (findRemovalBlocker(plan)) return false;
   const required = plan.requiredValidation ?? {};
   const verification = plan.candidateVerification ?? {};
   if (required.erc && verification.erc?.status !== 'passed') return false;
   if (required.drc && verification.drc?.status !== 'passed') return false;
   return true;
+}
+
+function removalFailure(plan) {
+  const blocker = findRemovalBlocker(plan);
+  return {
+    requiresApproval: false,
+    approved: true,
+    applied: false,
+    rolledBack: false,
+    files: plan?.targetFiles ?? {},
+    changedFiles: plan?.changedFiles ?? [],
+    diff: plan?.diff ?? '',
+    ...(plan ? { validation: plan.validation, review: plan.review } : {}),
+    reason: {
+      code: 'EXISTING_COMPONENTS_REMOVED',
+      message: blocker?.message ?? 'Existing components were removed. Apply stays closed unless the request explicitly deletes those parts. 기존 부품이 빠졌습니다. 요청에 해당 부품 삭제를 명시하지 않으면 적용할 수 없습니다.'
+    }
+  };
 }
 
 function previewManifest(plan) {
@@ -199,6 +225,14 @@ export async function applySchematicPatch({
 
   if (!approved) {
     const preview = previewFrom(plan);
+    const blocker = findRemovalBlocker(plan);
+    if (blocker) {
+      preview.requiresApproval = false;
+      preview.reason = {
+        code: 'EXISTING_COMPONENTS_REMOVED',
+        message: blocker.message
+      };
+    }
     if (ownsPlan) await disposeNativeProposal(plan);
     return preview;
   }
@@ -210,6 +244,7 @@ export async function applySchematicPatch({
 
   if (!candidateAllowsApply(plan)) {
     if (ownsPlan) await disposeNativeProposal(plan);
+    if (findRemovalBlocker(plan)) return removalFailure(plan);
     return {
       requiresApproval: false,
       approved: true,
