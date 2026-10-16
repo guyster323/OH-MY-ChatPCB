@@ -197,6 +197,24 @@ $env:CHATPCB_PROVIDER_TIMEOUT_MS = "300000"
 $env:CHATPCB_GROK_TIMEOUT_MS = "420000"
 ```
 
+## ChatGPT
+
+Choose **Continue with ChatGPT** in the panel to use a ChatGPT plan. Sign-in opens the system browser. Do not enter the account password in ChatPCB.
+
+OpenAI dynamic client registration issues an `oaiapp_` client id for this app. OpenAI expects that client id to be reused on the next sign-in, together with this machine's host id. Sign-out keeps the credentials file so the next **Continue with ChatGPT** can send the same client id. It does not start a new registration.
+
+After sign-out the file holds only that registration. When each value was stored, the keys are exactly:
+
+- `client_id` — the issued `oaiapp_` client id
+- `ext_agent_host_id` — this machine's host id
+- `issuer` — the OpenAI issuer
+- `saved_at` — when the registration was saved
+- `last_used_at` — when the registration was last used
+
+A key that was never stored is absent. No other key remains. Access tokens, refresh tokens, ID tokens, email, name, account, and subject are removed, and the next authorize request does not send `id_token_hint` or `login_hint`.
+
+로그아웃해도 자격증명 파일은 남습니다. OpenAI 동적 클라이언트 등록이 발급한 `oaiapp_` 클라이언트 id를 다음 로그인에서 다시 쓰기 위해서이며, 이 기기의 호스트 id도 함께 남습니다. 새 등록을 다시 받지 않습니다. 남는 필드는 등록 정보뿐입니다. 저장되어 있었다면 `client_id`, `ext_agent_host_id`, `issuer`, `saved_at`, `last_used_at`이고, 저장되지 않았던 키는 없습니다. 액세스 토큰, 리프레시 토큰, ID 토큰, 이메일, 이름, 계정, subject는 남지 않으며, 다음 로그인 요청에는 `id_token_hint`와 `login_hint`가 없습니다.
+
 ## Browser UI verification
 
 Run this command for the closest repeatable check to a user operating the current panel:

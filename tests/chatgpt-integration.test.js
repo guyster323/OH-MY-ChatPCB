@@ -3352,7 +3352,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         issued_at: Date.now(),
         scope: PLAN_SCOPE,
         scopes: PLAN_SCOPE.split(' '),
-        token_type: 'Bearer'
+        token_type: 'Bearer',
+        saved_at: '2026-01-02T03:04:05.000Z'
       });
       const before = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
       assert.equal((await manager.signOut()).state, 'signed_out');
@@ -3360,8 +3361,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       assert.equal(retained.client_id, 'oaiapp_TEST');
       assert.equal(retained.ext_agent_host_id, 'host-1');
       assert.equal(retained.issuer, 'https://auth.openai.com');
+      assert.equal(retained.saved_at, '2026-01-02T03:04:05.000Z');
       assert.equal(retained.last_used_at, before.last_used_at);
-      assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'ext_agent_host_id', 'issuer', 'last_used_at']);
+      assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'ext_agent_host_id', 'issuer', 'last_used_at', 'saved_at']);
       assert.equal(Object.hasOwn(retained, 'email'), false);
       assert.equal(Object.hasOwn(retained, 'name'), false);
       assert.equal(Object.hasOwn(retained, 'subject'), false);

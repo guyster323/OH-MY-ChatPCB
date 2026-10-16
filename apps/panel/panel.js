@@ -212,6 +212,10 @@ const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
 const kiCadFallbackEl = document.querySelector('#kicad-fallback');
 const chatgptAuthCardEl = document.querySelector('#chatgpt-auth-card');
+const chatgptSwitchOfferEl = document.querySelector('#chatgpt-switch-offer');
+const chatgptSwitchOfferTextEl = document.querySelector('#chatgpt-switch-offer-text');
+const chatgptSwitchOfferAcceptEl = document.querySelector('#chatgpt-switch-offer-accept');
+const chatgptSwitchOfferDismissEl = document.querySelector('#chatgpt-switch-offer-dismiss');
 const authLiveRegionEl = document.querySelector('#auth-live-region');
 
 let socket;
@@ -232,9 +236,12 @@ const pendingCalls = new Map();
 const workflowCaptionEl = document.querySelector('#workflow-caption');
 const workflowCliEl = document.querySelector('#workflow-cli');
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
+let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
 let chatgptAuthExpiryTimer = null;
+let chatgptSwitchOfferRecorded = false;
 const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
+const CHATGPT_SWITCH_OFFER_KEY = 'chatpcb.chatgpt-switch-offered';
 
 restoreProviderSelection();
 renderDaemonConnection();
@@ -257,7 +264,10 @@ providerEl.addEventListener('change', () => {
   rememberProvider(providerEl.value);
   refreshProviderStatus();
   updateChatGPTAuthVisibility();
+  syncChatGPTSwitchOffer();
 });
+chatgptSwitchOfferAcceptEl?.addEventListener('click', acceptChatGPTSwitchOffer);
+chatgptSwitchOfferDismissEl?.addEventListener('click', dismissChatGPTSwitchOffer);
 openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
@@ -289,6 +299,7 @@ function connect() {
     setDaemonConnectionState('open');
     clearPatchApproval();
     refreshProviderStatus();
+    refreshChatGPTAuthStatus();
     inspectActiveProject();
   });
   socket.addEventListener('message', (event) => handleEnvelope(JSON.parse(event.data)));
@@ -404,6 +415,24 @@ function rememberProvider(provider) {
     localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
   } catch {
     // The select still works for this page when storage is blocked.
+  }
+}
+
+function readChatGPTSwitchOffered() {
+  if (chatgptSwitchOfferRecorded) return true;
+  try {
+    return localStorage.getItem(CHATGPT_SWITCH_OFFER_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function rememberChatGPTSwitchOffered() {
+  chatgptSwitchOfferRecorded = true;
+  try {
+    localStorage.setItem(CHATGPT_SWITCH_OFFER_KEY, '1');
+  } catch {
+    // The choice still sticks for this page when storage is blocked.
   }
 }
 
@@ -563,6 +592,7 @@ function handleEnvelope(envelope) {
         account: provider.account,
         plan: provider.plan
       };
+      chatgptAuthKnown = true;
       renderChatGPTAuth();
     }
   }
@@ -580,6 +610,7 @@ function handleEnvelope(envelope) {
       expiresAt: result.expiresAt,
       code: undefined
     };
+    chatgptAuthKnown = true;
     renderChatGPTAuth();
     if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
     else stopChatGPTAuthPolling();
@@ -588,12 +619,14 @@ function handleEnvelope(envelope) {
   if (callName === 'auth.chatgpt.cancel') {
     stopChatGPTAuthPolling();
     chatgptAuthState = { state: 'signed_out' };
+    chatgptAuthKnown = true;
     renderChatGPTAuth();
     return;
   }
   if (callName === 'auth.chatgpt.signOut') {
     stopChatGPTAuthPolling();
     chatgptAuthState = { state: 'signed_out' };
+    chatgptAuthKnown = true;
     renderChatGPTAuth();
     refreshProviderStatus();
     return;
@@ -1476,6 +1509,7 @@ function showChatGPTAuthExpired() {
     state: 'error',
     code: 'timeout'
   };
+  chatgptAuthKnown = true;
   renderChatGPTAuth();
   updateLiveRegion({ state: 'error', code: 'timeout' });
 }
@@ -1507,7 +1541,9 @@ function startChatGPTAuthPolling() {
 }
 
 function applyChatGPTAuthStatus(result) {
+  chatgptAuthKnown = true;
   if (chatgptAuthState.state === 'error' && chatgptAuthState.code === 'timeout' && result.state === 'waiting') {
+    syncChatGPTSwitchOffer();
     return;
   }
   if (result.state === 'waiting') {
@@ -1525,6 +1561,7 @@ function applyChatGPTAuthStatus(result) {
       || previous.attemptId !== chatgptAuthState.attemptId
       || previous.authUrl !== chatgptAuthState.authUrl;
     if (changed) renderChatGPTAuth();
+    else syncChatGPTSwitchOffer();
     if (chatgptAuthState.state === 'waiting' && !chatgptAuthPoll) startChatGPTAuthPolling();
     return;
   }
@@ -1551,6 +1588,7 @@ function applyChatGPTAuthStatus(result) {
 function handleChatGPTAuthChanged(payload) {
   const previousAuthState = chatgptAuthState.state;
   chatgptAuthState = { ...chatgptAuthState, ...payload };
+  chatgptAuthKnown = true;
   if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
   else stopChatGPTAuthPolling();
   renderChatGPTAuth();
@@ -1558,7 +1596,39 @@ function handleChatGPTAuthChanged(payload) {
   refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
 }
 
+function syncChatGPTSwitchOffer() {
+  if (!chatgptSwitchOfferEl || !providerEl || !i18nReady || !chatgptAuthKnown) return;
+  const show = chatgptAuthState.state === 'signed_in'
+    && providerEl.value !== 'chatgpt'
+    && !readChatGPTSwitchOffered();
+  chatgptSwitchOfferEl.dataset.decision = show ? 'shown' : 'hidden';
+  if (!show) {
+    chatgptSwitchOfferEl.hidden = true;
+    return;
+  }
+  if (chatgptSwitchOfferTextEl) chatgptSwitchOfferTextEl.textContent = t('auth.chatgpt.switch-offer.prompt');
+  if (chatgptSwitchOfferAcceptEl) chatgptSwitchOfferAcceptEl.textContent = t('auth.chatgpt.switch-offer.accept');
+  if (chatgptSwitchOfferDismissEl) chatgptSwitchOfferDismissEl.textContent = t('auth.chatgpt.switch-offer.dismiss');
+  chatgptSwitchOfferEl.hidden = false;
+}
+
+function acceptChatGPTSwitchOffer() {
+  rememberChatGPTSwitchOffered();
+  if (!providerEl || providerEl.value === 'chatgpt') {
+    syncChatGPTSwitchOffer();
+    return;
+  }
+  providerEl.value = 'chatgpt';
+  providerEl.dispatchEvent(new Event('change'));
+}
+
+function dismissChatGPTSwitchOffer() {
+  rememberChatGPTSwitchOffered();
+  syncChatGPTSwitchOffer();
+}
+
 function renderChatGPTAuth() {
+  syncChatGPTSwitchOffer();
   if (!i18nReady || !chatgptAuthCardEl || !providerEl) return;
   const isChatGPT = providerEl.value === 'chatgpt';
   
@@ -1748,6 +1818,7 @@ function applyChatGPTReopenResult(payload) {
       attemptId: result.attemptId,
       authUrl: result.authUrl
     };
+    chatgptAuthKnown = true;
     renderChatGPTAuth();
   } catch (error) {
     showChatGPTSignInError(error);
@@ -1774,6 +1845,7 @@ function showChatGPTSignInError(error, authUrl) {
     code,
     authUrl: authUrl || error?.authUrl || chatgptAuthState.authUrl
   };
+  chatgptAuthKnown = true;
   renderChatGPTAuth();
   updateLiveRegion({ state: 'error', code });
 }

@@ -249,6 +249,19 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
 .chatgpt-sign-in-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
 .chatgpt-auth-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .chatgpt-auth-actions button { min-height: 32px; padding: 0 12px; }
+.chatgpt-switch-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #c9d7ea;
+  border-radius: 8px;
+  background: #f3f8fd;
+  padding: 6px 8px;
+}
+.chatgpt-switch-offer p { flex: 1 1 160px; font-size: 12px; line-height: 1.35; color: #1c242c; }
+.chatgpt-switch-offer-actions { display: flex; gap: 6px; }
+.chatgpt-switch-offer-actions button { min-height: 28px; padding: 0 10px; font-size: 12px; }
 .chatgpt-secondary-btn {
   background: #fff;
   color: #4a5668;
@@ -280,6 +293,8 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
 @media (prefers-color-scheme: dark) {
   .chatgpt-auth-card { background: #1c242c; border-color: #34414d; }
   .chatgpt-auth-card p { color: #cbd6e2; }
+  .chatgpt-switch-offer { background: #172433; border-color: #34506d; }
+  .chatgpt-switch-offer p { color: #e8edf3; }
   .chatgpt-secondary-btn { background: #1c242c; color: #e8edf3; border-color: #465563; }
 }
 
