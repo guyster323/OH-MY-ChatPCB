@@ -193,7 +193,10 @@ function setChatGptAuthState(state = {}) {
 
 function setConnectionStatus(key, state) {
   connectionStatusKey = key;
-  if (statusEl) statusEl.textContent = t(key);
+  if (statusEl) {
+    statusEl.dataset.i18n = key;
+    statusEl.textContent = t(key);
+  }
   if (statusEl && state !== undefined) {
     if (state) statusEl.dataset.state = state;
     else delete statusEl.dataset.state;
@@ -415,6 +418,7 @@ function handleEnvelope(envelope) {
   if (callName === 'schematic.patch.cancel') return;
   if (callName === 'provider.status') {
     const provider = envelope.payload.result;
+    providerStatusEl.removeAttribute('data-i18n');
     providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
     providerStatusEl.dataset.status = provider.status;
   }
@@ -822,7 +826,7 @@ function renderPatchApproval() {
     return;
   }
   patchApprovalStatusEl.dataset.state = 'ready';
-  patchApprovalStatusEl.textContent = 'Patch preview is ready for approval.';
+  patchApprovalStatusEl.textContent = t('patch.ready');
 }
 
 function askChatpcbToFixErc() {
@@ -1119,6 +1123,7 @@ function syncWorkflow() {
 
 function renderRequestStatus({ state, summary, technicalDetail = '' }) {
   requestStatusEl.dataset.state = state;
+  requestStatusEl.removeAttribute('data-i18n');
   requestStatusEl.textContent = summary;
   requestTechnicalDetailEl.textContent = technicalDetail;
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;

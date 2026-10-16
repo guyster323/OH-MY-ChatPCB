@@ -24,8 +24,8 @@
         </label>
         <div class="meta">
           <div class="meta-status">
-            <p id="connection-status" role="status">Connecting</p>
-            <span id="provider-status">Provider pending</span>
+            <p id="connection-status" role="status" data-i18n="connection.connecting">Connecting</p>
+            <span id="provider-status" data-i18n="provider.pending">Provider pending</span>
           </div>
           <div class="hdr-side">
             <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time.">
@@ -132,7 +132,7 @@
       </section>
 
       <section id="conversation-card" class="chat-column card">
-        <p id="request-status" role="status" aria-label="Request status" data-state="idle">Create a project to send a circuit request.</p>
+        <p id="request-status" role="status" aria-label="Request status" data-state="idle" data-i18n="request.idle">Create a project to send a circuit request.</p>
         <details id="request-technical-details" hidden>
           <summary>Technical details</summary>
           <pre id="request-technical-detail"></pre>
@@ -275,6 +275,6 @@
     </dialog>
 
     <script src="./i18n.js?v=20261016-soft1"></script>
-    <script src="./panel.js?v=20261016-soft6"></script>
+    <script src="./panel.js?v=20261016-soft7"></script>
   </body>
 </html>

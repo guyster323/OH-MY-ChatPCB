@@ -1,3 +1,4 @@
+/* global document, getComputedStyle, window */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -51,6 +52,15 @@ test('en and ko panel locales have the same keys', async () => {
   const en = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/en.json'), 'utf8'));
   const ko = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/ko.json'), 'utf8'));
   assert.deepEqual(Object.keys(en).sort(), Object.keys(ko).sort());
+  assert.equal(en['request.idle'], 'Create a project to send a circuit request.');
+  assert.equal(en['patch.ready'], 'Patch preview is ready for approval.');
+  assert.equal(en['provider.pending'], 'Provider pending');
+  assert.equal(en['connection.connecting'], 'Connecting');
+  assert.equal(en['connection.connected'], 'Connected');
+  for (const key of ['request.idle', 'patch.ready', 'provider.pending', 'connection.connecting', 'connection.connected']) {
+    assert.notEqual(ko[key], en[key], key);
+    assert.match(ko[key], /[가-힣]/, key);
+  }
   const logo = await readFile(join(PANEL_ROOT, 'assets/chatgpt-logo-white.svg'));
   assert.equal(createHash('sha256').update(logo).digest('hex'), LOGO_SHA256);
 });
@@ -66,6 +76,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
     t.skip(`Chromium unavailable: ${error.message}`);
     return;
   }
+  const en = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/en.json'), 'utf8'));
+  const ko = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/ko.json'), 'utf8'));
 
   const server = createServer(async (req, res) => {
     try {
@@ -94,11 +106,13 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
     const context = await browser.newContext({ viewport: { width: 420, height: 800 } });
     await context.addInitScript(() => {
       window.__sent = [];
+      window.__sockets = [];
       class FakeSocket extends EventTarget {
         constructor(url) {
           super();
           this.url = url;
           this.readyState = 0;
+          window.__sockets.push(this);
         }
         send(data) {
           window.__sent.push(String(data));
@@ -144,6 +158,28 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
             }
           });
         });
+
+        const copy = await page.evaluate(() => ({
+          request: document.querySelector('#request-status').textContent,
+          provider: document.querySelector('#provider-status').textContent,
+          connection: document.querySelector('#connection-status').textContent,
+          patch: document.querySelector('#patch-approval-status').textContent
+        }));
+        const locale = lang === 'ko' ? ko : en;
+        assert.equal(copy.request, locale['request.idle'], `${theme}/${lang} request status`);
+        assert.equal(copy.provider, locale['provider.pending'], `${theme}/${lang} provider status`);
+        assert.equal(copy.connection, locale['connection.connecting'], `${theme}/${lang} connecting`);
+        assert.equal(copy.patch, locale['patch.ready'], `${theme}/${lang} patch ready`);
+        if (lang === 'ko') {
+          assert.notEqual(copy.request, en['request.idle'], `${theme}/${lang} request still English`);
+          assert.notEqual(copy.provider, en['provider.pending'], `${theme}/${lang} provider still English`);
+          assert.notEqual(copy.connection, en['connection.connecting'], `${theme}/${lang} connecting still English`);
+          assert.notEqual(copy.patch, en['patch.ready'], `${theme}/${lang} patch still English`);
+          assert.match(copy.request, /[가-힣]/, `${theme}/${lang} request korean`);
+          assert.match(copy.provider, /[가-힣]/, `${theme}/${lang} provider korean`);
+          assert.match(copy.connection, /[가-힣]/, `${theme}/${lang} connecting korean`);
+          assert.match(copy.patch, /[가-힣]/, `${theme}/${lang} patch korean`);
+        }
 
         const layout = await page.evaluate(() => {
           const card = document.querySelector('#patch-approval-card').getBoundingClientRect();
@@ -294,6 +330,17 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         await page.evaluate(() => window.chatpcbI18n.setLang('en'));
         assert.equal(await page.evaluate(() => document.documentElement.lang), 'en', `${theme}/${lang} lang back to en`);
         await page.evaluate((next) => window.chatpcbI18n.setLang(next), lang);
+        const connected = await page.evaluate(() => {
+          const socket = window.__sockets[0];
+          socket.readyState = 1;
+          socket.dispatchEvent(new Event('open'));
+          return document.querySelector('#connection-status').textContent;
+        });
+        assert.equal(connected, locale['connection.connected'], `${theme}/${lang} connected`);
+        if (lang === 'ko') {
+          assert.notEqual(connected, en['connection.connected'], `${theme}/${lang} connected still English`);
+          assert.match(connected, /[가-힣]/, `${theme}/${lang} connected korean`);
+        }
 
         await page.evaluate(() => window.setChatGptAuthState({ signedIn: false }));
         const button = await page.evaluate(() => {
