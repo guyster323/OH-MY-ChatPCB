@@ -11,6 +11,7 @@ import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, 
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
+import { ercApprovalDecision, normalizeRecordedErc, recordedErcSource } from './erc-gate.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
 import { createProjectMutexRegistry } from './project-mutex-registry.js';
 import { createTransactionJournal } from './transaction-journal.js';
@@ -276,11 +277,17 @@ async function dispatchSchematicPatch(args, ctx) {
     }, ctx);
   }
 
-  emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });
   if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to approve a patch preview.');
   const peeked = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
   if (!peeked.ok) return { ok: false, error: peeked.reason };
   const plan = peeked.record.plan;
+  // The registry record is the only ERC the approval may trust. Client fields
+  // such as passed, validation, or ercResult on the request are ignored.
+  const recorded = normalizeRecordedErc(recordedErcSource(peeked.record));
+  const decision = ercApprovalDecision(recorded, args.ercOverride);
+  if (!decision.allow) return failure('ERC_BLOCKED', decision.message);
+
+  emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });
   try {
     await ensureReconciled(projectDir, ctx);
     const applied = sanitizeApplyResult(await applySchematicPatch({
@@ -295,7 +302,8 @@ async function dispatchSchematicPatch(args, ctx) {
       verifyAppliedProjectImpl,
       approvalRegistry: patchApprovalRegistry,
       mutexRegistry: projectMutexRegistry,
-      journal: transactionJournal
+      journal: transactionJournal,
+      allowSkippedErc: decision.allowSkippedErc === true
     }));
     if (applied?.reason?.code === 'PROJECT_BUSY') return projectBusyFailure(args.prompt);
     return ok(applied);
@@ -1075,6 +1083,7 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
     projectDir,
     plan,
     ...plan,
+    ercResult: normalizeRecordedErc(plan.candidateVerification?.erc),
     dispose: () => disposeSchematicPatchPlan(plan)
   });
   const preview = await applySchematicPatch({ projectDir, approved: false, patchPlan: plan });
