@@ -8,6 +8,7 @@ import test from 'node:test';
 import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { createNativeProposal, disposeNativeProposal, nativeProposalSource, proposalSource, publicProposal } from '../src/workflow/native-proposal-source.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 const RP2040_PROMPT = 'RP2040 board with USB-C power, I2C connector, reset button, and LED.';
 const STM32_PROMPT = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
@@ -234,6 +235,7 @@ test('nested candidate paths stay relative through the final change list', async
 
 test('a supported board profile requests candidate ERC and DRC', async () => {
   const root = await createProject();
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
   try {
     const calls = [];
     const plan = await createNativeProposal({
@@ -259,6 +261,7 @@ test('a supported board profile requests candidate ERC and DRC', async () => {
       await disposeNativeProposal(plan);
     }
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
