@@ -10,6 +10,7 @@ import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
+import { classifyRecordedErc } from '../../apps/panel/erc-verdict.js';
 
 const WHAT = 'Regenerate the supported ChatPCB project artifact set from the requested circuit specification.';
 const RISKS = [
@@ -146,18 +147,6 @@ function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-// ERC passes only with a numeric errorCount of 0 and no listed violations.
-// DRC passes only when its violation and unconnected evidence is actually empty.
-function numericErrorCount(result) {
-  if (!result || typeof result !== 'object') return undefined;
-  const nested = result.erc;
-  if (nested && typeof nested === 'object') {
-    const nestedCount = finiteNumber(nested.errorCount);
-    if (nestedCount !== undefined) return nestedCount;
-  }
-  return finiteNumber(result.errorCount);
-}
-
 function missingVerdict(required) {
   return { skipped: false, executed: false, status: 'missing', required: required === true };
 }
@@ -166,22 +155,14 @@ function withStatus(result, required, status) {
   return { ...result, status, required: required === true };
 }
 
-function ercViolationsClear(result) {
-  if (!Object.hasOwn(result, 'violations')) return true;
-  return Array.isArray(result.violations) && result.violations.length === 0;
-}
-
 function ercVerdict(result, required) {
   // null/undefined is missing evidence, not a skip. A skip can be overridden; missing cannot.
   if (result == null) return missingVerdict(required);
-  const errorCount = numericErrorCount(result);
-  const explicitSkip = result.skipped === true || result.executed === false;
-  const violationsClear = ercViolationsClear(result);
+  const verdict = classifyRecordedErc(result);
   let status = 'unverified';
-  if (!violationsClear || (typeof errorCount === 'number' && errorCount > 0)) status = 'failed';
-  else if (explicitSkip) status = 'unverified';
-  else if (result.ok === false) status = 'failed';
-  else if (result.ok === true && errorCount === 0 && violationsClear) status = 'passed';
+  if (verdict.failed) status = 'failed';
+  else if (verdict.passed) status = 'passed';
+  else if (verdict.skipped || result.skipped === true || result.executed === false) status = 'unverified';
   else if (result.ok === true) status = 'missing';
   return withStatus(result, required, status);
 }
@@ -190,6 +171,7 @@ function lengthIfArray(value) {
   return Array.isArray(value) ? value.length : undefined;
 }
 
+// DRC passes only when its violation and unconnected evidence is actually empty.
 function drcProof(result) {
   const violations = lengthIfArray(result.violations);
   const unconnected = lengthIfArray(

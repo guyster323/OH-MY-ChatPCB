@@ -266,11 +266,10 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.deepEqual(mismatchedErc.sent, []);
 
     const faked = await showPatch(page, { validation: { passed: true } }, 'apply');
-    assert.equal(faked.ariaDisabled, null);
+    assert.equal(faked.ariaDisabled, 'true');
     assert.equal(faked.disabled, false);
-    assert.equal(faked.sent.length, 1);
-    assert.equal(Object.hasOwn(faked.sent[0].args, 'passed'), false);
-    assert.equal(Object.hasOwn(faked.sent[0].args, 'ercOverride'), false);
+    assert.deepEqual(faked.sent, []);
+    assert.equal(faked.whyReason, 'patch.apply.blocked-missing');
 
     const ko = JSON.parse(await readFile(join(PANEL_ROOT, 'locales/ko.json'), 'utf8'));
     const missingRecord = await showPatch(page, {

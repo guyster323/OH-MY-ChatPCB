@@ -92,7 +92,7 @@ test('panel test hook exists only in test mode and cannot pass ERC for the daemo
     });
     await page.goto(`http://127.0.0.1:${port}/index.html?chatpcbTest=1`, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => window.chatpcbI18n.ready);
-    const payload = await page.evaluate((dir) => {
+    const view = await page.evaluate((dir) => {
       if (!window.__chatpcbTest?.showPatch) return null;
       window.__sent.length = 0;
       for (const socket of window.__sockets) socket.readyState = 1;
@@ -101,24 +101,31 @@ test('panel test hook exists only in test mode and cannot pass ERC for the daemo
         patchId: 'patch-hook-fake-pass',
         validation: { passed: true }
       });
-      document.querySelector('#approve-patch-button').click();
-      const raw = window.__sent[0];
-      return raw ? JSON.parse(raw).payload : null;
+      const button = document.querySelector('#approve-patch-button');
+      button.click();
+      return {
+        ariaDisabled: button.getAttribute('aria-disabled'),
+        sent: window.__sent.length
+      };
     }, projectDir);
-    assert.ok(payload, 'test hook did not send an approval');
-    assert.equal(payload.args.approved, true);
-    assert.equal(payload.args.patchId, 'patch-hook-fake-pass');
-    assert.equal(Object.hasOwn(payload.args, 'passed'), false);
-    assert.equal(Object.hasOwn(payload.args, 'validation'), false);
-    assert.equal(Object.hasOwn(payload.args, 'ercResult'), false);
-    assert.equal(Object.hasOwn(payload.args, 'ercOverride'), false);
+    assert.ok(view, 'test hook did not render the patch');
+    assert.equal(view.ariaDisabled, 'true');
+    assert.equal(view.sent, 0);
 
     registry.register({
-      patchId: payload.args.patchId,
-      projectDir: payload.args.projectDir,
-      plan: { proposalId: payload.args.patchId, changes: [] }
+      patchId: 'patch-hook-fake-pass',
+      projectDir,
+      plan: { proposalId: 'patch-hook-fake-pass', changes: [] }
     });
-    const blocked = await dispatchToolCall(payload, { patchApprovalRegistry: registry });
+    const blocked = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: {
+        projectDir,
+        approved: true,
+        patchId: 'patch-hook-fake-pass',
+        passed: true
+      }
+    }, { patchApprovalRegistry: registry });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.error.code, 'ERC_BLOCKED');
     assert.match(blocked.error.message, /ERC_BLOCKED/);

@@ -854,11 +854,6 @@ function setPatchStatus(key) {
   patchApprovalStatusEl.textContent = t(key);
 }
 
-function numericCount(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
 function ercMessagesFrom(source) {
   if (!source || typeof source !== 'object') return [];
   const messages = [];
@@ -878,21 +873,16 @@ function ercMessagesFrom(source) {
   return messages;
 }
 
-function readErcSource(source) {
-  if (!source || typeof source !== 'object') return null;
+function collectErcMessages(source) {
+  if (!source || typeof source !== 'object') return [];
   const erc = source.erc && typeof source.erc === 'object' ? source.erc : null;
   const nested = erc?.erc && typeof erc.erc === 'object' ? erc.erc : null;
-  const skipped = source.skipped === true || erc?.skipped === true;
-  const errorCount = numericCount(nested?.errorCount ?? erc?.errorCount ?? source.errorCount);
-  let ok;
-  if (source.ok === false || erc?.ok === false || nested?.ok === false) ok = false;
-  else if (source.ok === true || erc?.ok === true || nested?.ok === true) ok = true;
   const messages = [...ercMessagesFrom(nested), ...ercMessagesFrom(erc), ...ercMessagesFrom(source)];
-  if (messages.length === 0 && ok === false) {
+  if (messages.length === 0) {
     const reason = source.reason?.message || erc?.reason?.message || nested?.reason?.message;
     if (typeof reason === 'string' && reason.trim()) messages.push(reason.trim());
   }
-  return { skipped, errorCount, ok, messages: [...new Set(messages)] };
+  return [...new Set(messages)];
 }
 
 function ercSourceHasSignal(source) {
@@ -944,26 +934,16 @@ function inspectionErcSource() {
 }
 
 function classifyPanelErc(source) {
-  if (!source || typeof source !== 'object') {
-    return { passed: false, skipped: false, failed: false, missing: true, count: 0, messages: [] };
-  }
-  const read = readErcSource(source);
-  const nested = source.erc && typeof source.erc === 'object' ? source.erc : null;
-  const status = typeof source.status === 'string'
-    ? source.status
-    : (typeof nested?.status === 'string' ? nested.status : undefined);
-  const failed = status === 'failed' || read.ok === false || read.errorCount > 0;
-  if (failed) {
-    return { passed: false, skipped: false, failed: true, missing: false, count: read.errorCount, messages: read.messages };
-  }
-  if (source.skipped === true || nested?.skipped === true || read.skipped === true) {
-    return { passed: false, skipped: true, failed: false, missing: false, count: 0, messages: read.messages };
-  }
-  const explicitPassed = source.passed === true || nested?.passed === true;
-  if (explicitPassed || status === 'passed' || read.ok === true) {
-    return { passed: true, skipped: false, failed: false, missing: false, count: 0, messages: [] };
-  }
-  return { passed: false, skipped: false, failed: false, missing: true, count: 0, messages: [] };
+  const verdict = globalThis.chatpcbErcVerdict(source);
+  const messages = verdict.failed || verdict.skipped ? collectErcMessages(source) : [];
+  return {
+    passed: verdict.passed === true,
+    skipped: verdict.skipped === true,
+    failed: verdict.failed === true,
+    missing: verdict.missing === true,
+    count: verdict.errorCount,
+    messages
+  };
 }
 
 function ercBlockState() {
