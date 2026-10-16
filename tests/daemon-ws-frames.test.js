@@ -694,12 +694,12 @@ wsTest('a throwing handler does not kill the connection or the daemon', async ()
   });
 });
 
-wsTest('a panel burst of provider.status, auth.chatgpt.status, and project.inspect returns three tool results', async () => {
+wsTest('a panel burst of provider.status, chatpcb.test.nonexistent-tool, and project.inspect returns three tool results', async () => {
   await withDaemon(fastDispatch(), async (_daemon, open) => {
     const client = await open();
     await sendCalls(client, [
       { id: 'status', name: 'provider.status', args: { provider: 'codex' } },
-      { id: 'auth', name: 'auth.chatgpt.status', args: {} },
+      { id: 'auth', name: 'chatpcb.test.nonexistent-tool', args: {} },
       { id: 'inspect', name: 'project.inspect', args: { projectDir: '/tmp/chatpcb-ws-panel' } }
     ]);
     await waitFor(() => toolResults(client).length >= 3);
