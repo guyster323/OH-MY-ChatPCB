@@ -1963,7 +1963,7 @@ test('daemon PROJECT_BUSY responses hide the project path and follow the prompt 
     patchApprovalRegistry: registry
   });
   const english = 'Another operation is using this project. Try again in a moment.';
-  const korean = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+  const korean = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
   const assertHidden = (result) => {
     const encoded = JSON.stringify(result);
     assert.equal(encoded.includes(root), false);

@@ -12,7 +12,7 @@ const panelRoot = path.resolve(import.meta.dirname, '../apps/panel');
 const panelLocale = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
 const projectDir = '/tmp/chatpcb-panel-secret-project-path';
 const englishBusy = 'Another operation is using this project. Try again in a moment.';
-const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
 
 test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable', async (t) => {
   const browser = await launchPanelBrowser(t, {

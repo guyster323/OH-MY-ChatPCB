@@ -47,7 +47,7 @@ function progressCopy(prompt, ko, en) {
   return /[가-힣]/.test(prompt ?? '') ? ko : en;
 }
 
-const PROJECT_BUSY_KO = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+const PROJECT_BUSY_KO = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
 const PROJECT_BUSY_EN = 'Another operation is using this project. Try again in a moment.';
 
 function projectBusyClientMessage(prompt) {

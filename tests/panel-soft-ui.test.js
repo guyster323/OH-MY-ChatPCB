@@ -198,6 +198,12 @@ test('en and ko panel locales have the same keys', async () => {
     assert.notEqual(ko[key], en[key], key);
     assert.match(ko[key], /[가-힣]/, key);
   }
+  assert.equal(ko['workflow.caption.failed'], '생성에 실패했어요. 기술 상세를 확인하거나 다시 보내 주세요.');
+  assert.equal(ko['request.idle'], '회로 요청을 보내려면 프로젝트를 만들어 주세요.');
+  assert.equal(ko['request.project-busy'], '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.');
+  assert.doesNotMatch(ko['workflow.caption.failed'], /Send|하세요/);
+  assert.doesNotMatch(ko['request.idle'], /하세요/);
+  assert.doesNotMatch(ko['request.project-busy'], /하세요/);
   const logo = await readFile(join(PANEL_ROOT, 'assets/chatgpt-logo-white.svg'));
   assert.equal(createHash('sha256').update(logo).digest('hex'), LOGO_SHA256);
 });
