@@ -23,7 +23,7 @@
     "verify:kicad": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-kicad-panel.ps1"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "kicad",

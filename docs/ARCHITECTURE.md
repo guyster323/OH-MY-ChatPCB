@@ -262,7 +262,7 @@ OH-MY-ChatPCB/
 │       └── validate-project.js        # ERC 검증
 ├── apps/panel/                         # WebView UI
 ├── kicad-fork/chatpcb_panel/          # C++ wxWebView 호스트
-└── tests/                              # 344 테스트 (42 파일)
+└── tests/                              # node --test 테스트 스위트
 ```
 
 ## 다음 단계
