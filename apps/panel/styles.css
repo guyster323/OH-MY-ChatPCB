@@ -526,13 +526,21 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
 .dock .row, .composer .row { display: flex; gap: var(--sp-3); }
 .dock input, .dock textarea, .composer textarea { min-height: 36px; min-width: 0; width: auto; flex: 1; font-size: var(--fs-sm); }
 .dock .btn, .dock button, .composer button { min-height: 36px; }
-.ask-switch { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.ask-switch {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  min-width: 0;
+}
 .ask-switch-btn, #pro-mode {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
+  align-self: flex-start;
   gap: var(--sp-3);
   width: auto;
+  max-width: 100%;
   min-height: 28px;
   padding: 0;
   border: 0;
@@ -541,7 +549,9 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
+  flex: none;
 }
+.ask-switch-label { display: inline-block; white-space: nowrap; max-width: 100%; }
 .composer #pro-mode { min-height: 28px; background: transparent; border-color: transparent; color: var(--text); }
 .ask-switch-track {
   width: 36px;
@@ -564,7 +574,15 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
 }
 #pro-mode[aria-checked="true"] .ask-switch-track { background: var(--accent); border-color: var(--accent); }
 #pro-mode[aria-checked="true"] .ask-switch-track::after { transform: translateX(16px); background: var(--on-accent); }
-#pro-mode-help { margin: 0; min-width: 0; font-size: var(--fs-xs); line-height: 1.3; color: var(--muted); }
+#pro-mode-help {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
 .plan { display: flex; gap: var(--sp-3); align-items: center; font-size: var(--fs-xs); color: var(--muted); margin: 0; }
 .plan a { color: var(--accent-text); font-weight: 600; min-height: 28px; min-width: 28px; display: inline-flex; align-items: center; }
 .siwc-btn {

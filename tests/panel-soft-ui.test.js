@@ -633,20 +633,45 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.ok(fieldFit.scrollWidth <= fieldFit.clientWidth, `${theme}/${lang} placeholder truncated ${fieldFit.scrollWidth}>${fieldFit.clientWidth}`);
 
         const ask = await page.evaluate(() => {
+          const container = document.querySelector('.ask-switch');
           const control = document.querySelector('#pro-mode');
+          const label = control.querySelector('.ask-switch-label');
           const help = document.querySelector('#pro-mode-help');
           const style = getComputedStyle(help);
-          const box = help.getBoundingClientRect();
+          const box = (el) => {
+            const rect = el.getBoundingClientRect();
+            return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height };
+          };
+          const labelBox = box(label);
+          const helpBox = box(help);
+          const containerBox = box(container);
+          const overlaps = labelBox.left < helpBox.right
+            && helpBox.left < labelBox.right
+            && labelBox.top < helpBox.bottom
+            && helpBox.top < labelBox.bottom;
+          const inside = (inner, outer) => inner.left >= outer.left - 0.5
+            && inner.right <= outer.right + 0.5
+            && inner.top >= outer.top - 0.5
+            && inner.bottom <= outer.bottom + 0.5;
+          const clipped = (el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
           return {
             role: control.getAttribute('role'),
             describedBy: control.getAttribute('aria-describedby'),
-            label: control.innerText.trim(),
+            label: label.textContent.trim(),
             help: help.textContent.trim(),
             hidden: help.hidden,
             display: style.display,
             visibility: style.visibility,
-            width: box.width,
-            height: box.height
+            width: helpBox.width,
+            height: helpBox.height,
+            labelWhiteSpace: getComputedStyle(label).whiteSpace,
+            overlaps,
+            labelInside: inside(labelBox, containerBox),
+            helpInside: inside(helpBox, containerBox),
+            labelClipped: clipped(label),
+            helpClipped: clipped(help),
+            labelScroll: [label.scrollWidth, label.clientWidth, label.scrollHeight, label.clientHeight],
+            helpScroll: [help.scrollWidth, help.clientWidth, help.scrollHeight, help.clientHeight]
           };
         });
         assert.equal(ask.role, 'switch', `${theme}/${lang} choice control role`);
@@ -657,6 +682,12 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.notEqual(ask.display, 'none', `${theme}/${lang} choice help display`);
         assert.notEqual(ask.visibility, 'hidden', `${theme}/${lang} choice help visibility`);
         assert.ok(ask.width > 0 && ask.height > 0, `${theme}/${lang} choice help not visible`);
+        assert.equal(ask.labelWhiteSpace, 'nowrap', `${theme}/${lang} choice label wraps`);
+        assert.equal(ask.overlaps, false, `${theme}/${lang} choice label overlaps the description`);
+        assert.equal(ask.labelInside, true, `${theme}/${lang} choice label outside the switch`);
+        assert.equal(ask.helpInside, true, `${theme}/${lang} choice description outside the switch`);
+        assert.equal(ask.labelClipped, false, `${theme}/${lang} choice label clipped ${ask.labelScroll.join(',')}`);
+        assert.equal(ask.helpClipped, false, `${theme}/${lang} choice description clipped ${ask.helpScroll.join(',')}`);
 
         if (shots) {
           await mkdir(shots, { recursive: true });
