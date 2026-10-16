@@ -1,7 +1,7 @@
 import { createHash, createPublicKey, createVerify, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import http from 'node:http';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -141,6 +141,21 @@ function getHostIdPath() {
   return join(getConfigDir(), HOST_ID_FILE);
 }
 
+function uniqueTempPath(filePath) {
+  return `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+}
+
+async function ensureConfigDir() {
+  const dir = getConfigDir();
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // mkdir leaves an existing directory's mode alone, and umask can widen a
+  // newly created one. Tighten the config directory itself, best-effort.
+  if (process.platform !== 'win32') {
+    await chmod(dir, 0o700).catch(() => {});
+  }
+  return dir;
+}
+
 function isCredentialFile(name) {
   return name === 'chatgpt-credentials.json' || /^chatgpt-credentials-.+\.json$/.test(name);
 }
@@ -172,7 +187,7 @@ function newUuidHostId() {
 
 async function publishNewHostId(filePath) {
   const hostId = newUuidHostId();
-  const tempPath = `${filePath}.${process.pid}.tmp`;
+  const tempPath = uniqueTempPath(filePath);
   await writeFile(tempPath, hostId, { mode: 0o600 });
   await chmod(tempPath, 0o600);
   try {
@@ -196,7 +211,7 @@ async function publishNewHostId(filePath) {
 
 async function replaceInvalidHostId(filePath) {
   const hostId = newUuidHostId();
-  const tempPath = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  const tempPath = uniqueTempPath(filePath);
   try {
     await writeFile(tempPath, hostId, { mode: 0o600 });
     await chmod(tempPath, 0o600);
@@ -221,7 +236,7 @@ function canonicalHostId(value) {
 }
 
 async function storeCanonicalHostId(filePath, canonical) {
-  const tempPath = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  const tempPath = uniqueTempPath(filePath);
   try {
     await writeFile(tempPath, canonical, { mode: 0o600 });
     await chmod(tempPath, 0o600);
@@ -247,12 +262,14 @@ async function storeCanonicalHostId(filePath, canonical) {
  * {@link isValidHostId} accepts it; anything else is replaced.
  * A valid `urn:uuid` is stored in lowercase. Replacing an invalid id
  * deletes saved registrations whose `ext_agent_host_id` is not the new id.
- * The file is owner-only (0600). A missing file is published with an atomic
- * link so concurrent creators never observe a partial write. An invalid
- * file is replaced with an atomic rename.
+ * The file is owner-only (0600). The config directory is owner-only (0700).
+ * A missing file is published with an atomic link so concurrent creators
+ * never observe a partial write. An invalid file is replaced with an atomic
+ * rename. Every atomic write uses its own temporary name.
  */
 export async function getOrCreateHostId() {
   const filePath = getHostIdPath();
+  await ensureConfigDir();
   const existing = await readTrimmedFile(filePath);
   if (isValidHostId(existing)) {
     const canonical = canonicalHostId(existing);
@@ -263,7 +280,6 @@ export async function getOrCreateHostId() {
     return storeCanonicalHostId(filePath, canonical);
   }
 
-  await mkdir(dirname(filePath), { recursive: true });
   if (existing) return replaceInvalidHostId(filePath);
 
   try {
@@ -453,14 +469,16 @@ async function writeCredentialsFile(creds) {
     last_used_at: typeof creds.last_used_at === 'number' ? creds.last_used_at : Date.now()
   };
   const path = getCredentialsPath(clientId);
-  const dir = dirname(path);
+  await ensureConfigDir();
 
-  await mkdir(dir, { recursive: true });
-
-  const tempPath = `${path}.tmp`;
-  await writeFile(tempPath, JSON.stringify(stored, null, 2), { mode: 0o600 });
-  await chmod(tempPath, 0o600);
-  await rename(tempPath, path);
+  const tempPath = uniqueTempPath(path);
+  try {
+    await writeFile(tempPath, JSON.stringify(stored, null, 2), { mode: 0o600 });
+    await chmod(tempPath, 0o600);
+    await rename(tempPath, path);
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
   await chmod(path, 0o600);
   return stored;
 }
@@ -585,25 +603,26 @@ async function dropRegistrationsForNewHost(newHostId) {
 }
 
 /**
- * Registration kept across sign-out. OpenAI expects the same issued client id
- * on the next sign-in for this account, with no new dynamic registration and
- * no agent_name_hint. The ID token is dropped, so the next authorize request
- * omits id_token_hint. Email and subject stay for login_hint and account match.
+ * Registration kept across sign-out. The next sign-in reuses the issued
+ * client id and host id, and does not send agent_name_hint. Tokens and
+ * personal fields (email, name, account, subject) are removed, so the next
+ * authorize request omits id_token_hint and login_hint.
  */
 function retainRegistration(creds) {
-  const identity = accountFromCredentials(creds);
-  const subject = firstString(creds.subject) || subjectFromIdToken(creds.id_token) || undefined;
-  const email = firstString(creds.email, identity?.email) || undefined;
-  return {
-    email,
-    issuer: creds.issuer || undefined,
-    subject,
-    client_id: creds.client_id,
-    ext_agent_host_id: creds.ext_agent_host_id,
-    saved_at: creds.saved_at,
-    last_used_at: creds.last_used_at,
-    account: identity
+  const retained = {
+    client_id: creds.client_id
   };
+  if (typeof creds.ext_agent_host_id === 'string' && creds.ext_agent_host_id) {
+    retained.ext_agent_host_id = creds.ext_agent_host_id;
+  }
+  if (typeof creds.issuer === 'string' && creds.issuer) {
+    retained.issuer = creds.issuer;
+  }
+  if (creds.saved_at != null && creds.saved_at !== '') retained.saved_at = creds.saved_at;
+  if (typeof creds.last_used_at === 'number' && Number.isFinite(creds.last_used_at)) {
+    retained.last_used_at = creds.last_used_at;
+  }
+  return retained;
 }
 
 async function clearStoredSession() {
@@ -2064,6 +2083,41 @@ function resolveAuthGraceMs(graceMs) {
     ?? AUTH_GRACE_MS;
 }
 
+const SECRET_JSON_KEYS = /"(access_token|refresh_token|id_token|code_verifier|client_secret|code)"(\s*:\s*)"(?:\\.|[^"\\])*"/g;
+const BEARER_TOKEN = /\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi;
+const API_KEY = /\bsk-[A-Za-z0-9_-]{8,}/g;
+const REFRESH_TOKEN = /\brt_[A-Za-z0-9._~+/=-]{8,}/g;
+const JWT = /\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){0,2}/g;
+const EMAIL_ADDRESS = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+
+/**
+ * Redact credentials in ChatGPT API errors and daemon logs.
+ * Values shorter than 8 characters are left alone so a stand-in like "AT"
+ * cannot rewrite ordinary words. Email local-parts keep their first character.
+ */
+export function maskSecrets(text, accessToken) {
+  let masked = String(text ?? '');
+  if (typeof accessToken === 'string' && accessToken.length >= 8) {
+    masked = masked.split(accessToken).join('[REDACTED]');
+  }
+  SECRET_JSON_KEYS.lastIndex = 0;
+  BEARER_TOKEN.lastIndex = 0;
+  API_KEY.lastIndex = 0;
+  REFRESH_TOKEN.lastIndex = 0;
+  JWT.lastIndex = 0;
+  EMAIL_ADDRESS.lastIndex = 0;
+  masked = masked.replace(SECRET_JSON_KEYS, '"$1"$2"[REDACTED]"');
+  masked = masked.replace(BEARER_TOKEN, 'Bearer [REDACTED]');
+  masked = masked.replace(JWT, '[REDACTED]');
+  masked = masked.replace(API_KEY, '[REDACTED]');
+  masked = masked.replace(REFRESH_TOKEN, '[REDACTED]');
+  masked = masked.replace(EMAIL_ADDRESS, (address) => {
+    const at = address.indexOf('@');
+    return `${address[0]}***${address.slice(at)}`;
+  });
+  return masked;
+}
+
 function logAuth(message) {
-  console.error(message);
+  console.error(maskSecrets(message));
 }

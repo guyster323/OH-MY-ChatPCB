@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import net from 'node:net';
@@ -22,6 +22,7 @@ import {
   getOrCreateHostId,
   isValidHostId,
   loadCredentials,
+  maskSecrets,
   openSystemBrowser,
   refreshAccessToken,
   resolveChatGPTSettings,
@@ -319,6 +320,31 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         await first.cancelAll();
         await second.cancelAll();
       }
+    });
+  });
+
+  it('creates the config directory mode 0o700 and tightens an existing directory on POSIX', async () => {
+    await withConfig(async (dir) => {
+      await saveCredentials(sampleCreds());
+      const configDir = path.join(dir, 'chatpcb');
+      const created = await stat(configDir);
+      assert.equal(created.isDirectory(), true);
+      if (process.platform !== 'win32') assert.equal(created.mode & 0o777, 0o700);
+    });
+
+    await withConfig(async (dir) => {
+      const configDir = path.join(dir, 'chatpcb');
+      await mkdir(configDir, { recursive: true });
+      if (process.platform !== 'win32') {
+        await chmod(configDir, 0o755);
+        assert.equal((await stat(configDir)).mode & 0o777, 0o755);
+      }
+      await getOrCreateHostId();
+      if (process.platform !== 'win32') assert.equal((await stat(configDir)).mode & 0o777, 0o700);
+
+      if (process.platform !== 'win32') await chmod(configDir, 0o755);
+      await saveCredentials(sampleCreds());
+      if (process.platform !== 'win32') assert.equal((await stat(configDir)).mode & 0o777, 0o700);
     });
   });
 
@@ -682,22 +708,30 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_ISSUED.json'), 'utf8'));
         assert.equal(retained.client_id, 'oaiapp_ISSUED');
         assert.equal(retained.ext_agent_host_id, hostId);
-        assert.equal(retained.email, 'ada@ex.com');
-        assert.equal(retained.subject, 'user_123');
-        assert.equal(retained.account.email, 'ada@ex.com');
+        assert.equal(retained.issuer, 'https://auth.openai.com');
+        assert.equal(typeof retained.saved_at, 'string');
+        assert.equal(typeof retained.last_used_at, 'number');
+        assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'ext_agent_host_id', 'issuer', 'last_used_at', 'saved_at']);
         assertSessionCleared(retained);
+        assert.equal(JSON.stringify(retained).includes('ada@ex.com'), false);
+        assert.equal(JSON.stringify(retained).includes('user_123'), false);
         const other = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
         assert.equal(other.client_id, 'oaiapp_OTHER');
         assert.equal(other.ext_agent_host_id, hostId);
-        assert.equal(other.email, 'other@ex.com');
+        assert.equal(other.last_used_at, 1);
+        assert.deepEqual(Object.keys(other).sort(), ['client_id', 'ext_agent_host_id', 'last_used_at']);
         assertSessionCleared(other);
+        assert.equal(JSON.stringify(other).includes('other@ex.com'), false);
 
         const returned = await manager.startAuth();
         const returnedUrl = new URL(returned.authUrl);
         assert.equal(returnedUrl.searchParams.get('client_id'), 'oaiapp_ISSUED');
         assert.equal(returnedUrl.searchParams.has('agent_name_hint'), false);
         assert.equal(returnedUrl.searchParams.has('id_token_hint'), false);
-        assert.equal(returnedUrl.searchParams.get('login_hint'), 'ada@ex.com');
+        assert.equal(returnedUrl.searchParams.has('login_hint'), false);
+        assert.equal(returned.authUrl.includes('ada@ex.com'), false);
+        assert.equal(returned.authUrl.includes('other@ex.com'), false);
+        assert.equal(returned.authUrl.includes('user_123'), false);
         assert.equal(returnedUrl.searchParams.get('ext_agent_host_id'), hostId);
         await manager.cancelAll();
 
@@ -1367,6 +1401,121 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(logged.includes(accessToken), false);
         assert.equal(logged.includes(jwt), false);
         assert.equal(logged.includes('eyJ'), false);
+      } finally {
+        logs.restore();
+      }
+    });
+  });
+
+  it('masks each secret pattern and leaves normal text unchanged', () => {
+    const refresh = 'rt_TESTTOKEN_DO_NOT_USE_0123456789';
+    const apiKey = 'sk-TESTKEYDONOTUSE0123456789';
+    const projectKey = 'sk-proj-TESTKEYDONOTUSE0123456789';
+    const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl';
+    const bearer = `Bearer ${'d'.repeat(24)}`;
+    const email = 'jane@example.com';
+    const shortEmail = 'j@example.com';
+    const json = [
+      '{"access_token":"plain-access","refresh_token":"plain-refresh",',
+      '"id_token":"plain-id","code":"plain-code",',
+      '"code_verifier":"plain verifier !","client_secret":"plain-secret",',
+      '"note":"leave-this","code":1}'
+    ].join('');
+    const secrets = [refresh, apiKey, projectKey, jwt, bearer.slice('Bearer '.length), 'plain-access', 'plain-refresh', 'plain-id', 'plain-code', 'plain verifier !', 'plain-secret', 'jane@example.com'];
+
+    const maskedRefresh = maskSecrets(`token ${refresh} end`);
+    assert.equal(maskedRefresh.includes(refresh), false);
+    assert.match(maskedRefresh, /token \[REDACTED\] end/);
+
+    const maskedKey = maskSecrets(`key ${apiKey} end`);
+    assert.equal(maskedKey.includes(apiKey), false);
+    assert.match(maskedKey, /key \[REDACTED\] end/);
+
+    const maskedProjectKey = maskSecrets(`key ${projectKey} end`);
+    assert.equal(maskedProjectKey.includes(projectKey), false);
+    assert.equal(maskedProjectKey.includes('sk-proj-'), false);
+    assert.match(maskedProjectKey, /key \[REDACTED\] end/);
+
+    const maskedJwt = maskSecrets(`jwt ${jwt} end`);
+    assert.equal(maskedJwt.includes(jwt), false);
+    assert.equal(maskedJwt.includes('eyJ'), false);
+    assert.match(maskedJwt, /jwt \[REDACTED\] end/);
+
+    const maskedBearer = maskSecrets(`auth ${bearer} end`);
+    assert.equal(maskedBearer.includes(bearer.slice('Bearer '.length)), false);
+    assert.match(maskedBearer, /auth Bearer \[REDACTED\] end/);
+
+    assert.equal(maskSecrets(`mail ${email} and ${shortEmail} end`), 'mail j***@example.com and j***@example.com end');
+
+    const maskedJson = maskSecrets(json);
+    for (const secret of ['plain-access', 'plain-refresh', 'plain-id', 'plain-code', 'plain verifier !', 'plain-secret']) {
+      assert.equal(maskedJson.includes(secret), false, secret);
+    }
+    assert.match(maskedJson, /"access_token":"\[REDACTED\]"/);
+    assert.match(maskedJson, /"refresh_token":"\[REDACTED\]"/);
+    assert.match(maskedJson, /"id_token":"\[REDACTED\]"/);
+    assert.match(maskedJson, /"code":"\[REDACTED\]"/);
+    assert.match(maskedJson, /"code_verifier":"\[REDACTED\]"/);
+    assert.match(maskedJson, /"client_secret":"\[REDACTED\]"/);
+    assert.match(maskedJson, /"note":"leave-this"/);
+    assert.match(maskedJson, /"code":1/);
+
+    const plain = [
+      'Route the 3V3 net with a 10k resistor. The code review passed.',
+      'See sk-12, rt_ab, Bearer, eyJabc, and sketch this board.',
+      'ChatGPT API error: 400 Input must be a list',
+      'ChatGPT sign-in waiting on http://127.0.0.1:41318/auth/callback until 2026-10-16T00:00:00.000Z',
+      'ChatGPT OpenID discovery failed (403); using fallback endpoints',
+      'late ChatGPT callback received after expiry'
+    ].join('\n');
+    assert.equal(maskSecrets(plain), plain);
+    assert.equal(maskSecrets(plain, 'AT'), plain);
+
+    const combined = `${refresh} ${apiKey} ${projectKey} ${jwt} ${bearer} ${email} ${json}`;
+    const once = maskSecrets(combined, 'test-access-token-DO-NOT-USE-0123456789');
+    assert.equal(maskSecrets(once), once);
+    for (const secret of secrets) assert.equal(once.includes(secret), false, secret);
+  });
+
+  it('masks refresh tokens, api keys, emails, and json fields in api errors and daemon logs', async () => {
+    await withConfig(async () => {
+      const refresh = 'rt_TESTTOKEN_DO_NOT_USE_0123456789';
+      const projectKey = 'sk-proj-TESTKEYDONOTUSE0123456789';
+      const email = 'jane@example.com';
+      await saveCredentials(sampleCreds());
+      const logs = spyConsoleError();
+      try {
+        const detail = `failed ${refresh} ${projectKey} ${email} {"code":"plain-auth-code","client_secret":"plain-secret"}`;
+        stubFetch(async (url) => {
+          if (String(url).includes('/v1/models')) return jsonResponse({ detail }, 400);
+          return new Response('no', { status: 404 });
+        });
+        await assert.rejects(
+          dispatchToolCall({
+            id: 'mask-400',
+            name: 'provider.invoke',
+            args: { provider: 'chatgpt', prompt: 'hi' }
+          }),
+          (err) => {
+            assert.match(err.message, /^ChatGPT API error: 400 /);
+            assert.equal(err.message.includes(refresh), false);
+            assert.equal(err.message.includes(projectKey), false);
+            assert.equal(err.message.includes('sk-proj-'), false);
+            assert.equal(err.message.includes('jane@'), false);
+            assert.equal(err.message.includes('plain-auth-code'), false);
+            assert.equal(err.message.includes('plain-secret'), false);
+            assert.match(err.message, /j\*\*\*@example\.com/);
+            assert.match(err.message, /\[REDACTED\]/);
+            return true;
+          }
+        );
+        const logged = logs.lines.join('\n');
+        assert.match(logged, /ChatGPT API error: 400 /);
+        assert.equal(logged.includes(refresh), false);
+        assert.equal(logged.includes(projectKey), false);
+        assert.equal(logged.includes('jane@'), false);
+        assert.equal(logged.includes('plain-auth-code'), false);
+        assert.equal(logged.includes('plain-secret'), false);
       } finally {
         logs.restore();
       }
@@ -2080,7 +2229,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(result.text, 'hi');
         const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
         assert.equal(retained.client_id, 'oaiapp_TEST');
-        assert.equal(retained.account.email, 'ada@ex.com');
+        assert.equal(typeof retained.last_used_at, 'number');
+        assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'last_used_at']);
+        assert.equal(JSON.stringify(retained).includes('ada@ex.com'), false);
         assertSessionCleared(retained);
         assert.equal(await loadCredentials(), null);
         assert.equal((await manager.getAuthStatus()).state, 'signed_out');
@@ -2120,6 +2271,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(retained.client_id, 'oaiapp_TEST');
         assert.equal(retained.access_token === 'AT_NEW', false);
         assert.equal(retained.refresh_token === 'RT_NEW', false);
+        assert.equal(typeof retained.last_used_at, 'number');
+        assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'last_used_at']);
+        assert.equal(JSON.stringify(retained).includes('ada@ex.com'), false);
         assertSessionCleared(retained);
         assert.equal((await manager.getAuthStatus()).state, 'signed_out');
         assert.equal(await loadCredentials(), null);
@@ -2666,7 +2820,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
-  it('sign-out keeps the registration and drops access, refresh, and id tokens', async () => {
+  it('sign-out keeps client id, host id, issuer, and timestamps, and drops tokens and personal fields', async () => {
     await withConfig(async (dir) => {
       const manager = createChatGPTAuthManager();
       await saveCredentials({
@@ -2687,18 +2841,24 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         scopes: PLAN_SCOPE.split(' '),
         token_type: 'Bearer'
       });
+      const before = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
       assert.equal((await manager.signOut()).state, 'signed_out');
       const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
       assert.equal(retained.client_id, 'oaiapp_TEST');
       assert.equal(retained.ext_agent_host_id, 'host-1');
       assert.equal(retained.issuer, 'https://auth.openai.com');
-      assert.equal(retained.subject, 'user_ada');
-      assert.equal(retained.email, 'ada@ex.com');
-      assert.equal(retained.account.email, 'ada@ex.com');
-      assert.equal(retained.account.name, 'Ada Lovelace');
+      assert.equal(retained.last_used_at, before.last_used_at);
+      assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'ext_agent_host_id', 'issuer', 'last_used_at']);
+      assert.equal(Object.hasOwn(retained, 'email'), false);
+      assert.equal(Object.hasOwn(retained, 'name'), false);
+      assert.equal(Object.hasOwn(retained, 'subject'), false);
+      assert.equal(Object.hasOwn(retained, 'account'), false);
       assert.equal(Object.hasOwn(retained, 'access_token'), false);
       assert.equal(Object.hasOwn(retained, 'refresh_token'), false);
       assert.equal(Object.hasOwn(retained, 'id_token'), false);
+      assert.equal(JSON.stringify(retained).includes('ada@ex.com'), false);
+      assert.equal(JSON.stringify(retained).includes('Ada Lovelace'), false);
+      assert.equal(JSON.stringify(retained).includes('user_ada'), false);
       assertSessionCleared(retained);
       assert.equal(await loadCredentials(), null);
       assert.equal((await manager.getAuthStatus()).state, 'signed_out');

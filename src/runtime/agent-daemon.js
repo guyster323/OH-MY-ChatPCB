@@ -20,7 +20,7 @@ import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
-import { createChatGPTAuthManager } from './auth/chatgpt-auth.js';
+import { createChatGPTAuthManager, maskSecrets } from './auth/chatgpt-auth.js';
 
 function emitProgress(ctx, payload) {
   if (typeof ctx?.emit !== 'function') return;
@@ -333,7 +333,7 @@ async function invokeProvider(call, ctx) {
         });
       } catch (error) {
         // stderr is what the daemon launcher appends to daemon.log.
-        console.error(error?.message || 'ChatGPT request failed');
+        console.error(maskSecrets(error?.message || 'ChatGPT request failed'));
         throw error;
       }
       const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);

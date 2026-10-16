@@ -2,6 +2,7 @@ import {
   currentSessionGeneration,
   hasChatGPTPlanScope,
   loadCredentials,
+  maskSecrets,
   refreshAccessToken,
   resolveChatGPTSettings,
   saveCredentialsIfCurrent,
@@ -490,17 +491,6 @@ function clip(text, limit) {
   return value.length <= limit ? value : value.slice(0, limit);
 }
 
-function maskSecrets(text, accessToken) {
-  let masked = String(text ?? '');
-  // Skip very short values so a stand-in like "AT" cannot rewrite ordinary words.
-  if (typeof accessToken === 'string' && accessToken.length >= 8) {
-    masked = masked.split(accessToken).join('[REDACTED]');
-  }
-  masked = masked.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi, 'Bearer [REDACTED]');
-  masked = masked.replace(/\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){0,2}/g, '[REDACTED]');
-  return masked;
-}
-
 async function readResponseStream(response) {
   if (!response.body || typeof response.body.getReader !== 'function') {
     throw new Error('ChatGPT response had no stream body');
@@ -578,7 +568,8 @@ function interpretSseLine(line, state) {
     throw failureFromResponseEvent(event);
   }
   if (event.type === 'response.incomplete') {
-    const reason = event.response?.incomplete_details?.reason;
+    const rawReason = event.response?.incomplete_details?.reason;
+    const reason = typeof rawReason === 'string' ? maskSecrets(rawReason) : '';
     const err = new Error(reason ? `ChatGPT response incomplete: ${reason}` : 'ChatGPT response incomplete');
     err.code = 'response_incomplete';
     throw err;
@@ -590,19 +581,21 @@ function failureFromResponseEvent(event) {
   const code = error.code || event?.code || event?.type || 'response_failed';
   const message = typeof error.message === 'string' ? error.message : '';
   const blob = `${code} ${message}`;
+  const safeCode = maskSecrets(typeof code === 'string' ? code : String(code ?? ''));
+  const safeMessage = maskSecrets(message);
 
   if (/usage_limit/i.test(blob)) {
-    const err = new Error(`USAGE_LIMIT_EXCEEDED: ${message || 'You have reached your ChatGPT usage limit'} (${code})`);
+    const err = new Error(`USAGE_LIMIT_EXCEEDED: ${safeMessage || 'You have reached your ChatGPT usage limit'} (${safeCode})`);
     err.code = 'usage_limit';
     return err;
   }
   if (/usage_unavailable/i.test(blob)) {
-    const err = new Error(`USAGE_UNAVAILABLE: ${message || 'ChatGPT usage is temporarily unavailable'} (${code})`);
+    const err = new Error(`USAGE_UNAVAILABLE: ${safeMessage || 'ChatGPT usage is temporarily unavailable'} (${safeCode})`);
     err.code = 'usage_unavailable';
     return err;
   }
 
-  const err = new Error(message ? `ChatGPT response failed: ${code}: ${message}` : `ChatGPT response failed: ${code}`);
-  err.code = typeof code === 'string' ? code : 'response_failed';
+  const err = new Error(safeMessage ? `ChatGPT response failed: ${safeCode}: ${safeMessage}` : `ChatGPT response failed: ${safeCode}`);
+  err.code = typeof code === 'string' ? safeCode : 'response_failed';
   return err;
 }
