@@ -1697,6 +1697,7 @@ test('daemon keeps the restored project and warns when backup cleanup fails', as
       && item.text.includes('.chatpcb-backup-')
     ));
     assert.ok(warning);
+    assert.equal(warning.stage, 'warn');
     const backupPath = warning.text.match(/(\S*\.chatpcb-backup-\S+)/)?.[1];
     assert.equal(typeof backupPath, 'string');
     assert.ok(warning.text.includes(backupPath));

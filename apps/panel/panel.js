@@ -9,6 +9,7 @@ const PROGRESS_COPY = {
   ready: { title: '적용을 기다리고 있어요', sprite: 'preview' },
   apply: { title: '스키매틱에 넣는 중', sprite: 'apply' },
   done: { title: '완료', sprite: 'done' },
+  warn: { title: '주의가 필요해요', sprite: 'preview' },
   fail: { title: '이번엔 적용하지 못했어요', sprite: 'fail' }
 };
 const WORKFLOW_ORDER = [

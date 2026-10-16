@@ -704,7 +704,7 @@ function restoreBackupCleanupWarning(prompt, backup, error) {
 function warnLeftoverRestoreBackup(ctx, prompt, backup, error) {
   const text = restoreBackupCleanupWarning(prompt, backup, error);
   try {
-    emitProgress(ctx, { stage: 'fail', sprite: 'fail', text });
+    emitProgress(ctx, { stage: 'warn', sprite: 'preview', text });
   } catch {
     // The restore already finished. A progress listener must not roll it back.
   }

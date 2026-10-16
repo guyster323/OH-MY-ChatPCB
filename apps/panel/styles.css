@@ -41,6 +41,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .request-progress { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 72px; overflow: auto; flex: 0 0 auto; }
 .request-progress li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 8px; align-items: start; border-radius: 8px; padding: 6px 8px; background: #f8fafc; }
 .request-progress strong { display: block; font-size: 11px; color: #1d4ed8; }
+.request-progress li[data-stage="warn"] strong { color: #a16207; }
 .request-progress p { margin: 2px 0 0; font-size: 11px; line-height: 1.35; color: #334155; white-space: pre-wrap; overflow-wrap: anywhere; }
 .progress-sprite { width: 32px; height: 32px; image-rendering: pixelated; image-rendering: crisp-edges; object-fit: contain; }
 .dialog-hint { margin: 0; font-size: 12px; line-height: 1.4; color: #334155; }
@@ -194,6 +195,7 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
   .panel-dialog { background: #1c242c; border-color: #34414d; color: #e8edf3; }
   .patch-approval-card { background: #14261d; }
   .request-progress li { background: #11161b; }
+  .request-progress li[data-stage="warn"] strong { color: #fbbf24; }
   .request-progress p, #patch-approval-lead, .dialog-hint { color: #cbd6e2; }
   #cancel-patch-button { background: #1c242c; color: #e8edf3; border-color: #465563; }
 }
