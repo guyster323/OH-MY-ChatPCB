@@ -10,8 +10,8 @@ const wrapperScriptCache = new Map();
 let flatpakLibraryRootOverride = null;
 
 const FLATPAK_LAYOUT_DIR = new Set(['exports', 'app', 'runtime']);
-const FLATPAK_FORCE_ON = new Set(['1', 'true', 'yes']);
-const FLATPAK_FORCE_OFF = new Set(['0', 'false', 'no']);
+const FLATPAK_FORCE_ON = new Set(['1', 'true', 'yes', 'on']);
+const FLATPAK_FORCE_OFF = new Set(['0', 'false', 'no', 'off']);
 
 function pathSegments(value) {
   return String(value).split(/[/\\]+/).filter((segment) => segment.length > 0);
@@ -164,8 +164,8 @@ function flatpakCliBasename(cliPath) {
 }
 
 // Decide once, at CLI resolution. Off Windows, KICAD_CLI_FLATPAK forces the
-// result: 1/true/yes on, 0/false/no off. Any other value is ignored. Windows
-// ignores that variable. Flatpak layouts and the KiCad app id do not read the file.
+// result: 1/true/yes/on on, 0/false/no/off off. Any other value is ignored.
+// Windows ignores that variable. Flatpak layouts and the KiCad app id do not read the file.
 export function cliIsFlatpakKicad(cliPath, {
   env = {},
   platform = process.platform,

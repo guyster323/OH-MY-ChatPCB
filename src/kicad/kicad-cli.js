@@ -138,8 +138,12 @@ export async function runKicadCli(args, options = {}) {
   const flatpak = resolved.source === 'flatpak';
   const env = kicadCliChildEnv(options.env ?? process.env, { flatpak });
   // Concurrent kicad-cli processes rewrite the shared kicad_common.json.
-  // Each invocation gets a private copy unless the caller already set a home.
-  const privateConfigHome = await assignPrivateKicadConfigHome(env, { flatpak });
+  // Each invocation copies the live config into a private directory and deletes it.
+  const privateConfigHome = await assignPrivateKicadConfigHome(env, {
+    flatpak,
+    platform: options.platform ?? process.platform,
+    cwd: options.cwd
+  });
   try {
     const result = await runCommand(resolved.path, args, {
       cwd: options.cwd,
@@ -162,34 +166,130 @@ function configHomeDirectory(env) {
   return null;
 }
 
-// Flatpak KiCad 10 keeps settings under its app config. ~/.config/kicad can be
-// a different major version, so a flatpak CLI does not copy that tree.
-function findKicadConfigSource(env, { flatpak }) {
-  const home = configHomeDirectory(env);
-  const candidates = [];
-  if (flatpak && home) {
-    candidates.push(path.join(home, '.var', 'app', KICAD_FLATPAK_APP_ID, 'config', 'kicad'));
+// os.homedir() follows HOME. A test hook can point HOME at an empty temp dir,
+// so the real account home is the passwd entry, not the environment.
+function realAccountHome() {
+  try {
+    const home = os.userInfo().homedir;
+    if (typeof home === 'string' && home.trim()) return home.trim();
+  } catch {
+    // No passwd entry. The project directory is the remaining visible place.
   }
-  if (typeof env.XDG_CONFIG_HOME === 'string' && env.XDG_CONFIG_HOME.trim()) {
-    candidates.push(path.join(env.XDG_CONFIG_HOME.trim(), 'kicad'));
-  }
-  if (typeof env.APPDATA === 'string' && env.APPDATA.trim()) {
-    candidates.push(path.join(env.APPDATA.trim(), 'kicad'));
-  }
-  if (!flatpak && home) {
-    candidates.push(path.join(home, '.config', 'kicad'));
-  }
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+  return null;
 }
 
-// Returns the temp parent to delete, or null when the caller owns KICAD_CONFIG_HOME.
-// An empty private home turns on KiCad's default ERC checks, so copy the live config.
-async function assignPrivateKicadConfigHome(env, { flatpak }) {
-  if (typeof env.KICAD_CONFIG_HOME === 'string' && env.KICAD_CONFIG_HOME.trim()) return null;
-  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'chatpcb-kicad-config-'));
+function directoryExists(candidate) {
+  try {
+    return fs.statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function pathInside(root, candidate) {
+  if (!root || !candidate) return false;
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (
+    !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)
+  );
+}
+
+// Our per-call copy must not be treated as the upstream config. That includes
+// the cache directory used now and the old /tmp/chatpcb-kicad-config-* prefix.
+function isOurPrivateKicadConfig(value) {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  const parts = path.resolve(value.trim()).split(path.sep).filter(Boolean);
+  for (let index = 0; index < parts.length; index += 1) {
+    const name = parts[index];
+    const legacy = name.startsWith('chatpcb-kicad-config-');
+    const parent = parts[index - 1];
+    const current = /^kicad-config-[A-Za-z0-9]+$/.test(name)
+      && (parent === 'chatpcb' || parent === '.chatpcb');
+    if (!legacy && !current) continue;
+    const rest = parts.slice(index + 1);
+    if (rest.length === 0 || (rest.length === 1 && rest[0] === 'kicad')) return true;
+  }
+  return false;
+}
+
+// Flatpak KiCad 10 keeps settings under its app config. ~/.config/kicad can be
+// a different major version, so a flatpak CLI does not copy that tree.
+// An existing KICAD_CONFIG_HOME wins, unless it is one of our own private copies.
+// Otherwise use the platform directory under the environment home when that
+// directory exists, then the same directory under the real account home.
+function findKicadConfigSource(env, { flatpak, platform = process.platform, exists = directoryExists } = {}) {
+  const pinned = typeof env.KICAD_CONFIG_HOME === 'string' ? env.KICAD_CONFIG_HOME.trim() : '';
+  if (pinned && !isOurPrivateKicadConfig(pinned) && exists(pinned)) return pinned;
+
+  const envHome = configHomeDirectory(env);
+  const realHome = realAccountHome();
+  const fromEnv = kicadConfigCandidates(env, { flatpak, platform, home: envHome, realHome });
+  const foundEnv = fromEnv.find((candidate) => exists(candidate));
+  if (foundEnv) return foundEnv;
+
+  if (realHome && (!envHome || path.resolve(realHome) !== path.resolve(envHome))) {
+    const fromReal = kicadConfigCandidates({}, {
+      flatpak,
+      platform,
+      home: realHome,
+      realHome
+    });
+    return fromReal.find((candidate) => exists(candidate)) ?? null;
+  }
+  return null;
+}
+
+function kicadConfigCandidates(env, { flatpak, platform, home, realHome }) {
+  const candidates = [];
+  const push = (candidate) => {
+    if (candidate) candidates.push(candidate);
+  };
+  const redirected = Boolean(home && realHome && path.resolve(home) !== path.resolve(realHome));
+  const allowEnvPath = (candidate) => candidate && !(redirected && home && pathInside(home, candidate));
+
+  if (platform === 'darwin') {
+    if (home) push(path.join(home, 'Library', 'Preferences', 'kicad'));
+    return candidates;
+  }
+  if (platform === 'win32') {
+    const appData = typeof env.APPDATA === 'string' ? env.APPDATA.trim() : '';
+    if (allowEnvPath(appData)) push(path.join(appData, 'kicad'));
+    else if (home) push(path.join(home, 'AppData', 'Roaming', 'kicad'));
+    return candidates;
+  }
+
+  if (flatpak && home) {
+    push(path.join(home, '.var', 'app', KICAD_FLATPAK_APP_ID, 'config', 'kicad'));
+  }
+  const xdg = typeof env.XDG_CONFIG_HOME === 'string' ? env.XDG_CONFIG_HOME.trim() : '';
+  if (allowEnvPath(xdg)) push(path.join(xdg, 'kicad'));
+  const appData = typeof env.APPDATA === 'string' ? env.APPDATA.trim() : '';
+  if (allowEnvPath(appData)) push(path.join(appData, 'kicad'));
+  if (!flatpak && home) push(path.join(home, '.config', 'kicad'));
+  return candidates;
+}
+
+// A stock flatpak KiCad sandbox has home, not /tmp. The private copy lives
+// under $XDG_CACHE_HOME/chatpcb (default ~/.cache/chatpcb on the real account
+// home) so the sandbox can read it. With no home, it lives in the project.
+function privateConfigBase(env, cwd) {
+  const xdg = typeof env.XDG_CACHE_HOME === 'string' ? env.XDG_CACHE_HOME.trim() : '';
+  if (xdg) return path.join(xdg, 'chatpcb');
+  const home = realAccountHome();
+  if (home) return path.join(home, '.cache', 'chatpcb');
+  return path.join(cwd || process.cwd(), '.chatpcb');
+}
+
+// Returns the private parent to delete. KICAD_CONFIG_HOME on the child is the
+// copied kicad directory inside that parent. An empty copy turns on KiCad's
+// default ERC checks, so copy the live config when one exists.
+async function assignPrivateKicadConfigHome(env, { flatpak, platform, cwd }) {
+  const base = privateConfigBase(env, cwd);
+  await fs.promises.mkdir(base, { recursive: true });
+  const parent = await fs.promises.mkdtemp(path.join(base, 'kicad-config-'));
   try {
     const dest = path.join(parent, 'kicad');
-    const source = findKicadConfigSource(env, { flatpak });
+    const source = findKicadConfigSource(env, { flatpak, platform });
     if (source) {
       await fs.promises.cp(source, dest, { recursive: true });
     } else {

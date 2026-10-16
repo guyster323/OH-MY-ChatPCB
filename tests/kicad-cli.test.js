@@ -8,6 +8,8 @@ import { pathToFileURL } from 'node:url';
 
 import { cliIsFlatpakKicad, flatpakAppLibraryPaths, flatpakLibraryRoots, isFlatpakPath } from '../src/kicad/flatpak.js';
 import { kicadCliChildEnv, resolveKicadCli, runCommand, runKicadCli } from '../src/kicad/kicad-cli.js';
+import { findInstalledSymbolLibraryDirectory } from '../src/kicad/project-generator.js';
+import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 
 test('resolves an explicit KiCad CLI path first', () => {
   const found = resolveKicadCli({
@@ -474,7 +476,7 @@ test('flatpak path layouts, directory stripping, and KICAD_CLI_FLATPAK are table
   const native = '/opt/native/bin/kicad-cli';
   const wrapped = '/var/lib/flatpak/exports/bin/kicad-cli';
   const appId = '/usr/bin/org.kicad.KiCad';
-  for (const value of ['1', 'true', 'TRUE', 'Yes', ' yes ', 'yes\n']) {
+  for (const value of ['1', 'true', 'TRUE', 'Yes', ' yes ', 'yes\n', 'on', 'ON', ' on ', 'on\n']) {
     assert.equal(cliIsFlatpakKicad(native, { platform: 'linux', env: { KICAD_CLI_FLATPAK: value }, io: blindIo }), true, value);
     const resolved = resolveKicadCli({
       env: { KICAD_CLI_FLATPAK: value, KICAD_CLI_PATH: native, PATH: '' },
@@ -483,7 +485,7 @@ test('flatpak path layouts, directory stripping, and KICAD_CLI_FLATPAK are table
     });
     assert.deepEqual(resolved, { path: native, source: 'flatpak' }, value);
   }
-  for (const value of ['0', 'false', 'FALSE', 'No', 'no']) {
+  for (const value of ['0', 'false', 'FALSE', 'No', 'no', 'off', 'OFF', ' off ', 'off\n']) {
     let reads = 0;
     const countingIo = {
       realpathSync() {
@@ -514,12 +516,12 @@ test('flatpak path layouts, directory stripping, and KICAD_CLI_FLATPAK are table
     });
     assert.deepEqual(resolved, { path: wrapped, source: 'env' }, value);
   }
-  for (const value of ['2', 'maybe', 'on', 'off', '', 'trueish']) {
+  for (const value of ['2', 'maybe', '', 'trueish']) {
     assert.equal(cliIsFlatpakKicad(native, { platform: 'linux', env: { KICAD_CLI_FLATPAK: value }, io: blindIo }), false, value);
     assert.equal(cliIsFlatpakKicad(wrapped, { platform: 'linux', env: { KICAD_CLI_FLATPAK: value }, io: blindIo }), true, value);
     assert.equal(cliIsFlatpakKicad(appId, { platform: 'linux', env: { KICAD_CLI_FLATPAK: value }, io: blindIo }), true, value);
   }
-  for (const value of ['1', 'true', 'yes', '0', 'false', 'no', 'maybe']) {
+  for (const value of ['1', 'true', 'yes', 'on', '0', 'false', 'no', 'off', 'maybe']) {
     assert.equal(cliIsFlatpakKicad(wrapped, { platform: 'win32', env: { KICAD_CLI_FLATPAK: value }, io: blindIo }), false, value);
     assert.equal(cliIsFlatpakKicad(appId, { platform: 'win32', env: { KICAD_CLI_FLATPAK: value }, io: blindIo }), false, value);
     const windows = resolveKicadCli({
@@ -600,15 +602,36 @@ test('runKicadCli drops flatpak KiCad directory env when KICAD_CLI_FLATPAK=1', {
   }
 });
 
+function writeConfigMarker(dir, marker) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'marker'), marker);
+}
+
+function configProbeScript(root) {
+  const scriptPath = path.join(root, 'kicad-cli');
+  fs.writeFileSync(scriptPath, [
+    '#!/bin/sh',
+    'printf "%s\\n" "${KICAD_CONFIG_HOME-unset}"',
+    'if [ -f "${KICAD_CONFIG_HOME}/marker" ]; then cat "${KICAD_CONFIG_HOME}/marker"; fi',
+    ''
+  ].join('\n'), { mode: 0o755 });
+  return scriptPath;
+}
+
+function privateConfigPath(stdout) {
+  return stdout.split('\n')[0];
+}
+
 test('runKicadCli isolates each invocation in a private KICAD_CONFIG_HOME', {
   skip: process.platform === 'win32' ? 'POSIX shell script' : false
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-config-home-'));
-  const scriptPath = path.join(root, 'kicad-cli');
-  fs.writeFileSync(scriptPath, '#!/bin/sh\nprintf %s "${KICAD_CONFIG_HOME-unset}"\n', { mode: 0o755 });
+  const cache = path.join(root, 'cache');
+  const scriptPath = configProbeScript(root);
   try {
     const env = {
       KICAD_CLI_PATH: scriptPath,
+      XDG_CACHE_HOME: cache,
       PATH: process.env.PATH ?? ''
     };
     const [first, second] = await Promise.all([
@@ -617,20 +640,317 @@ test('runKicadCli isolates each invocation in a private KICAD_CONFIG_HOME', {
     ]);
     assert.equal(first.exitCode, 0, first.stderr);
     assert.equal(second.exitCode, 0, second.stderr);
-    assert.match(first.stdout, /chatpcb-kicad-config-/);
-    assert.match(second.stdout, /chatpcb-kicad-config-/);
-    assert.notEqual(first.stdout, second.stdout);
-    assert.equal(fs.existsSync(first.stdout), false);
-    assert.equal(fs.existsSync(second.stdout), false);
-
-    const preserved = path.join(root, 'preserved-config');
-    fs.mkdirSync(preserved);
-    const kept = await runKicadCli([], {
-      env: { ...env, KICAD_CONFIG_HOME: preserved }
-    });
-    assert.equal(kept.stdout, preserved);
-    assert.equal(fs.existsSync(preserved), true);
+    const firstHome = privateConfigPath(first.stdout);
+    const secondHome = privateConfigPath(second.stdout);
+    assert.ok(firstHome.startsWith(path.join(cache, 'chatpcb', 'kicad-config-')), firstHome);
+    assert.ok(secondHome.startsWith(path.join(cache, 'chatpcb', 'kicad-config-')), secondHome);
+    assert.ok(firstHome.endsWith(`${path.sep}kicad`), firstHome);
+    assert.notEqual(firstHome, secondHome);
+    assert.equal(fs.existsSync(firstHome), false);
+    assert.equal(fs.existsSync(secondHome), false);
+    assert.equal(fs.existsSync(path.dirname(firstHome)), false);
+    assert.equal(fs.existsSync(path.dirname(secondHome)), false);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('private KiCad config is copied from KICAD_CONFIG_HOME, then the real platform home', {
+  skip: process.platform === 'win32' ? 'POSIX shell script' : false
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-config-source-'));
+  const cache = path.join(root, 'cache');
+  const scriptPath = configProbeScript(root);
+  const baseEnv = {
+    KICAD_CLI_PATH: scriptPath,
+    XDG_CACHE_HOME: cache,
+    PATH: process.env.PATH ?? ''
+  };
+  try {
+    const pinned = path.join(root, 'pinned-config');
+    const home = path.join(root, 'home');
+    writeConfigMarker(pinned, 'from-env\n');
+    writeConfigMarker(path.join(home, '.config', 'kicad'), 'from-home\n');
+    writeConfigMarker(path.join(home, '.var', 'app', 'org.kicad.KiCad', 'config', 'kicad'), 'from-flatpak\n');
+    const pinnedResult = await runKicadCli([], {
+      env: { ...baseEnv, HOME: home, KICAD_CONFIG_HOME: pinned }
+    });
+    assert.equal(pinnedResult.exitCode, 0, pinnedResult.stderr);
+    const pinnedHome = privateConfigPath(pinnedResult.stdout);
+    assert.ok(pinnedHome.startsWith(path.join(cache, 'chatpcb', 'kicad-config-')), pinnedHome);
+    assert.notEqual(pinnedHome, pinned);
+    assert.match(pinnedResult.stdout, /from-env/);
+    assert.equal(pinnedResult.stdout.includes('from-home'), false);
+    assert.equal(fs.existsSync(pinned), true);
+    assert.equal(fs.existsSync(pinnedHome), false);
+
+    const stale = path.join(cache, 'chatpcb', 'kicad-config-stale');
+    writeConfigMarker(stale, 'from-stale\n');
+    const ignored = await runKicadCli([], {
+      env: { ...baseEnv, HOME: home, KICAD_CONFIG_HOME: stale },
+      platform: 'linux'
+    });
+    assert.match(ignored.stdout, /from-home/);
+    assert.equal(ignored.stdout.includes('from-stale'), false, ignored.stdout);
+    assert.equal(fs.existsSync(stale), true);
+
+    const legacy = path.join(root, 'chatpcb-kicad-config-legacy');
+    writeConfigMarker(path.join(legacy, 'kicad'), 'from-legacy\n');
+    const ignoredLegacy = await runKicadCli([], {
+      env: { ...baseEnv, HOME: home, KICAD_CONFIG_HOME: path.join(legacy, 'kicad') }
+    });
+    assert.match(ignoredLegacy.stdout, /from-home/);
+    assert.equal(ignoredLegacy.stdout.includes('from-legacy'), false, ignoredLegacy.stdout);
+
+    const flatpakCli = await runKicadCli([], {
+      env: { ...baseEnv, HOME: home, KICAD_CLI_FLATPAK: '1' }
+    });
+    assert.equal(flatpakCli.source, 'flatpak');
+    assert.match(flatpakCli.stdout, /from-flatpak/);
+    assert.equal(flatpakCli.stdout.includes('from-home'), false, flatpakCli.stdout);
+
+    const nativeCli = await runKicadCli([], {
+      env: { ...baseEnv, HOME: home }
+    });
+    assert.match(nativeCli.stdout, /from-home/);
+    assert.equal(nativeCli.stdout.includes('from-flatpak'), false, nativeCli.stdout);
+
+    const darwinHome = path.join(root, 'darwin-home');
+    writeConfigMarker(path.join(darwinHome, 'Library', 'Preferences', 'kicad'), 'from-darwin\n');
+    writeConfigMarker(path.join(darwinHome, '.config', 'kicad'), 'from-darwin-config\n');
+    const darwin = await runKicadCli([], {
+      env: { ...baseEnv, HOME: darwinHome },
+      platform: 'darwin'
+    });
+    assert.match(darwin.stdout, /from-darwin/);
+    assert.equal(darwin.stdout.includes('from-darwin-config'), false, darwin.stdout);
+
+    const winHome = path.join(root, 'win-home');
+    const appData = path.join(winHome, 'AppData', 'Roaming');
+    writeConfigMarker(path.join(appData, 'kicad'), 'from-appdata\n');
+    const windows = await runKicadCli([], {
+      env: { ...baseEnv, HOME: winHome, APPDATA: appData },
+      platform: 'win32'
+    });
+    assert.match(windows.stdout, /from-appdata/);
+
+    const redirected = path.join(root, 'redirected-home');
+    fs.mkdirSync(path.join(redirected, '.config', 'kicad'), { recursive: true });
+    const realPin = path.join(root, 'real-kicad-config');
+    writeConfigMarker(realPin, 'from-real-pin\n');
+    const hooked = await runKicadCli([], {
+      env: {
+        ...baseEnv,
+        HOME: redirected,
+        XDG_CONFIG_HOME: path.join(redirected, '.config'),
+        KICAD_CONFIG_HOME: realPin
+      }
+    });
+    assert.match(hooked.stdout, /from-real-pin/);
+    const hookedPath = privateConfigPath(hooked.stdout);
+    assert.ok(hookedPath.startsWith(path.join(cache, 'chatpcb', 'kicad-config-')), hookedPath);
+    assert.equal(hookedPath.startsWith(redirected), false, hookedPath);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('private KiCad config defaults to the real account cache, not HOME or /tmp', {
+  skip: process.platform === 'win32' ? 'POSIX shell script' : false
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-config-cache-'));
+  const scriptPath = configProbeScript(root);
+  const home = path.join(root, 'empty-home');
+  fs.mkdirSync(home);
+  const realCache = path.join(os.userInfo().homedir, '.cache', 'chatpcb');
+  try {
+    const result = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        HOME: home,
+        PATH: process.env.PATH ?? ''
+      }
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const configHome = privateConfigPath(result.stdout);
+    assert.ok(configHome.startsWith(path.join(realCache, 'kicad-config-')), configHome);
+    assert.ok(configHome.endsWith(`${path.sep}kicad`), configHome);
+    assert.equal(configHome.startsWith(os.tmpdir()), false, configHome);
+    assert.equal(configHome.startsWith(home), false, configHome);
+    assert.equal(fs.existsSync(configHome), false);
+    assert.equal(fs.existsSync(path.dirname(configHome)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function ercCounts(reportPath) {
+  const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+  const violations = (report.sheets ?? []).flatMap((sheet) => sheet.violations ?? []);
+  const byType = {};
+  let errorCount = 0;
+  let warningCount = 0;
+  for (const violation of violations) {
+    byType[violation.type] = (byType[violation.type] ?? 0) + 1;
+    if (violation.severity === 'error') errorCount += 1;
+    else if (violation.severity === 'warning') warningCount += 1;
+  }
+  return { errorCount, warningCount, byType };
+}
+
+function flatpakChildEnv(configHome) {
+  const env = { ...process.env, KICAD_CONFIG_HOME: configHome };
+  for (const key of Object.keys(env)) {
+    if (/^KICAD\d*(?:_[A-Z0-9]+)+_DIR$/.test(key)) delete env[key];
+  }
+  return env;
+}
+
+function runStockFlatpakKicad(args, configHome) {
+  return spawnSync('flatpak', ['run', '--command=kicad-cli', 'org.kicad.KiCad', ...args], {
+    env: flatpakChildEnv(configHome),
+    encoding: 'utf8',
+    timeout: 90000
+  });
+}
+
+test('stock flatpak KiCad reads a home-visible config and ignores an empty one', {
+  timeout: 180000
+}, async (t) => {
+  const info = spawnSync('flatpak', ['info', '--show-permissions', 'org.kicad.KiCad'], { encoding: 'utf8' });
+  if (info.status !== 0) {
+    t.skip('flatpak KiCad is not installed');
+    return;
+  }
+  assert.match(info.stdout, /filesystems=home/);
+  assert.doesNotMatch(info.stdout, /filesystems=[^\n]*\/tmp/);
+  const symbols = findInstalledSymbolLibraryDirectory();
+  const realConfig = path.join(os.homedir(), '.var', 'app', 'org.kicad.KiCad', 'config', 'kicad');
+  if (!symbols || !fs.existsSync(realConfig)) {
+    t.skip('real KiCad symbol library or config is not available');
+    return;
+  }
+
+  const root = fs.mkdtempSync(path.join(os.homedir(), '.cache', 'chatpcb-flatpak-probe-'));
+  const previous = {
+    KICAD_SYMBOL_DIR: process.env.KICAD_SYMBOL_DIR,
+    KICAD10_SYMBOL_DIR: process.env.KICAD10_SYMBOL_DIR
+  };
+  process.env.KICAD_SYMBOL_DIR = symbols;
+  process.env.KICAD10_SYMBOL_DIR = symbols;
+  try {
+    const projectDir = path.join(root, 'project');
+    const generated = await generateMcuPeripheralProject({
+      projectDir,
+      prompt: 'red LED on 5V',
+      projectName: 'discrete_led'
+    });
+    const schematic = generated.files.schematic;
+    const fullCopy = path.join(root, 'real-config');
+    const emptyConfig = path.join(root, 'empty-config');
+    const emptyHome = path.join(root, 'empty-home');
+    fs.cpSync(realConfig, fullCopy, { recursive: true });
+    fs.mkdirSync(emptyConfig);
+    fs.mkdirSync(path.join(emptyHome, '.var', 'app', 'org.kicad.KiCad', 'config', 'kicad'), { recursive: true });
+    fs.mkdirSync(path.join(emptyHome, '.config', 'kicad'), { recursive: true });
+
+    const markedCopy = path.join(root, 'marked-config');
+    fs.cpSync(fullCopy, markedCopy, { recursive: true });
+    const deviceLib = '(lib (name "Device") (type "KiCad") (uri "${KICAD10_SYMBOL_DIR}/Device.kicad_sym")';
+    const missingLib = path.join(root, 'ChatpcbMarkerMissing.kicad_sym');
+    const markedTable = path.join(markedCopy, '10.0', 'sym-lib-table');
+    const table = fs.readFileSync(markedTable, 'utf8');
+    assert.equal(table.includes(deviceLib), true);
+    fs.writeFileSync(
+      markedTable,
+      table.replace(deviceLib, `(lib (name "Device") (type "KiCad") (uri "${missingLib}")`)
+    );
+    assert.equal(fs.existsSync(missingLib), false);
+
+    const cache = path.join(root, 'cache');
+    const hookedEnv = (configHome) => {
+      const env = {
+        ...process.env,
+        HOME: emptyHome,
+        USERPROFILE: emptyHome,
+        XDG_CONFIG_HOME: path.join(emptyHome, '.config'),
+        XDG_CACHE_HOME: cache,
+        KICAD_CONFIG_HOME: configHome,
+        PATH: process.env.PATH ?? ''
+      };
+      delete env.KICAD_SYMBOL_DIR;
+      delete env.KICAD10_SYMBOL_DIR;
+      return env;
+    };
+    const upgrade = await runKicadCli(['sch', 'upgrade', '--force', schematic], {
+      env: hookedEnv(fullCopy),
+      cwd: projectDir
+    });
+    assert.equal(upgrade.exitCode, 0, upgrade.stderr);
+    const report = path.join(projectDir, 'hooked-erc.json');
+    const erc = await runKicadCli(
+      ['sch', 'erc', '--format', 'json', '--output', report, schematic],
+      { env: hookedEnv(fullCopy), cwd: projectDir }
+    );
+    const hookedCounts = ercCounts(report);
+    assert.equal(erc.exitCode, 0, `${erc.stderr} ${JSON.stringify(hookedCounts)}`);
+    assert.equal(hookedCounts.errorCount, 0, JSON.stringify(hookedCounts));
+    assert.equal(hookedCounts.warningCount, 0, JSON.stringify(hookedCounts));
+
+    const markedReport = path.join(projectDir, 'hooked-marked-erc.json');
+    const marked = await runKicadCli(
+      ['sch', 'erc', '--format', 'json', '--output', markedReport, schematic],
+      { env: hookedEnv(markedCopy), cwd: projectDir }
+    );
+    assert.equal(fs.existsSync(markedReport), true, `${marked.stderr} ${marked.stdout}`);
+    const markedCounts = ercCounts(markedReport);
+    assert.ok(
+      (markedCounts.byType.lib_symbol_issues ?? 0) > 0,
+      JSON.stringify(markedCounts)
+    );
+    const cacheBase = path.join(cache, 'chatpcb');
+    if (fs.existsSync(cacheBase)) {
+      assert.deepEqual(fs.readdirSync(cacheBase).filter((name) => name.startsWith('kicad-config-')), []);
+    }
+
+    const stockReport = path.join(projectDir, 'stock-erc.json');
+    const stock = runStockFlatpakKicad(
+      ['sch', 'erc', '--format', 'json', '--output', stockReport, schematic],
+      fullCopy
+    );
+    assert.equal(stock.status, 0, `${stock.stderr} ${stock.stdout}`);
+    const stockCounts = ercCounts(stockReport);
+    assert.equal(stockCounts.errorCount, 0, JSON.stringify(stockCounts));
+    assert.equal(stockCounts.warningCount, 0, JSON.stringify(stockCounts));
+
+    const stockMarkedReport = path.join(projectDir, 'stock-marked-erc.json');
+    const stockMarked = runStockFlatpakKicad(
+      ['sch', 'erc', '--format', 'json', '--output', stockMarkedReport, schematic],
+      markedCopy
+    );
+    assert.equal(fs.existsSync(stockMarkedReport), true, `${stockMarked.stderr} ${stockMarked.stdout}`);
+    const stockMarkedCounts = ercCounts(stockMarkedReport);
+    assert.ok(
+      (stockMarkedCounts.byType.lib_symbol_issues ?? 0) > 0,
+      JSON.stringify(stockMarkedCounts)
+    );
+
+    const emptyReport = path.join(projectDir, 'empty-erc.json');
+    const empty = runStockFlatpakKicad(
+      ['sch', 'erc', '--format', 'json', '--output', emptyReport, schematic],
+      emptyConfig
+    );
+    assert.equal(fs.existsSync(emptyReport), true, `${empty.stderr} ${empty.stdout}`);
+    const emptyCounts = ercCounts(emptyReport);
+    assert.ok(
+      (emptyCounts.byType.lib_symbol_issues ?? 0) > 0 || emptyCounts.warningCount > 0,
+      JSON.stringify(emptyCounts)
+    );
+  } finally {
+    if (previous.KICAD_SYMBOL_DIR == null) delete process.env.KICAD_SYMBOL_DIR;
+    else process.env.KICAD_SYMBOL_DIR = previous.KICAD_SYMBOL_DIR;
+    if (previous.KICAD10_SYMBOL_DIR == null) delete process.env.KICAD10_SYMBOL_DIR;
+    else process.env.KICAD10_SYMBOL_DIR = previous.KICAD10_SYMBOL_DIR;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
