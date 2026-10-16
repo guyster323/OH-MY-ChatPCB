@@ -184,6 +184,7 @@
   "artifacts.title": "Artifacts",
   "artifacts.item": "{kind}: {file}",
   "spec.reason": " / {reason}",
+  "provider.status.missing.next": "Install it and sign in, or choose another provider.",
   "provider.status.codex.available": "Codex CLI is available",
   "provider.status.codex.missing": "Codex CLI is not installed",
   "provider.status.claude.available": "Claude Code is available",

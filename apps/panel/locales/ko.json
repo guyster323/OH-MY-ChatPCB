@@ -184,6 +184,7 @@
   "artifacts.title": "산출물",
   "artifacts.item": "{kind}: {file}",
   "spec.reason": " / {reason}",
+  "provider.status.missing.next": "설치하고 로그인해 주세요. 또는 다른 공급자를 골라 주세요.",
   "provider.status.codex.available": "Codex CLI를 사용할 수 있어요",
   "provider.status.codex.missing": "Codex CLI가 설치되어 있지 않아요",
   "provider.status.claude.available": "Claude Code를 사용할 수 있어요",

@@ -508,9 +508,14 @@ function renderProviderStatus(provider) {
   lastProviderStatus = provider;
   providerStatusEl.removeAttribute('data-i18n');
   const text = t(`provider.status.${provider.provider}.${provider.status}`);
-  providerStatusEl.textContent = text.startsWith('provider.status.')
-    ? t('provider.status.fallback')
-    : text;
+  if (text.startsWith('provider.status.')) {
+    providerStatusEl.textContent = t('provider.status.fallback');
+  } else if (provider.status === 'missing') {
+    const next = t('provider.status.missing.next');
+    providerStatusEl.textContent = next.startsWith('provider.status.') ? text : [text, next].join(' ');
+  } else {
+    providerStatusEl.textContent = text;
+  }
   if (provider.status) providerStatusEl.dataset.status = provider.status;
   else delete providerStatusEl.dataset.status;
 }

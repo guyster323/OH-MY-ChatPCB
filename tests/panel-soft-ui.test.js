@@ -752,7 +752,13 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           await window.chatpcbI18n.setLang(nextLang);
           return { missing, available, switched };
         }, lang);
-        assert.equal(providerLine.missing, locale['provider.status.codex.missing'], `${theme}/${lang} provider missing`);
+        const missingCopy = `${locale['provider.status.codex.missing']} ${locale['provider.status.missing.next']}`;
+        assert.equal(providerLine.missing, missingCopy, `${theme}/${lang} provider missing`);
+        if (lang === 'en') assert.match(providerLine.missing, /Install it and sign in, or choose another provider/);
+        if (lang === 'ko') {
+          assert.match(providerLine.missing, /설치하고 로그인해 주세요/);
+          assert.match(providerLine.missing, /다른 공급자/);
+        }
         assert.equal(providerLine.available, locale['provider.status.codex.available'], `${theme}/${lang} provider available`);
         assert.doesNotMatch(providerLine.missing, /codex:\s*missing/i, `${theme}/${lang} raw provider missing`);
         assert.doesNotMatch(providerLine.available, /codex:\s*available/i, `${theme}/${lang} raw provider available`);
