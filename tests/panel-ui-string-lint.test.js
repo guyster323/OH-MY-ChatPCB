@@ -49,7 +49,18 @@ test('panel UI string rule rejects hardcoded copy and allows t()', async () => {
     ['show({ text: `스키매틱` });', 'Hangul template property'],
     ["renderRequestStatus({ label: 'Apply', message: 'Saved' });", 'label and message properties'],
     ["appendProgress({ text: ok ? 'Passed' : 'Failed' });", 'conditional object text'],
-    ["appendProgress({ summary: 'ERC ' + x });", 'concatenated object summary']
+    ["appendProgress({ summary: 'ERC ' + x });", 'concatenated object summary'],
+    ["alert('Done');", 'alert literal'],
+    ["confirm('Sure');", 'confirm literal'],
+    ["el.append('Raw text');", 'append literal'],
+    ["el.prepend('Raw text');", 'prepend literal'],
+    ["el.insertAdjacentHTML('beforeend', '<i>x</i>');", 'insertAdjacentHTML literal'],
+    ["el.insertAdjacentText('beforeend', 'Hello');", 'insertAdjacentText literal'],
+    ['alert(`Done ${x}`);', 'alert template with static text'],
+    ['el.append(`Raw ${x}`);', 'append template with static text'],
+    ['el.insertAdjacentHTML(\'beforeend\', `<i>${x}</i>`);', 'insertAdjacentHTML template with static text'],
+    ["el.append('Raw ' + x);", 'append concatenation'],
+    ["alert(ok ? 'Yes' : 'No');", 'alert conditional']
   ];
 
   for (const [code, label] of rejected) {
@@ -74,7 +85,19 @@ test('panel UI string rule rejects hardcoded copy and allows t()', async () => {
     "const steps = { apply: { titleKey: 'progress.apply', sprite: 'apply' } };",
     "clearPatchApproval('patch.cancelled');",
     'show({ label: `${t(\'workflow.lane.circuit\')} ${t(\'workflow.step.circuit.draft\')}` });',
-    "document.querySelector('.lane-h, .lane-name');"
+    "document.querySelector('.lane-h, .lane-name');",
+    'el.textContent = `${x}`;',
+    'el.setAttribute(\'title\', `${x}`);',
+    'el.textContent = ok ? `${x}` : \'\';',
+    'alert(`${x}`);',
+    'confirm(`${x}`);',
+    'el.append(`${x}`);',
+    'el.prepend(`${x}`);',
+    'el.insertAdjacentHTML(\'beforeend\', `${x}`);',
+    'el.insertAdjacentText(\'beforeend\', `${x}`);',
+    "alert(t('dialog.done'));",
+    "el.append(x);",
+    "el.insertAdjacentHTML('beforeend', t('request.pending'));"
   ];
 
   for (const code of allowed) {
