@@ -27,6 +27,19 @@ kicad-cli version
 
 These two commands are the same in bash and PowerShell. `node -v` should report a 22.x or newer release. `kicad-cli version` should report KiCad 10. If the shell cannot find `kicad-cli`, set `KICAD_CLI_PATH` and run that binary's `version` command.
 
+**KiCad from Flatpak (Linux).** The Flatpak build does not put `kicad-cli` on `PATH`. You can run it directly with `flatpak run --command=kicad-cli org.kicad.KiCad version`, but ChatPCB needs a single executable path, so create a small wrapper and put it on `PATH` (or point `KICAD_CLI_PATH` at it):
+
+```bash
+sudo tee /usr/local/bin/kicad-cli >/dev/null <<'SH'
+#!/bin/sh
+exec flatpak run --filesystem=host --filesystem=/tmp --no-documents-portal --command=kicad-cli org.kicad.KiCad "$@"
+SH
+sudo chmod +x /usr/local/bin/kicad-cli
+kicad-cli version
+```
+
+`--filesystem=host` and `--filesystem=/tmp` let the sandboxed `kicad-cli` read your project and the temporary copies ChatPCB validates; without them ERC/DRC can fail to load the schematic. Use `~/.local/bin/kicad-cli` instead of `/usr/local/bin` if you don't have `sudo`.
+
 ## Quick Start
 
 ### Windows
