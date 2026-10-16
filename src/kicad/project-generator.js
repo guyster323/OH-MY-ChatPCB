@@ -448,7 +448,7 @@ export function buildMcuSchematicAst(spec) {
   };
 }
 
-const DISCRETE_RAIL_SYMBOLS = new Set(['+3V3', '+5V', '+12V']);
+const DISCRETE_RAIL_SYMBOLS = new Set(['+3V3', '+5V', '+9V', '+12V']);
 
 function discreteSupplySymbol(supplyNet) {
   if (DISCRETE_RAIL_SYMBOLS.has(supplyNet)) {
@@ -476,18 +476,35 @@ function discreteLedNetExplanation(name, supplyNet) {
   return explainNet(name);
 }
 
+function discretePowerFlag(ref, netName, explanation) {
+  return component(ref, 'power:PWR_FLAG', explanation, '', {
+    value: 'PWR_FLAG',
+    pins: [netName],
+    connectedPins: [netName],
+    pinNets: { 1: netName }
+  });
+}
+
 function buildDiscreteLedSchematicAst(spec) {
   const discrete = spec.discrete ?? {};
+  if (discrete.refused || !(discrete.count > 0)) {
+    return { components: [], nets: [] };
+  }
   const supplyNet = discrete.supplyNet || '+5V';
-  const resistorValue = discrete.resistorValue || '330Ω';
-  const count = Math.max(1, discrete.count || 1);
-  const ledValue = discrete.ledValue || 'LED';
+  const count = discrete.count;
+  const channels = Array.isArray(discrete.channels) && discrete.channels.length === count
+    ? discrete.channels
+    : Array.from({ length: count }, () => ({
+      ledValue: discrete.ledValue || 'LED',
+      resistorValue: discrete.resistorValue || '330Ω'
+    }));
   const ledNets = Array.from({ length: count }, (_, index) => (count === 1 ? 'LED' : `LED${index + 1}`));
   const supplySymbol = discreteSupplySymbol(supplyNet);
+  const battery = discrete.supplyKind === 'battery';
   const components = [
-    component('J1', 'Connector_Generic:Conn_01x02', `Power input for the ${supplyNet} LED circuit.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
+    component('J1', 'Connector_Generic:Conn_01x02', battery ? `9V battery connector for the ${supplyNet} LED circuit.` : `Power input for the ${supplyNet} LED circuit.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
       value: supplyNet,
-      description: supplyNet,
+      description: battery ? `${supplyNet} battery connector` : supplyNet,
       pins: [supplyNet, 'GND'],
       connectedPins: [supplyNet, 'GND'],
       pinNets: { 1: supplyNet, 2: 'GND' }
@@ -495,6 +512,9 @@ function buildDiscreteLedSchematicAst(spec) {
   ];
   ledNets.forEach((ledNet, index) => {
     const number = index + 1;
+    const channel = channels[index];
+    const resistorValue = channel.resistorValue;
+    const ledValue = channel.ledValue;
     components.push(
       component('R' + number, 'Device:R', `Series resistor ${resistorValue} between ${supplyNet} and ${ledNet}.`, 'Resistor_SMD:R_0603_1608Metric', {
         value: resistorValue,
@@ -526,6 +546,10 @@ function buildDiscreteLedSchematicAst(spec) {
       pinNets: { 1: supplyNet }
     })
   );
+  if (supplySymbol.libId !== 'power:PWR_FLAG') {
+    components.push(discretePowerFlag('#FLG1', supplyNet, `ERC power source marker for the ${supplyNet} discrete LED rail.`));
+  }
+  components.push(discretePowerFlag('#FLG2', 'GND', 'ERC power source marker for the discrete LED ground return.'));
   return {
     components,
     nets: [supplyNet, ...ledNets, 'GND'].map((name) => ({
@@ -822,7 +846,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
   )
 ${renderLibSymbols(schematic.components.map((item) => item.libId))}
 ${notes.map((note, index) => renderText(note, 25.4, 25.4 + index * 7.62)).join('\n')}
-${schematic.components.map((item, index) => renderPlacedComponent(item, 38.1 + (index % SCHEMATIC_GRID_COLUMNS) * 38.1, 88.9 + Math.floor(index / SCHEMATIC_GRID_COLUMNS) * SCHEMATIC_GRID_ROW_SPACING_MM, baseName)).join('\n')}
+${renderPlacedComponents(schematic, baseName, spec.kind === 'discrete-led')}
   (sheet_instances
     (path "/"
       (page "1")
@@ -859,21 +883,38 @@ ${fixtureSymbols()
 
 export function renderSpiceFixture(spec) {
   if (spec.kind === 'discrete-led') {
+    if (spec.discrete?.refused || !(spec.discrete?.count > 0)) {
+      const message = spec.discrete?.reviewBlockers?.[0]?.message
+        ?? spec.discrete?.reviewNotes?.[0]?.message
+        ?? 'Discrete LED draft was not generated.';
+      return [
+        `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
+        `* ${message}`,
+        '.end',
+        ''
+      ].join('\n');
+    }
     const volts = spec.discrete?.supplyVolts ?? 5;
-    const ohms = spec.discrete?.resistanceOhms ?? 330;
     const count = Math.max(1, spec.discrete?.count || 1);
-    const vf = spec.discrete?.color?.vf ?? spec.discrete?.calculation?.vf ?? 2;
+    const channels = Array.isArray(spec.discrete?.channels) && spec.discrete.channels.length === count
+      ? spec.discrete.channels
+      : null;
     const lines = [
       `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
       '* Discrete LED and series resistor. Confirm LED current before release.',
       `VSUP vsup 0 DC ${volts}`
     ];
     for (let index = 1; index <= count; index += 1) {
+      const channel = channels?.[index - 1];
+      const ohms = channel?.resistanceOhms ?? spec.discrete?.resistanceOhms ?? 330;
+      const vf = channel?.vf ?? spec.discrete?.color?.vf ?? spec.discrete?.calculation?.vf ?? 2;
       const node = count === 1 ? 'led' : `led${index}`;
+      const model = count === 1 ? 'DLED' : `DLED${index}`;
       lines.push(`RLED${index} vsup ${node} ${ohms}`);
-      lines.push(`DLED${index} ${node} 0 DLED`);
+      lines.push(`DLED${index} ${node} 0 ${model}`);
+      lines.push(`.model ${model} D(Vfwd=${vf})`);
     }
-    lines.push(`.model DLED D(Vfwd=${vf})`, '.op', '.end', '');
+    lines.push('.op', '.end', '');
     return lines.join('\n');
   }
   if (spec.boardProfile?.kind === 'isolated-dcdc') {
@@ -1876,23 +1917,66 @@ function renderLibPin(pinName, index) {
         )`;
 }
 
-function renderPlacedComponent(componentModel, x, y, baseName) {
+function globalPowerNetLibIds(schematic) {
+  const nets = new Map();
+  for (const item of schematic.components ?? []) {
+    if (typeof item.libId !== 'string' || !item.libId.startsWith('power:') || item.libId === 'power:PWR_FLAG') continue;
+    if (item.value) nets.set(item.value, item.libId);
+  }
+  return nets;
+}
+
+function renderPlacedComponents(schematic, baseName, joinGlobalPowerNets) {
+  const powerNets = joinGlobalPowerNets ? globalPowerNetLibIds(schematic) : null;
+  const powerRefs = { n: 10 };
+  return schematic.components.map((item, index) => renderPlacedComponent(
+    item,
+    38.1 + (index % SCHEMATIC_GRID_COLUMNS) * 38.1,
+    88.9 + Math.floor(index / SCHEMATIC_GRID_COLUMNS) * SCHEMATIC_GRID_ROW_SPACING_MM,
+    baseName,
+    powerNets,
+    powerRefs
+  )).join('\n');
+}
+
+function renderPlacedComponent(componentModel, x, y, baseName, powerNets = null, powerRefs = null) {
   const pins = componentModel.pins ?? symbolPinsFor(componentModel.libId);
   const pinSlots = pinDefinitionsFor(componentModel.libId, pins);
   const connectedPins = new Set(componentModel.connectedPins ?? pins);
+  const chunks = [renderSymbolInstance(componentModel, x, y, baseName)];
 
-  return [
-    renderSymbolInstance(componentModel, x, y, baseName),
-    ...pinSlots.flatMap((pinDef, index) => {
-      const netName = componentModel.pinNets?.[pinDef.number] ?? pins[index];
-      if (netName && connectedPins.has(netName)) {
-        return renderPinNetStub(netName, x, y, pinDef);
-      }
-
+  for (const [index, pinDef] of pinSlots.entries()) {
+    const netName = componentModel.pinNets?.[pinDef.number] ?? pins[index];
+    if (!netName || !connectedPins.has(netName)) {
       const point = pinConnectionPoint(x, y, pinDef);
-      return renderNoConnect(point.x, point.y);
-    })
-  ].join('\n');
+      chunks.push(renderNoConnect(point.x, point.y));
+      continue;
+    }
+
+    const powerLibId = powerNets?.get(netName);
+    if (powerLibId) {
+      // Power symbols are global labels. A local label of the same name is
+      // same_local_global_label, so every pin on the net — including the
+      // power symbol's own pin — meets another power symbol through a short
+      // wire. Leaving the grid symbol's pin bare is pin_not_connected.
+      const start = pinConnectionPoint(x, y, pinDef);
+      const end = powerSymbolPointFromPin(start);
+      const refNumber = powerRefs.n;
+      powerRefs.n += 1;
+      chunks.push(renderWire(start, end));
+      chunks.push(renderSymbolInstance({
+        ref: `#PWR${refNumber}`,
+        libId: powerLibId,
+        value: netName,
+        footprint: ''
+      }, end.x, end.y, baseName));
+      continue;
+    }
+
+    chunks.push(...renderPinNetStub(netName, x, y, pinDef));
+  }
+
+  return chunks.join('\n');
 }
 
 function renderSymbolInstance(componentModel, x, y, baseName) {
@@ -1962,6 +2046,7 @@ function officialPinDefinitionsFor(libId) {
       return [pinDef('1', 0, 0, 90)];
     case 'power:+3V3':
     case 'power:+5V':
+    case 'power:+9V':
     case 'power:+12V':
       return [pinDef('1', 0, 0, 270)];
     case 'power:GND':
@@ -2077,6 +2162,8 @@ function symbolPinsFor(libId) {
       return ['+3V3'];
     case 'power:+5V':
       return ['+5V'];
+    case 'power:+9V':
+      return ['+9V'];
     case 'power:+12V':
       return ['+12V'];
     case 'power:GND':
@@ -2158,6 +2245,19 @@ function pinConnectionPoint(symbolX, symbolY, pinDef) {
     y: symbolY - pinDef.y,
     rotation: pinDef.rotation
   };
+}
+
+function powerSymbolPointFromPin(pin) {
+  switch (pin.rotation) {
+    case 90:
+      return { x: pin.x, y: pin.y + 2.54 };
+    case 180:
+      return { x: pin.x + 2.54, y: pin.y };
+    case 270:
+      return { x: pin.x, y: pin.y - 2.54 };
+    default:
+      return { x: pin.x - 2.54, y: pin.y };
+  }
 }
 
 function renderPinNetStub(pinName, symbolX, symbolY, pinDef) {

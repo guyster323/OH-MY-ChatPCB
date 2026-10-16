@@ -134,8 +134,8 @@ function titleFromPrompt(prompt) {
     .replace(/[.。]+$/, '');
 }
 
-const DISCRETE_LED_EXCLUDE = /\besp32\b|\bstm32\b|\brp2040\b|\bnrf52\b|\batmega\b|\barduino\b|\bmcu\b|마이크로\s*컨트롤러|\bbms\b|adbms|ltc681|센서|sensor|\busb-?c\b|\busb\b/i;
-const DISCRETE_LED_BOARD_WORDS = /\b(?:button|reset|boot|regulator|connector|header|i2c|spi|uart|gpio|display|lcd|battery|switch|buzzer|motor|relay)\b|버튼|리셋|커넥터|헤더|레귤레이터|디스플레이/i;
+const DISCRETE_LED_EXCLUDE = /\besp32\b|\bstm32\b|\brp2040\b|\bnrf52\b|\batmega\b|\barduino\b|\bmcu\b|마이크로\s*컨트롤러|\bbms\b|adbms|ltc681|센서|sensor|\busb-?c\b|\busb\b|\bbattery\s+monitor\b|\bbattery\s+management\b|배터리\s*모니터|배터리\s*관리/i;
+const DISCRETE_LED_BOARD_WORDS = /\b(?:button|reset|boot|regulator|connector|header|i2c|spi|uart|gpio|display|lcd|switch|buzzer|motor|relay)\b|버튼|리셋|커넥터|헤더|레귤레이터|디스플레이/i;
 const DISCRETE_PROFILE_KINDS = new Set(['battery-monitor', 'isolated-dcdc', 'bms']);
 const MAX_DISCRETE_LEDS = 8;
 const TYPICAL_LED_CURRENT_MA = 10;
@@ -186,8 +186,8 @@ function isSimpleDiscreteLedPrompt(prompt) {
 function parseExplicitResistanceOhms(prompt) {
   const kiloWithUnit = prompt.match(/(\d+(?:\.\d+)?)\s*k\s*(?:옴|ohms?|Ω)/i);
   if (kiloWithUnit) return Number(kiloWithUnit[1]) * 1000;
-  const kiloBare = prompt.match(/(\d+(?:\.\d+)?)\s*k(?:\s*r\b)?/i);
-  if (kiloBare && /저항|resistor/i.test(prompt)) return Number(kiloBare[1]) * 1000;
+  const kiloBare = prompt.match(/(\d+(?:\.\d+)?)\s*k(?:\s*r\b|\b)/i);
+  if (kiloBare) return Number(kiloBare[1]) * 1000;
   const plain = prompt.match(/(\d+(?:\.\d+)?)\s*(?:옴|ohms?|Ω)/i)
     ?? prompt.match(/(\d+(?:\.\d+)?)\s*r\b/i);
   if (plain) return Number(plain[1]);
@@ -196,15 +196,32 @@ function parseExplicitResistanceOhms(prompt) {
 
 function parseSupplyVolts(prompt) {
   const matches = [];
-  for (const match of prompt.matchAll(/(\d+)\s*v\s*(\d+)/gi)) {
+  // 3V3 and 5v0 are one token. A space, another digit, or a resistor suffix belongs to the next value.
+  for (const match of prompt.matchAll(/(\d+)v(\d)(?![\dk])/gi)) {
     matches.push({ index: match.index, volts: Number(`${match[1]}.${match[2]}`) });
   }
-  for (const match of prompt.matchAll(/(\d+(?:\.\d+)?)\s*(?:v\b|볼트)/gi)) {
+  for (const match of prompt.matchAll(/(\d+(?:\.\d+)?)\s*(?:v(?:ac|\s*\/\s*a\.?c\.?)?\b|볼트)/gi)) {
+    matches.push({ index: match.index, volts: Number(match[1]) });
+  }
+  for (const match of prompt.matchAll(/(\d+(?:\.\d+)?)vac\b/gi)) {
     matches.push({ index: match.index, volts: Number(match[1]) });
   }
   matches.sort((left, right) => left.index - right.index);
   const first = matches.find((item) => Number.isFinite(item.volts) && item.volts > 0);
   return first ? first.volts : null;
+}
+
+const MAINS_SUPPLY = /상용\s*전원|교류\s*전원|\bmains\b|\bwall\s*outlet\b|\bline\s*voltage\b/i;
+const MAX_DISCRETE_SUPPLY_VOLTS = 24;
+
+function supplyIsUnsafe(prompt, volts) {
+  if (MAINS_SUPPLY.test(prompt)) return true;
+  return Number.isFinite(volts) && volts > MAX_DISCRETE_SUPPLY_VOLTS;
+}
+
+function highVoltageMessage(volts) {
+  const detected = Number.isFinite(volts) ? ` Detected ${formatVolts(volts)}V.` : '';
+  return `Refusing to draft a mains or high-voltage LED circuit.${detected} The discrete LED generator only supports low-voltage rails up to 24V (+3V3, +5V, +9V, and +12V). No LED, resistor, or power symbol was generated.`;
 }
 
 function supplyNetName(volts) {
@@ -246,7 +263,7 @@ function parseLedCount(prompt) {
     const before = new RegExp(`${word}\\s*개(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
     if (before.test(prompt)) return count;
   }
-  return 1;
+  return null;
 }
 
 function findLedColors(prompt) {
@@ -275,6 +292,12 @@ function unsupportedLedFeatures(prompt) {
     items.push({
       id: 'pwm',
       message: 'Unsupported: PWM, dimming, and brightness control are not supported by the discrete LED generator. The draft is a static series LED.'
+    });
+  }
+  if (/\bstrips?\b|스트립|엘이디\s*띠|\bled\s*띠/i.test(prompt)) {
+    items.push({
+      id: 'strip',
+      message: 'Unsupported: LED strips are not supported by the discrete LED generator. A simple indicator LED was drafted instead.'
     });
   }
   return items;
@@ -323,9 +346,47 @@ function resistorFromSupply({ supplyVolts, vf, colorLabel, assumed }) {
   };
 }
 
-function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported }) {
+function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms }) {
+  const vfColor = color ?? LED_COLOR_SPECS[0];
+  const assumed = !color;
+  const calculation = resistorExplicit
+    ? null
+    : resistorFromSupply({
+      supplyVolts,
+      vf: vfColor.vf,
+      colorLabel: vfColor.prose,
+      assumed
+    });
+  const resistanceOhms = resistorExplicit ? explicitOhms : calculation.resistanceOhms;
+  const resistorValue = formatOhms(resistanceOhms);
+  return {
+    color: color ? { id: color.id, label: color.label, vf: color.vf } : null,
+    assumedColor: assumed,
+    ledValue: color ? `LED ${color.label}` : 'LED',
+    vf: vfColor.vf,
+    resistanceOhms,
+    resistorValue,
+    calculation
+  };
+}
+
+function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels }) {
   const notes = [];
-  if (calculation?.incompatible) {
+  if (perColor && resistorExplicit) {
+    const names = channels.map((channel) => channel.ledValue).join(', ');
+    notes.push({
+      code: 'discrete-led',
+      message: `Discrete LED draft keeps the requested series resistor ${resistorValue} for ${names}; confirm it for the LED forward voltage and current before release.`
+    });
+  } else if (perColor) {
+    for (const channel of channels) {
+      const id = channel.color?.id ?? 'led';
+      notes.push({
+        code: channel.calculation?.incompatible ? `discrete-led-unsupported-vf-${id}` : `discrete-led-${id}`,
+        message: channel.calculation.summary
+      });
+    }
+  } else if (calculation?.incompatible) {
     notes.push({ code: 'discrete-led-unsupported-vf', message: calculation.summary });
   } else if (resistorExplicit) {
     const colorText = color ? ` for ${ledValue}` : '';
@@ -353,52 +414,79 @@ export function parseDiscreteLedRequest(prompt) {
   if (!isSimpleDiscreteLedPrompt(text)) return null;
   const supplyVolts = parseSupplyVolts(text) ?? 5;
   if (!Number.isFinite(supplyVolts) || supplyVolts <= 0) return null;
+  if (supplyIsUnsafe(text, supplyVolts)) {
+    const message = highVoltageMessage(supplyVolts);
+    return {
+      count: 0,
+      requestedCount: 0,
+      quantityCapped: false,
+      refused: true,
+      perColor: false,
+      color: null,
+      assumedColor: false,
+      ledValue: 'LED',
+      resistanceOhms: null,
+      resistorValue: null,
+      resistorExplicit: false,
+      supplyVolts,
+      supplyNet: null,
+      supplyKind: null,
+      channels: [],
+      calculation: null,
+      unsupported: [],
+      reviewBlockers: [{ code: 'discrete-led-high-voltage', message }],
+      reviewNotes: [{ code: 'discrete-led-high-voltage', message }]
+    };
+  }
   const colors = findLedColors(text);
-  const color = colors[0] ?? null;
-  const assumedColor = !color;
-  const vfColor = color ?? LED_COLOR_SPECS[0];
+  const explicitCount = parseLedCount(text);
+  const perColor = colors.length > 1 && (explicitCount == null || explicitCount === colors.length);
+  const requestedCount = perColor ? colors.length : Math.max(1, explicitCount ?? 1);
+  const count = Math.min(MAX_DISCRETE_LEDS, requestedCount);
   const explicitOhms = parseExplicitResistanceOhms(text);
   const resistorExplicit = Number.isFinite(explicitOhms) && explicitOhms > 0;
-  const calculation = resistorExplicit
-    ? null
-    : resistorFromSupply({
-      supplyVolts,
-      vf: vfColor.vf,
-      colorLabel: vfColor.prose,
-      assumed: assumedColor
-    });
-  const resistanceOhms = resistorExplicit ? explicitOhms : calculation.resistanceOhms;
-  const resistorValue = formatOhms(resistanceOhms);
-  if (!resistorValue) return null;
-  const requestedCount = Math.max(1, parseLedCount(text));
-  const count = Math.min(MAX_DISCRETE_LEDS, requestedCount);
+  const channelColors = perColor
+    ? colors.slice(0, count)
+    : Array.from({ length: count }, () => colors[0] ?? null);
+  const channels = channelColors.map((color) => channelForLed({
+    color,
+    supplyVolts,
+    resistorExplicit,
+    explicitOhms
+  }));
+  if (channels.some((channel) => !channel.resistorValue)) return null;
+  const primary = channels[0];
   const unsupported = unsupportedLedFeatures(text);
-  if (colors.length > 1) {
+  if (!perColor && colors.length > 1) {
     const names = colors.map((item) => item.prose).join(', ');
     unsupported.push({
       id: 'mixed-color',
       message: `Unsupported: multiple LED colors (${names}) in one draft are not supported. The draft uses ${colors[0].prose} for every LED.`
     });
   }
-  const ledValue = color ? `LED ${color.label}` : 'LED';
   const parsed = {
     count,
     requestedCount,
     quantityCapped: requestedCount > count,
-    color: color ? { id: color.id, label: color.label, vf: color.vf } : null,
-    assumedColor,
-    ledValue,
-    resistanceOhms,
-    resistorValue,
+    refused: false,
+    perColor,
+    color: primary.color,
+    assumedColor: primary.assumedColor,
+    ledValue: primary.ledValue,
+    resistanceOhms: primary.resistanceOhms,
+    resistorValue: primary.resistorValue,
     resistorExplicit,
     supplyVolts,
     supplyNet: supplyNetName(supplyVolts),
-    calculation,
+    supplyKind: /\bbattery\b|배터리|건전지/i.test(text) ? 'battery' : 'rail',
+    channels,
+    calculation: primary.calculation,
     unsupported
   };
   return {
     ...parsed,
-    reviewNotes: buildDiscreteReviewNotes(parsed)
+    reviewNotes: buildDiscreteReviewNotes(parsed),
+    reviewBlockers: []
   };
 }
 
@@ -408,14 +496,27 @@ export function applyDiscreteLedSpec(spec) {
   if (DISCRETE_PROFILE_KINDS.has(spec.kind) || DISCRETE_PROFILE_KINDS.has(spec.boardProfile?.kind)) return spec;
   const parsed = parseDiscreteLedRequest(spec.sourcePrompt ?? '');
   if (!parsed) return spec;
+  if (parsed.refused) {
+    return {
+      ...spec,
+      kind: 'discrete-led',
+      interfaces: [],
+      peripherals: [],
+      power: {
+        input: 'external',
+        rails: []
+      },
+      discrete: parsed
+    };
+  }
   return {
     ...spec,
     kind: 'discrete-led',
     interfaces: [],
-    peripherals: Array.from({ length: parsed.count }, () => ({
+    peripherals: parsed.channels.map((channel) => ({
       kind: 'status-led',
-      color: parsed.color?.id ?? null,
-      currentLimit: parsed.resistorValue
+      color: channel.color?.id ?? null,
+      currentLimit: channel.resistorValue
     })),
     power: {
       input: 'external',

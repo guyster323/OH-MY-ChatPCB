@@ -122,13 +122,46 @@ export async function runKicadCli(args, options = {}) {
   }
   return runCommand(resolved.path, args, {
     cwd: options.cwd,
-    timeoutMs: options.timeoutMs ?? 120000
+    timeoutMs: options.timeoutMs ?? 120000,
+    env: kicadCliChildEnv(resolved.path, options.env ?? process.env)
   }).then((result) => ({ ...result, command: resolved.path, source: resolved.source }));
 }
 
-export function runCommand(command, args, { cwd = process.cwd(), timeoutMs = 120000 } = {}) {
+// Flatpak hides /var/lib/flatpak even with --filesystem=host. Forwarding
+// KICAD*_SYMBOL_DIR from that runtime makes kicad-cli report lib_symbol_issues
+// for libraries it already has under /app/extensions. Node still reads those
+// directories to embed symbols; only the CLI child drops them.
+function kicadCliChildEnv(cliPath, baseEnv) {
+  const env = { ...baseEnv };
+  if (!flatpakKicadWrapper(cliPath)) {
+    return env;
+  }
+  for (const key of ['KICAD_SYMBOL_DIR', 'KICAD10_SYMBOL_DIR', 'KICAD_FOOTPRINT_DIR', 'KICAD10_FOOTPRINT_DIR']) {
+    const value = env[key];
+    if (typeof value === 'string' && value.includes(`${path.sep}flatpak${path.sep}`)) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
+function flatpakKicadWrapper(cliPath) {
+  try {
+    const text = fs.readFileSync(cliPath, 'utf8');
+    return text.includes('flatpak run') && text.includes('kicad-cli');
+  } catch {
+    return false;
+  }
+}
+
+export function runCommand(command, args, { cwd = process.cwd(), timeoutMs = 120000, env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
     const stdout = [];
     const stderr = [];
     let settled = false;

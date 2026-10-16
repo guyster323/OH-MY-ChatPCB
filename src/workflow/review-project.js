@@ -151,6 +151,18 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
         `Discrete LED draft uses series resistor ${spec.discrete?.resistorValue ?? 'unspecified'}; confirm it for the LED forward voltage and current before release.`
       );
     }
+    for (const blocker of spec.discrete?.reviewBlockers ?? []) {
+      if (blocker?.code && blocker?.message) {
+        addFinding(findings.blockers, blocker.code, blocker.message);
+      }
+    }
+    if (!spec.discrete?.refused) {
+      addFinding(
+        findings.warnings,
+        'discrete-led-draft',
+        'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.'
+      );
+    }
   }
 
   if (spec.boardProfile?.id) {
@@ -282,7 +294,7 @@ function summarizeCalculations(calculations) {
 }
 
 function statusFor(findings, validation) {
-  if (findings.blockers.length > 0) {
+  if ((validation?.erc?.errorCount ?? 0) > 0 || findings.blockers.length > 0) {
     return 'blocked';
   }
 
