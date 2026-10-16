@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { resolveKicadCli, runCommand } from '../src/kicad/kicad-cli.js';
+import { flatpakKicadWrapper, kicadCliChildEnv, resolveKicadCli, runCommand } from '../src/kicad/kicad-cli.js';
 
 test('resolves an explicit KiCad CLI path first', () => {
   const found = resolveKicadCli({
@@ -162,6 +164,186 @@ test('trusted explicitPath and KICAD_CLI_PATH still select inside an excluded pr
     exists: (candidate) => candidate === '/untrusted-project/bin/kicad-cli' || candidate === '/trusted/bin/kicad-cli'
   });
   assert.deepEqual(fromEnv, { path: '/untrusted-project/bin/kicad-cli', source: 'env' });
+});
+
+const FLATPAK_LIBRARY = path.join(path.sep, 'var', 'lib', 'flatpak', 'app', 'org.kicad.KiCad', 'current', 'active', 'files', 'share', 'kicad');
+const NATIVE_LIBRARY = path.join(path.sep, 'usr', 'share', 'kicad');
+const FLATPAK_SCRIPT = '#!/bin/sh\nexec flatpak run --command=kicad-cli org.kicad.KiCad "$@"\n';
+const NATIVE_SCRIPT = '#!/bin/sh\nexec /usr/bin/kicad-cli "$@"\n';
+const COMMENT_SCRIPT = '#!/bin/sh\n# previously: flatpak run --command=kicad-cli org.kicad.KiCad\nexec /usr/bin/kicad-cli "$@"\n';
+const TRAILING_COMMENT_SCRIPT = '#!/bin/sh\nexec /usr/bin/kicad-cli "$@" # flatpak run --command=kicad-cli org.kicad.KiCad\n';
+
+function libraryEnv() {
+  return {
+    KICAD_SYMBOL_DIR: path.join(NATIVE_LIBRARY, 'symbols'),
+    KICAD10_SYMBOL_DIR: path.join(FLATPAK_LIBRARY, 'symbols'),
+    KICAD10_FOOTPRINT_DIR: path.join(FLATPAK_LIBRARY, 'footprints'),
+    KICAD9_SYMBOL_DIR: path.join(FLATPAK_LIBRARY, 'symbols'),
+    KICAD8_FOOTPRINT_DIR: path.join(FLATPAK_LIBRARY, 'footprints'),
+    KICAD7_3DMODEL_DIR: path.join(FLATPAK_LIBRARY, '3dmodels'),
+    KICAD_3DMODEL_DIR: path.join(FLATPAK_LIBRARY, '3dmodels'),
+    KICAD6_SYMBOL_DIR: path.join(FLATPAK_LIBRARY, 'symbols'),
+    KICAD_TEMPLATE_DIR: path.join(FLATPAK_LIBRARY, 'template'),
+    KICAD_USER_TEMPLATE_DIR: path.join(FLATPAK_LIBRARY, 'template'),
+    KICAD_FOOTPRINT_DIR: path.join(NATIVE_LIBRARY, 'footprints'),
+    KICAD11_SYMBOL_DIR: path.join(path.sep, 'opt', 'flatpak-kicad', 'symbols'),
+    KICAD_CLI_PATH: path.join(FLATPAK_LIBRARY, 'bin', 'kicad-cli'),
+    CUSTOM_FLATPAK: path.join(FLATPAK_LIBRARY, 'symbols'),
+    PATH: path.join(path.sep, 'usr', 'bin')
+  };
+}
+
+function spyFsReads() {
+  const events = [];
+  const original = {
+    readFileSync: fs.readFileSync,
+    openSync: fs.openSync,
+    readSync: fs.readSync,
+    statSync: fs.statSync
+  };
+  fs.readFileSync = (...args) => {
+    events.push({ op: 'readFileSync', path: args[0] });
+    return original.readFileSync(...args);
+  };
+  fs.openSync = (...args) => {
+    events.push({ op: 'openSync', path: args[0] });
+    return original.openSync(...args);
+  };
+  fs.readSync = (fd, buffer, offset, length, position) => {
+    events.push({ op: 'readSync', length, position: position ?? null });
+    return original.readSync(fd, buffer, offset, length, position);
+  };
+  fs.statSync = (...args) => {
+    events.push({ op: 'statSync', path: args[0] });
+    return original.statSync(...args);
+  };
+  return {
+    events,
+    restore() {
+      fs.readFileSync = original.readFileSync;
+      fs.openSync = original.openSync;
+      fs.readSync = original.readSync;
+      fs.statSync = original.statSync;
+    }
+  };
+}
+
+function assertFlatpakDirsStripped(env, child) {
+  for (const key of [
+    'KICAD10_SYMBOL_DIR',
+    'KICAD10_FOOTPRINT_DIR',
+    'KICAD9_SYMBOL_DIR',
+    'KICAD8_FOOTPRINT_DIR',
+    'KICAD7_3DMODEL_DIR',
+    'KICAD_3DMODEL_DIR',
+    'KICAD6_SYMBOL_DIR',
+    'KICAD_TEMPLATE_DIR',
+    'KICAD_USER_TEMPLATE_DIR'
+  ]) {
+    assert.equal(Object.hasOwn(child, key), false, key);
+  }
+  assert.equal(child.KICAD_SYMBOL_DIR, env.KICAD_SYMBOL_DIR);
+  assert.equal(child.KICAD_FOOTPRINT_DIR, env.KICAD_FOOTPRINT_DIR);
+  assert.equal(child.KICAD11_SYMBOL_DIR, env.KICAD11_SYMBOL_DIR);
+  assert.equal(child.KICAD_CLI_PATH, env.KICAD_CLI_PATH);
+  assert.equal(child.CUSTOM_FLATPAK, env.CUSTOM_FLATPAK);
+  assert.equal(child.PATH, env.PATH);
+}
+
+test('flatpak wrapper detection does not read binary or oversized kicad-cli files', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-cli-'));
+  const largePath = path.join(root, 'kicad-cli-large');
+  const binaryPath = path.join(root, 'kicad-cli-binary');
+  const scriptPath = path.join(root, 'kicad-cli-script');
+  const largeBody = Buffer.concat([
+    Buffer.from(FLATPAK_SCRIPT),
+    Buffer.alloc(64 * 1024 + 1 - Buffer.byteLength(FLATPAK_SCRIPT), 0x20)
+  ]);
+  const binary = Buffer.alloc(4096, 0);
+  binary[0] = 0x7f;
+  binary[1] = 0x45;
+  binary[2] = 0x4c;
+  binary[3] = 0x46;
+  Buffer.from('flatpak run --command=kicad-cli').copy(binary, 128);
+  try {
+    fs.writeFileSync(largePath, largeBody);
+    fs.writeFileSync(binaryPath, binary);
+    fs.writeFileSync(scriptPath, FLATPAK_SCRIPT, { mode: 0o755 });
+    assert.equal(largeBody.length, 64 * 1024 + 1);
+
+    const largeSpy = spyFsReads();
+    try {
+      assert.equal(flatpakKicadWrapper(largePath, { platform: 'linux' }), false);
+      assert.equal(largeSpy.events.some((event) => event.op === 'readFileSync'), false);
+      assert.equal(largeSpy.events.some((event) => event.op === 'openSync'), false);
+      assert.equal(largeSpy.events.some((event) => event.op === 'readSync'), false);
+    } finally {
+      largeSpy.restore();
+    }
+
+    const binarySpy = spyFsReads();
+    try {
+      assert.equal(flatpakKicadWrapper(binaryPath, { platform: 'linux' }), false);
+      assert.equal(binarySpy.events.some((event) => event.op === 'readFileSync'), false);
+      const readBytes = binarySpy.events
+        .filter((event) => event.op === 'readSync')
+        .reduce((sum, event) => sum + event.length, 0);
+      assert.ok(readBytes > 0 && readBytes <= 64, `binary peek read ${readBytes} bytes`);
+      assert.ok(readBytes < binary.length);
+    } finally {
+      binarySpy.restore();
+    }
+
+    const winSpy = spyFsReads();
+    try {
+      assert.equal(flatpakKicadWrapper(scriptPath, { platform: 'win32' }), false);
+      assert.equal(winSpy.events.length, 0);
+      const env = libraryEnv();
+      const child = kicadCliChildEnv(scriptPath, env, { platform: 'win32' });
+      assert.deepEqual(child, env);
+    } finally {
+      winSpy.restore();
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('flatpak run mentioned only in comments does not strip KiCad directory env', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-cli-comment-'));
+  const commentPath = path.join(root, 'kicad-cli');
+  const trailingPath = path.join(root, 'kicad-cli-trailing');
+  try {
+    fs.writeFileSync(commentPath, COMMENT_SCRIPT, { mode: 0o755 });
+    fs.writeFileSync(trailingPath, TRAILING_COMMENT_SCRIPT, { mode: 0o755 });
+    assert.equal(flatpakKicadWrapper(commentPath, { platform: 'linux' }), false);
+    assert.equal(flatpakKicadWrapper(trailingPath, { platform: 'linux' }), false);
+    const env = libraryEnv();
+    assert.deepEqual(kicadCliChildEnv(commentPath, env, { platform: 'linux' }), env);
+    assert.deepEqual(kicadCliChildEnv(trailingPath, env, { platform: 'linux' }), env);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('generic KICAD directory env is stripped only for flatpak paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-cli-env-'));
+  const flatpakPath = path.join(root, 'kicad-cli-flatpak');
+  const nativePath = path.join(root, 'kicad-cli-native');
+  try {
+    fs.writeFileSync(flatpakPath, FLATPAK_SCRIPT, { mode: 0o755 });
+    fs.writeFileSync(nativePath, NATIVE_SCRIPT, { mode: 0o755 });
+    assert.equal(flatpakKicadWrapper(flatpakPath, { platform: 'linux' }), true);
+    const env = libraryEnv();
+    assertFlatpakDirsStripped(env, kicadCliChildEnv(flatpakPath, env, { platform: 'linux' }));
+    assert.deepEqual(env, libraryEnv());
+
+    assert.equal(flatpakKicadWrapper(nativePath, { platform: 'linux' }), false);
+    const nativeChild = kicadCliChildEnv(nativePath, env, { platform: 'linux' });
+    assert.deepEqual(nativeChild, env);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('KiCad command timeout reports a typed failure after terminating the process', async () => {

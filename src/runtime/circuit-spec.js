@@ -183,32 +183,152 @@ function isSimpleDiscreteLedPrompt(prompt) {
   return hasLed && !DISCRETE_LED_EXCLUDE.test(prompt) && !DISCRETE_LED_BOARD_WORDS.test(prompt);
 }
 
-function parseExplicitResistanceOhms(prompt) {
-  const kiloWithUnit = prompt.match(/(\d+(?:\.\d+)?)\s*k\s*(?:옴|ohms?|Ω)/i);
-  if (kiloWithUnit) return Number(kiloWithUnit[1]) * 1000;
-  const kiloBare = prompt.match(/(\d+(?:\.\d+)?)\s*k(?:\s*r\b|\b)/i);
-  if (kiloBare) return Number(kiloBare[1]) * 1000;
-  const plain = prompt.match(/(\d+(?:\.\d+)?)\s*(?:옴|ohms?|Ω)/i)
-    ?? prompt.match(/(\d+(?:\.\d+)?)\s*r\b/i);
-  if (plain) return Number(plain[1]);
+const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
+const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
+const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
+const FORWARD_VOLTAGE = /\bvf\b|\bforward\b|순방향/i;
+const SUPPLY_VOLTAGE = /\bsupply\b|\bpower\b|\bbattery\b|\brail\b|전원|배터리/i;
+const ON_AT_VOLTAGE = /\b(?:on|at)\s+(?:(?:a|an|the)\s+)?$/i;
+
+function isPotentiometerResistor(prompt, start, end) {
+  const before = prompt.slice(Math.max(0, start - 48), start);
+  const after = prompt.slice(end, end + 48);
+  return POT_BEFORE.test(before) || POT_AFTER.test(after);
+}
+
+function firstAcceptedOhms(prompt, source, flags, toOhms) {
+  const regex = new RegExp(source, flags.includes('g') ? flags : `${flags}g`);
+  for (const match of prompt.matchAll(regex)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (isPotentiometerResistor(prompt, start, end)) continue;
+    const ohms = toOhms(match);
+    if (Number.isFinite(ohms) && ohms > 0) return ohms;
+  }
   return null;
 }
 
-function parseSupplyVolts(prompt) {
+function rkmToOhms(whole, fraction, letter) {
+  const multiplier = RESISTANCE_MULTIPLIER[String(letter).toLowerCase()];
+  if (!multiplier) return null;
+  const scale = 10 ** fraction.length;
+  return (Number(whole) * scale + Number(fraction)) * multiplier / scale;
+}
+
+function isBareNumberExcluded(after) {
+  if (/^\s*(?:v(?:ac|\s*\/\s*a\.?c\.?)?(?:\b|\d)|볼트)/i.test(after)) return true;
+  if (/^\s*(?:m\s*a|ma|milli\s*amps?|milliamps?|amp(?:ere)?s?|암페어|밀리\s*암페어)\b/i.test(after)) return true;
+  if (/^\s*(?:x\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b/i.test(after)) return true;
+  if (/^\s*개/.test(after)) return true;
+  return false;
+}
+
+// A bare number is a series resistor only in an LED prompt. Voltages, counts, and currents are not.
+function parseExplicitResistanceOhms(prompt) {
+  const rkm = firstAcceptedOhms(
+    prompt,
+    '(?<![\\w.])(\\d+)([rRkKmM])(\\d+)(?![\\w])',
+    'g',
+    (match) => rkmToOhms(match[1], match[3], match[2])
+  );
+  if (rkm != null) return rkm;
+
+  const withUnit = firstAcceptedOhms(
+    prompt,
+    '(\\d+(?:\\.\\d+)?)\\s*([rRkKmM])?\\s*(?:옴|ohms?|Ω)',
+    'gi',
+    (match) => Number(match[1]) * (match[2] ? RESISTANCE_MULTIPLIER[match[2].toLowerCase()] : 1)
+  );
+  if (withUnit != null) return withUnit;
+
+  const suffixed = firstAcceptedOhms(
+    prompt,
+    '(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*([rRkKmM])(?:\\s*[rR]\\b|\\b)(?![A-Za-z])',
+    'g',
+    (match) => Number(match[1]) * RESISTANCE_MULTIPLIER[match[2].toLowerCase()]
+  );
+  if (suffixed != null) return suffixed;
+
+  const bare = firstAcceptedOhms(
+    prompt,
+    '(?<![\\w.])(\\d+\\.\\d+|\\d+)(?![\\w]|\\.\\d)',
+    'g',
+    (match) => (isBareNumberExcluded(prompt.slice((match.index ?? 0) + match[0].length)) ? null : Number(match[1]))
+  );
+  return bare;
+}
+
+function addSupplyVoltage(matches, index, end, volts) {
+  if (!Number.isFinite(volts) || volts <= 0) return;
+  if (matches.some((item) => index < item.end && end > item.index)) return;
+  matches.push({ index, end, volts });
+}
+
+function collectSupplyVoltages(prompt) {
   const matches = [];
   // 3V3 and 5v0 are one token. A space, another digit, or a resistor suffix belongs to the next value.
   for (const match of prompt.matchAll(/(\d+)v(\d)(?![\dk])/gi)) {
-    matches.push({ index: match.index, volts: Number(`${match[1]}.${match[2]}`) });
+    addSupplyVoltage(matches, match.index, match.index + match[0].length, Number(`${match[1]}.${match[2]}`));
   }
   for (const match of prompt.matchAll(/(\d+(?:\.\d+)?)\s*(?:v(?:ac|\s*\/\s*a\.?c\.?)?\b|볼트)/gi)) {
-    matches.push({ index: match.index, volts: Number(match[1]) });
+    addSupplyVoltage(matches, match.index, match.index + match[0].length, Number(match[1]));
   }
   for (const match of prompt.matchAll(/(\d+(?:\.\d+)?)vac\b/gi)) {
-    matches.push({ index: match.index, volts: Number(match[1]) });
+    addSupplyVoltage(matches, match.index, match.index + match[0].length, Number(match[1]));
   }
   matches.sort((left, right) => left.index - right.index);
-  const first = matches.find((item) => Number.isFinite(item.volts) && item.volts > 0);
-  return first ? first.volts : null;
+  return matches;
+}
+
+function voltageWindow(prompt, item, found) {
+  const previous = found.filter((other) => other.end <= item.index).at(-1);
+  const next = found.find((other) => other.index >= item.end);
+  const start = Math.max(previous ? previous.end : 0, item.index - 32);
+  const end = Math.min(next ? next.index : prompt.length, item.end + 32);
+  return {
+    before: prompt.slice(start, item.index),
+    after: prompt.slice(item.end, end)
+  };
+}
+
+function closestContextGap(before, after, pattern) {
+  let best = Number.POSITIVE_INFINITY;
+  for (const match of before.matchAll(new RegExp(pattern.source, 'gi'))) {
+    best = Math.min(best, before.length - (match.index + match[0].length));
+  }
+  for (const match of after.matchAll(new RegExp(pattern.source, 'gi'))) {
+    best = Math.min(best, match.index);
+  }
+  return best;
+}
+
+function contextOwned(gaps, index) {
+  const gap = gaps[index];
+  return Number.isFinite(gap) && gap <= 32 && gaps.every((other, otherIndex) => otherIndex === index || !(other < gap));
+}
+
+// Prefer a voltage tied to the supply. An LED forward voltage is never the rail.
+function parseSupplyVolts(prompt) {
+  const found = collectSupplyVoltages(prompt);
+  if (found.length === 0) return null;
+  const windows = found.map((item) => voltageWindow(prompt, item, found));
+  const forwardGaps = windows.map(({ before, after }) => closestContextGap(before, after, FORWARD_VOLTAGE));
+  const supplyGaps = windows.map(({ before, after }) => closestContextGap(before, after, SUPPLY_VOLTAGE));
+  const labeled = found.map((item, index) => {
+    const onAt = ON_AT_VOLTAGE.test(windows[index].before);
+    const forwardOwned = contextOwned(forwardGaps, index);
+    const supplyOwned = contextOwned(supplyGaps, index);
+    const forward = forwardOwned && !onAt && !(supplyOwned && supplyGaps[index] < forwardGaps[index]);
+    return {
+      ...item,
+      forward,
+      supply: !forward && (onAt || supplyOwned)
+    };
+  });
+  const preferred = labeled.filter((item) => item.supply);
+  const pool = (preferred.length > 0 ? preferred : labeled.filter((item) => !item.forward))
+    .sort((left, right) => left.index - right.index);
+  return pool[0]?.volts ?? null;
 }
 
 const MAINS_SUPPLY = /상용\s*전원|교류\s*전원|\bmains\b|\bwall\s*outlet\b|\bline\s*voltage\b/i;
@@ -231,15 +351,18 @@ function supplyNetName(volts) {
   return `+${whole}V${fraction}`;
 }
 
+function formatScaled(value) {
+  const scaled = Math.round(value * 10) / 10;
+  return String(scaled);
+}
+
 function formatOhms(ohms) {
   if (!Number.isFinite(ohms) || ohms <= 0) return null;
-  const rounded = Math.round(ohms);
-  if (rounded >= 1000) {
-    const kilo = rounded / 1000;
-    const text = Number.isInteger(kilo) ? String(kilo) : String(Math.round(kilo * 10) / 10);
-    return `${text}kΩ`;
-  }
-  return `${rounded}Ω`;
+  const nearest = Math.round(ohms);
+  const value = Math.abs(ohms - nearest) < 1e-6 ? nearest : Math.round(ohms * 10) / 10;
+  if (value >= 1_000_000) return `${formatScaled(value / 1_000_000)}MΩ`;
+  if (value >= 1000) return `${formatScaled(value / 1000)}kΩ`;
+  return `${value}Ω`;
 }
 
 function formatVolts(volts) {
@@ -298,6 +421,12 @@ function unsupportedLedFeatures(prompt) {
     items.push({
       id: 'strip',
       message: 'Unsupported: LED strips are not supported by the discrete LED generator. A simple indicator LED was drafted instead.'
+    });
+  }
+  if (/\bpots?\b|\bpotentiometers?\b|가변\s*저항/i.test(prompt)) {
+    items.push({
+      id: 'pot',
+      message: 'Unsupported: potentiometers are not supported by the discrete LED generator. The draft uses a fixed series resistor instead.'
     });
   }
   return items;

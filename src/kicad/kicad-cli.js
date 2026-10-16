@@ -128,27 +128,87 @@ export async function runKicadCli(args, options = {}) {
 }
 
 // Flatpak hides /var/lib/flatpak even with --filesystem=host. Forwarding
-// KICAD*_SYMBOL_DIR from that runtime makes kicad-cli report lib_symbol_issues
-// for libraries it already has under /app/extensions. Node still reads those
+// KICAD*_DIR from that runtime makes kicad-cli report lib_symbol_issues for
+// libraries it already has under /app/extensions. Node still reads those
 // directories to embed symbols; only the CLI child drops them.
-function kicadCliChildEnv(cliPath, baseEnv) {
+const MAX_FLATPAK_WRAPPER_BYTES = 64 * 1024;
+const KICAD_DIRECTORY_ENV = /^KICAD\d*(?:_[A-Z0-9]+)+_DIR$/;
+
+export function kicadCliChildEnv(cliPath, baseEnv, io) {
   const env = { ...baseEnv };
-  if (!flatpakKicadWrapper(cliPath)) {
-    return env;
-  }
-  for (const key of ['KICAD_SYMBOL_DIR', 'KICAD10_SYMBOL_DIR', 'KICAD_FOOTPRINT_DIR', 'KICAD10_FOOTPRINT_DIR']) {
+  if (!flatpakKicadWrapper(cliPath, io)) return env;
+  const flatpakDir = `${path.sep}flatpak${path.sep}`;
+  for (const key of Object.keys(env)) {
     const value = env[key];
-    if (typeof value === 'string' && value.includes(`${path.sep}flatpak${path.sep}`)) {
+    if (KICAD_DIRECTORY_ENV.test(key) && typeof value === 'string' && value.includes(flatpakDir)) {
       delete env[key];
     }
   }
   return env;
 }
 
-function flatpakKicadWrapper(cliPath) {
+function stripShellComment(line) {
+  if (/^\s*#!/.test(line)) return line;
+  let quote = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (quote) {
+      if (char === '\\' && quote === '"') {
+        index += 1;
+        continue;
+      }
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === '\'') {
+      quote = char;
+      continue;
+    }
+    if (char === '#') return line.slice(0, index);
+  }
+  return line;
+}
+
+function scriptUsesFlatpakKicad(text) {
+  const code = String(text).split(/\r?\n/).map((line) => stripShellComment(line)).join('\n');
+  return code.includes('flatpak run') && code.includes('kicad-cli');
+}
+
+function closeQuietly(closeSync, fd) {
   try {
-    const text = fs.readFileSync(cliPath, 'utf8');
-    return text.includes('flatpak run') && text.includes('kicad-cli');
+    closeSync(fd);
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+// Shell wrappers are small and start with a shebang. Do not slurp a kicad-cli binary.
+function readWrapperScript(cliPath, io = {}) {
+  const statSync = io.statSync ?? fs.statSync;
+  const openSync = io.openSync ?? fs.openSync;
+  const readSync = io.readSync ?? fs.readSync;
+  const closeSync = io.closeSync ?? fs.closeSync;
+  const stat = statSync(cliPath);
+  if (!stat?.isFile?.() || stat.size > MAX_FLATPAK_WRAPPER_BYTES || stat.size < 2) return null;
+  const fd = openSync(cliPath, 'r');
+  try {
+    const header = Buffer.alloc(2);
+    const headerBytes = readSync(fd, header, 0, 2, 0);
+    if (headerBytes < 2 || header.toString('utf8', 0, headerBytes) !== '#!') return null;
+    const body = Buffer.alloc(stat.size);
+    const bodyBytes = readSync(fd, body, 0, stat.size, 0);
+    return body.toString('utf8', 0, bodyBytes);
+  } finally {
+    closeQuietly(closeSync, fd);
+  }
+}
+
+export function flatpakKicadWrapper(cliPath, io = {}) {
+  if ((io.platform ?? process.platform) === 'win32') return false;
+  try {
+    const text = readWrapperScript(cliPath, io);
+    return text != null && scriptUsesFlatpakKicad(text);
   } catch {
     return false;
   }
