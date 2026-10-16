@@ -179,7 +179,9 @@ const workflowCliEl = document.querySelector('#workflow-cli');
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthPoll = null;
 let chatgptAuthExpiryTimer = null;
+const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
 
+restoreProviderSelection();
 connect();
 syncWorkflow();
 
@@ -196,6 +198,7 @@ formEl.addEventListener('submit', (event) => {
   sendProjectRequest();
 });
 providerEl.addEventListener('change', () => {
+  rememberProvider(providerEl.value);
   refreshProviderStatus();
   updateChatGPTAuthVisibility();
 });
@@ -316,6 +319,29 @@ function refreshProviderStatus() {
   const id = `provider_status_${Date.now()}`;
   pendingCalls.set(id, 'provider.status');
   sendToolCall({ id, name: 'provider.status', args: { provider: providerEl.value } });
+}
+
+function restoreProviderSelection() {
+  const stored = readStoredProvider();
+  if (!stored || !providerEl) return;
+  const listed = [...providerEl.options].some((option) => option.value === stored);
+  if (listed) providerEl.value = stored;
+}
+
+function readStoredProvider() {
+  try {
+    return localStorage.getItem(PROVIDER_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberProvider(provider) {
+  try {
+    localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
+  } catch {
+    // The select still works for this page when storage is blocked.
+  }
 }
 
 function sendToolCall(payload) {
@@ -479,10 +505,17 @@ function handleEnvelope(envelope) {
     else stopChatGPTAuthPolling();
     return;
   }
-  if (callName === 'auth.chatgpt.cancel' || callName === 'auth.chatgpt.signOut') {
+  if (callName === 'auth.chatgpt.cancel') {
     stopChatGPTAuthPolling();
     chatgptAuthState = { state: 'signed_out' };
     renderChatGPTAuth();
+    return;
+  }
+  if (callName === 'auth.chatgpt.signOut') {
+    stopChatGPTAuthPolling();
+    chatgptAuthState = { state: 'signed_out' };
+    renderChatGPTAuth();
+    refreshProviderStatus();
     return;
   }
 }

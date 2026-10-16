@@ -323,12 +323,19 @@ async function invokeProvider(call, ctx) {
         sprite: 'cli',
         text: progressCopy(prompt, 'ChatGPT와 대화 중.', 'Talking to ChatGPT.')
       });
-      const response = await callChatGPTResponses({
-        prompt: input,
-        signal: controller.signal,
-        model: args.model,
-        allowedTools: PROVIDER_ALLOWED_TOOLS
-      });
+      let response;
+      try {
+        response = await callChatGPTResponses({
+          prompt: input,
+          signal: controller.signal,
+          model: args.model,
+          allowedTools: PROVIDER_ALLOWED_TOOLS
+        });
+      } catch (error) {
+        // stderr is what the daemon launcher appends to daemon.log.
+        console.error(error?.message || 'ChatGPT request failed');
+        throw error;
+      }
       const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
       for (const event of events) emitProviderEvent(ctx, event);
       transcript = { exitCode: 0, events, stderr: '', tracePath: null };

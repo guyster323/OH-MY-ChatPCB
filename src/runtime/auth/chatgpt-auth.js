@@ -300,11 +300,19 @@ export function hasChatGPTPlanScope(creds) {
 }
 
 function subjectFromIdToken(idToken) {
+  const sub = idTokenClaims(idToken)?.sub;
+  return typeof sub === 'string' && sub ? sub : null;
+}
+
+// The ID token was signature-checked before it was stored. Later reads use
+// these claims without another JWKS round trip, including while offline.
+function idTokenClaims(idToken) {
   try {
     const part = String(idToken || '').split('.')[1];
     if (!part) return null;
     const payload = JSON.parse(Buffer.from(part, 'base64url').toString());
-    return typeof payload.sub === 'string' && payload.sub ? payload.sub : null;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    return payload;
   } catch {
     return null;
   }
@@ -583,8 +591,9 @@ async function dropRegistrationsForNewHost(newHostId) {
  * omits id_token_hint. Email and subject stay for login_hint and account match.
  */
 function retainRegistration(creds) {
+  const identity = accountFromCredentials(creds);
   const subject = firstString(creds.subject) || subjectFromIdToken(creds.id_token) || undefined;
-  const email = firstString(creds.email, creds.account?.email) || undefined;
+  const email = firstString(creds.email, identity?.email) || undefined;
   return {
     email,
     issuer: creds.issuer || undefined,
@@ -593,7 +602,7 @@ function retainRegistration(creds) {
     ext_agent_host_id: creds.ext_agent_host_id,
     saved_at: creds.saved_at,
     last_used_at: creds.last_used_at,
-    account: creds.account
+    account: identity
   };
 }
 
@@ -1775,7 +1784,7 @@ export function createChatGPTAuthManager({
     const plan = extractPlan(creds);
     return {
       state: 'signed_in',
-      account: creds.account,
+      account: accountFromCredentials(creds),
       plan: plan || undefined
     };
   }
@@ -1983,15 +1992,26 @@ export function verifyTokenExpiry(creds) {
 }
 
 export function extractPlan(creds) {
-  if (!creds || !creds.id_token) return null;
+  const payload = idTokenClaims(creds?.id_token);
+  if (!payload) return null;
+  return payload.plan || payload['https://api.openai.com/plan'] || null;
+}
 
-  try {
-    const [, payloadB64] = creds.id_token.split('.');
-    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-    return payload.plan || payload['https://api.openai.com/plan'] || null;
-  } catch {
-    return null;
+export function accountFromCredentials(creds) {
+  if (!creds || typeof creds !== 'object') return undefined;
+  const claims = idTokenClaims(creds.id_token);
+  const stored = creds.account && typeof creds.account === 'object' && !Array.isArray(creds.account)
+    ? { ...creds.account }
+    : {};
+  if (!firstString(stored.email)) {
+    const email = firstString(creds.email, claims?.email);
+    if (email) stored.email = email;
   }
+  if (!firstString(stored.name)) {
+    const name = firstString(claims?.name);
+    if (name) stored.name = name;
+  }
+  return Object.keys(stored).length > 0 ? stored : undefined;
 }
 
 async function readChatGPTConfig() {

@@ -30,10 +30,7 @@ export async function selectChatGPTModel(accessToken, override) {
   const response = await fetch(MODELS_ENDPOINT, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Failed to list ChatGPT models: ${response.status} ${text}`.trim());
-  }
+  if (!response.ok) throw await httpError(response, accessToken);
 
   const payload = await response.json();
   const slugs = catalogSlugs(payload);
@@ -100,14 +97,7 @@ export async function callChatGPTResponses({
   const allowed = normalizeAllowedTools(allowedTools);
   const responseTimeout = positiveTimeout(settings.responsesTimeoutMs) ?? DEFAULT_RESPONSES_TIMEOUT_MS;
 
-  const body = {
-    model: selectedModel,
-    input: prompt,
-    tools: buildChatGPTFunctionTools(allowed),
-    tool_choice: 'auto',
-    store: false,
-    stream: true
-  };
+  const body = buildResponsesRequest(selectedModel, prompt, buildChatGPTFunctionTools(allowed));
 
   const streamed = await withResponseTimeout(responseTimeout, signal, async (timedSignal) => {
     const response = await fetch(RESPONSES_ENDPOINT, {
@@ -119,7 +109,7 @@ export async function callChatGPTResponses({
       body: JSON.stringify(body),
       signal: timedSignal
     });
-    if (!response.ok) throw await httpError(response);
+    if (!response.ok) throw await httpError(response, accessToken);
     return readResponseStream(response);
   });
   const text = joinProviderText(streamed.text, renderFunctionCalls(streamed.functionCalls, allowed));
@@ -135,6 +125,24 @@ export async function callChatGPTResponses({
 
 function persistSession(creds, generation, clientId, refreshTokens) {
   return saveCredentialsIfCurrent(creds, { generation, clientId, refreshTokens });
+}
+
+// The ChatGPT-plan Responses route rejects a string `input` with HTTP 400
+// "Input must be a list", and rejects explicit system message items. Send one
+// user message and nothing from the unsupported-field list (background,
+// conversation, max_output_tokens, max_tool_calls, metadata, moderation,
+// prompt, prompt_cache_retention, safety_identifier, temperature,
+// top_logprobs, top_p, truncation, user, previous_response_id).
+function buildResponsesRequest(model, prompt, tools) {
+  const content = typeof prompt === 'string' ? prompt : String(prompt ?? '');
+  return {
+    model,
+    input: [{ role: 'user', content }],
+    tools,
+    tool_choice: 'auto',
+    store: false,
+    stream: true
+  };
 }
 
 function positiveTimeout(value) {
@@ -413,20 +421,12 @@ function catalogSlugs(payload) {
   return (listed.length > 0 ? listed : entries).map((item) => item.slug);
 }
 
-async function httpError(response) {
-  const errorText = await response.text().catch(() => '');
-  let errorCode = 'api_error';
-  let errorMessage = `ChatGPT API error: ${response.status}`;
+const API_ERROR_LIMIT = 500;
 
-  try {
-    const errorData = JSON.parse(errorText);
-    if (errorData.error) {
-      errorCode = errorData.error.code || errorCode;
-      errorMessage = errorData.error.message || errorMessage;
-    }
-  } catch {
-    errorMessage = errorText || errorMessage;
-  }
+async function httpError(response, accessToken) {
+  const errorText = await response.text().catch(() => '');
+  const parsed = parseApiError(errorText);
+  const errorCode = parsed.code || 'api_error';
 
   if (response.status === 403 && errorCode === 'subscription_sharing_user_not_eligible') {
     const err = new Error('NOT_ELIGIBLE: This account is not eligible to use ChatGPT plan sharing');
@@ -449,9 +449,56 @@ async function httpError(response) {
     return err;
   }
 
-  const err = new Error(errorMessage);
-  err.code = errorCode;
+  const err = new Error(formatApiError(response.status, parsed.detail, accessToken));
+  err.code = maskSecrets(errorCode, accessToken);
   return err;
+}
+
+function parseApiError(errorText) {
+  const text = String(errorText || '').trim();
+  if (!text) return { code: '', detail: '' };
+  try {
+    const data = JSON.parse(text);
+    if (!data || typeof data !== 'object') return { code: '', detail: text };
+    const error = data.error;
+    const code = stringField(error?.code)
+      || (typeof error === 'string' ? stringField(error) : '')
+      || stringField(data.code);
+    const detail = stringField(data.detail)
+      || stringField(error?.message)
+      || (typeof error === 'string' ? stringField(error) : '')
+      || stringField(data.message)
+      || code;
+    return { code, detail: detail || '' };
+  } catch {
+    return { code: '', detail: text };
+  }
+}
+
+function stringField(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function formatApiError(status, detail, accessToken) {
+  const safe = maskSecrets(detail, accessToken).trim();
+  const message = safe ? `ChatGPT API error: ${status} ${safe}` : `ChatGPT API error: ${status}`;
+  return clip(message, API_ERROR_LIMIT);
+}
+
+function clip(text, limit) {
+  const value = String(text ?? '');
+  return value.length <= limit ? value : value.slice(0, limit);
+}
+
+function maskSecrets(text, accessToken) {
+  let masked = String(text ?? '');
+  // Skip very short values so a stand-in like "AT" cannot rewrite ordinary words.
+  if (typeof accessToken === 'string' && accessToken.length >= 8) {
+    masked = masked.split(accessToken).join('[REDACTED]');
+  }
+  masked = masked.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi, 'Bearer [REDACTED]');
+  masked = masked.replace(/\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){0,2}/g, '[REDACTED]');
+  return masked;
 }
 
 async function readResponseStream(response) {

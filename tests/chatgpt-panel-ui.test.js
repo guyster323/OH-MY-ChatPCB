@@ -56,7 +56,7 @@ async function startStaticServer() {
 // Opens the real panel with a fake daemon socket. startResult is what auth.chatgpt.start returns.
 // reopenFailure is an { ok: false, error } tool result. reopenResultFailure nests that object in result.
 // reopenThrow makes the socket throw while sending auth.chatgpt.reopen.
-async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenFailure, reopenResultFailure, reopenThrow } = {}) {
+async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenFailure, reopenResultFailure, reopenThrow, signedIn, leaveProvider } = {}) {
   const browser = await getBrowser();
   if (!browser) {
     t.skip('No Chromium browser available. Set CHATPCB_BROWSER_PATH or run npx playwright install chromium.');
@@ -69,6 +69,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.addInitScript((config) => {
     window.__sent = [];
+    window.__chatgptSignedIn = config.signedIn === true;
     class FakeSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
       constructor() {
@@ -95,13 +96,26 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
         } else if (call.name === 'auth.chatgpt.start') {
           result = config.start;
         }
-        if (call.name === 'auth.chatgpt.status') {
-          const started = window.__sent.some((entry) => entry.name === 'auth.chatgpt.start');
-          result = started && window.__authExpiresAt
-            ? { ...config.start, state: 'waiting', expiresAt: window.__authExpiresAt }
-            : { state: 'signed_out' };
+        if (call.name === 'auth.chatgpt.signOut') {
+          window.__chatgptSignedIn = false;
+          result = { state: 'signed_out' };
         }
-        if (call.name === 'provider.status') result = { provider: call.args?.provider ?? 'codex', status: 'signed-out' };
+        if (call.name === 'auth.chatgpt.status') {
+          if (window.__chatgptSignedIn) {
+            result = { state: 'signed_in', account: { email: 'ada@ex.com', name: 'Ada' }, plan: 'plus' };
+          } else {
+            const started = window.__sent.some((entry) => entry.name === 'auth.chatgpt.start');
+            result = started && window.__authExpiresAt
+              ? { ...config.start, state: 'waiting', expiresAt: window.__authExpiresAt }
+              : { state: 'signed_out' };
+          }
+        }
+        if (call.name === 'provider.status') {
+          const provider = call.args?.provider ?? 'codex';
+          result = provider === 'chatgpt' && window.__chatgptSignedIn
+            ? { provider, status: 'signed-in', account: { email: 'ada@ex.com', name: 'Ada' }, plan: 'plus' }
+            : { provider, status: 'signed-out' };
+        }
         if (call.name === 'auth.chatgpt.reopen') {
           if (config.reopenFailure) {
             ok = false;
@@ -127,12 +141,15 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
     expiresInMs: expiresInMs ?? null,
     reopenFailure: reopenFailure ?? null,
     reopenResultFailure: reopenResultFailure ?? null,
-    reopenThrow: reopenThrow ?? null
+    reopenThrow: reopenThrow ?? null,
+    signedIn: signedIn === true
   });
   await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
-  await page.selectOption('#provider', 'chatgpt');
   const button = page.locator('.chatgpt-sign-in-btn');
-  await button.waitFor();
+  if (!leaveProvider) {
+    await page.selectOption('#provider', 'chatgpt');
+    if (!signedIn) await button.waitFor();
+  }
   return { page, context, pageErrors, button };
 }
 
@@ -314,6 +331,60 @@ test('expired sign-in shows a retry button and stops polling', async (t) => {
     await page.waitForTimeout(2500);
     const countAfter = await page.evaluate(() => window.__sent.filter((call) => call.name === 'auth.chatgpt.status').length);
     assert.equal(countAfter, countAtExpiry);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('sign-out refreshes the chatgpt signed-in provider label', async (t) => {
+  const opened = await openChatGPTWaiting(t, { locale: 'en-US', startResult: waiting, signedIn: true });
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-in');
+    const signOut = page.locator('#chatgpt-auth-card button', { hasText: /Sign out|sign-out/ });
+    await signOut.click();
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-out');
+    const names = await page.evaluate(() => window.__sent.map((call) => call.name));
+    const signOutAt = names.lastIndexOf('auth.chatgpt.signOut');
+    const statusAt = names.lastIndexOf('provider.status');
+    assert.ok(signOutAt >= 0);
+    assert.ok(statusAt > signOutAt);
+    assert.equal(names[statusAt] === 'provider.status', true);
+    const statusCall = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').at(-1));
+    assert.equal(statusCall.args.provider, 'chatgpt');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('remembers the selected provider across reloads', async (t) => {
+  const opened = await openChatGPTWaiting(t, { locale: 'en-US', startResult: waiting, leaveProvider: true });
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    assert.equal(await page.locator('#provider').inputValue(), 'codex');
+    await page.selectOption('#provider', 'chatgpt');
+    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.provider')), 'chatgpt');
+    await page.reload();
+    assert.equal(await page.locator('#provider').inputValue(), 'chatgpt');
+    await page.waitForFunction(() => window.__sent.some((call) => call.name === 'provider.status'));
+    const restored = await page.evaluate(() => window.__sent.find((call) => call.name === 'provider.status'));
+    assert.equal(restored.args.provider, 'chatgpt');
+
+    await page.selectOption('#provider', 'claude');
+    assert.equal(await page.evaluate(() => localStorage.getItem('chatpcb.provider')), 'claude');
+    await page.reload();
+    assert.equal(await page.locator('#provider').inputValue(), 'claude');
+
+    await page.evaluate(() => localStorage.setItem('chatpcb.provider', 'not-a-provider'));
+    await page.reload();
+    assert.equal(await page.locator('#provider').inputValue(), 'codex');
+    await page.waitForFunction(() => window.__sent.some((call) => call.name === 'provider.status'));
+    const fallback = await page.evaluate(() => window.__sent.find((call) => call.name === 'provider.status'));
+    assert.equal(fallback.args.provider, 'codex');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();

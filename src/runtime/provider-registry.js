@@ -61,16 +61,20 @@ export async function checkProviderAvailability({ provider, commandExistsImpl = 
   
   // Special handling for chatgpt
   if (definition.id === 'chatgpt') {
-    const { loadCredentials } = await import('./auth/chatgpt-auth.js');
+    const { accountFromCredentials, extractPlan, loadCredentials } = await import('./auth/chatgpt-auth.js');
     const creds = await loadCredentials();
     const available = Boolean(creds && creds.access_token);
-    
+    const account = available ? accountFromCredentials(creds) : undefined;
+    const plan = available ? extractPlan(creds) : null;
+
     return {
       provider: definition.id,
       command: null,
       available,
       status: available ? 'signed-in' : 'signed-out',
-      requiresAuth: true
+      requiresAuth: true,
+      ...(account ? { account } : {}),
+      ...(plan ? { plan } : {})
     };
   }
   

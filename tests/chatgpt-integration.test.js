@@ -1253,6 +1253,126 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
+  it('sends Responses input as user messages and omits unsupported fields', async () => {
+    const unsupported = [
+      'background',
+      'conversation',
+      'max_output_tokens',
+      'max_tool_calls',
+      'metadata',
+      'moderation',
+      'prompt',
+      'prompt_cache_retention',
+      'safety_identifier',
+      'temperature',
+      'top_logprobs',
+      'top_p',
+      'truncation',
+      'user',
+      'previous_response_id'
+    ];
+    await withConfig(async () => {
+      await saveCredentials(sampleCreds());
+      let body;
+      stubFetch(async (url, init) => {
+        const target = String(url);
+        if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+        if (target.includes('/v1/responses')) {
+          body = JSON.parse(init.body);
+          return completedStream('ok');
+        }
+        return new Response('no', { status: 404 });
+      });
+      const result = await callChatGPTResponses({ prompt: 'ESP32 board' });
+      assert.equal(result.completed, true);
+      assert.equal(Array.isArray(body.input), true);
+      assert.equal(body.input.length, 1);
+      assert.equal(body.input[0].role, 'user');
+      assert.equal(Object.hasOwn(body.input[0], 'type'), false);
+      assert.equal(body.input.some((item) => item?.role === 'system'), false);
+      assert.match(body.input[0].content, /ESP32 board/);
+      assert.equal(body.store, false);
+      assert.equal(body.stream, true);
+      for (const key of unsupported) {
+        assert.equal(Object.hasOwn(body, key), false, key);
+      }
+    });
+  });
+
+  it('includes a masked API error body for model and responses failures', async () => {
+    await withConfig(async () => {
+      const accessToken = 'test-access-token-DO-NOT-USE-0123456789';
+      const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl';
+      await saveCredentials({ ...sampleCreds(), access_token: accessToken });
+      const logs = spyConsoleError();
+      const apiLogs = () => logs.lines.filter((line) => line.includes('ChatGPT API error'));
+      try {
+        stubFetch(async (url) => {
+          if (String(url).includes('/v1/models')) {
+            return jsonResponse({
+              error: {
+                message: `no models Bearer ${jwt} ${accessToken}`,
+                code: 'invalid_request'
+              }
+            }, 400);
+          }
+          return new Response('no', { status: 404 });
+        });
+        await assert.rejects(
+          dispatchToolCall({
+            id: 'model-400',
+            name: 'provider.invoke',
+            args: { provider: 'chatgpt', prompt: 'hi' }
+          }),
+          (err) => {
+            assert.match(err.message, /^ChatGPT API error: 400 /);
+            assert.match(err.message, /no models/);
+            assert.equal(err.message.includes(accessToken), false);
+            assert.equal(err.message.includes(jwt), false);
+            assert.equal(err.message.includes('eyJ'), false);
+            assert.equal(err.code, 'invalid_request');
+            assert.equal(err.message.length <= 500, true);
+            return true;
+          }
+        );
+        assert.equal(apiLogs().some((line) => line.includes('no models')), true);
+        assert.equal(apiLogs().some((line) => line.includes(accessToken) || line.includes('eyJ') || line.includes(jwt)), false);
+
+        logs.lines.length = 0;
+        const detail = `Input must be a list ${accessToken} Bearer ${jwt} ${'y'.repeat(700)}`;
+        stubFetch(async (url) => {
+          if (String(url).includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+          if (String(url).includes('/v1/responses')) return jsonResponse({ detail }, 400);
+          return new Response('no', { status: 404 });
+        });
+        await assert.rejects(callChatGPTResponses({ prompt: 'hi' }), (err) => {
+          assert.match(err.message, /^ChatGPT API error: 400 Input must be a list/);
+          assert.equal(err.message.includes(accessToken), false);
+          assert.equal(err.message.includes(jwt), false);
+          assert.equal(err.message.includes('eyJ'), false);
+          assert.match(err.message, /\[REDACTED\]/);
+          assert.equal(err.message.length <= 500, true);
+          return true;
+        });
+        await assert.rejects(
+          dispatchToolCall({
+            id: 'resp-400',
+            name: 'provider.invoke',
+            args: { provider: 'chatgpt', prompt: 'hi' }
+          }),
+          /ChatGPT API error: 400 Input must be a list/
+        );
+        const logged = apiLogs().join('\n');
+        assert.match(logged, /ChatGPT API error: 400 Input must be a list/);
+        assert.equal(logged.includes(accessToken), false);
+        assert.equal(logged.includes(jwt), false);
+        assert.equal(logged.includes('eyJ'), false);
+      } finally {
+        logs.restore();
+      }
+    });
+  });
+
   it('throws on response.failed and does not return partial text', async () => {
     await withConfig(async () => {
       await saveCredentials(sampleCreds());
@@ -1348,11 +1468,13 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
           args: { provider: 'chatgpt', prompt: 'ESP32 board', projectDir: root }
         });
         const request = JSON.parse(seen.find((call) => call.url.includes('/v1/responses')).body);
-        assert.match(request.input, /Allowed tool names/);
-        assert.match(request.input, /schematic\.generate/);
-        assert.match(request.input, /schematic\.patch/);
-        assert.match(request.input, /validate\.drc/);
-        assert.match(request.input, /ESP32 board/);
+        assert.equal(Array.isArray(request.input), true);
+        const promptText = request.input.map((item) => (item && typeof item.content === 'string' ? item.content : '')).join('\n');
+        assert.match(promptText, /Allowed tool names/);
+        assert.match(promptText, /schematic\.generate/);
+        assert.match(promptText, /schematic\.patch/);
+        assert.match(promptText, /validate\.drc/);
+        assert.match(promptText, /ESP32 board/);
         assert.equal(request.model, 'gpt-x');
         assert.equal(result.ok, true);
         const toolEvent = result.result.events.find((event) => event.type === 'tool.call');
@@ -2502,6 +2624,85 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         JSON.stringify(doc)
       );
     }
+  });
+
+  it('returns account email and name from the record or the stored id token', async () => {
+    await withConfig(async () => {
+      await saveCredentials({
+        ...sampleCreds(),
+        account: { email: 'ada@ex.com' }
+      });
+      const manager = createChatGPTAuthManager();
+      let providerStatus = await dispatchToolCall({ name: 'provider.status', args: { provider: 'chatgpt' } });
+      assert.equal(providerStatus.ok, true);
+      assert.equal(providerStatus.result.status, 'signed-in');
+      assert.equal(providerStatus.result.account.email, 'ada@ex.com');
+      let auth = await manager.getAuthStatus();
+      assert.equal(auth.state, 'signed_in');
+      assert.equal(auth.account.email, 'ada@ex.com');
+
+      await saveCredentials({
+        ...sampleCreds(),
+        email: '',
+        account: { email: 'kept@ex.com' },
+        id_token: signToken(claims({ email: 'other@ex.com', name: 'From Token' }))
+      });
+      auth = await manager.getAuthStatus();
+      assert.equal(auth.account.email, 'kept@ex.com');
+      assert.equal(auth.account.name, 'From Token');
+
+      await saveCredentials({
+        ...sampleCreds(),
+        email: '',
+        account: {},
+        id_token: signToken(claims({ email: 'ada@ex.com', name: 'Ada Lovelace' }))
+      });
+      providerStatus = await dispatchToolCall({ name: 'provider.status', args: { provider: 'chatgpt' } });
+      assert.equal(providerStatus.result.account.email, 'ada@ex.com');
+      assert.equal(providerStatus.result.account.name, 'Ada Lovelace');
+      auth = await manager.getAuthStatus();
+      assert.equal(auth.account.email, 'ada@ex.com');
+      assert.equal(auth.account.name, 'Ada Lovelace');
+    });
+  });
+
+  it('sign-out keeps the registration and drops access, refresh, and id tokens', async () => {
+    await withConfig(async (dir) => {
+      const manager = createChatGPTAuthManager();
+      await saveCredentials({
+        client_id: 'oaiapp_TEST',
+        ext_agent_host_id: 'host-1',
+        issuer: 'https://auth.openai.com',
+        subject: 'user_ada',
+        access_token: 'AT',
+        refresh_token: 'RT',
+        id_token: signToken(claims({
+          email: 'ada@ex.com',
+          name: 'Ada Lovelace',
+          sub: 'user_ada'
+        })),
+        expires_in: 3600,
+        issued_at: Date.now(),
+        scope: PLAN_SCOPE,
+        scopes: PLAN_SCOPE.split(' '),
+        token_type: 'Bearer'
+      });
+      assert.equal((await manager.signOut()).state, 'signed_out');
+      const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+      assert.equal(retained.client_id, 'oaiapp_TEST');
+      assert.equal(retained.ext_agent_host_id, 'host-1');
+      assert.equal(retained.issuer, 'https://auth.openai.com');
+      assert.equal(retained.subject, 'user_ada');
+      assert.equal(retained.email, 'ada@ex.com');
+      assert.equal(retained.account.email, 'ada@ex.com');
+      assert.equal(retained.account.name, 'Ada Lovelace');
+      assert.equal(Object.hasOwn(retained, 'access_token'), false);
+      assert.equal(Object.hasOwn(retained, 'refresh_token'), false);
+      assert.equal(Object.hasOwn(retained, 'id_token'), false);
+      assertSessionCleared(retained);
+      assert.equal(await loadCredentials(), null);
+      assert.equal((await manager.getAuthStatus()).state, 'signed_out');
+    });
   });
 
   it('reads client id from the environment and config file', async () => {
