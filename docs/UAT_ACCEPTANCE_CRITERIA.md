@@ -64,7 +64,7 @@ stopButton.click();
 ### Acceptance
 - [ ] Patch approval 카드에 ERC 미리보기 섹션 표시
 - [ ] ERC 오류/경고 개수가 "ERC: X errors, Y warnings" 형식으로 표시
-- [ ] ERC 오류가 있을 때 경고 메시지 "⚠️ ERC 오류가 있습니다. 적용 시 검증 실패로 거부될 수 있습니다." 표시
+- [ ] ERC 오류가 있을 때 경고 메시지 "ERC errors detected. Apply may be rejected due to validation failures." 표시
 - [ ] 주요 이슈 top 3이 표시됨 (예: "label_dangling (17), ...")
 - [ ] ESP32-S3 gas sensor 예제에서 ERC 17 errors / 162 warnings가 미리보기에 표시됨
 - [ ] 사용자가 apply 버튼을 누르기 전에 ERC 실패 가능성을 알 수 있음
@@ -84,7 +84,7 @@ assert(ercSummary.textContent.includes('warnings'));
 if (errorCount > 0) {
   const ercWarning = document.querySelector('#patch-preview-erc-warning');
   assert(ercWarning.hidden === false);
-  assert(ercWarning.textContent.includes('ERC 오류가 있습니다'));
+  assert(ercWarning.textContent.includes('ERC errors detected'));
 }
 ```
 
@@ -154,7 +154,7 @@ assert(providerStatus.hint.includes('npm install'));
 - Rollback success: "Transaction rolled back successfully."
 - Stop progress: "Stopping request..."
 - ERC preview title: "ERC 미리보기"
-- ERC warning: "⚠️ ERC 오류가 있습니다. 적용 시 검증 실패로 거부될 수 있습니다."
+- ERC warning: "ERC errors detected. Apply may be rejected due to validation failures."
 - ERC summary format: "ERC: X errors, Y warnings"
 - Provider hints (English only, technical documentation)
 

@@ -27,7 +27,7 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="transaction-dialog"/);
   assert.match(html, /id="rollback-confirm-dialog"/);
   assert.match(html, /id="patch-preview-erc"/);
-  assert.match(html, /panel\.js\?v=20261016-panel-fixes/);
+  assert.match(html, /panel\.js\?v=20261016-strings/);
   assert.match(html, /id="request-progress"/);
   assert.match(html, /스키매틱에 적용/);
   assert.match(html, /sprites\/preview\.png/);

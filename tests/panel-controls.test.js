@@ -256,6 +256,8 @@ test('patch preview shows ERC counts and apply refreshes the transaction list', 
     await page.locator('#patch-preview-erc-summary').filter({ hasText: 'ERC: 17 errors, 162 warnings' }).waitFor();
     assert.equal(await page.locator('#patch-preview-erc').isHidden(), false);
     assert.equal(await page.locator('#patch-preview-erc-warning').isHidden(), false);
+    assert.match(await page.locator('#patch-preview-erc-warning').textContent() ?? '', /ERC errors detected/);
+    assert.match(await page.locator('#patch-preview-erc-warning').textContent() ?? '', /label_dangling \(17\)/);
     assert.equal((await callsNamed(page, 'project.transaction.status')).length, statusBeforePreview);
     await replyInspect(page);
     await page.waitForFunction(() => document.querySelector('#cancel-patch-button')?.disabled === false);

@@ -20,6 +20,7 @@ const UI_STRINGS = {
     rolledBack: 'Transaction rolled back successfully.',
     rollbackFailed: 'Rollback failed.',
     stopping: 'Stopping request...',
+    stopped: 'Request stopped.',
     notCancelled: 'The request was not cancelled.'
   },
   project: {
@@ -42,6 +43,13 @@ const UI_STRINGS = {
   },
   transaction: {
     noTransactions: 'No transactions',
+    noneAvailable: 'No transactions available',
+    noneToRollback: 'No transactions to rollback',
+    loadFailed: 'Could not load transactions.',
+    rollbackFailedDetail: 'The transaction could not be rolled back.',
+    count: (count) => `${count} transaction(s)`,
+    rollbackTitle: (id) => `Rollback transaction ${id}`,
+    row: (id, status, fileCount, when) => `${id}: ${status} · ${fileCount} file(s)${when ? ` (${when})` : ''}`,
     confirmRollback: (id) => `Roll back transaction ${id}? This will restore the previous project state.`,
     rollbackButton: 'Rollback',
     transactionButton: 'Rollback last transaction'
@@ -424,7 +432,7 @@ function handleEnvelope(envelope) {
       return;
     }
     if (callName === 'project.transaction.status') {
-      const message = reasonDetail(envelope.payload.error, 'Could not load transactions.');
+      const message = reasonDetail(envelope.payload.error, UI_STRINGS.transaction.loadFailed);
       transactionStatusEl.textContent = message;
       transactionListEl.replaceChildren();
       rollbackButtonEl.disabled = true;
@@ -497,7 +505,7 @@ function handleEnvelope(envelope) {
     }
     renderRequestStatus({
       state: activeRequestId ? 'running' : 'completed',
-      summary: activeRequestId ? UI_STRINGS.requestStatus.stopping : 'Request stopped.'
+      summary: activeRequestId ? UI_STRINGS.requestStatus.stopping : UI_STRINGS.requestStatus.stopped
     });
     setRequestBusy(Boolean(activeRequestId));
     return;
@@ -512,7 +520,7 @@ function handleEnvelope(envelope) {
       renderRequestStatus({
         state: 'failed',
         summary: UI_STRINGS.requestStatus.rollbackFailed,
-        technicalDetail: reasonDetail(result?.reason, 'The transaction could not be rolled back.')
+        technicalDetail: reasonDetail(result?.reason, UI_STRINGS.transaction.rollbackFailedDetail)
       });
     } else {
       renderRequestStatus({ state: 'completed', summary: UI_STRINGS.requestStatus.rolledBack });
@@ -1302,15 +1310,15 @@ function refreshTransactionStatus() {
 function renderTransactionStatus(status) {
   const transactions = Array.isArray(status?.transactions) ? status.transactions : [];
   if (transactions.length === 0) {
-    transactionStatusEl.textContent = 'No transactions';
+    transactionStatusEl.textContent = UI_STRINGS.transaction.noTransactions;
     transactionListEl.replaceChildren();
     rollbackButtonEl.disabled = true;
-    rollbackButtonEl.title = 'No transactions available';
+    rollbackButtonEl.title = UI_STRINGS.transaction.noneAvailable;
     rollbackButtonEl.onclick = null;
     return;
   }
 
-  transactionStatusEl.textContent = `${transactions.length} transaction(s)`;
+  transactionStatusEl.textContent = UI_STRINGS.transaction.count(transactions.length);
   transactionListEl.replaceChildren();
 
   for (const txn of transactions.slice(-5).reverse()) {
@@ -1319,14 +1327,14 @@ function renderTransactionStatus(status) {
     const when = txn.createdAt ? new Date(txn.createdAt).toLocaleString() : '';
     item.dataset.transactionId = txn.transactionId ?? '';
     item.dataset.status = txn.status ?? '';
-    item.textContent = `${txn.transactionId}: ${txn.status} · ${fileCount} file(s)${when ? ` (${when})` : ''}`;
+    item.textContent = UI_STRINGS.transaction.row(txn.transactionId ?? '', txn.status ?? '', fileCount, when);
     transactionListEl.append(item);
   }
 
   const lastTxn = transactions[transactions.length - 1];
   const transactionId = lastTxn?.transactionId;
   rollbackButtonEl.disabled = !transactionId;
-  rollbackButtonEl.title = transactionId ? `Rollback transaction ${transactionId}` : 'No transactions to rollback';
+  rollbackButtonEl.title = transactionId ? UI_STRINGS.transaction.rollbackTitle(transactionId) : UI_STRINGS.transaction.noneToRollback;
   rollbackButtonEl.onclick = transactionId ? () => showRollbackConfirmation(transactionId) : null;
 }
 
@@ -1335,29 +1343,25 @@ function renderPatchPreviewErc(validation = {}) {
     clearPatchPreviewErc();
     return;
   }
-  
+
   const erc = validation.erc;
   const errorCount = erc.errorCount ?? 0;
   const warningCount = erc.warningCount ?? 0;
-  
+
   patchPreviewErcEl.hidden = false;
-  patchPreviewErcSummaryEl.textContent = `ERC: ${errorCount} errors, ${warningCount} warnings`;
-  
+  patchPreviewErcSummaryEl.textContent = UI_STRINGS.erc.summary(errorCount, warningCount);
+
   if (errorCount > 0) {
-    patchPreviewErcWarningEl.hidden = false;
-    patchPreviewErcWarningEl.textContent = '⚠️ ERC 오류가 있습니다. 적용 시 검증 실패로 거부될 수 있습니다.';
-    
     const topIssues = Object.entries(erc.byType ?? {})
-      .sort((a, b) => b[1] - a[1])
+      .sort((left, right) => right[1] - left[1])
       .slice(0, 3)
       .map(([type, count]) => `${type} (${count})`)
       .join(', ');
-    
-    if (topIssues) {
-      patchPreviewErcWarningEl.textContent += ` 주요 이슈: ${topIssues}`;
-    }
+    patchPreviewErcWarningEl.hidden = false;
+    patchPreviewErcWarningEl.textContent = `${UI_STRINGS.erc.warning}${topIssues ? UI_STRINGS.erc.topIssues(topIssues) : ''}`;
   } else {
     patchPreviewErcWarningEl.hidden = true;
+    patchPreviewErcWarningEl.textContent = '';
   }
 }
 
@@ -1375,7 +1379,7 @@ function showRollbackConfirmation(transactionId) {
   const confirmNo = document.getElementById('rollback-confirm-no');
   if (!confirmDialog || !confirmMessage || !confirmYes || !confirmNo || !activeProject) return;
 
-  confirmMessage.textContent = `Roll back transaction ${transactionId}? This will restore the previous project state.`;
+  confirmMessage.textContent = UI_STRINGS.transaction.confirmRollback(transactionId);
 
   confirmYes.onclick = () => {
     confirmDialog.close();
