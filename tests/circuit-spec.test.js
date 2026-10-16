@@ -689,19 +689,23 @@ test('a specified forward voltage is used for the resistor and is never the supp
   }
 
   const onlyForward = parseDiscreteLedRequest('LED Vf 12V');
-  assert.equal(onlyForward.supplyVolts, 5);
-  assert.equal(onlyForward.supplyAssumed, true);
-  assert.notEqual(onlyForward.supplyVolts, 12);
   assert.equal(onlyForward.refused, true);
-  assert.equal(onlyForward.reviewBlockers[0].code, 'discrete-led-below-vf');
-  assert.match(onlyForward.reviewBlockers[0].en, /specified forward voltage of 12V/);
-  assert.match(onlyForward.reviewBlockers[0].ko, /지정한 순방향 전압 12V/);
+  assert.equal(onlyForward.supplyVolts, null);
+  assert.notEqual(onlyForward.supplyVolts, 12);
+  assert.equal(onlyForward.reviewBlockers[0].code, 'discrete-led-implausible-vf');
+  assert.match(onlyForward.reviewBlockers[0].en, /forward voltage 12V is implausible/);
+  assert.match(onlyForward.reviewBlockers[0].en, /0\.5V to 5V/);
+  assert.match(onlyForward.reviewBlockers[0].ko, /순방향 전압 12V/);
+  assert.equal(/not above/i.test(onlyForward.reviewBlockers[0].en), false);
   assert.equal(onlyForward.reviewBlockers[0].message, onlyForward.reviewBlockers[0].en);
 
   const highForward = parseDiscreteLedRequest('LED Vf 48V on 5V supply');
-  assert.equal(highForward.supplyVolts, 5);
-  assert.equal(highForward.reviewBlockers[0].code, 'discrete-led-below-vf');
-  assert.match(highForward.reviewBlockers[0].message, /specified forward voltage of 48V/);
+  assert.equal(highForward.refused, true);
+  assert.equal(highForward.reviewBlockers[0].code, 'discrete-led-implausible-vf');
+  assert.match(highForward.reviewBlockers[0].en, /forward voltage 48V is implausible/);
+  assert.equal(/not above/i.test(highForward.reviewBlockers[0].en), false);
+  assert.equal(/supply voltage/i.test(highForward.reviewBlockers[0].en), false);
+  assert.equal(highForward.reviewBlockers[0].message, highForward.reviewBlockers[0].en);
 });
 
 test('a specified forward voltage drives the headroom check', () => {
@@ -1334,6 +1338,118 @@ test('an em dash separates a forward-voltage range and a Vf value the way an en 
     assert.equal(parsed.resistorValue, '180Ω', prompt);
     const roles = classifyQuantities(prompt).tokens.map((token) => [token.raw, token.role]);
     assert.deepEqual(roles, [['3.2V', 'vf'], ['5V', 'voltage']], prompt);
+  }
+});
+
+test('a fractional Vf before LED is one LED, while real counts still count', () => {
+  const oneLed = [
+    'vf3.2 LED를 5V에 연결해줘',
+    '5V에 vf3.2 LED 연결',
+    'vf3.2 LED on 5V supply',
+    'vf 3.2 LED를 5V에 연결해줘',
+    'LED vf3.2 5V',
+    '5V supply vf3.2 LED',
+    'LED vf 3.2 5V',
+    '5V에 vf 3.2 LED 연결',
+    'vf 3,2 LED on 5V',
+    '3.2 LED on 5V',
+    '3,2 LED on 5V',
+    '2.5 LEDs on 5V'
+  ];
+  for (const prompt of oneLed) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.count, 1, prompt);
+    assert.equal(parsed.requestedCount, 1, prompt);
+    assert.equal(parsed.supplyVolts, 5, prompt);
+    if (/vf/i.test(prompt)) {
+      assert.equal(parsed.specifiedVf, 3.2, prompt);
+      assert.equal(parsed.resistorValue, '180Ω', prompt);
+      assert.equal(parsed.resistorExplicit, false, prompt);
+    } else {
+      assert.equal(parsed.specifiedVf, null, prompt);
+      assert.equal(parsed.count, 1, prompt);
+    }
+  }
+
+  const counted = [
+    ['2 LEDs 5V Vf 3.2V', 2, 3.2, '180Ω'],
+    ['LED 3개 5V', 3, null, '300Ω'],
+    ['three LEDs on 5V', 3, null, '300Ω'],
+    ['LED 5V 3 leds 470', 3, null, '470Ω']
+  ];
+  for (const [prompt, count, vf, resistor] of counted) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.count, count, prompt);
+    assert.equal(parsed.requestedCount, count, prompt);
+    assert.equal(parsed.specifiedVf, vf, prompt);
+    assert.equal(parsed.resistorValue, resistor, prompt);
+    assert.equal(parsed.supplyVolts, 5, prompt);
+  }
+});
+
+test('every forward voltage outside 0.5V to 5V is implausible, including labeled units and non-positive values', () => {
+  const cases = [
+    ['LED Vf 0V 5V', '0'],
+    ['LED Vf -2V 5V', '-2'],
+    ['LED Vf 10V', '10'],
+    ['Vf 10V LED', '10'],
+    ['LED Vf 6V', '6'],
+    ['LED Vf 6V on 5V', '6'],
+    ['LED Vf 0.3V', '0.3'],
+    ['LED 5V Vf 0.3V', '0.3'],
+    ['LED 12V Vf 6V', '6'],
+    ['LED 24V Vf 10V', '10'],
+    ['LED vf32', '32'],
+    ['LED 5V vf32', '32'],
+    ['LED Vf=0.4', '0.4'],
+    ['LED Vf 0.49V', '0.49'],
+    ['LED Vf 5.1V', '5.1'],
+    ['엘이디 Vf 0V 5V', '0'],
+    ['엘이디 Vf -2V 5V', '-2'],
+    ['엘이디 Vf 10V', '10'],
+    ['엘이디 Vf 6V를 5V에', '6'],
+    ['엘이디 Vf 0.3V 5V', '0.3']
+  ];
+  for (const [prompt, shown] of cases) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.count, 0, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.resistorValue, null, prompt);
+    assert.equal(parsed.specifiedVf ?? null, null, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, prompt);
+    const blocker = parsed.reviewBlockers[0];
+    assert.equal(blocker.code, 'discrete-led-implausible-vf', `${prompt} ${blocker.code} ${blocker.en}`);
+    assert.match(blocker.en, new RegExp(`forward voltage ${shown.replace(/[.]/g, '\\.')}V is implausible`), blocker.en);
+    assert.match(blocker.en, /0\.5V to 5V/, blocker.en);
+    assert.equal(/not above/i.test(blocker.en), false, blocker.en);
+    assert.equal(/not positive/i.test(blocker.en), false, blocker.en);
+    assert.equal(/supply voltage/i.test(blocker.en), false, blocker.en);
+    assert.match(blocker.ko, new RegExp(`순방향 전압 ${shown.replace(/[.]/g, '\\.')}V`), blocker.ko);
+    assert.match(blocker.ko, /0\.5V에서 5V/, blocker.ko);
+    assert.equal(blocker.ko.includes('공급 전압'), false, blocker.ko);
+    assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
+  }
+
+  const accepted = [
+    ['LED Vf 0.5V on 5V', 0.5, 5, '470Ω'],
+    ['LED Vf 5V on 12V', 5, 12, '750Ω'],
+    ['LED Vf 3.2V 5V', 3.2, 5, '180Ω']
+  ];
+  for (const [prompt, vf, supply, resistor] of accepted) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.reviewBlockers.some((item) => item.code === 'discrete-led-implausible-vf'), false, prompt);
+    assert.equal(parsed.reviewBlockers.some((item) => item.code === 'discrete-led-below-vf'), false, prompt);
+    assert.equal(parsed.specifiedVf, vf, prompt);
+    assert.equal(parsed.supplyVolts, supply, prompt);
+    assert.equal(parsed.resistorValue, resistor, prompt);
+    assert.equal(parsed.count, 1, prompt);
   }
 });
 

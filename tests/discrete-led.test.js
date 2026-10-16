@@ -106,6 +106,43 @@ test('discrete LED quantity gives each LED its own series resistor and caps abov
   assert.match(noteText(twelve), /Requested 12 LEDs; the discrete LED generator is capped at 8/);
 });
 
+test('a fractional Vf glued to LED is one series LED, and explicit counts stay intact', async () => {
+  const oneLed = [
+    'vf3.2 LED를 5V에 연결해줘',
+    '5V에 vf3.2 LED 연결',
+    'vf3.2 LED on 5V supply',
+    'vf 3.2 LED를 5V에 연결해줘',
+    'LED vf3.2 5V',
+    '5V supply vf3.2 LED'
+  ];
+  for (const prompt of oneLed) {
+    const result = await generateLed(prompt);
+    assert.equal(result.spec.discrete.refused, false, `${prompt} ${JSON.stringify(result.spec.discrete.reviewBlockers)}`);
+    assert.equal(result.spec.discrete.count, 1, prompt);
+    assert.equal(result.spec.discrete.specifiedVf, 3.2, prompt);
+    assert.equal(result.spec.discrete.supplyVolts, 5, prompt);
+    assert.equal(components(result, 'Device:LED').length, 1, prompt);
+    assert.equal(components(result, 'Device:R').length, 1, prompt);
+    assert.equal(components(result, 'Device:R')[0].value, '180Ω', prompt);
+  }
+
+  const two = await generateLed('2 LEDs 5V Vf 3.2V');
+  assert.equal(two.spec.discrete.count, 2);
+  assert.equal(components(two, 'Device:LED').length, 2);
+  assert.equal(components(two, 'Device:R').length, 2);
+  assert.ok(components(two, 'Device:R').every((part) => part.value === '180Ω'));
+
+  const threeKorean = await generateLed('LED 3개 5V');
+  assert.equal(threeKorean.spec.discrete.count, 3);
+  assert.equal(components(threeKorean, 'Device:LED').length, 3);
+  assert.equal(components(threeKorean, 'Device:R').length, 3);
+
+  const threeEnglish = await generateLed('three LEDs on 5V');
+  assert.equal(threeEnglish.spec.discrete.count, 3);
+  assert.equal(components(threeEnglish, 'Device:LED').length, 3);
+  assert.equal(components(threeEnglish, 'Device:R').length, 3);
+});
+
 test('discrete LED color sets the value and calculates the series resistor unless one was requested', async () => {
   const red = await generateLed('빨간 LED를 5V에 연결해줘');
   assert.equal(components(red, 'Device:LED')[0].value, 'LED Red');

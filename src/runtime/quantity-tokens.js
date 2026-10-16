@@ -44,6 +44,14 @@ const UNCOVERED_VOLTAGE = [
 const UNITLESS_VF_MIN = 0.5;
 const UNITLESS_VF_MAX = 5;
 
+// The value a labeled Vf would use, or either end of a Vf range. Null when every
+// sample sits inside 0.5V to 5V. The first sample outside that window is returned
+// so the refusal can name the value that failed.
+function implausibleForwardVolts(token) {
+  const samples = token.range ? [token.range.min, token.range.max] : [token.value];
+  return samples.find((volts) => !(volts >= UNITLESS_VF_MIN && volts <= UNITLESS_VF_MAX)) ?? null;
+}
+
 // Longer labels first. "forward voltage" must win over the bare word "forward",
 // and "순방향 전압" over "순방향". A following voltage wins when only space,
 // ":", "=", or "of" separates it, so "5V forward voltage 3.2V" keeps 3.2V as
@@ -340,7 +348,9 @@ function pushCurrent(candidates, prompt, match, milliamps, unit) {
 }
 
 function collectCounts(prompt, candidates) {
-  const pattern = /(?<![\w.])(\d+)\s*(?:개|(?:x\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b)/gi;
+  // A count cannot start on the tail of a fractional number. The digit before
+  // the match must not be '.', ',', or another digit ("3.2 LED" / "3,2 LED").
+  const pattern = /(?<![\w.,])(\d+)\s*(?:개|(?:x\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b)/gi;
   for (const match of prompt.matchAll(pattern)) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
@@ -367,8 +377,8 @@ function collectCounts(prompt, candidates) {
 }
 
 // "Vf=3.2", "Vf 3.2", and glued "vf3.2" are a forward voltage when labeled Vf.
-// Inside 0.5V to 5V that value is used. Outside that range it is an implausible
-// forward voltage and is refused, not kept as a resistor.
+// The same 0.5V to 5V window is applied to every Vf form in classifyQuantities.
+// Outside that window the value is refused, not kept as a resistor.
 function collectUnitlessForward(prompt, candidates) {
   const pattern = /\bvf(?=\d|\b)(?:\s*[=:]\s*|\s+)?(\d+(?:[.,]\d+)?)(?![\w.]|Ω|옴)/gi;
   for (const match of prompt.matchAll(pattern)) {
@@ -548,6 +558,11 @@ export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
   for (const token of tokens) {
     if (token.kind === 'voltage') {
       if (token.role !== 'vf') token.role = roleForVoltage(text, token);
+      if (token.role === 'vf') {
+        const outside = implausibleForwardVolts(token);
+        token.implausible = outside != null;
+        if (outside != null) token.implausibleValue = outside;
+      }
     } else if (token.kind === 'resistance') token.role = token.pot ? null : 'resistor';
     else if (token.kind === 'current') token.role = 'current';
     else if (token.kind === 'count') token.role = 'count';

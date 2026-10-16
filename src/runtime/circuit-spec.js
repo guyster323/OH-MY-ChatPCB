@@ -289,7 +289,7 @@ function resolveDiscreteSupply(prompt, scan) {
       }
     };
   }
-  const nonPositive = voltages.find((token) => token.value <= 0);
+  const nonPositive = voltages.find((token) => token.role !== 'vf' && token.value <= 0);
   if (nonPositive) {
     const shown = formatVolts(nonPositive.value);
     return {
@@ -474,13 +474,28 @@ function formatVolts(volts) {
   return String(rounded);
 }
 
-function parseLedCount(prompt) {
-  const afterLed = prompt.match(/(?:leds?|엘이디|발광(?:\s*다이오드)?)\D{0,16}?(\d+)\s*개/i);
-  if (afterLed) return Number(afterLed[1]);
-  const beforeLed = prompt.match(/(\d+)\s*개(?:의)?\s*(?:leds?|엘이디|발광)/i);
-  if (beforeLed) return Number(beforeLed[1]);
-  const englishDigit = prompt.match(/\b(\d+)\s*(?:x\s*)?leds?\b/i);
-  if (englishDigit) return Number(englishDigit[1]);
+const CLAIMED_QUANTITY_ROLES = new Set(['vf', 'supply', 'resistor', 'current']);
+
+function spansOverlap(left, right) {
+  return left.start < right.end && right.start < left.end;
+}
+
+// "3.2 LED" and "3,2 LED" must not yield a count of 2 from the fractional tail.
+function isFractionalCountTail(prompt, start) {
+  if (!(start > 0)) return false;
+  const previous = prompt[start - 1];
+  return previous === '.' || previous === ',' || (previous >= '0' && previous <= '9');
+}
+
+function parseLedCount(prompt, tokens) {
+  const claimed = tokens.filter((token) => CLAIMED_QUANTITY_ROLES.has(token.role));
+  for (const token of tokens) {
+    if (token.kind !== 'count' || token.role !== 'count') continue;
+    if (!Number.isInteger(token.value) || token.value < 1) continue;
+    if (isFractionalCountTail(prompt, token.start)) continue;
+    if (claimed.some((other) => spansOverlap(token, other))) continue;
+    return token.value;
+  }
   const englishWord = prompt.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?:\s+\w+){0,3}\s+leds?\b/i);
   if (englishWord) return ENGLISH_LED_COUNTS[englishWord[1].toLowerCase()];
   const words = [...KOREAN_LED_COUNTS].sort((left, right) => right[0].length - left[0].length);
@@ -799,23 +814,23 @@ export function parseDiscreteLedRequest(prompt) {
     });
   }
   const scan = classifyQuantities(text);
-  const supply = resolveDiscreteSupply(text, scan);
-  if (supply.refused) return refuseDiscreteLed({ ...supply, prompt: text });
   const implausible = scan.tokens.find((token) => token.role === 'vf' && token.implausible === true);
   if (implausible) {
     return refuseDiscreteLed({
       code: 'discrete-led-implausible-vf',
       prompt: text,
       supplyVolts: null,
-      texts: implausibleForwardMessage(implausible.value)
+      texts: implausibleForwardMessage(implausible.implausibleValue ?? implausible.value)
     });
   }
+  const supply = resolveDiscreteSupply(text, scan);
+  if (supply.refused) return refuseDiscreteLed({ ...supply, prompt: text });
   const supplyVolts = supply.supplyVolts;
   const supplyAssumed = supply.supplyAssumed === true;
   const forward = specifiedForward(scan.tokens);
   const specifiedVf = forward?.volts ?? null;
   const colors = findLedColors(text);
-  const explicitCount = parseLedCount(text);
+  const explicitCount = parseLedCount(text, scan.tokens);
   const perColor = colors.length > 1 && (explicitCount == null || explicitCount === colors.length);
   const requestedCount = perColor ? colors.length : Math.max(1, explicitCount ?? 1);
   const count = Math.min(MAX_DISCRETE_LEDS, requestedCount);
