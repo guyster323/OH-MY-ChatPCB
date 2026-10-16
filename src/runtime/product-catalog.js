@@ -1,5 +1,4 @@
 import { matchSupportedProfile } from './board-profiles.js';
-import { parseDiscreteLedRequest } from './circuit-spec.js';
 import {
   canRoleFromContext,
   mcuNeedFromContext,
@@ -644,48 +643,6 @@ export const PRODUCT_KINDS = [
         examplesFor: (ctx) => datasheetCompanionExamples(ctx)
       }
     ]
-  },
-  {
-    id: 'discrete-led',
-    priority: 1,
-    generate: 'discrete-led',
-    matches: (prompt) => Boolean(parseDiscreteLedRequest(prompt)),
-    labels: { ko: 'LED 회로', en: 'LED circuit' },
-    fields: [
-      {
-        id: 'led',
-        required: true,
-        questionKo: '표시 LED를 넣을까요?',
-        questionEn: 'Include an indicator LED?',
-        extract: (prompt) => (parseDiscreteLedRequest(prompt) ? 'LED' : null),
-        examples: [
-          example('LED', 'LED', 'LED', '특징: 표시용 LED 하나.\n장점: 전원 확인이 바로 됩니다.\n단점: 전류 제한 저항이 필요합니다.', true)
-        ]
-      },
-      {
-        id: 'resistor',
-        required: true,
-        questionKo: '직렬 저항 값은 얼마로 할까요?',
-        questionEn: 'What series resistor value should the LED use?',
-        extract: (prompt) => parseDiscreteLedRequest(prompt)?.resistorValue ?? null,
-        examples: [
-          example('330Ω', '330Ω', '330Ω', '특징: 5V LED 표시등에 흔한 직렬 저항.\n장점: 전류가 수 mA로 제한됩니다.\n단점: LED 순방향 전압에 따라 밝기가 달라집니다.', true)
-        ]
-      },
-      {
-        id: 'supply',
-        required: true,
-        questionKo: '전원 전압은 얼마인가요?',
-        questionEn: 'What supply voltage should the LED use?',
-        extract: (prompt) => {
-          const parsed = parseDiscreteLedRequest(prompt);
-          return parsed ? `${parsed.supplyVolts}V` : null;
-        },
-        examples: [
-          example('5V', '5V', '5V', '특징: 5V 전원에 LED와 저항을 직렬로 연결.\n장점: USB·벤치 전원에서 바로 시험할 수 있습니다.\n단점: LED 전류는 저항으로 확인해야 합니다.', true)
-        ]
-      }
-    ]
   }
 ];
 
@@ -724,14 +681,9 @@ const CUSTOM_KIND = {
   ]
 };
 
-function kindMatches(kind, text) {
-  if (typeof kind.matches === 'function') return kind.matches(text);
-  return kind.match.test(text);
-}
-
 export function detectProductRequest(prompt) {
   const text = prompt ?? '';
-  const kinds = PRODUCT_KINDS.filter((kind) => kindMatches(kind, text))
+  const kinds = PRODUCT_KINDS.filter((kind) => kind.match.test(text))
     .sort((left, right) => right.priority - left.priority);
   const resolved = kinds.length > 0 ? kinds : [{ ...CUSTOM_KIND }];
   const facts = {};
@@ -811,9 +763,6 @@ export function canGenerateImmediately(detection, spec) {
   if (matchSupportedProfile(spec)) return true;
   if (/adbms[\s-]?6830/i.test(detection.prompt)) return true;
   if (detection.primary?.generate === 'isolated-dcdc') {
-    return openFields(detection).length === 0;
-  }
-  if (detection.primary?.generate === 'discrete-led') {
     return openFields(detection).length === 0;
   }
   if (detection.kinds.length === 1 && detection.primary?.id === 'mcu-board') return true;

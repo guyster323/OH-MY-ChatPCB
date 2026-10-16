@@ -32,13 +32,11 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   const generatedNets = new Set((spec.schematic?.nets ?? []).map((net) => net.name));
   const generatedComponents = spec.schematic?.components ?? [];
 
-  const discreteLed = spec.kind === 'discrete-led';
-
-  if (!discreteLed && spec.mcu?.package === 'unspecified') {
+  if (spec.mcu?.package === 'unspecified') {
     addFinding(findings.blockers, 'mcu-part-missing', `Choose the exact ${spec.mcu.family} part or module before release.`);
   }
 
-  if (!discreteLed && generatedComponents.some((component) => component.libId === 'ChatPCB:MCU_PLACEHOLDER')) {
+  if (generatedComponents.some((component) => component.libId === 'ChatPCB:MCU_PLACEHOLDER')) {
     addFinding(findings.warnings, 'fixture-symbols', 'The schematic still uses ChatPCB fixture symbols instead of production KiCad library symbols.');
   }
 
@@ -136,14 +134,6 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
 
   for (const note of spec.product?.designNotes ?? []) {
     addFinding(findings.notes, `design-${note.slice(0, 24)}`, note);
-  }
-
-  if (discreteLed) {
-    addFinding(
-      findings.notes,
-      'discrete-led',
-      `Discrete LED draft uses series resistor ${spec.discrete?.resistorValue ?? 'unspecified'}; confirm it for the LED forward voltage and current before release.`
-    );
   }
 
   if (spec.boardProfile?.id) {

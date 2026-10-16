@@ -183,9 +183,6 @@ function boardPlacementFor(componentModel, index, profileMode) {
 }
 
 export function buildMcuSchematicAst(spec) {
-  if (spec.kind === 'discrete-led') {
-    return buildDiscreteLedSchematicAst(spec);
-  }
   if (spec.boardProfile?.kind === 'bms') {
     return buildBmsSchematicAst(spec);
   }
@@ -448,58 +445,6 @@ export function buildMcuSchematicAst(spec) {
   };
 }
 
-function buildDiscreteLedSchematicAst(spec) {
-  const discrete = spec.discrete ?? {};
-  const supplyNet = discrete.supplyNet || '+5V';
-  const resistorValue = discrete.resistorValue || '330Ω';
-  const useRailSymbol = supplyNet === '+5V';
-  const components = [
-    component('J1', 'Connector_Generic:Conn_01x02', `Power input for the ${supplyNet} LED circuit.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
-      value: supplyNet,
-      pins: [supplyNet, 'GND'],
-      connectedPins: [supplyNet, 'GND'],
-      pinNets: { 1: supplyNet, 2: 'GND' }
-    }),
-    component('R1', 'Device:R', `Series resistor ${resistorValue} between ${supplyNet} and the LED anode.`, 'Resistor_SMD:R_0603_1608Metric', {
-      value: resistorValue,
-      pins: [supplyNet, 'LED'],
-      connectedPins: [supplyNet, 'LED'],
-      pinNets: { 1: supplyNet, 2: 'LED' }
-    }),
-    component('D1', 'Device:LED', 'Indicator LED. Pin 1 is the cathode to GND and pin 2 is the anode.', 'LED_SMD:LED_0603_1608Metric', {
-      value: 'LED',
-      pins: ['GND', 'LED'],
-      connectedPins: ['GND', 'LED'],
-      pinNets: { 1: 'GND', 2: 'LED' }
-    }),
-    component('#PWR02', 'power:GND', 'Ground return for the LED cathode and the supply connector.', '', {
-      value: 'GND',
-      pins: ['GND'],
-      connectedPins: ['GND'],
-      pinNets: { 1: 'GND' }
-    }),
-    component(
-      useRailSymbol ? '#PWR01' : '#FLG1',
-      useRailSymbol ? 'power:+5V' : 'power:PWR_FLAG',
-      useRailSymbol ? '5V power symbol for the LED supply rail.' : `Power flag for the ${supplyNet} supply rail.`,
-      '',
-      {
-        value: useRailSymbol ? '+5V' : 'PWR_FLAG',
-        pins: [supplyNet],
-        connectedPins: [supplyNet],
-        pinNets: { 1: supplyNet }
-      }
-    )
-  ];
-  return {
-    components,
-    nets: [supplyNet, 'LED', 'GND'].map((name) => ({
-      name,
-      explanation: explainNet(name)
-    }))
-  };
-}
-
 export function buildIsolatedDcdcSchematicAst(spec) {
   const ratings = spec.boardProfile?.ratings ?? {};
   const vin = ratings.vin ?? 'VIN';
@@ -736,14 +681,7 @@ function adbms6830PinConnections() {
 
 export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchematicAst(spec) }) {
   const uuid = randomUUID();
-  const notes = spec.kind === 'discrete-led'
-    ? [
-        `ChatPCB generated discrete LED draft: ${spec.title}`,
-        `Series resistor ${spec.discrete?.resistorValue ?? '330Ω'} from ${spec.discrete?.supplyNet ?? '+5V'} to the LED and GND.`,
-        'Confirm the resistor against the LED forward voltage and current before release.',
-        'Review all symbols, footprints, net labels, and design rules before production.'
-      ]
-    : spec.boardProfile?.kind === 'isolated-dcdc'
+  const notes = spec.boardProfile?.kind === 'isolated-dcdc'
     ? [
         `ChatPCB generated isolated DC-DC draft: ${spec.title}`,
         `Input ${spec.boardProfile?.ratings?.vin ?? 'unspecified'} to output ${spec.boardProfile?.ratings?.vout ?? 'unspecified'}.`,
@@ -824,21 +762,6 @@ ${fixtureSymbols()
 }
 
 export function renderSpiceFixture(spec) {
-  if (spec.kind === 'discrete-led') {
-    const volts = spec.discrete?.supplyVolts ?? 5;
-    const ohms = spec.discrete?.resistanceOhms ?? 330;
-    return [
-      `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
-      '* Discrete LED and series resistor. Confirm LED current before release.',
-      `VSUP vsup 0 DC ${volts}`,
-      `RLED vsup led ${ohms}`,
-      'DLED led 0 DRED',
-      '.model DRED D(Vfwd=1.9)',
-      '.op',
-      '.end',
-      ''
-    ].join('\n');
-  }
   if (spec.boardProfile?.kind === 'isolated-dcdc') {
     return [
       `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
@@ -928,10 +851,6 @@ function explainNet(name) {
   switch (name) {
     case 'VBUS':
       return 'Primary 5V input rail.';
-    case '+5V':
-      return '5V supply rail for the discrete LED circuit.';
-    case 'LED':
-      return 'LED anode node between the series resistor and the LED.';
     case '+3V3':
       return 'Regulated 3.3V rail for MCU and peripherals.';
     case 'GND':
@@ -1917,10 +1836,6 @@ function officialPinDefinitionsFor(libId) {
       ];
     case 'power:PWR_FLAG':
       return [pinDef('1', 0, 0, 90)];
-    case 'power:+5V':
-      return [pinDef('1', 0, 0, 270)];
-    case 'power:GND':
-      return [pinDef('1', 0, 0, 90)];
     case 'Switch:SW_Push':
       return [pinDef('1', -5.08, 0, 0), pinDef('2', 5.08, 0, 180)];
     case 'Device:LED':
@@ -2028,10 +1943,6 @@ function symbolPinsFor(libId) {
       return ['VBUS', 'GND', '+3V3'];
     case 'power:PWR_FLAG':
       return ['VBUS'];
-    case 'power:+5V':
-      return ['+5V'];
-    case 'power:GND':
-      return ['GND'];
     case 'ChatPCB:MCU_PLACEHOLDER':
     case 'ChatPCB:ESP32_S3_WROOM_1':
     case 'ChatPCB:STM32G0B1CBT6':
