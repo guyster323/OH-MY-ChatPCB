@@ -26,6 +26,7 @@ test('panel test hook exists only in test mode and cannot pass ERC for the daemo
   try {
     browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
   } catch (error) {
+    if (process.env.CI) throw error;
     t.skip(`Chromium unavailable: ${error.message}`);
     return;
   }

@@ -1843,7 +1843,7 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
       };
       if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
       renderPatchApproval();
-      syncWorkflow();
+      renderRequestStatus({ state: 'ready', summaryKey: 'request.preview-ready' });
     }
   };
 }

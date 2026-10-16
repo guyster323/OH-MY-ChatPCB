@@ -17,6 +17,7 @@ const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. �
 test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable', async (t) => {
   const browser = await launchPanelBrowser();
   if (!browser) {
+    if (process.env.CI) throw new Error('Chromium unavailable');
     t.skip('no browser available');
     return;
   }

@@ -189,6 +189,7 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
       headless: true
     });
   } catch (error) {
+    if (process.env.CI) throw error;
     t.skip(`Chromium unavailable: ${error.message}`);
     return;
   }
@@ -284,7 +285,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           patch: document.querySelector('#patch-approval-status').textContent
         }));
         const locale = lang === 'ko' ? ko : en;
-        assert.equal(copy.request, locale['request.idle'], `${theme}/${lang} request status`);
+        assert.equal(copy.request, locale['request.preview-ready'], `${theme}/${lang} request status`);
+        assert.notEqual(copy.request, locale['request.idle'], `${theme}/${lang} create-project status while a preview is open`);
         assert.equal(copy.provider, locale['provider.pending'], `${theme}/${lang} provider status`);
         assert.equal(copy.connection, locale['connection.connecting'], `${theme}/${lang} connecting`);
         assert.equal(copy.patch, locale['patch.blocked'], `${theme}/${lang} patch blocked while ERC fails`);
@@ -392,6 +394,100 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         }, { textPairs: TEXT_PAIRS, uiPairs: UI_PAIRS });
         assert.deepEqual(contrast, [], `${theme}/${lang} contrast: ${contrast.join('; ')}`);
 
+        const renderedContrast = await page.evaluate(() => {
+          const parseColor = (value) => {
+            if (!value || value === 'transparent') return null;
+            const match = String(value).match(/rgba?\(\s*([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)(?:[,\s/]+([0-9.]+))?\s*\)/i);
+            if (!match) return null;
+            return {
+              r: Number(match[1]),
+              g: Number(match[2]),
+              b: Number(match[3]),
+              a: match[4] === undefined ? 1 : Number(match[4])
+            };
+          };
+          const composite = (fg, bg) => {
+            const alpha = fg.a + bg.a * (1 - fg.a);
+            if (alpha === 0) return { r: 0, g: 0, b: 0, a: 0 };
+            return {
+              r: (fg.r * fg.a + bg.r * bg.a * (1 - fg.a)) / alpha,
+              g: (fg.g * fg.a + bg.g * bg.a * (1 - fg.a)) / alpha,
+              b: (fg.b * fg.a + bg.b * bg.a * (1 - fg.a)) / alpha,
+              a: alpha
+            };
+          };
+          const channel = (c) => {
+            const s = c / 255;
+            return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+          };
+          const lum = (rgb) => 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+          const ratio = (a, b) => {
+            const left = lum(a);
+            const right = lum(b);
+            return (Math.max(left, right) + 0.05) / (Math.min(left, right) + 0.05);
+          };
+          const painted = (el) => {
+            const layers = [];
+            let node = el;
+            while (node) {
+              const style = getComputedStyle(node);
+              const bg = parseColor(style.backgroundColor);
+              const opacity = Number(style.opacity);
+              const factor = Number.isFinite(opacity) ? opacity : 1;
+              if (bg && bg.a > 0) {
+                const layer = { r: bg.r, g: bg.g, b: bg.b, a: bg.a * factor };
+                layers.push(layer);
+                if (layer.a >= 0.999) break;
+              }
+              node = node.parentElement;
+            }
+            let acc = { r: 0, g: 0, b: 0, a: 0 };
+            for (let i = layers.length - 1; i >= 0; i -= 1) acc = composite(layers[i], acc);
+            return acc;
+          };
+          const weightOf = (style) => {
+            const raw = style.fontWeight;
+            if (raw === 'bold' || raw === 'bolder') return 700;
+            const value = Number.parseInt(raw, 10);
+            return Number.isFinite(value) ? value : 400;
+          };
+          const picks = [
+            ['body', document.body],
+            ['muted', document.querySelector('#pro-mode-help')],
+            ['button', document.querySelector('#fix-patch-button')],
+            ['button', document.querySelector('#tools-menu-button')],
+            ['step', document.querySelector('.workflow-lane[data-lane="circuit"] .flow-btn')],
+            ['erc', document.querySelector('#patch-erc')]
+          ];
+          for (const el of document.querySelectorAll('.workflow-lane[data-lane="circuit"] .flow-btn')) {
+            picks.push(['step', el]);
+          }
+          const failures = [];
+          for (const [label, el] of picks) {
+            if (!el) {
+              failures.push(`${label} missing`);
+              continue;
+            }
+            const style = getComputedStyle(el);
+            const fg0 = parseColor(style.color);
+            const bg = painted(el);
+            if (!fg0 || bg.a < 0.99) {
+              failures.push(`${label} unpainted`);
+              continue;
+            }
+            const opacity = Number(style.opacity);
+            const fg = composite({ ...fg0, a: fg0.a * (Number.isFinite(opacity) ? opacity : 1) }, bg);
+            const size = Number.parseFloat(style.fontSize);
+            const weight = weightOf(style);
+            const large = size >= 24 || (size >= 18.66 && weight >= 700);
+            const min = large ? 3 : 4.5;
+            const value = ratio(fg, bg);
+            if (value < min) failures.push(`${label} ${value.toFixed(2)} < ${min}`);
+          }
+          return failures;
+        });
+        assert.deepEqual(renderedContrast, [], `${theme}/${lang} rendered contrast: ${renderedContrast.join('; ')}`);
+
         const outline = await page.evaluate(() => {
           const button = document.querySelector('#approve-patch-button');
           button.focus({ focusVisible: true });
@@ -434,6 +530,98 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         }
         assert.equal(names.filter((step) => step.current === 'step').length, 1, `${theme}/${lang} current step`);
 
+        const steps = await page.evaluate(() => {
+          const labels = [...document.querySelectorAll('.step-label')].filter((el) => !el.closest('[hidden]')).map((el) => {
+            const box = el.getBoundingClientRect();
+            const button = el.closest('button');
+            return {
+              text: el.textContent.trim(),
+              width: box.width,
+              height: box.height,
+              visibleText: button ? button.innerText.trim() : ''
+            };
+          });
+          const locked = [...document.querySelectorAll('.flow-btn[aria-disabled="true"]')].map((button) => {
+            const reason = document.getElementById(button.getAttribute('aria-describedby') || '');
+            return {
+              ariaDisabled: button.getAttribute('aria-disabled'),
+              reason: reason ? reason.textContent.trim() : ''
+            };
+          });
+          const reasons = ['lock-r-layout', 'lock-r-fab'].map((id) => {
+            const el = document.getElementById(id);
+            const box = el.getBoundingClientRect();
+            return {
+              hidden: el.hidden,
+              inHidden: Boolean(el.closest('[hidden]')),
+              text: el.textContent.trim(),
+              height: box.height
+            };
+          });
+          return { labels, locked, reasons };
+        });
+        assert.ok(steps.labels.length >= 5, `${theme}/${lang} visible step labels ${steps.labels.length}`);
+        for (const label of steps.labels) {
+          assert.ok(label.text.length > 0, `${theme}/${lang} blank step label`);
+          assert.ok(label.width > 0 && label.height > 0, `${theme}/${lang} step label "${label.text}" has no box`);
+          assert.ok(label.visibleText.includes(label.text), `${theme}/${lang} step "${label.text}" is only an accessible name`);
+        }
+        assert.ok(steps.locked.length >= 9, `${theme}/${lang} locked steps ${steps.locked.length}`);
+        for (const button of steps.locked) {
+          assert.equal(button.ariaDisabled, 'true', `${theme}/${lang} locked step aria-disabled`);
+          assert.ok(button.reason.length > 0, `${theme}/${lang} locked step missing reason`);
+        }
+        for (const reason of steps.reasons) {
+          assert.equal(reason.hidden, false, `${theme}/${lang} lock reason hidden`);
+          assert.equal(reason.inHidden, false, `${theme}/${lang} lock reason inside hidden`);
+          assert.ok(reason.text.length > 0, `${theme}/${lang} empty lock reason`);
+          assert.ok(reason.height > 0, `${theme}/${lang} lock reason not visible`);
+        }
+
+        const fieldFit = await page.evaluate(() => {
+          const field = document.querySelector('#prompt');
+          const previous = field.value;
+          const previousSpace = field.style.whiteSpace;
+          field.style.whiteSpace = 'nowrap';
+          field.value = field.placeholder;
+          const result = {
+            placeholder: field.placeholder,
+            scrollWidth: field.scrollWidth,
+            clientWidth: field.clientWidth
+          };
+          field.value = previous;
+          field.style.whiteSpace = previousSpace;
+          return result;
+        });
+        assert.equal(fieldFit.placeholder, locale['composer.placeholder'], `${theme}/${lang} placeholder`);
+        assert.ok(fieldFit.scrollWidth <= fieldFit.clientWidth, `${theme}/${lang} placeholder truncated ${fieldFit.scrollWidth}>${fieldFit.clientWidth}`);
+
+        const ask = await page.evaluate(() => {
+          const control = document.querySelector('#pro-mode');
+          const help = document.querySelector('#pro-mode-help');
+          const style = getComputedStyle(help);
+          const box = help.getBoundingClientRect();
+          return {
+            role: control.getAttribute('role'),
+            describedBy: control.getAttribute('aria-describedby'),
+            label: control.innerText.trim(),
+            help: help.textContent.trim(),
+            hidden: help.hidden,
+            display: style.display,
+            visibility: style.visibility,
+            width: box.width,
+            height: box.height
+          };
+        });
+        assert.equal(ask.role, 'switch', `${theme}/${lang} choice control role`);
+        assert.equal(ask.describedBy, 'pro-mode-help', `${theme}/${lang} choice control description`);
+        assert.equal(ask.label, locale['pro.switch'], `${theme}/${lang} choice control label`);
+        assert.equal(ask.help, locale['pro.switch-help'], `${theme}/${lang} choice control help`);
+        assert.equal(ask.hidden, false, `${theme}/${lang} choice help hidden`);
+        assert.notEqual(ask.display, 'none', `${theme}/${lang} choice help display`);
+        assert.notEqual(ask.visibility, 'hidden', `${theme}/${lang} choice help visibility`);
+        assert.ok(ask.width > 0 && ask.height > 0, `${theme}/${lang} choice help not visible`);
+
         if (shots) {
           await mkdir(shots, { recursive: true });
           await page.screenshot({ path: join(shots, `soft-${theme}-${lang}.png`) });
@@ -469,6 +657,7 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           button.focus();
           link.focus();
           return {
+            provider: document.querySelector('#provider').value,
             cardHidden: card.hidden,
             planHidden: plan.hidden,
             cardInert: card.inert,
@@ -479,6 +668,7 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
             planText: plan.textContent
           };
         });
+        assert.equal(gated.provider, 'codex', `${theme}/${lang} provider`);
         assert.equal(gated.cardHidden, true, `${theme}/${lang} ChatGPT sign-in hidden`);
         assert.equal(gated.planHidden, true, `${theme}/${lang} ChatGPT plan hidden`);
         assert.equal(gated.cardInert, true, `${theme}/${lang} ChatGPT sign-in inert`);
@@ -514,6 +704,74 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.equal(button.fontWeight, '500', `${theme}/${lang} ChatGPT button weight`);
         assert.equal(button.text, 'Continue with ChatGPT', `${theme}/${lang} ChatGPT button text`);
         assert.equal(button.lang, 'en', `${theme}/${lang} ChatGPT button lang`);
+
+        const latest = await page.evaluate(() => {
+          const messages = [];
+          for (let i = 0; i < 6; i += 1) {
+            messages.push({ role: 'user', text: `Question ${i} about the USB-C power path and the status LED resistor.` });
+            messages.push({ role: 'assistant', text: `Reply ${i}: keep the AMS1117 regulator and the 1 kΩ series resistor.` });
+          }
+          messages.push({ role: 'assistant', text: 'Latest reply stays in view.' });
+          window.__chatpcbTest.showPatch({
+            validation: {
+              ok: false,
+              erc: {
+                ok: false,
+                errorCount: 2,
+                violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }]
+              }
+            },
+            conversation: { messages }
+          });
+          const log = document.querySelector('#conversation-log');
+          const last = log.querySelector('li:last-child');
+          const logBox = log.getBoundingClientRect();
+          const box = last.getBoundingClientRect();
+          const overlap = Math.min(box.bottom, logBox.bottom) - Math.max(box.top, logBox.top);
+          return {
+            role: last.dataset.role,
+            text: last.textContent,
+            scrollTop: log.scrollTop,
+            clientHeight: log.clientHeight,
+            overlap,
+            inViewport: box.width > 0 && box.top < window.innerHeight && box.bottom > 0
+          };
+        });
+        assert.equal(latest.role, 'assistant', `${theme}/${lang} latest role`);
+        assert.equal(latest.text, 'Latest reply stays in view.', `${theme}/${lang} latest reply`);
+        assert.ok(latest.scrollTop > 0, `${theme}/${lang} conversation did not scroll`);
+        assert.ok(latest.clientHeight >= 96, `${theme}/${lang} conversation height ${latest.clientHeight}`);
+        assert.ok(latest.overlap > 0, `${theme}/${lang} latest reply outside the log`);
+        assert.equal(latest.inViewport, true, `${theme}/${lang} latest reply outside the viewport`);
+
+        const passedErc = await page.evaluate(() => {
+          window.__chatpcbTest.showPatch({
+            validation: {
+              ok: true,
+              skipped: false,
+              erc: { errorCount: 0, warningCount: 0 }
+            },
+            candidateVerification: {
+              erc: { ok: true, skipped: false, status: 'passed', erc: { errorCount: 0, warningCount: 0 } }
+            }
+          });
+          const apply = document.querySelector('#approve-patch-button');
+          const why = document.querySelector('#apply-why');
+          const status = document.querySelector('#patch-approval-status');
+          return {
+            disabled: apply.disabled,
+            ariaDisabled: apply.getAttribute('aria-disabled'),
+            whyHidden: why.hidden,
+            statusHidden: status.hidden,
+            status: status.textContent
+          };
+        });
+        assert.equal(passedErc.disabled, false, `${theme}/${lang} apply disabled after ERC passes`);
+        assert.equal(passedErc.ariaDisabled, null, `${theme}/${lang} apply aria-disabled after ERC passes`);
+        assert.equal(passedErc.whyHidden, true, `${theme}/${lang} apply reason after ERC passes`);
+        assert.equal(passedErc.statusHidden, false, `${theme}/${lang} patch status hidden after ERC passes`);
+        assert.equal(passedErc.status, locale['patch.ready'], `${theme}/${lang} patch status after ERC passes`);
+
         assert.deepEqual(errors, [], `${theme}/${lang} page errors ${errors.join('\n')}`);
         await page.close();
       }

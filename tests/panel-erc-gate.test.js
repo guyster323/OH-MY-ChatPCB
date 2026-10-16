@@ -31,6 +31,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
       headless: true
     });
   } catch (error) {
+    if (process.env.CI) throw error;
     t.skip(`Chromium unavailable: ${error.message}`);
     return;
   }
