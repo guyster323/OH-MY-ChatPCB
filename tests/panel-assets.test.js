@@ -60,7 +60,11 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /option\.help/);
   assert.match(script, /dataset\.recommended/);
   assert.match(html, /id="tools-menu"/);
-  assert.match(html, /aria-haspopup="menu"/);
+  assert.match(html, /aria-controls="tools-menu"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /aria-haspopup/);
+  assert.doesNotMatch(html, /role="menu"/);
+  assert.doesNotMatch(html, /role="menuitem"/);
   assert.match(html, /workflow-board/);
   assert.match(html, /data-step="circuit.concept"/);
   assert.match(html, /data-step="layout.route"/);

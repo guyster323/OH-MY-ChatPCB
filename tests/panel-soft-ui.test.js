@@ -689,6 +689,33 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.equal(ask.labelClipped, false, `${theme}/${lang} choice label clipped ${ask.labelScroll.join(',')}`);
         assert.equal(ask.helpClipped, false, `${theme}/${lang} choice description clipped ${ask.helpScroll.join(',')}`);
 
+        const tools = await page.evaluate(() => {
+          const button = document.querySelector('#tools-menu-button');
+          const menu = document.querySelector('#tools-menu');
+          const items = [...menu.querySelectorAll('button')];
+          return {
+            expanded: button.getAttribute('aria-expanded'),
+            controls: button.getAttribute('aria-controls'),
+            popup: button.getAttribute('aria-haspopup'),
+            menuRole: menu.getAttribute('role'),
+            itemRoles: items.map((item) => item.getAttribute('role')),
+            itemTags: items.map((item) => item.tagName)
+          };
+        });
+        assert.equal(tools.expanded, 'false', `${theme}/${lang} tools disclosure starts closed`);
+        assert.equal(tools.controls, 'tools-menu', `${theme}/${lang} tools disclosure controls`);
+        assert.equal(tools.popup, null, `${theme}/${lang} tools disclosure popup`);
+        assert.equal(tools.menuRole, null, `${theme}/${lang} tools disclosure role`);
+        assert.ok(tools.itemTags.length >= 3, `${theme}/${lang} tools disclosure items`);
+        assert.deepEqual(tools.itemRoles, tools.itemTags.map(() => null), `${theme}/${lang} tools items are plain buttons`);
+        await page.locator('#tools-menu-button').click();
+        assert.equal(await page.locator('#tools-menu-button').getAttribute('aria-expanded'), 'true', `${theme}/${lang} tools disclosure expanded`);
+        assert.equal(await page.locator('#tools-menu').isVisible(), true, `${theme}/${lang} tools list visible`);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#tools-menu-button').getAttribute('aria-expanded'), 'false', `${theme}/${lang} tools disclosure closed`);
+        assert.equal(await page.locator('#tools-menu').isHidden(), true, `${theme}/${lang} tools list hidden`);
+        assert.equal(await page.evaluate(() => document.activeElement?.id), 'tools-menu-button', `${theme}/${lang} tools focus returned`);
+
         if (shots) {
           await mkdir(shots, { recursive: true });
           await page.screenshot({ path: join(shots, `soft-${theme}-${lang}.png`) });
