@@ -544,7 +544,7 @@ async function requestProject(call, ctx) {
     // A caller that already holds the project still sees PROJECT_BUSY from preview.
     if (!callerHolds) ctx[projectLockHeld] = true;
     let providerResult;
-    let firstPreview = null;
+    let firstPreview;
     let retryAttempted = false;
     const invocationId = args.invocationId ?? call.id;
     const provisionalPlans = [];
