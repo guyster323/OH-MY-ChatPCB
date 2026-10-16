@@ -1098,16 +1098,12 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
-  if (typeof prompt === 'string' && prompt.trim() && (name === 'schematic.generate' || name === 'schematic.patch')) {
-    // The caller prompt is the user request (or the conversation generate prompt
-    // on project.request). A rewritten tool prompt can drop a connector or a
-    // debug header and leave a missing-swd blocker. Native generation and
-    // project.request already keep this prompt, so direct provider.invoke does too.
-    // An existing-project patch may still use a non-empty model prompt: that path
-    // asks for a complete description of the edited board.
-    if (name === 'schematic.generate' || !forceProjectDir) {
-      args.prompt = prompt;
-    } else if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
+  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && name === 'schematic.generate') {
+    // The daemon prompt carries the profile and conversation facts. A short model
+    // prompt such as "draft it" would drop the parts list the native path keeps.
+    args.prompt = prompt;
+  } else if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && name === 'schematic.patch') {
+    if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
       args.prompt = prompt;
     }
   }
