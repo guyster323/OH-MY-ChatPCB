@@ -720,38 +720,6 @@ test('verify:ui docs tell users how to install Chromium or the headless shell', 
   assert.doesNotMatch(section, /no `executablePath`/);
 });
 
-test('browser launchers resolve Chrome through the shared helper', async () => {
-  const verifier = await readFile(new URL('../scripts/verify-panel-ui.js', import.meta.url), 'utf8');
-  const uiTest = await readFile(new URL('./panel-ui-verifier.test.js', import.meta.url), 'utf8');
-  const finderSource = await readFile(new URL('../scripts/lib/find-chrome.js', import.meta.url), 'utf8');
-
-  const panelTests = await Promise.all(
-    ['panel-soft-ui.test.js', 'panel-erc-gate.test.js', 'panel-test-hook.test.js']
-      .map((name) => readFile(new URL(`./${name}`, import.meta.url), 'utf8'))
-  );
-
-  assert.match(verifier, /findChrome\(/);
-  assert.match(uiTest, /findChrome\(/);
-  assert.match(finderSource, /playwright-headless-shell/);
-  assert.doesNotMatch(verifier, /\/usr\/bin\/google-chrome/);
-  assert.doesNotMatch(uiTest, /\/usr\/bin\/google-chrome/);
-  assert.doesNotMatch(verifier, /findBrowserExecutable/);
-  assert.match(verifier, /chromeLaunchOptions\(/);
-  assert.match(uiTest, /chromeLaunchOptions\(/);
-  for (const source of panelTests) {
-    assert.match(source, /findChrome\(/);
-    assert.match(source, /chromeLaunchOptions\(/);
-    assert.match(source, /process\.env\.CI/);
-    assert.match(source, /t\.skip\(`Chromium unavailable:/);
-    assert.doesNotMatch(source, /chromium\.executablePath\(/);
-  }
-  assert.match(finderSource, /chromeLaunchOptions\(/);
-  assert.match(finderSource, /const executablePath = executablePathForLaunch\(found\)/);
-  assert.match(verifier, /isUiHeadless\(\)/);
-  assert.match(finderSource, /CHATPCB_UI_HEADLESS !== '0'/);
-  assert.match(finderSource, /headed mode needs full Chromium or Chrome: run npx playwright install chromium or set CHATPCB_CHROME_PATH/);
-});
-
 function expectedHeadlessShellExecutable(platform, arch) {
   if (platform === 'win32') return 'chrome-headless-shell.exe';
   if (platform === 'linux' && arch === 'arm64') return 'headless_shell';

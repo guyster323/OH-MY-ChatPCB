@@ -13,3 +13,9 @@ test('generated panel tokens.css matches the committed file', async () => {
   const committed = await readFile(new URL('../apps/panel/styles/tokens.css', import.meta.url), 'utf8');
   assert.equal(normalizeEol(renderTokensCss()), normalizeEol(committed));
 });
+
+test('tokens.css header names the in-repo generator', () => {
+  const css = renderTokensCss();
+  assert.match(css, /scripts\/panel-tokens\/build\.mjs/);
+  assert.doesNotMatch(css, /redesign\/build\.mjs/);
+});

@@ -93,7 +93,7 @@ function block(selector, lines) {
 }
 
 export function renderTokensCss() {
-  const header = '/* Generated from redesign/build.mjs (concept C Soft v2). Do not hand-edit; regenerate. */\n';
+  const header = '/* Generated from scripts/panel-tokens/build.mjs (concept C Soft v2). Do not hand-edit; regenerate. */\n';
   const media = `@media (prefers-color-scheme:dark){\n${block('  :root:not([data-theme=light])', themeLines('dark'))}\n\n}\n\n`;
   return `${header}${block(':root', rootLines())}\n\n${block(':root,[data-theme=light]', themeLines('light'))}\n${block('[data-theme=dark]', themeLines('dark'))}\n\n${media}`;
 }
