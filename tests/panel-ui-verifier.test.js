@@ -22,7 +22,9 @@ test('panel browser UI verifier drives the real panel like a user', async () => 
   assert.match(source, /fill\(/);
   assert.match(source, /click\(/);
   assert.match(source, /runProviderProcessImpl/);
-  assert.match(source, /가스 센서 보드 01/);
+  assert.match(source, /const projectName = 'STM32 센서 보드 01';/);
+  assert.match(source, /waitForCompletedOrFailFast\(page\)/);
+  assert.match(source, /ERC validation failed/);
   assert.match(source, /getByRole\('button', \{ name: 'New project' \}\)/);
   assert.match(source, /getByRole\('button', \{ name: 'Send' \}\)/);
   assert.match(source, /hasGenerateButton/);
