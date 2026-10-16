@@ -37,6 +37,28 @@ function services(registry, validateProjectImpl) {
   };
 }
 
+test('recorded ERC with violations is failed even when status says passed', () => {
+  const topLevel = normalizeRecordedErc({
+    ok: true,
+    status: 'passed',
+    errorCount: 0,
+    violations: [{ message: 'unconnected pin' }]
+  });
+  assert.equal(topLevel.passed, false);
+  assert.equal(topLevel.failed, true);
+  assert.equal(topLevel.skipped, false);
+  assert.equal(topLevel.missing, false);
+
+  const nestedOnly = normalizeRecordedErc({
+    ok: true,
+    status: 'passed',
+    erc: { errorCount: 0, violations: [{ message: 'nested pin' }] }
+  });
+  assert.equal(nestedOnly.passed, false);
+  assert.equal(nestedOnly.failed, true);
+  assert.equal(nestedOnly.errorCount, 0);
+});
+
 test('recorded ERC normalizes to passed, failed, skipped, or missing', () => {
   assert.deepEqual(
     normalizeRecordedErc({ ok: true, skipped: false, status: 'passed', erc: { errorCount: 0, warningCount: 0 } }),
