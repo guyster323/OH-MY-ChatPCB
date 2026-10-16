@@ -146,7 +146,8 @@ function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-// ERC passes only with a numeric error count of 0. DRC reports violation counts, not errorCount.
+// ERC passes only with a numeric errorCount of 0 and no listed violations.
+// DRC passes only when its violation and unconnected evidence is actually empty.
 function numericErrorCount(result) {
   if (!result || typeof result !== 'object') return undefined;
   const nested = result.erc;
@@ -157,27 +158,69 @@ function numericErrorCount(result) {
   return finiteNumber(result.errorCount);
 }
 
-function hasDrcEvidence(result) {
-  if (!result || typeof result !== 'object') return false;
-  if (Array.isArray(result.violations) || Array.isArray(result.unconnectedItems)) return true;
-  return Boolean(result.drc && typeof result.drc === 'object');
+function missingVerdict(required) {
+  return { skipped: false, executed: false, status: 'missing', required: required === true };
 }
 
-function statusFor(result, required) {
+function withStatus(result, required, status) {
+  return { ...result, status, required: required === true };
+}
+
+function ercViolationsClear(result) {
+  if (!Object.hasOwn(result, 'violations')) return true;
+  return Array.isArray(result.violations) && result.violations.length === 0;
+}
+
+function ercVerdict(result, required) {
   // null/undefined is missing evidence, not a skip. A skip can be overridden; missing cannot.
-  if (result == null) {
-    return { skipped: false, executed: false, status: 'missing', required: required === true };
-  }
+  if (result == null) return missingVerdict(required);
   const errorCount = numericErrorCount(result);
   const explicitSkip = result.skipped === true || result.executed === false;
+  const violationsClear = ercViolationsClear(result);
   let status = 'unverified';
-  if (typeof errorCount === 'number' && errorCount > 0) status = 'failed';
+  if (!violationsClear || (typeof errorCount === 'number' && errorCount > 0)) status = 'failed';
   else if (explicitSkip) status = 'unverified';
   else if (result.ok === false) status = 'failed';
-  else if (result.ok === true && errorCount === 0) status = 'passed';
-  else if (result.ok === true && hasDrcEvidence(result)) status = 'passed';
+  else if (result.ok === true && errorCount === 0 && violationsClear) status = 'passed';
   else if (result.ok === true) status = 'missing';
-  return { ...result, status, required: required === true };
+  return withStatus(result, required, status);
+}
+
+function lengthIfArray(value) {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function drcProof(result) {
+  const violations = lengthIfArray(result.violations);
+  const unconnected = lengthIfArray(
+    Object.hasOwn(result, 'unconnectedItems') ? result.unconnectedItems : result.unconnected_items
+  );
+  const nested = result.drc && typeof result.drc === 'object' && !Array.isArray(result.drc) ? result.drc : null;
+  const violationCount = finiteNumber(nested ? nested.violationCount : result.violationCount);
+  const unconnectedCount = finiteNumber(nested ? nested.unconnectedCount : result.unconnectedCount);
+  const dirty = (violations !== undefined && violations > 0)
+    || (unconnected !== undefined && unconnected > 0)
+    || (violationCount !== undefined && violationCount > 0)
+    || (unconnectedCount !== undefined && unconnectedCount > 0)
+    || (Object.hasOwn(result, 'violations') && !Array.isArray(result.violations))
+    || (Object.hasOwn(result, 'unconnectedItems') && !Array.isArray(result.unconnectedItems))
+    || (Object.hasOwn(result, 'unconnected_items') && !Array.isArray(result.unconnected_items));
+  const cleanLists = violations === 0 && unconnected === 0;
+  const cleanCounts = violationCount === 0 && unconnectedCount === 0;
+  return { dirty, clean: dirty === false && (cleanLists || cleanCounts) };
+}
+
+function drcVerdict(result, required) {
+  if (result == null) return missingVerdict(required);
+  const proof = drcProof(result);
+  const explicitSkip = result.skipped === true || result.executed === false;
+  let status = 'unverified';
+  if (proof.dirty) status = 'failed';
+  else if (explicitSkip) status = 'unverified';
+  else if (result.ok === false) status = 'failed';
+  else if (result.ok === true && proof.clean) status = 'passed';
+  else if (result.ok === true) status = 'missing';
+  return withStatus(result, required, status);
 }
 
 function isLegacyErcResult(result) {
@@ -202,20 +245,20 @@ function normalizeCandidateVerification(result, required) {
   const skipped = { ok: true, skipped: true, executed: false };
   if (result == null) {
     return {
-      erc: statusFor(null, required.erc),
-      drc: statusFor(null, required.drc)
+      erc: ercVerdict(null, required.erc),
+      drc: drcVerdict(null, required.drc)
     };
   }
   if (isLegacyErcResult(result)) {
     return {
-      erc: statusFor(result, required.erc),
-      drc: statusFor(skipped, required.drc)
+      erc: ercVerdict(result, required.erc),
+      drc: drcVerdict(skipped, required.drc)
     };
   }
   // A missing erc/drc field is an absent verifier result. Do not invent a skip.
   return {
-    erc: statusFor(result.erc ?? null, required.erc),
-    drc: statusFor(result.drc ?? null, required.drc)
+    erc: ercVerdict(result.erc ?? null, required.erc),
+    drc: drcVerdict(result.drc ?? null, required.drc)
   };
 }
 

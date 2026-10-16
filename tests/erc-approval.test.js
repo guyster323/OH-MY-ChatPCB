@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
+import { dispatchToolCall, startDaemon } from '../src/runtime/agent-daemon.js';
+import { createEnvelope } from '../src/runtime/envelope.js';
 import { ercApprovalDecision, normalizeRecordedErc } from '../src/runtime/erc-gate.js';
 import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
@@ -268,3 +269,122 @@ test('null and unproven verifier results are not passed and stay ERC_BLOCKED', a
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('DRC-shaped ERC results stay blocked on the daemon websocket', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-erc-drc-shape-'));
+  const stateRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-erc-drc-shape-journal-'));
+  const base = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
+  const cases = [
+    {
+      label: 'ok with empty violations and no errorCount',
+      id: 'empty-violations',
+      result: { ok: true, violations: [] }
+    },
+    {
+      label: 'ok with an empty drc object and no errorCount',
+      id: 'empty-drc',
+      result: { ok: true, drc: {} }
+    },
+    {
+      label: 'ok with errorCount 0 and non-empty violations',
+      id: 'nonempty-violations',
+      result: { ok: true, errorCount: 0, violations: [{ type: 'clearance', severity: 'error' }] }
+    }
+  ];
+  let validateProjectImpl = async () => cases[0].result;
+  const daemon = await startDaemon({
+    port: 0,
+    dispatchOptions: {
+      transactionStateRoot: stateRoot,
+      validateProjectImpl: () => validateProjectImpl(),
+      validateBoardImpl: passingDrc,
+      verifyAppliedProjectImpl: passingVerify
+    }
+  });
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const specPath = generated.files.spec;
+    const before = await readFile(specPath, 'utf8');
+    const socket = await openDaemonSocket(daemon);
+
+    try {
+      for (const entry of cases) {
+        validateProjectImpl = async () => entry.result;
+        const preview = await socket.call({
+          id: `call-preview-${entry.id}`,
+          name: 'schematic.patch',
+          args: { projectDir: root, prompt: `${base} ${entry.label}.` }
+        });
+        assert.equal(preview.ok, true, `${entry.label} preview ${JSON.stringify(preview)}`);
+        assert.notEqual(preview.result.candidateVerification.erc.status, 'passed', entry.label);
+
+        const approved = await socket.call({
+          id: `call-approve-${entry.id}`,
+          name: 'schematic.patch',
+          args: {
+            projectDir: root,
+            approved: true,
+            patchId: preview.result.patchId,
+            passed: true,
+            validation: { ok: true, status: 'passed', skipped: false, erc: { errorCount: 0 } }
+          }
+        });
+        assert.equal(approved.ok, false, `${entry.label} ${JSON.stringify(approved)}`);
+        assert.equal(approved.error.code, 'ERC_BLOCKED', entry.label);
+        assert.equal(await readFile(specPath, 'utf8'), before, entry.label);
+      }
+    } finally {
+      socket.close();
+    }
+  } finally {
+    await daemon.close();
+    await rm(root, { force: true, recursive: true });
+    await rm(stateRoot, { force: true, recursive: true });
+  }
+});
+
+function openDaemonSocket(daemon) {
+  const socket = new WebSocket(`${daemon.url.replace('http:', 'ws:')}/ws`);
+  const pending = new Map();
+
+  socket.addEventListener('message', (event) => {
+    const envelope = JSON.parse(event.data);
+    if (envelope.type !== 'tool.result' || !envelope.payload?.id) return;
+    const waiter = pending.get(envelope.payload.id);
+    if (!waiter) return;
+    pending.delete(envelope.payload.id);
+    waiter.resolve(envelope.payload);
+  });
+
+  return {
+    call(payload) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(payload.id);
+          reject(new Error(`websocket ${payload.id} timed out`));
+        }, 30000);
+        pending.set(payload.id, {
+          resolve: (result) => {
+            clearTimeout(timer);
+            resolve(result);
+          }
+        });
+        const send = () => socket.send(JSON.stringify(createEnvelope('tool.call', payload)));
+        if (socket.readyState === WebSocket.OPEN) send();
+        else socket.addEventListener('open', send, { once: true });
+        socket.addEventListener('error', (error) => {
+          clearTimeout(timer);
+          pending.delete(payload.id);
+          reject(error);
+        }, { once: true });
+      });
+    },
+    close() {
+      socket.close();
+    }
+  };
+}
