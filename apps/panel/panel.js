@@ -145,8 +145,26 @@ for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
     if (typeof dialog?.showModal === 'function') dialog.showModal();
+    setToolsMenuOpen(false);
   });
 }
+document.querySelector('#tools-menu-button')?.addEventListener('click', () => {
+  const button = document.querySelector('#tools-menu-button');
+  setToolsMenuOpen(button?.getAttribute('aria-expanded') !== 'true');
+});
+document.addEventListener('click', (event) => {
+  const menu = document.querySelector('#tools-menu');
+  if (!menu || menu.hidden) return;
+  if (event.target instanceof Element && event.target.closest('#tools-menu, #tools-menu-button')) return;
+  setToolsMenuOpen(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const menu = document.querySelector('#tools-menu');
+  if (!menu || menu.hidden) return;
+  setToolsMenuOpen(false);
+  document.querySelector('#tools-menu-button')?.focus();
+});
 for (const button of document.querySelectorAll('.flow-btn')) {
   button.addEventListener('click', () => {
     if (button.getAttribute('aria-disabled') === 'true' || button.dataset.state === 'locked') {
@@ -1707,9 +1725,23 @@ function handleHostMessage(message) {
   }
 }
 
+function setToolsMenuOpen(open) {
+  const button = document.querySelector('#tools-menu-button');
+  const menu = document.querySelector('#tools-menu');
+  if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (menu) menu.hidden = !open;
+}
+
+function syncToolsBadge() {
+  const button = document.querySelector('#tools-menu-button');
+  if (!button) return;
+  button.classList.toggle('has-badge', Boolean(conflictDockBtnEl && !conflictDockBtnEl.hidden));
+}
+
 function showConflict() {
   conflictCardEl.hidden = false;
   if (conflictDockBtnEl) conflictDockBtnEl.hidden = false;
+  syncToolsBadge();
   document.getElementById('conflict-dialog')?.showModal?.();
   renderKiCadLink({ linkState: 'conflict', projectPath: activeProject.projectDir, dirty: true });
   startConflictWatch();
@@ -1718,6 +1750,7 @@ function showConflict() {
 function hideConflict() {
   conflictCardEl.hidden = true;
   if (conflictDockBtnEl) conflictDockBtnEl.hidden = true;
+  syncToolsBadge();
   document.getElementById('conflict-dialog')?.close?.();
   stopConflictWatch();
 }
