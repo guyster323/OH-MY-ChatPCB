@@ -24,6 +24,7 @@ import {
   loadCredentials,
   maskSecrets,
   openSystemBrowser,
+  resolveChatGPTConfigDir,
   restoreCredentialBytes,
   refreshAccessToken,
   resolveChatGPTSettings,
@@ -56,6 +57,16 @@ jwk.use = 'sig';
 
 const ALLOWED_TOOLS = [...PROVIDER_ALLOWED_TOOLS];
 const HOST_ID_V4 = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function configPathInside(dir, home) {
+  const fromHome = path.relative(path.resolve(home), path.resolve(dir));
+  return fromHome === '' || (fromHome !== '' && !fromHome.startsWith('..') && !path.isAbsolute(fromHome));
+}
+
+function assertPosixMode(actualMode, expected) {
+  if (process.platform === 'win32') return;
+  assert.equal(actualMode & 0o777, expected);
+}
 const OPENID_CONFIGURATION_URL = 'https://auth.openai.com/.well-known/openid-configuration';
 let portCursor = 28000;
 
@@ -102,11 +113,10 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
 
   it('keeps ChatGPT config writes in the temporary home', async () => {
     const id = await getOrCreateHostId();
-    const hostPath = path.join(process.env.XDG_CONFIG_HOME, 'chatpcb', 'chatgpt-host-id.txt');
+    const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
     assert.equal((await readFile(hostPath, 'utf8')).trim(), id);
     const realHome = userInfo().homedir;
-    const fromHome = path.relative(path.resolve(realHome), path.resolve(hostPath));
-    assert.equal(fromHome === '' || fromHome.startsWith('..') || path.isAbsolute(fromHome), true);
+    assert.equal(configPathInside(hostPath, realHome), false);
   });
 
   it('refuses a ChatPCB config directory inside the real home under node --test', async () => {
@@ -115,20 +125,51 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       HOME: process.env.HOME,
       USERPROFILE: process.env.USERPROFILE,
       XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-      APPDATA: process.env.APPDATA
+      APPDATA: process.env.APPDATA,
+      LOCALAPPDATA: process.env.LOCALAPPDATA
     };
     try {
       process.env.HOME = realHome;
       process.env.USERPROFILE = realHome;
       delete process.env.XDG_CONFIG_HOME;
       delete process.env.APPDATA;
+      const nativeDir = resolveChatGPTConfigDir({
+        platform: process.platform,
+        home: realHome,
+        env: {}
+      });
+      assert.equal(resolveChatGPTConfigDir(), nativeDir);
+      assert.equal(configPathInside(nativeDir, realHome), true);
       await assert.rejects(loadCredentials(), (error) => {
         assert.equal(error.code, 'CHATPCB_TEST_CONFIG_HOME');
+        assert.ok(error.message.includes(path.resolve(nativeDir)));
         assert.match(error.message, /real home/);
         assert.match(error.message, /node --test/);
         return true;
       });
-      process.env.XDG_CONFIG_HOME = `${realHome}-chatpcb-sibling`;
+
+      // A sibling of the real home stays outside the profile on every OS,
+      // including Windows where the temp directory lives under the profile.
+      const outsideXdg = `${realHome}-chatpcb-sibling`;
+      process.env.XDG_CONFIG_HOME = outsideXdg;
+      const xdgDir = resolveChatGPTConfigDir({
+        platform: process.platform,
+        home: realHome,
+        env: { XDG_CONFIG_HOME: outsideXdg }
+      });
+      assert.equal(resolveChatGPTConfigDir(), xdgDir);
+      assert.equal(configPathInside(xdgDir, realHome), false);
+      assert.equal(await loadCredentials(), null);
+
+      delete process.env.XDG_CONFIG_HOME;
+      if (process.platform === 'win32') {
+        process.env.APPDATA = `${realHome}-chatpcb-appdata`;
+      } else {
+        process.env.HOME = `${realHome}-chatpcb-home`;
+        process.env.USERPROFILE = process.env.HOME;
+      }
+      const escaped = resolveChatGPTConfigDir();
+      assert.equal(configPathInside(escaped, realHome), false);
       assert.equal(await loadCredentials(), null);
     } finally {
       for (const [key, value] of Object.entries(saved)) {
@@ -231,7 +272,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('registers a new account with dynamic_agent_client and reuses the issued client id', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({
         spawnImpl,
@@ -282,10 +323,10 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(saved.token_type, 'Bearer');
         assert.ok(saved.scopes.includes('chatgpt.tokens.use.direct'));
         assert.match(saved.saved_at, /^\d{4}-\d{2}-\d{2}T/);
-        const credPath = path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_ISSUED.json');
+        const credPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_ISSUED.json');
         const raw = await readFile(credPath, 'utf8');
         assert.equal(raw.includes('dynamic_agent_client'), false);
-        assert.equal((await stat(credPath)).mode & 0o777, 0o600);
+        assertPosixMode((await stat(credPath)).mode, 0o600);
 
         const second = createChatGPTAuthManager({
           spawnImpl,
@@ -349,7 +390,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('generates one host id and reuses it across manager instances', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       const { spawnImpl } = fakeSpawn();
       const first = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
       const second = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -360,9 +401,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         await first.cancelAll();
         const again = await second.startAuth();
         assert.equal(new URL(again.authUrl).searchParams.get('ext_agent_host_id'), hostId);
-        const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+        const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
         assert.equal((await readFile(hostPath, 'utf8')).trim(), hostId);
-        assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+        assertPosixMode((await stat(hostPath)).mode, 0o600);
       } finally {
         await first.cancelAll();
         await second.cancelAll();
@@ -371,16 +412,16 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('creates the config directory mode 0o700 and tightens an existing directory on POSIX', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(sampleCreds());
-      const configDir = path.join(dir, 'chatpcb');
+      const configDir = resolveChatGPTConfigDir();
       const created = await stat(configDir);
       assert.equal(created.isDirectory(), true);
       if (process.platform !== 'win32') assert.equal(created.mode & 0o777, 0o700);
     });
 
-    await withConfig(async (dir) => {
-      const configDir = path.join(dir, 'chatpcb');
+    await withConfig(async () => {
+      const configDir = resolveChatGPTConfigDir();
       await mkdir(configDir, { recursive: true });
       if (process.platform !== 'win32') {
         await chmod(configDir, 0o755);
@@ -396,8 +437,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('replaces a legacy host_ id with a stable urn:uuid', async () => {
-    await withConfig(async (dir) => {
-      const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+    await withConfig(async () => {
+      const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
       await mkdir(path.dirname(hostPath), { recursive: true });
       await writeFile(hostPath, 'host_fa1d4d58b406ac26b8f63419552b90f4', { mode: 0o600 });
 
@@ -405,7 +446,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       assert.match(first, HOST_ID_V4);
       assert.notEqual(first, 'host_fa1d4d58b406ac26b8f63419552b90f4');
       assert.equal(await readFile(hostPath, 'utf8'), first);
-      assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+      assertPosixMode((await stat(hostPath)).mode, 0o600);
       const names = await readdir(path.dirname(hostPath));
       assert.equal(names.some((name) => name.endsWith('.tmp')), false);
 
@@ -421,8 +462,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     ];
     const canonical = 'urn:uuid:123e4567-e89b-42d3-a456-426614174000';
     for (const stored of cases) {
-      await withConfig(async (dir) => {
-        const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+      await withConfig(async () => {
+        const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
         await mkdir(path.dirname(hostPath), { recursive: true });
         await writeFile(hostPath, `${stored}\n`, { mode: 0o644 });
         await saveCredentials({
@@ -432,7 +473,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
 
         assert.equal(await getOrCreateHostId(), canonical);
         assert.equal(await readFile(hostPath, 'utf8'), canonical);
-        assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+        assertPosixMode((await stat(hostPath)).mode, 0o600);
         const names = await readdir(path.dirname(hostPath));
         assert.equal(names.some((name) => name.endsWith('.tmp')), false);
         assert.equal((await loadCredentials()).client_id, 'oaiapp_TEST');
@@ -445,8 +486,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('drops registrations that do not match a regenerated host id', async () => {
-    await withConfig(async (dir) => {
-      const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+    await withConfig(async () => {
+      const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
       await mkdir(path.dirname(hostPath), { recursive: true });
       const oldHost = 'host_fa1d4d58b406ac26b8f63419552b90f4';
       await writeFile(hostPath, oldHost, { mode: 0o600 });
@@ -480,11 +521,11 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.match(next, HOST_ID_V4);
         assert.notEqual(next, oldHost);
         assert.equal(await readFile(hostPath, 'utf8'), next);
-        assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+        assertPosixMode((await stat(hostPath)).mode, 0o600);
         const names = await readdir(path.dirname(hostPath));
         assert.equal(names.some((name) => name.endsWith('.tmp')), false);
         assert.equal(await loadCredentials(), null);
-        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.deepEqual(await listCredentialFiles(), []);
         assert.equal(await getOrCreateHostId(), next);
         assert.equal(authUrl.searchParams.get('client_id'), 'dynamic_agent_client');
         assert.equal(authUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
@@ -501,8 +542,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
     ];
     for (const existing of values) {
-      await withConfig(async (dir) => {
-        const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+      await withConfig(async () => {
+        const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
         await mkdir(path.dirname(hostPath), { recursive: true });
         await writeFile(hostPath, existing, 'utf8');
         assert.equal(await getOrCreateHostId(), existing);
@@ -717,7 +758,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('keeps the issued client id after sign-out and still accepts an override', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
       const nonceRef = { nonce: null };
@@ -752,7 +793,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal((await manager.signOut()).state, 'signed_out');
         assert.equal(await loadCredentials(), null);
         assert.equal((await manager.getAuthStatus()).state, 'signed_out');
-        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_ISSUED.json'), 'utf8'));
+        const retained = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_ISSUED.json'), 'utf8'));
         assert.equal(retained.client_id, 'oaiapp_ISSUED');
         assert.equal(retained.ext_agent_host_id, hostId);
         assert.equal(retained.issuer, 'https://auth.openai.com');
@@ -762,7 +803,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assertSessionCleared(retained);
         assert.equal(JSON.stringify(retained).includes('ada@ex.com'), false);
         assert.equal(JSON.stringify(retained).includes('user_123'), false);
-        const other = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
+        const other = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
         assert.equal(other.client_id, 'oaiapp_OTHER');
         assert.equal(other.ext_agent_host_id, hostId);
         assert.equal(other.last_used_at, 1);
@@ -790,8 +831,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         await manager.cancelAll();
         delete process.env.CHATPCB_CHATGPT_CLIENT_ID;
 
-        await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
-        await writeFile(path.join(dir, 'chatpcb', 'chatgpt.json'), JSON.stringify({ clientId: 'oaiapp_FROM_FILE' }));
+        await mkdir(resolveChatGPTConfigDir(), { recursive: true });
+        await writeFile(path.join(resolveChatGPTConfigDir(), 'chatgpt.json'), JSON.stringify({ clientId: 'oaiapp_FROM_FILE' }));
         const fromFile = await manager.startAuth();
         assert.equal(new URL(fromFile.authUrl).searchParams.get('client_id'), 'oaiapp_FROM_FILE');
         assert.equal(new URL(fromFile.authUrl).searchParams.has('agent_name_hint'), false);
@@ -1285,7 +1326,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('selects a model from the account catalog and allows an override', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(sampleCreds());
       const seen = [];
       stubFetch(async (url, init) => {
@@ -1316,8 +1357,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       const fromEnv = await callChatGPTResponses({ prompt: 'ESP32 board' });
       assert.equal(fromEnv.model, 'gpt-y');
 
-      await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
-      await writeFile(path.join(dir, 'chatpcb', 'chatgpt.json'), JSON.stringify({ model: 'gpt-y' }));
+      await mkdir(resolveChatGPTConfigDir(), { recursive: true });
+      await writeFile(path.join(resolveChatGPTConfigDir(), 'chatgpt.json'), JSON.stringify({ model: 'gpt-y' }));
       delete process.env.CHATPCB_CHATGPT_MODEL;
       const fromFile = await callChatGPTResponses({ prompt: 'ESP32 board' });
       assert.equal(fromFile.model, 'gpt-y');
@@ -1728,7 +1769,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       assert.equal(temps[0] === temps[1], false);
       assert.equal(await readFile(credPath, 'utf8'), previous.toString('utf8'));
       if (process.platform !== 'win32') {
-        assert.equal((await stat(credPath)).mode & 0o777, 0o600);
+        assertPosixMode((await stat(credPath)).mode, 0o600);
       }
       assert.deepEqual(
         (await readdir(dir)).filter((name) => name !== path.basename(credPath)),
@@ -2048,8 +2089,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('selects the most recently used account, then email', async () => {
-    await withConfig(async (dir) => {
-      const configDir = path.join(dir, 'chatpcb');
+    await withConfig(async () => {
+      const configDir = resolveChatGPTConfigDir();
       await mkdir(configDir, { recursive: true });
       await writeCred(configDir, {
         client_id: 'zoe-old',
@@ -2465,7 +2506,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('does not restore credentials when sign-out finishes during a Responses call', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(sampleCreds());
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -2489,7 +2530,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const result = await call;
         assert.equal(result.completed, true);
         assert.equal(result.text, 'hi');
-        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+        const retained = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
         assert.equal(retained.client_id, 'oaiapp_TEST');
         assert.equal(typeof retained.last_used_at, 'number');
         assert.deepEqual(Object.keys(retained).sort(), ['client_id', 'last_used_at']);
@@ -2505,7 +2546,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('does not restore credentials when sign-out finishes during token refresh', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(expiredCreds());
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -2529,7 +2570,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         gate.resolve();
         const result = await call;
         assert.equal(result.completed, true);
-        const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+        const retained = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
         assert.equal(retained.client_id, 'oaiapp_TEST');
         assert.equal(retained.access_token === 'AT_NEW', false);
         assert.equal(retained.refresh_token === 'RT_NEW', false);
@@ -2547,7 +2588,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('drops the issued client id when refresh returns invalid_client and registers again', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials({
         ...sampleCreds(),
         client_id: 'oaiapp_OTHER',
@@ -2572,10 +2613,10 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       const result = await callChatGPTResponses({ prompt: 'hi' });
       assert.equal(result.completed, true);
       assert.equal((await loadCredentials()).client_id, 'oaiapp_OTHER');
-      const other = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
+      const other = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_OTHER.json'), 'utf8'));
       assert.equal(other.access_token, 'AT_OTHER');
       assert.equal(other.refresh_token, 'RT_OTHER');
-      assert.equal((await listCredentialFiles(dir)).includes('chatgpt-credentials-oaiapp_TEST.json'), false);
+      assert.equal((await listCredentialFiles()).includes('chatgpt-credentials-oaiapp_TEST.json'), false);
 
       stubFetch(async () => new Response(JSON.stringify({ error: 'invalid_client' }), {
         status: 401,
@@ -2587,7 +2628,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(err.message.includes('revoked-secret'), false);
         return true;
       });
-      assert.deepEqual(await listCredentialFiles(dir), []);
+      assert.deepEqual(await listCredentialFiles(), []);
       assert.equal(await loadCredentials(), null);
 
       const { spawnImpl } = fakeSpawn();
@@ -2604,7 +2645,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('drops the issued client id when the authorize callback returns invalid_client and registers again', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(sampleCreds());
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -2630,7 +2671,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.match(page.body, /sign in again/i);
         assert.equal(/cancelled/i.test(page.body), false);
         assert.equal(tokenCalls.length, 0);
-        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.deepEqual(await listCredentialFiles(), []);
         assert.equal(await loadCredentials(), null);
 
         const again = await manager.startAuth();
@@ -2644,7 +2685,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('drops the issued client id when the token endpoint returns invalid_client and registers again', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(sampleCreds());
       const { spawnImpl } = fakeSpawn();
       const manager = createChatGPTAuthManager({ spawnImpl, portStart: allocPort(), timeoutMs: 20000 });
@@ -2666,7 +2707,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
           `${authUrl.searchParams.get('redirect_uri')}?code=CODE&state=${authUrl.searchParams.get('state')}`
         );
         assert.match(page.body, /invalid_client/);
-        assert.deepEqual(await listCredentialFiles(dir), []);
+        assert.deepEqual(await listCredentialFiles(), []);
         assert.equal(await loadCredentials(), null);
 
         const again = await manager.startAuth();
@@ -2680,10 +2721,10 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('times out a hanging Responses request at the configured limit', { timeout: 5000 }, async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       assert.equal((await resolveChatGPTSettings()).responsesTimeoutMs, 120_000);
-      await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
-      await writeFile(path.join(dir, 'chatpcb', 'chatgpt.json'), JSON.stringify({ responsesTimeoutMs: 80 }));
+      await mkdir(resolveChatGPTConfigDir(), { recursive: true });
+      await writeFile(path.join(resolveChatGPTConfigDir(), 'chatgpt.json'), JSON.stringify({ responsesTimeoutMs: 80 }));
       assert.equal((await resolveChatGPTSettings()).responsesTimeoutMs, 80);
       process.env.CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS = '40';
       assert.equal((await resolveChatGPTSettings()).responsesTimeoutMs, 40);
@@ -2736,7 +2777,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('shares one refresh when concurrent provider calls use the same refresh token', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       await saveCredentials(expiredCreds());
       let refreshCalls = 0;
       const gate = deferred();
@@ -2765,7 +2806,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const saved = await loadCredentials();
         assert.equal(saved.access_token, 'AT_NEW');
         assert.equal(saved.refresh_token, 'RT_NEW');
-        assert.equal((await listCredentialFiles(dir)).length, 1);
+        assert.equal((await listCredentialFiles()).length, 1);
       } finally {
         gate.resolve();
       }
@@ -3243,7 +3284,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('sign-out keeps client id, host id, issuer, and timestamps, and drops tokens and personal fields', async () => {
-    await withConfig(async (dir) => {
+    await withConfig(async () => {
       const manager = createChatGPTAuthManager();
       await saveCredentials({
         client_id: 'oaiapp_TEST',
@@ -3263,9 +3304,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         scopes: PLAN_SCOPE.split(' '),
         token_type: 'Bearer'
       });
-      const before = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+      const before = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
       assert.equal((await manager.signOut()).state, 'signed_out');
-      const retained = JSON.parse(await readFile(path.join(dir, 'chatpcb', 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
+      const retained = JSON.parse(await readFile(path.join(resolveChatGPTConfigDir(), 'chatgpt-credentials-oaiapp_TEST.json'), 'utf8'));
       assert.equal(retained.client_id, 'oaiapp_TEST');
       assert.equal(retained.ext_agent_host_id, 'host-1');
       assert.equal(retained.issuer, 'https://auth.openai.com');
@@ -3288,9 +3329,9 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
   });
 
   it('reads client id from the environment and config file', async () => {
-    await withConfig(async (dir) => {
-      await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
-      await writeFile(path.join(dir, 'chatpcb', 'chatgpt.json'), JSON.stringify({ clientId: 'from-file' }));
+    await withConfig(async () => {
+      await mkdir(resolveChatGPTConfigDir(), { recursive: true });
+      await writeFile(path.join(resolveChatGPTConfigDir(), 'chatgpt.json'), JSON.stringify({ clientId: 'from-file' }));
       assert.equal((await resolveChatGPTSettings()).clientId, 'from-file');
       process.env.CHATPCB_CHATGPT_CLIENT_ID = 'from-env';
       assert.equal((await resolveChatGPTSettings()).clientId, 'from-env');
@@ -3644,15 +3685,23 @@ function childClose(child, timeoutMs) {
   });
 }
 
+const CONFIG_ENV_KEYS = ['XDG_CONFIG_HOME', 'APPDATA', 'LOCALAPPDATA'];
+
+// dir is the temporary XDG_CONFIG_HOME. Credential files live in
+// resolveChatGPTConfigDir(), which follows that variable on every OS.
 async function withConfig(fn) {
   const dir = await mkdtemp(path.join(tmpdir(), 'chatpcb-cgpt-'));
-  const previous = process.env.XDG_CONFIG_HOME;
+  const saved = new Map(CONFIG_ENV_KEYS.map((key) => [key, process.env[key]]));
   process.env.XDG_CONFIG_HOME = dir;
+  process.env.APPDATA = path.join(dir, 'AppData', 'Roaming');
+  process.env.LOCALAPPDATA = path.join(dir, 'AppData', 'Local');
   try {
     return await fn(dir);
   } finally {
-    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
-    else process.env.XDG_CONFIG_HOME = previous;
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     await rm(dir, { recursive: true, force: true });
   }
 }
@@ -3759,8 +3808,8 @@ function assertSessionCleared(creds) {
   assert.equal(creds.scopes, undefined);
 }
 
-async function listCredentialFiles(dir) {
-  const configDir = path.join(dir, 'chatpcb');
+async function listCredentialFiles() {
+  const configDir = resolveChatGPTConfigDir();
   let names;
   try {
     names = await readdir(configDir);
@@ -3776,7 +3825,7 @@ async function closeServer(server) {
 }
 
 async function withDelayedTokenExchange(fn) {
-  await withConfig(async (dir) => {
+  await withConfig(async () => {
     const { spawnImpl } = fakeSpawn();
     const manager = createChatGPTAuthManager({
       clientId: 'oaiapp_TEST',
@@ -3816,11 +3865,11 @@ async function withDelayedTokenExchange(fn) {
         `${authUrl.searchParams.get('redirect_uri')}?code=CODE&state=${authUrl.searchParams.get('state')}`
       );
       await waitFor(() => tokenFetchStarted);
-      await fn({ manager, dir, gate, started, callbackPromise });
+      await fn({ manager, gate, started, callbackPromise });
       gate.resolve();
       await callbackPromise;
       await delay(30);
-      assert.deepEqual(await listCredentialFiles(dir), []);
+      assert.deepEqual(await listCredentialFiles(), []);
       assert.equal(await loadCredentials(), null);
       assert.equal((await manager.getAuthStatus()).state, 'signed_out');
     } finally {

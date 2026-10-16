@@ -3440,6 +3440,7 @@ test('chatgpt tool call records source.provider and keeps the profile parts list
     })
   });
   const logs = spyDaemonError();
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
   const restoreFetch = stubChatGptFetch(JSON.stringify({
     type: 'tool.call',
     payload: {
@@ -3491,6 +3492,7 @@ test('chatgpt tool call records source.provider and keeps the profile parts list
       assert.equal(status.result.transactions[0].proposal.source.via, 'provider');
     });
   } finally {
+    restoreKicadLibraryEnv(previousLibs);
     logs.restore();
     restoreFetch();
     services.patchApprovalRegistry.disposeAll();
@@ -3570,6 +3572,7 @@ test('chatgpt native fallback records provider null and still drafts profile par
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-chatgpt-fallback-'));
   const services = await transactionServices({ validateProjectImpl: passingErc });
   const logs = spyDaemonError();
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
   const restoreFetch = stubChatGptFetch('The draft is ready.');
   try {
     await withChatGptHome(async () => {
@@ -3596,6 +3599,7 @@ test('chatgpt native fallback records provider null and still drafts profile par
       assert.deepEqual(decision, ['provider chatgpt: fell back to native: provider returned no tool call']);
     });
   } finally {
+    restoreKicadLibraryEnv(previousLibs);
     logs.restore();
     restoreFetch();
     services.patchApprovalRegistry.disposeAll();
@@ -3613,6 +3617,7 @@ test('apply succeeds after preview writes lastSource to the conversation file', 
       drc: { ok: true, skipped: false, executed: true, violations: [], unconnectedItems: [] }
     })
   });
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
   const restoreFetch = stubChatGptFetch(JSON.stringify({
     type: 'tool.call',
     payload: {
@@ -3666,6 +3671,7 @@ test('apply succeeds after preview writes lastSource to the conversation file', 
       assert.deepEqual(after.lastSource, { provider: 'chatgpt', via: 'provider' });
     });
   } finally {
+    restoreKicadLibraryEnv(previousLibs);
     restoreFetch();
     services.patchApprovalRegistry.disposeAll();
     await rm(workspaceRoot, { force: true, recursive: true });

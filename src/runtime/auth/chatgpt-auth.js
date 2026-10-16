@@ -154,16 +154,35 @@ function rethrowIfTestConfigGuard(error) {
   if (error?.code === TEST_CONFIG_CODE) throw error;
 }
 
-function getConfigDir() {
-  const platform = process.platform;
-  let dir;
+function envPath(value) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+// XDG_CONFIG_HOME wins on every OS when it is set, so tests can isolate
+// config with one variable. Otherwise Windows uses %APPDATA%\chatpcb (or
+// %USERPROFILE%\AppData\Roaming\chatpcb), macOS uses ~/Library/Application
+// Support/chatpcb, and every other platform uses ~/.config/chatpcb.
+export function resolveChatGPTConfigDir({
+  platform = process.platform,
+  env = process.env,
+  home
+} = {}) {
+  const xdg = envPath(env.XDG_CONFIG_HOME);
+  if (xdg) return join(xdg, 'chatpcb');
+
+  const homeDir = () => home ?? homedir();
   if (platform === 'win32') {
-    dir = join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'chatpcb');
-  } else if (platform === 'darwin') {
-    dir = join(homedir(), 'Library', 'Application Support', 'chatpcb');
-  } else {
-    dir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'chatpcb');
+    const appData = envPath(env.APPDATA);
+    return join(appData || join(homeDir(), 'AppData', 'Roaming'), 'chatpcb');
   }
+  if (platform === 'darwin') {
+    return join(homeDir(), 'Library', 'Application Support', 'chatpcb');
+  }
+  return join(homeDir(), '.config', 'chatpcb');
+}
+
+function getConfigDir() {
+  const dir = resolveChatGPTConfigDir();
   assertTestConfigNotInRealHome(dir);
   return dir;
 }
