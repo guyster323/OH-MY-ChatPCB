@@ -140,6 +140,7 @@ const DISCRETE_LED_EXCLUDE = /\besp32\b|\bstm32\b|\brp2040\b|\bnrf52\b|\batmega\
 const DISCRETE_LED_BOARD_WORDS = /\b(?:button|reset|boot|regulator|connector|header|i2c|spi|uart|gpio|display|lcd|switch|buzzer|motor|relay)\b|버튼|리셋|커넥터|헤더|레귤레이터|디스플레이/i;
 const DISCRETE_PROFILE_KINDS = new Set(['battery-monitor', 'isolated-dcdc', 'bms']);
 const MAX_DISCRETE_LEDS = 8;
+const MAX_DISCRETE_LED_PROMPT_CHARS = 4000;
 const TYPICAL_LED_CURRENT_MA = 10;
 const E24_MANTISSA = [1, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2, 2.2, 2.4, 2.7, 3, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1];
 const ENGLISH_LED_COUNTS = {
@@ -362,6 +363,13 @@ function acSupplyMessage(volts) {
   return {
     en: `Refusing to draft an LED circuit because the supply is AC.${detected} The discrete LED generator only supports DC rails up to 24V. No LED, resistor, or power symbol was generated.`,
     ko: `교류는 전압과 관계없이 거부합니다.${detectedKo} 이산 LED 생성기는 24V 이하의 직류만 지원합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
+}
+
+function promptTooLongMessage() {
+  return {
+    en: `Refusing to draft an LED circuit because the prompt is longer than ${MAX_DISCRETE_LED_PROMPT_CHARS} characters. Shorten the request and try again. No LED, resistor, or power symbol was generated.`,
+    ko: `요청이 ${MAX_DISCRETE_LED_PROMPT_CHARS}자를 넘어 LED 회로를 만들지 않습니다. 요청을 줄여 다시 보내 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
   };
 }
 
@@ -754,6 +762,14 @@ function refuseDiscreteLed({ code, texts, prompt, supplyVolts, supplyAssumed = f
 export function parseDiscreteLedRequest(prompt) {
   const text = String(prompt ?? '');
   if (!isSimpleDiscreteLedPrompt(text)) return null;
+  if (text.length > MAX_DISCRETE_LED_PROMPT_CHARS) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-prompt-too-long',
+      prompt: text,
+      supplyVolts: null,
+      texts: promptTooLongMessage()
+    });
+  }
   const scan = classifyQuantities(text);
   const supply = resolveDiscreteSupply(text, scan);
   if (supply.refused) return refuseDiscreteLed({ ...supply, prompt: text });

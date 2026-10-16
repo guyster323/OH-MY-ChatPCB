@@ -11,7 +11,10 @@ const VOLTAGE_NUMBER = '(\\d+(?:[.,]\\d+)?)';
 const VOLTAGE_SIGN = '([+\\-\\u2212])?';
 const VOLTAGE_MULT = '([kKmM])?';
 const VOLTAGE_AC_TAIL = '(?:\\s*/\\s*[Aa]\\.?[Cc]\\.?)?';
-const RANGE_SEPARATOR = '(?:-|~|(?<![A-Za-z])[Tt][Oo](?![A-Za-z]))';
+const RANGE_SEPARATOR = '(?:-|~|–|—|～|〜|(?<![A-Za-z])[Tt][Oo](?![A-Za-z]))';
+// A voltage may also begin immediately after "Vf", as in vf3.2v. The label
+// itself stays outside the token so the forward-voltage binder can see it.
+const VOLTAGE_START = '(?:(?<![\\w.])|(?<=\\b[Vv][Ff]))';
 
 const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
 const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
@@ -31,11 +34,15 @@ const PRIORITY = {
   bare: 8
 };
 
+// Anchored at a token boundary. An unanchored \d+ retries at every offset and
+// is quadratic on a long digit run.
 const UNCOVERED_VOLTAGE = [
-  '\\d+(?:[.,]\\d+)?\\s*[kKmM]?\\s*(?:volts|volt|vdc|vac|v|볼트)[A-Za-z]+',
-  '\\d+(?:,\\d+){2,}\\s*[kKmM]?\\s*(?:volts|volt|vdc|vac|v|볼트)(?![A-Za-z])',
+  '(?<![A-Za-z0-9.,])\\d+(?:[.,]\\d+)?\\s*[kKmM]?\\s*(?:volts|volt|vdc|vac|v|볼트)[A-Za-z]+',
+  '(?<![A-Za-z0-9.,])\\d+(?:,\\d+){2,}\\s*[kKmM]?\\s*(?:volts|volt|vdc|vac|v|볼트)(?![A-Za-z])',
   '(?<![A-Za-z0-9.,])(?:volts|volt|vdc|vac|kv|mv|볼트)(?![A-Za-z])'
 ];
+const UNITLESS_VF_MIN = 0.5;
+const UNITLESS_VF_MAX = 5;
 
 // Longer labels first. "forward voltage" must win over the bare word "forward",
 // and "순방향 전압" over "순방향". A following voltage wins when only space,
@@ -44,7 +51,8 @@ const UNCOVERED_VOLTAGE = [
 const FORWARD_LABELS = [
   /forward\s+voltage(?:\s+of)?/gi,
   /순방향\s*전압/g,
-  /\bvf\b(?:\s*[=:])?/gi,
+  // "vf3.2v" has no word boundary between the label and the digits.
+  /\bvf(?=\b|\d)(?:\s*[=:])?/gi,
   /\bforward\b/gi,
   /순방향/g
 ];
@@ -200,7 +208,7 @@ function collectGlued(prompt, candidates) {
 
 function collectVoltages(prompt, candidates) {
   const pattern = new RegExp(
-    `(?<![\\w.])${VOLTAGE_SIGN}${VOLTAGE_NUMBER}\\s*${VOLTAGE_MULT}\\s*(${VOLTAGE_UNIT})${VOLTAGE_AC_TAIL}(?![A-Za-z])`,
+    `${VOLTAGE_START}${VOLTAGE_SIGN}${VOLTAGE_NUMBER}\\s*${VOLTAGE_MULT}\\s*(${VOLTAGE_UNIT})${VOLTAGE_AC_TAIL}(?![A-Za-z])`,
     'g'
   );
   for (const match of prompt.matchAll(pattern)) {
@@ -358,6 +366,23 @@ function collectCounts(prompt, candidates) {
   }
 }
 
+// "Vf=3.2" and "Vf 3.2" are volts only for a Vf label and only inside the
+// usual LED forward range. Outside that range the number stays a resistor.
+function collectUnitlessForward(prompt, candidates) {
+  const pattern = /\bvf\b(?:\s*[=:]\s*|\s+)(\d+(?:[.,]\d+)?)(?![\w.])/gi;
+  for (const match of prompt.matchAll(pattern)) {
+    const rawNumber = match[1];
+    const volts = parseVoltageNumber(rawNumber);
+    if (!(volts >= UNITLESS_VF_MIN && volts <= UNITLESS_VF_MAX)) continue;
+    const start = (match.index ?? 0) + match[0].length - rawNumber.length;
+    const end = start + rawNumber.length;
+    const token = voltageToken(prompt, start, end, volts, '', 'V');
+    token.unit = 'V';
+    token.form = 'voltage';
+    candidates.push({ priority: PRIORITY.voltage, start, end, token, invalid: false });
+  }
+}
+
 function collectBare(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+\.\d+|\d+)(?![\w]|\.\d)/g;
   for (const match of prompt.matchAll(pattern)) {
@@ -412,6 +437,7 @@ export function tokenizeQuantities(prompt) {
   collectSuffix(text, candidates);
   collectCurrent(text, candidates);
   collectCounts(text, candidates);
+  collectUnitlessForward(text, candidates);
   collectBare(text, candidates);
 
   const accepted = resolveOverlaps(candidates);

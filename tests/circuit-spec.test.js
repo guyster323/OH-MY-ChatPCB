@@ -787,8 +787,17 @@ test('identical blocker, note, and warning sentences appear once in the review',
 test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () => {
   const cases = [
     ['3.0-3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
+    ['3.0–3.4V', [{ value: 3.4, unit: 'V', raw: '3.0–3.4V' }]],
+    ['3.0—3.4V', [{ value: 3.4, unit: 'V', raw: '3.0—3.4V' }]],
+    ['2.0～2.4V', [{ value: 2.4, unit: 'V', raw: '2.0～2.4V' }]],
+    ['2.0〜2.4V', [{ value: 2.4, unit: 'V', raw: '2.0〜2.4V' }]],
     ['2.0~2.4V', [{ value: 2.4, unit: 'V', raw: '2.0~2.4V' }]],
     ['2.0 to 2.4 V', [{ value: 2.4, unit: 'V', raw: '2.0 to 2.4 V' }]],
+    ['vf3.2v', [{ value: 3.2, unit: 'V', raw: '3.2v' }]],
+    ['VF3.2V', [{ value: 3.2, unit: 'V', raw: '3.2V' }]],
+    ['Vf3.2v', [{ value: 3.2, unit: 'V', raw: '3.2v' }]],
+    ['Vf=3.2', [{ value: 3.2, unit: 'V', raw: '3.2' }]],
+    ['Vf 3.2', [{ value: 3.2, unit: 'V', raw: '3.2' }]],
     ['2,0-2,4V', [{ value: 2.4, unit: 'V', raw: '2,0-2,4V' }]],
     ['3300mV', [{ value: 3.3, unit: 'mV', raw: '3300mV' }]],
     ['3300 mV', [{ value: 3.3, unit: 'mV', raw: '3300 mV' }]],
@@ -832,8 +841,17 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     });
   }
 
-  const range = tokenizeQuantities('Vf 3.0-3.4V').tokens[0];
-  assert.deepEqual(range.range, { min: 3, max: 3.4 });
+  for (const [prompt, min, max] of [
+    ['Vf 3.0-3.4V', 3, 3.4],
+    ['3.0–3.4V', 3, 3.4],
+    ['3.0—3.4V', 3, 3.4],
+    ['2.0～2.4V', 2, 2.4],
+    ['2.0〜2.4V', 2, 2.4]
+  ]) {
+    const token = tokenizeQuantities(prompt).tokens[0];
+    assert.deepEqual(token.range, { min, max }, prompt);
+    assert.equal(token.value, max, prompt);
+  }
   assert.equal(tokenizeQuantities('LED 5Vrms').unparseable, true);
   assert.equal(tokenizeQuantities('LED 3,3,3V').unparseable, true);
   assert.equal(tokenizeQuantities('LED on volts').unparseable, true);
@@ -893,6 +911,25 @@ test('quantity classification is order-independent inside a small window', () =>
       ['5V', 'voltage'],
       ['3.2V', 'vf']
     ]],
+    ['LED 5V Vf=3.2', [
+      ['5V', 'voltage'],
+      ['3.2', 'vf']
+    ]],
+    ['LED 5V Vf 3.2', [
+      ['5V', 'voltage'],
+      ['3.2', 'vf']
+    ]],
+    ['LED 5V vf3.2v', [
+      ['5V', 'voltage'],
+      ['3.2v', 'vf']
+    ]],
+    ['LED 5V VF3.2V', [
+      ['5V', 'voltage'],
+      ['3.2V', 'vf']
+    ]],
+    ['LED Vf=3.2', [
+      ['3.2', 'vf']
+    ]],
     ['LED 5V 순방향 전압 2.2V', [
       ['5V', 'voltage'],
       ['2.2V', 'vf']
@@ -951,6 +988,10 @@ test('quantity classification is order-independent inside a small window', () =>
 test('a forward-voltage range is not a resistor and uses its maximum', () => {
   const cases = [
     ['LED Vf 3.0-3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
+    ['LED Vf 3.0–3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0–3.4V'],
+    ['LED Vf 3.0—3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0—3.4V'],
+    ['LED Vf 2.0～2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0～2.4V'],
+    ['LED Vf 2.0〜2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0〜2.4V'],
     ['LED Vf 2.0~2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0~2.4V'],
     ['LED Vf 2.0 to 2.4 V at 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0 to 2.4 V'],
     ['blue LED Vf 3.0-3.4V on 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V']
@@ -986,6 +1027,14 @@ test('a specified forward voltage beats the color default in either order', () =
     ['LED 2개 5V Vf 3.2V', 5, false, 3.2, '180Ω', 2],
     ['white LED on 5V, Vf 3.2V', 5, false, 3.2, '180Ω', 1],
     ['LED Vf=3.2V 5V', 5, false, 3.2, '180Ω', 1],
+    ['LED Vf=3.2', 5, true, 3.2, '180Ω', 1],
+    ['LED Vf 3.2', 5, true, 3.2, '180Ω', 1],
+    ['LED 5V Vf=3.2', 5, false, 3.2, '180Ω', 1],
+    ['LED 5V Vf 3.2', 5, false, 3.2, '180Ω', 1],
+    ['LED 5V vf3.2v', 5, false, 3.2, '180Ω', 1],
+    ['LED 5V VF3.2V', 5, false, 3.2, '180Ω', 1],
+    ['LED 5V Vf3.2v', 5, false, 3.2, '180Ω', 1],
+    ['blue LED 5V vf3.2v', 5, false, 3.2, '180Ω', 1],
     ['LED 5 V, Vf 2.2 V', 5, false, 2.2, '300Ω', 1],
     ['LED Vf 3200mV', 5, true, 3.2, '180Ω', 1],
     ['LED 5V 순방향 전압 2V', 5, false, 2, '300Ω', 1],
@@ -1145,7 +1194,8 @@ test('every discrete LED message is one language and Korean has no English words
     'white LED on 3.3V',
     '빨간 LED를 5V에 연결해줘',
     'LED 5V forward voltage 3.2V',
-    'LED 5V 순방향 전압 2.2V'
+    'LED 5V 순방향 전압 2.2V',
+    `LED ${'x'.repeat(4100)}`
   ];
   const seen = new Set();
   for (const prompt of prompts) {
@@ -1192,6 +1242,7 @@ test('every discrete LED message is one language and Korean has no English words
     'discrete-led-vf-range',
     'discrete-led-headroom',
     'discrete-led-draft',
+    'discrete-led-prompt-too-long',
     'validation-needed'
   ]) {
     assert.equal(seen.has(code), true, `${code} missing from ${[...seen].sort().join(', ')}`);
@@ -1216,6 +1267,104 @@ test('every discrete LED message is one language and Korean has no English words
   assert.equal(koreanForward.supplyVolts, 5);
   assert.equal(koreanForward.specifiedVf, 2.2);
   assert.equal(koreanForward.resistorValue, '300Ω');
+});
+
+test('unitless Vf is volts only when labeled Vf and between 0.5 and 5', () => {
+  const volts = [
+    ['LED Vf=0.5', 5, true, 0.5, '470Ω'],
+    ['LED Vf=5 12V', 12, false, 5, '750Ω'],
+    ['LED Vf=2 5V', 5, false, 2, '300Ω'],
+    ['LED vf=3.2', 5, true, 3.2, '180Ω'],
+    ['LED VF 3.2', 5, true, 3.2, '180Ω'],
+    ['LED Vf:3.2', 5, true, 3.2, '180Ω'],
+    ['red LED Vf=3.2 on 5V', 5, false, 3.2, '180Ω']
+  ];
+  for (const [prompt, supply, assumed, vf, resistor] of volts) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.supplyVolts, supply, prompt);
+    assert.equal(parsed.supplyAssumed, assumed, prompt);
+    assert.equal(parsed.specifiedVf, vf, prompt);
+    assert.equal(parsed.resistorExplicit, false, prompt);
+    assert.equal(parsed.resistorValue, resistor, prompt);
+  }
+
+  const atSupply = parseDiscreteLedRequest('LED Vf=5');
+  assert.equal(atSupply.refused, true);
+  assert.equal(atSupply.reviewBlockers[0].code, 'discrete-led-below-vf');
+  assert.match(atSupply.reviewBlockers[0].en, /specified forward voltage of 5V/);
+  assert.equal(atSupply.resistanceOhms, null);
+
+  const notVolts = [
+    ['LED Vf=0.4', 0.4],
+    ['LED Vf=0.49', 0.49],
+    ['LED Vf=5.1', 5.1],
+    ['LED Vf=6', 6],
+    ['LED 5V 3.2', 3.2],
+    ['LED forward voltage 3.2', 3.2]
+  ];
+  for (const [prompt, ohms] of notVolts) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.specifiedVf, null, prompt);
+    assert.equal(parsed.resistorExplicit, true, prompt);
+    assert.equal(parsed.resistanceOhms, ohms, prompt);
+  }
+
+  const gluedWithoutUnit = parseDiscreteLedRequest('LED 5V Vf3.2');
+  assert.notEqual(gluedWithoutUnit.specifiedVf, 3.2);
+  assert.notEqual(gluedWithoutUnit.resistorValue, '180Ω');
+});
+
+test('a discrete LED prompt longer than 4000 characters is blocked without tokenizing', { timeout: 20000 }, () => {
+  const base = 'LED on 5V';
+  const under = `${base}${' '.repeat(4000 - base.length)}`;
+  assert.equal(under.length, 4000);
+  const accepted = parseDiscreteLedRequest(under);
+  assert.equal(accepted.refused, false, JSON.stringify(accepted.reviewBlockers));
+  assert.equal(accepted.supplyVolts, 5);
+  assert.notEqual(accepted.reviewBlockers[0]?.code, 'discrete-led-prompt-too-long');
+
+  const over = `${under} `;
+  assert.equal(over.length, 4001);
+  const blocked = parseDiscreteLedRequest(over);
+  assert.equal(blocked.refused, true);
+  assert.equal(blocked.reviewBlockers.length, 1);
+  assert.equal(blocked.reviewBlockers[0].code, 'discrete-led-prompt-too-long');
+  assert.match(blocked.reviewBlockers[0].en, /4000/);
+  assert.match(blocked.reviewBlockers[0].ko, /4000/);
+  assert.equal(blocked.reviewBlockers[0].message, blocked.reviewBlockers[0].en);
+  assert.equal(blocked.resistanceOhms, null);
+  assert.equal(blocked.supplyVolts, null);
+
+  const korean = `엘이디 ${'가'.repeat(4000)}`;
+  const koreanBlocked = parseDiscreteLedRequest(korean);
+  assert.equal(koreanBlocked.reviewBlockers[0].code, 'discrete-led-prompt-too-long');
+  assert.equal(koreanBlocked.reviewBlockers[0].message, koreanBlocked.reviewBlockers[0].ko);
+
+  const notLed = `STM32 ${'x'.repeat(5000)}`;
+  assert.equal(parseDiscreteLedRequest(notLed), null);
+
+  const huge = `LED 5V ${'1'.repeat(100_000)}`;
+  const started = performance.now();
+  const hugeBlocked = parseDiscreteLedRequest(huge);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 500, `parse took ${elapsed}ms`);
+  assert.equal(hugeBlocked.refused, true);
+  assert.equal(hugeBlocked.reviewBlockers[0].code, 'discrete-led-prompt-too-long');
+});
+
+test('quantity tokenization stays fast on long digit runs below the prompt cap', { timeout: 20000 }, () => {
+  const prompt = `LED 5V ${'1'.repeat(3900)}`;
+  assert.ok(prompt.length < 4000);
+  const started = performance.now();
+  const result = tokenizeQuantities(prompt);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 25, `tokenize took ${elapsed}ms`);
+  assert.equal(result.unparseable, false);
+  assert.equal(result.tokens.some((token) => token.raw === '5V'), true);
 });
 
 function strayKoreanAscii(text) {
