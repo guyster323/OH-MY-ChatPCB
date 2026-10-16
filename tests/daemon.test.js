@@ -9,6 +9,7 @@ import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-regis
 import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
+import { getProviderDefinition } from '../src/runtime/provider-registry.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { saveCircuitConversation } from '../src/runtime/request-conversation.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
@@ -28,6 +29,21 @@ async function kicadArtifacts(projectDir) {
     || name.endsWith('.kicad_pro')
     || name.endsWith('.chatpcb.json')
   ));
+}
+
+async function listRelativeFiles(directory) {
+  const names = [];
+  const walk = async (current) => {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(absolute);
+      else names.push(path.relative(directory, absolute).split(path.sep).join('/'));
+    }
+  };
+  await walk(directory);
+  names.sort();
+  return names;
 }
 
 async function transactionServices(extra = {}) {
@@ -450,7 +466,7 @@ test('daemon lists provider definitions through provider.list', async () => {
   assert.equal(result.ok, true);
   assert.deepEqual(
     result.result.providers.map((provider) => provider.id),
-    ['codex', 'claude', 'copilot']
+    ['codex', 'claude', 'copilot', 'grok']
   );
 });
 
@@ -500,6 +516,10 @@ test('daemon invokes a selected provider and executes emitted tool calls', async
     assert.equal(result.result.providerInvocation, true);
     assert.equal(result.result.provider, 'codex');
     assert.equal(providerCalls[0].command, 'codex');
+    assert.equal(providerCalls[0].providerId, 'codex');
+    assert.deepEqual(providerCalls[0].args, getProviderDefinition('codex').args);
+    assert.equal(providerCalls[0].timeoutMs, getProviderDefinition('codex').timeoutMs);
+    assert.equal(providerCalls[0].args.includes('--cwd'), false);
     assert.match(providerCalls[0].input, /Generate an STM32 board from chat\./);
     assert.match(providerCalls[0].input, /Project directory:/);
     assert.deepEqual(
@@ -510,6 +530,52 @@ test('daemon invokes a selected provider and executes emitted tool calls', async
     assert.equal(result.result.toolResults[0].ok, true);
     assert.equal(result.result.toolResults[0].result.requiresApproval, true);
     assert.match(result.result.toolResults[0].result.files.schematic, /\.kicad_sch$/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon spawns grok at the resolved path with --cwd and the grok timeout', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-invoke-'));
+  const resolvedPath = path.join(root, 'grok');
+  const providerCalls = [];
+
+  try {
+    const result = await dispatchToolCall(
+      {
+        id: 'call_grok_cwd',
+        name: 'provider.invoke',
+        args: {
+          provider: 'grok',
+          projectDir: root,
+          prompt: 'Generate an ESP32-S3 sensor board.'
+        }
+      },
+      {
+        checkProviderAvailabilityImpl: async () => ({
+          provider: 'grok',
+          command: resolvedPath,
+          resolvedPath,
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async (options) => {
+          providerCalls.push(options);
+          return { exitCode: 0, stderr: '', events: [] };
+        }
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(providerCalls.length, 1);
+    assert.equal(providerCalls[0].command, resolvedPath);
+    assert.equal(providerCalls[0].args[0], '--cwd');
+    assert.equal(providerCalls[0].args[1], root);
+    assert.ok(providerCalls[0].args.includes('--prompt-file'));
+    assert.equal(providerCalls[0].usePromptFile, true);
+    assert.equal(providerCalls[0].providerId, 'grok');
+    assert.equal(providerCalls[0].timeoutMs, getProviderDefinition('grok').timeoutMs);
+    assert.ok(getProviderDefinition('grok', {}).timeoutMs >= 300000);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1061,6 +1127,90 @@ test('daemon does not fall back after provider parse, cancellation, or non-zero 
   }
 });
 
+test('grok project.request uses a generate schema for a new project and a patch schema with spec context for an existing one', async () => {
+  const createdRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-new-schema-'));
+  const existingRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-existing-schema-'));
+  const patchApprovalRegistry = createPatchApprovalRegistry();
+  const captured = [];
+  const grokOptions = (events) => ({
+    patchApprovalRegistry,
+    checkProviderAvailabilityImpl: async () => ({
+      available: true,
+      command: 'grok',
+      resolvedPath: 'grok',
+      status: 'available'
+    }),
+    runProviderProcessImpl: async (invocation) => {
+      captured.push({ args: invocation.args, input: invocation.input });
+      return { exitCode: 0, stderr: '', events };
+    },
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
+
+  try {
+    const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.';
+    const created = await dispatchToolCall({
+      id: 'grok-schema-new',
+      name: 'project.request',
+      args: { provider: 'grok', projectDir: createdRoot, prompt }
+    }, grokOptions([
+      createEnvelope('tool.call', {
+        id: 'gen',
+        name: 'schematic.generate',
+        args: { prompt }
+      })
+    ]));
+
+    assert.equal(created.ok, true);
+    assert.equal(created.result.providerFallback, undefined);
+    assert.equal(created.result.source.id, 'native');
+    assert.equal(created.result.source.provider, getProviderDefinition('grok').id);
+    assert.equal(created.result.source.via, 'provider');
+    const generateSchema = JSON.parse(captured[0].args[captured[0].args.indexOf('--json-schema') + 1]);
+    assert.deepEqual(generateSchema.properties.payload.properties.name.enum, ['schematic.generate']);
+    assert.equal(captured[0].args.includes('--permission-mode'), true);
+    assert.equal(captured[0].args.includes('plan'), true);
+    assert.match(captured[0].input, /Do not explore, read, or modify project files/);
+    assert.equal(captured[0].input.includes('project.inspect'), false);
+
+    await generateMcuPeripheralProject({
+      projectDir: existingRoot,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const patched = await dispatchToolCall({
+      id: 'grok-schema-existing',
+      name: 'project.request',
+      args: { provider: 'grok', projectDir: existingRoot, prompt: 'Add a status LED.' }
+    }, grokOptions([
+      createEnvelope('tool.call', {
+        id: 'patch',
+        name: 'schematic.patch',
+        args: { prompt: 'RP2040 board with USB-C power, I2C connector, and a status LED.' }
+      })
+    ]));
+
+    assert.equal(patched.ok, true);
+    assert.equal(patched.result.providerFallback, undefined);
+    assert.equal(patched.result.operation, 'patched');
+    assert.equal(patched.result.source.id, 'native');
+    assert.equal(patched.result.source.provider, getProviderDefinition('grok').id);
+    assert.equal(patched.result.source.via, 'provider');
+    const patchSchema = JSON.parse(captured[1].args[captured[1].args.indexOf('--json-schema') + 1]);
+    assert.deepEqual(patchSchema.properties.payload.properties.name.enum, ['schematic.patch']);
+    assert.equal(patchSchema.properties.payload.properties.args.properties.projectName.type, 'string');
+    assert.match(captured[1].input, /Existing project inspection context/);
+    assert.match(captured[1].input, /RP2040/);
+    assert.match(captured[1].input, /I2C/);
+    assert.match(captured[1].input, /Do not explore/);
+    assert.equal(captured[1].input.includes('project.inspect'), false);
+  } finally {
+    patchApprovalRegistry.disposeAll();
+    await rm(createdRoot, { force: true, recursive: true });
+    await rm(existingRoot, { force: true, recursive: true });
+  }
+});
+
 test('project.request falls back to a native preview when the provider only inspects', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-inspect-only-'));
   const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
@@ -1103,11 +1253,80 @@ test('project.request falls back to a native preview when the provider only insp
     assert.equal(result.result.requiresApproval, true);
     assert.equal(result.result.applied, false);
     assert.equal(result.result.operation, 'generated');
+    assert.equal(result.result.providerFallback, 'built-in-draft');
+    assert.equal(result.result.source.id, 'native');
+    assert.equal(result.result.source.provider, null);
+    assert.equal(result.result.source.via, 'native-fallback');
     assert.ok(result.result.conversation.specRows.some((row) => row.label === 'MCU'));
     assert.equal((await kicadArtifacts(created.result.projectDir)).length, 0);
   } finally {
     restoreKicadLibraryEnv(previous);
     await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('project.request journals a new conversation file and rollback restores the pre-request tree', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-conversation-rollback-'));
+  const services = await transactionServices({
+    ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'No tool call.' })] }),
+    validateProjectImpl: passingErc
+  });
+  const progress = [];
+
+  try {
+    const before = await listRelativeFiles(root);
+    const result = await dispatchToolCall({
+      id: 'call_fallback_conversation_rollback',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir: root,
+        prompt: 'RP2040 board with USB-C power and I2C connector.'
+      }
+    }, { ...services, emit: (type, payload) => progress.push({ type, ...payload }) });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.providerFallback, 'built-in-draft');
+    assert.equal(result.result.source.id, 'native');
+    assert.equal(result.result.source.provider, null);
+    assert.equal(result.result.source.via, 'native-fallback');
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.applied, false);
+    assert.ok(result.result.changedFiles.includes('.chatpcb-conversation.json'));
+    assert.deepEqual(await listRelativeFiles(root), before);
+    await assert.rejects(() => access(path.join(root, '.chatpcb-conversation.json')), { code: 'ENOENT' });
+    assert.ok(progress.some((item) => (
+      item.fallback === 'built-in-draft'
+      && item.reason === 'provider-returned-no-tool-call'
+      && /no tool call/i.test(item.text ?? '')
+    )));
+
+    const approved = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir: root, approved: true, patchId: result.result.patchId }
+    }, services);
+    assert.equal(approved.ok, true);
+    assert.equal(approved.result.applied, true);
+    assert.equal(approved.result.transaction.proposal.source.id, 'native');
+    assert.equal(approved.result.transaction.proposal.source.provider, null);
+    assert.equal(approved.result.transaction.proposal.source.via, 'native-fallback');
+    const conversation = await readFile(path.join(root, '.chatpcb-conversation.json'), 'utf8');
+    assert.match(conversation, /"status": "generate"/);
+    const created = approved.result.transaction.changes.find((change) => change.path === '.chatpcb-conversation.json');
+    assert.equal(created.operation, 'create');
+
+    const rolled = await dispatchToolCall({
+      name: 'project.transaction.rollback',
+      args: { projectDir: root, transactionId: approved.result.transaction.transactionId }
+    }, services);
+    assert.equal(rolled.ok, true);
+    assert.equal(rolled.result.rolledBack, true);
+    assert.deepEqual(await listRelativeFiles(root), before);
+    await assert.rejects(() => access(path.join(root, '.chatpcb-conversation.json')), { code: 'ENOENT' });
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
 
@@ -1181,6 +1400,9 @@ test('daemon returns a provider-emitted patch as a preview without writing until
     assert.equal(result.ok, true);
     assert.equal(result.result.requiresApproval, true);
     assert.equal(result.result.applied, false);
+    assert.equal(result.result.source.id, 'native');
+    assert.equal(result.result.source.provider, getProviderDefinition('codex').id);
+    assert.equal(result.result.source.via, 'provider');
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
 
     const approved = await dispatchToolCall(
@@ -1189,6 +1411,9 @@ test('daemon returns a provider-emitted patch as a preview without writing until
     );
     assert.equal(approved.ok, true);
     assert.equal(approved.result.applied, true);
+    assert.equal(approved.result.transaction.proposal.source.id, 'native');
+    assert.equal(approved.result.transaction.proposal.source.provider, getProviderDefinition('codex').id);
+    assert.equal(approved.result.transaction.proposal.source.via, 'provider');
   } finally {
     registry.disposeAll();
     await rm(root, { force: true, recursive: true });
