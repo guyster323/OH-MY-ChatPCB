@@ -186,7 +186,9 @@ node ./bin/chatpcb-cli.js simulate --project ./workspaces/demo
 node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 ```
 
-`validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; the current generated MCU fixture is expected to validate with `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
+The example prompt above creates a schematic-only project (no `.kicad_pcb`), so `drc` returns `skipped: true` with reason `NO_BOARD`. A PCB draft is created only for supported board profiles, for example `--prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator."`; run `drc` on such a project, or on a project where you created the board in KiCad yourself. Expect that board draft to fail DRC today: with KiCad 10.0.7 it reports `22` violations (`lib_footprint_mismatch` 21, `isolated_copper` 1) and `0` unconnected items, and `drc` exits with code `2`. These counts were measured with the bundled fixture footprints (`tests/fixtures/kicad-libraries`); with the full installed KiCad libraries the result can differ. The draft is a starting point, not a DRC-clean board.
+
+`validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; with KiCad 10.0.7 the CLI example above validates with `0` errors and `2` warnings (`isolated_pin_label`), while `npm run generate:sample` validates with `0` errors and `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
 
 ## Evidence and migration
 

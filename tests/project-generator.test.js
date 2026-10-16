@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { kicadInstallLibraryCandidatePaths, setFlatpakLibraryRootsForTests } from '../src/kicad/project-generator.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 test('generates a reviewable KiCad project and SPICE fixture for an MCU peripheral prompt', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-'));
@@ -189,6 +192,7 @@ test('review blocker names the requested MCU family instead of a hard-coded part
 
 test('supported release profiles generate a PCB draft and manufacturing metadata', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-pcb-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -224,49 +228,19 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
     assert.equal(metadata.boardProfile.manufacturing.exports.gerber.status, 'pending');
     assert.equal(metadata.boardProfile.manufacturing.exports.drill.status, 'pending');
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported release profiles embed resolved KiCad footprint bodies in PCB drafts', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-footprints-'));
-  const footprintRoot = path.join(root, 'footprints');
-  const resistorLibrary = path.join(footprintRoot, 'Resistor_SMD.pretty');
-  const previousFootprintDir = process.env.KICAD_FOOTPRINT_DIR;
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
-    await mkdir(resistorLibrary, { recursive: true });
-    await writeFile(
-      path.join(resistorLibrary, 'R_0603_1608Metric.kicad_mod'),
-      `(footprint "R_0603_1608Metric"
-  (version 20260206)
-  (generator "test")
-  (layer "F.Cu")
-  (property "Reference" "REF**"
-    (at 0 -1.43 0)
-    (layer "F.SilkS")
-    (effects (font (size 1 1) (thickness 0.15)))
-  )
-  (property "Value" "R_0603_1608Metric"
-    (at 0 1.43 0)
-    (layer "F.Fab")
-    (effects (font (size 1 1) (thickness 0.15)))
-  )
-  (pad "1" smd rect
-    (at -0.8 0)
-    (size 0.8 0.9)
-    (layers "F.Cu" "F.Paste" "F.Mask")
-  )
-  (pad "2" smd rect
-    (at 0.8 0)
-    (size 0.8 0.9)
-    (layers "F.Cu" "F.Paste" "F.Mask")
-  )
-)
-`,
-      'utf8'
-    );
-    process.env.KICAD_FOOTPRINT_DIR = footprintRoot;
 
     for (const [profile, prompt] of [
       [
@@ -314,17 +288,17 @@ test('supported release profiles embed resolved KiCad footprint bodies in PCB dr
       assert.doesNotMatch(board, /\(property "Reference" "REF\*\*"/);
     }
   } finally {
-    if (previousFootprintDir === undefined) {
-      delete process.env.KICAD_FOOTPRINT_DIR;
-    } else {
-      process.env.KICAD_FOOTPRINT_DIR = previousFootprintDir;
-    }
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profile PCB power intent rejects unsafe endpoint-pad routes', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-power-routing-'));
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
     for (const [profile, prompt] of [
@@ -361,12 +335,17 @@ test('supported profile PCB power intent rejects unsafe endpoint-pad routes', as
       assert.match(board, /\(at 36 82 0\)/);
     }
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profiles emit safe CC escape routes outside the USB-C pad field', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-usbc-cc-escape-'));
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
     for (const [profile, prompt] of [
@@ -392,12 +371,17 @@ test('supported profiles emit safe CC escape routes outside the USB-C pad field'
       assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
     }
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profiles route I2C pull-up nets through bounded multi-leg chains', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-i2c-routing-'));
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
     for (const [profile, prompt] of [
@@ -421,12 +405,17 @@ test('supported profiles route I2C pull-up nets through bounded multi-leg chains
       assert.equal(boardSegmentSpans(board).every((span) => span <= 30), true);
     }
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('supported profile generic segments avoid J3/J7 no-net pads and cross-net intersections', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pad-safe-generic-routing-'));
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
   let noNetPadCount = 0;
 
   try {
@@ -476,6 +465,41 @@ test('supported profile generic segments avoid J3/J7 no-net pads and cross-net i
 
     assert.ok(noNetPadCount > 0, 'supported profile boards should contain J3/J7 no-net pads');
   } finally {
+    restoreKicadLibraryEnv(previous);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('unresolved footprints skip routing with warnings in profile mode', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-unresolved-footprint-'));
+  const emptyLib = path.join(root, 'empty-lib');
+  await mkdir(emptyLib, { recursive: true });
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: emptyLib
+  });
+
+  try {
+
+    const result = await generateMcuPeripheralProject({
+      projectDir: path.join(root, 'project'),
+      prompt: 'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator.'
+    });
+
+    const board = await readFile(result.files.board, 'utf8');
+    
+    // Should have nets but no segments (routing skipped)
+    assert.match(board, /\(net \d+ "GND"\)/);
+    assert.match(board, /\(net \d+ "VBUS"\)/);
+    
+    // Should not have any segments (routing was skipped)
+    const segmentCount = (board.match(/\(segment/g) || []).length;
+    assert.equal(segmentCount, 0, 'Profile mode should skip all routing when footprints are unresolved');
+    
+    // Should still have footprint placeholders (without pads)
+    assert.match(board, /\(footprint /);
+  } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -494,6 +518,7 @@ test('maps no-net pad centers through their containing footprint transform', () 
 
 test('ADBMS6830 BMS example generates cell filters, balancing branches, thermistors, and isoSPI', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-schematic-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -532,12 +557,14 @@ test('ADBMS6830 BMS example generates cell filters, balancing branches, thermist
     assert.equal(metadata.boardProfile.releaseTarget, 'example-review');
     assert.equal(metadata.boardProfile.releaseEvidence.status, 'incomplete');
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('ADBMS6830 EEPROM companion uses GPIO3/GPIO4 serial pins when requested', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-eeprom-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const { saveCircuitConversation } = await import('../src/runtime/request-conversation.js');
@@ -559,6 +586,66 @@ test('ADBMS6830 EEPROM companion uses GPIO3/GPIO4 serial pins when requested', a
     assert.equal(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO4')], 'EEPROM_SCL');
     assert.notEqual(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO6')], 'EEPROM_SDA');
   } finally {
+    restoreKicadLibraryEnv(previous);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('flatpak runtime libraries resolve through arch/branch/active/files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-flatpak-libs-'));
+  const systemRoot = path.join(root, 'system');
+  const userRoot = path.join(root, 'user');
+  const commit = 'a060212d400aa3fdc1813b92b423868f4d7da841eb463ea063f0adbb7082638e';
+  const systemSymbols = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', 'active', 'files', 'symbols');
+  const systemSymbolCommit = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', commit, 'files', 'symbols');
+  const userSymbols = path.join(userRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', 'active', 'files', 'symbols');
+  const systemFootprints = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Footprints', 'x86_64', 'stable', 'active', 'files', 'footprints');
+  const systemFootprintCommit = path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Footprints', 'x86_64', 'stable', commit, 'files', 'footprints', 'Device.pretty');
+  const previous = setFlatpakLibraryRootsForTests([systemRoot, userRoot]);
+
+  try {
+    await mkdir(systemSymbolCommit, { recursive: true });
+    await mkdir(userSymbols, { recursive: true });
+    await mkdir(systemFootprintCommit, { recursive: true });
+    await writeFile(path.join(systemSymbolCommit, 'Device.kicad_sym'), '(kicad_symbol_lib (version 20211014))\n');
+    await writeFile(path.join(systemSymbolCommit, 'ChatPCBFlatpakProbe.kicad_sym'), '(kicad_symbol_lib (version 20211014))\n');
+    await writeFile(path.join(userSymbols, 'ChatPCBFlatpakUserProbe.kicad_sym'), '(kicad_symbol_lib (version 20211014))\n');
+    await writeFile(path.join(systemFootprintCommit, 'ChatPCBFlatpakProbe.kicad_mod'), '(footprint "ChatPCBFlatpakProbe")\n');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await symlink(commit, path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Symbols', 'x86_64', 'stable', 'active'), linkType);
+    await symlink(commit, path.join(systemRoot, 'runtime', 'org.kicad.KiCad.Library.Footprints', 'x86_64', 'stable', 'active'), linkType);
+
+    const symbols = kicadInstallLibraryCandidatePaths('symbols');
+    const footprints = kicadInstallLibraryCandidatePaths('footprints');
+    assert.ok(symbols.indexOf(systemSymbols) >= 0);
+    assert.ok(symbols.indexOf(userSymbols) > symbols.indexOf(systemSymbols));
+    assert.equal(symbols.includes(systemSymbolCommit), false);
+    if (process.platform === 'linux') {
+      const systemLibrary = '/usr/share/kicad/symbols';
+      const flatpakApp = '/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/symbols';
+      assert.ok(symbols.indexOf(systemLibrary) < symbols.indexOf(systemSymbols));
+      assert.ok(symbols.indexOf(flatpakApp) < symbols.indexOf(systemSymbols));
+    }
+
+    const device = path.join(systemSymbols, 'Device.kicad_sym');
+    assert.equal(existsSync(device), true);
+    assert.equal(
+      symbols.map((dir) => path.join(dir, 'Device.kicad_sym')).includes(device),
+      true
+    );
+    const probe = symbols.map((dir) => path.join(dir, 'ChatPCBFlatpakProbe.kicad_sym')).find((file) => existsSync(file));
+    assert.equal(probe, path.join(systemSymbols, 'ChatPCBFlatpakProbe.kicad_sym'));
+    const userProbe = symbols.map((dir) => path.join(dir, 'ChatPCBFlatpakUserProbe.kicad_sym')).find((file) => existsSync(file));
+    assert.equal(userProbe, path.join(userSymbols, 'ChatPCBFlatpakUserProbe.kicad_sym'));
+
+    assert.ok(footprints.includes(systemFootprints));
+    assert.equal(footprints.includes(path.dirname(systemFootprintCommit)), false);
+    const footprint = footprints
+      .map((dir) => path.join(dir, 'Device.pretty', 'ChatPCBFlatpakProbe.kicad_mod'))
+      .find((file) => existsSync(file));
+    assert.equal(footprint, path.join(systemFootprints, 'Device.pretty', 'ChatPCBFlatpakProbe.kicad_mod'));
+  } finally {
+    setFlatpakLibraryRootsForTests(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
