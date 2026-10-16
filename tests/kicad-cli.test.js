@@ -760,13 +760,20 @@ test('private KiCad config is copied from KICAD_CONFIG_HOME, then the real platf
 
 function modeProbeScript(root) {
   const scriptPath = path.join(root, 'mode-kicad-cli');
+  // GNU stat -c is absent on macOS. Print the same octal bits Node uses, then
+  // fall back to BSD stat when GNU stat rejects -c.
+  const node = `'${process.execPath.replaceAll("'", "'\\''")}'`;
+  const printMode = 'const fs=require("fs");const p=process.argv[1];process.stdout.write((fs.statSync(p).mode & 0o777).toString(8)+"\\n")';
   fs.writeFileSync(scriptPath, [
     '#!/bin/sh',
     'parent=$(dirname "$KICAD_CONFIG_HOME")',
     'base=$(dirname "$parent")',
     'printf "%s\\n" "$KICAD_CONFIG_HOME"',
-    'stat -c %a "$parent"',
-    'stat -c %a "$base"',
+    'print_mode() {',
+    `  ${node} -e '${printMode}' "$1" || stat -c %a "$1" || stat -f %Lp "$1"`,
+    '}',
+    'print_mode "$parent"',
+    'print_mode "$base"',
     ''
   ].join('\n'), { mode: 0o755 });
   return scriptPath;
