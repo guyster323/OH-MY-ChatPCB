@@ -949,6 +949,84 @@ test('daemon does not fall back after provider parse, cancellation, or non-zero 
   }
 });
 
+test('grok project.request uses a generate schema for a new project and a patch schema with spec context for an existing one', async () => {
+  const createdRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-new-schema-'));
+  const existingRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-grok-existing-schema-'));
+  const patchApprovalRegistry = createPatchApprovalRegistry();
+  const captured = [];
+  const grokOptions = (events) => ({
+    patchApprovalRegistry,
+    checkProviderAvailabilityImpl: async () => ({
+      available: true,
+      command: 'grok',
+      resolvedPath: 'grok',
+      status: 'available'
+    }),
+    runProviderProcessImpl: async (invocation) => {
+      captured.push({ args: invocation.args, input: invocation.input });
+      return { exitCode: 0, stderr: '', events };
+    },
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
+
+  try {
+    const prompt = 'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.';
+    const created = await dispatchToolCall({
+      id: 'grok-schema-new',
+      name: 'project.request',
+      args: { provider: 'grok', projectDir: createdRoot, prompt }
+    }, grokOptions([
+      createEnvelope('tool.call', {
+        id: 'gen',
+        name: 'schematic.generate',
+        args: { prompt }
+      })
+    ]));
+
+    assert.equal(created.ok, true);
+    assert.equal(created.result.providerFallback, undefined);
+    const generateSchema = JSON.parse(captured[0].args[captured[0].args.indexOf('--json-schema') + 1]);
+    assert.deepEqual(generateSchema.properties.payload.properties.name.enum, ['schematic.generate']);
+    assert.equal(captured[0].args.includes('--permission-mode'), true);
+    assert.equal(captured[0].args.includes('plan'), true);
+    assert.match(captured[0].input, /Do not explore, read, or modify project files/);
+    assert.equal(captured[0].input.includes('project.inspect'), false);
+
+    await generateMcuPeripheralProject({
+      projectDir: existingRoot,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const patched = await dispatchToolCall({
+      id: 'grok-schema-existing',
+      name: 'project.request',
+      args: { provider: 'grok', projectDir: existingRoot, prompt: 'Add a status LED.' }
+    }, grokOptions([
+      createEnvelope('tool.call', {
+        id: 'patch',
+        name: 'schematic.patch',
+        args: { prompt: 'RP2040 board with USB-C power, I2C connector, and a status LED.' }
+      })
+    ]));
+
+    assert.equal(patched.ok, true);
+    assert.equal(patched.result.providerFallback, undefined);
+    assert.equal(patched.result.operation, 'patched');
+    const patchSchema = JSON.parse(captured[1].args[captured[1].args.indexOf('--json-schema') + 1]);
+    assert.deepEqual(patchSchema.properties.payload.properties.name.enum, ['schematic.patch']);
+    assert.equal(patchSchema.properties.payload.properties.args.properties.projectName.type, 'string');
+    assert.match(captured[1].input, /Existing project inspection context/);
+    assert.match(captured[1].input, /RP2040/);
+    assert.match(captured[1].input, /I2C/);
+    assert.match(captured[1].input, /Do not explore/);
+    assert.equal(captured[1].input.includes('project.inspect'), false);
+  } finally {
+    patchApprovalRegistry.disposeAll();
+    await rm(createdRoot, { force: true, recursive: true });
+    await rm(existingRoot, { force: true, recursive: true });
+  }
+});
+
 test('project.request falls back to a native preview when the provider only inspects', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-inspect-only-'));
 

@@ -68,7 +68,10 @@ test('grok provider uses json schema output and a prompt-file placeholder', () =
   assert.equal(definition.args.includes('plain'), false);
   const schema = JSON.parse(definition.args[definition.args.indexOf('--json-schema') + 1]);
   assert.equal(schema.properties.type.type, 'string');
+  assert.deepEqual(schema.properties.type.enum, ['tool.call']);
+  assert.deepEqual(schema.properties.payload.properties.name.enum, ['schematic.generate']);
   assert.equal(schema.properties.payload.properties.args.type, 'object');
+  assert.deepEqual(schema.properties.payload.properties.args.required, ['prompt']);
   assert.ok(definition.args.includes('--disable-web-search'));
   assert.ok(definition.args.includes('--permission-mode'));
   assert.ok(definition.args.includes('plan'));
@@ -82,6 +85,92 @@ test('grok provider uses json schema output and a prompt-file placeholder', () =
   assert.match(prompt, /structured response/);
   assert.match(prompt, /tool\.call/);
   assert.match(prompt, /schematic\.generate/);
+});
+
+test('grok json schema enum is the mutating tool for that project context', () => {
+  const definition = getProviderDefinition('grok');
+  const projectDir = '/tmp/chatpcb-project';
+
+  const fresh = schemaFrom(buildProviderLaunchArgs(definition, {
+    projectDir,
+    allowGenerate: true,
+    projectExists: false
+  }));
+  assert.deepEqual(fresh.properties.payload.properties.name.enum, ['schematic.generate']);
+  assert.deepEqual(fresh.properties.payload.properties.args.required, ['prompt']);
+  assert.equal(fresh.properties.payload.properties.args.properties.prompt.type, 'string');
+  assert.equal(fresh.properties.payload.additionalProperties, false);
+  assert.equal(fresh.properties.payload.properties.args.properties.approved, undefined);
+
+  const existingByFlag = schemaFrom(buildProviderLaunchArgs(definition, {
+    projectDir,
+    allowGenerate: false
+  }));
+  assert.deepEqual(existingByFlag.properties.payload.properties.name.enum, ['schematic.patch']);
+  assert.deepEqual(existingByFlag.properties.payload.properties.args.required, ['prompt']);
+  assert.equal(existingByFlag.properties.payload.properties.args.properties.projectName.type, 'string');
+  assert.equal(existingByFlag.properties.payload.properties.args.properties.approved, undefined);
+  assert.equal(existingByFlag.properties.payload.properties.args.properties.cancel, undefined);
+  assert.equal(existingByFlag.properties.payload.properties.args.properties.patchId, undefined);
+
+  const existingBySpec = schemaFrom(buildProviderLaunchArgs(definition, {
+    projectDir,
+    projectExists: true
+  }));
+  assert.deepEqual(existingBySpec.properties.payload.properties.name.enum, ['schematic.patch']);
+
+  const both = schemaFrom(buildProviderLaunchArgs(definition, {
+    projectDir,
+    mutatingTools: ['schematic.generate', 'schematic.patch']
+  }));
+  assert.deepEqual(
+    both.properties.payload.anyOf.map((branch) => branch.properties.name.enum[0]),
+    ['schematic.generate', 'schematic.patch']
+  );
+
+  const codex = buildProviderLaunchArgs(getProviderDefinition('codex', {}), {
+    projectDir,
+    projectExists: true,
+    allowGenerate: false
+  });
+  assert.equal(codex.includes('--json-schema'), false);
+  assert.equal(codex.includes('--cwd'), false);
+  assert.deepEqual(codex, getProviderDefinition('codex', {}).args);
+});
+
+test('grok prompt for an existing project includes inspection context and forbids file exploration', () => {
+  const prompt = buildProviderPrompt({
+    provider: 'grok',
+    userMessage: 'Add a status LED.',
+    projectDir: '/tmp/chatpcb-existing',
+    allowedTools: ['schematic.patch'],
+    inspectionContext: {
+      spec: {
+        mcu: { family: 'RP2040' },
+        sourcePrompt: 'RP2040 board with USB-C power and I2C connector.'
+      },
+      summary: { nets: ['SCL', 'SDA'] }
+    }
+  });
+
+  assert.match(prompt, /schematic\.patch/);
+  assert.match(prompt, /Do not explore, read, or modify project files/);
+  assert.match(prompt, /Existing project inspection context/);
+  assert.match(prompt, /RP2040 board with USB-C power and I2C connector/);
+  assert.match(prompt, /SCL/);
+  assert.match(prompt, /Add a status LED/);
+  assert.equal(prompt.includes('project.inspect'), false);
+
+  const claude = buildProviderPrompt({
+    provider: 'claude',
+    userMessage: 'Add a status LED.',
+    allowedTools: ['schematic.patch', 'project.inspect'],
+    inspectionContext: { spec: { mcu: { family: 'RP2040' } } }
+  });
+  assert.equal(claude.includes('Existing project inspection context'), false);
+  assert.equal(claude.includes('Do not explore'), false);
+  assert.match(claude, /JSON Lines/);
+  assert.match(claude, /project\.inspect/);
 });
 
 test('grok provider supports CHATPCB_GROK_MODEL environment variable', () => {
@@ -406,6 +495,10 @@ test('Windows provider lookup honors PATHEXT and searches PATH before grok home 
     'C:\\Users\\tester\\.local\\bin\\grok.EXE'
   ]);
 });
+
+function schemaFrom(args) {
+  return JSON.parse(args[args.indexOf('--json-schema') + 1]);
+}
 
 function commandFileName(command) {
   return process.platform === 'win32' ? `${command}.CMD` : command;

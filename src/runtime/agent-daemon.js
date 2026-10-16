@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
-import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
@@ -16,7 +16,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
+import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
 
@@ -241,7 +241,7 @@ async function invokeProvider(call, ctx) {
     runProviderProcessImpl,
     checkProviderAvailabilityImpl,
     providerControllers,
-    allowGenerate = true,
+    allowGenerate: allowGenerateFlag,
     forceProjectDir = false
   } = ctx;
   const args = call.args ?? {};
@@ -264,11 +264,22 @@ async function invokeProvider(call, ctx) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
 
+  const launchContext = await providerLaunchContext({
+    provider,
+    projectDir,
+    allowGenerate: allowGenerateFlag,
+    projectExists: ctx.projectExists,
+    inspectionContext: ctx.inspectionContext,
+    inspectResult: ctx.inspectResult
+  });
+  const allowGenerate = provider === 'grok' ? launchContext.allowGenerate !== false : allowGenerateFlag !== false;
+  const allowedTools = provider === 'grok' ? grokMutatingToolNames(launchContext) : PROVIDER_ALLOWED_TOOLS;
   const input = buildProviderPrompt({
     provider,
     userMessage: prompt,
     projectDir,
-    allowedTools: PROVIDER_ALLOWED_TOOLS
+    allowedTools,
+    inspectionContext: launchContext.inspectionContext
   });
   const controller = new AbortController();
   providerControllers.set(invocationId, controller);
@@ -283,7 +294,7 @@ async function invokeProvider(call, ctx) {
     });
     transcript = await runProviderProcessImpl({
       command: availability.resolvedPath || availability.command || definition.command,
-      args: buildProviderLaunchArgs(definition, projectDir),
+      args: buildProviderLaunchArgs(definition, launchContext),
       input,
       timeoutMs: definition.timeoutMs,
       allowedToolNames: PROVIDER_ALLOWED_TOOLS,
@@ -418,6 +429,7 @@ async function requestProject(call, ctx) {
     }, {
       ...ctx,
       allowGenerate: !hasSpec,
+      projectExists: hasSpec,
       forceProjectDir: true
     });
     let preview = lastMutatingResult(providerResult.toolResults);
@@ -487,6 +499,49 @@ function lastMutatingResult(toolResults) {
 async function projectHasSpec(projectDir) {
   const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
   return entries.some((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
+}
+
+async function providerLaunchContext({
+  provider,
+  projectDir,
+  allowGenerate,
+  projectExists,
+  inspectionContext,
+  inspectResult
+}) {
+  if (provider !== 'grok') return { projectDir };
+
+  let exists = projectExists === true;
+  if (allowGenerate === false) exists = true;
+  else if (typeof allowGenerate !== 'boolean' && projectExists !== true && projectExists !== false && projectDir) {
+    try {
+      exists = await projectHasSpec(projectDir);
+    } catch {
+      exists = false;
+    }
+  }
+  const existing = allowGenerate === false || (allowGenerate !== true && exists);
+  const context = {
+    projectDir,
+    allowGenerate: !existing,
+    projectExists: existing
+  };
+  if (existing) {
+    context.inspectionContext = inspectionContext ?? await loadGrokInspectionContext(projectDir, inspectResult);
+  }
+  return context;
+}
+
+async function loadGrokInspectionContext(projectDir, inspectResult) {
+  let spec = null;
+  if (projectDir) {
+    try {
+      spec = await readChatPcbManifest(projectDir);
+    } catch {
+      spec = null;
+    }
+  }
+  return summarizeProjectInspection({ spec, inspection: inspectResult });
 }
 
 function guardToolProjectDir(call, allowedWorkspaceRoot) {

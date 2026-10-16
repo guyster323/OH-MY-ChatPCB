@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,10 @@ import { PROMPT_FILE_PLACEHOLDER } from './provider-registry.js';
 
 const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 const DEFAULT_KILL_GRACE_MS = 2000;
+// Detached children are their own process group, so SIGINT/SIGTERM sent to this
+// process does not reach them. The set holds group-leader pids still running.
+const activeProviderGroups = new Set();
+let providerShutdownHandlersInstalled = false;
 
 function reportProviderDiagnostic(message, error) {
   console.error(message, error);
@@ -81,6 +85,8 @@ export async function runProviderProcess({
         return;
       }
       const providerProcess = providerProcessCommand(command, finalArgs);
+      // Install on first spawn, not at import, so tests that only load this module keep default signals.
+      installProviderShutdownHandlers();
       // POSIX detached puts the child in its own process group so the tree can be signalled together.
       const child = spawnImpl(providerProcess.command, providerProcess.args, {
         cwd,
@@ -89,6 +95,7 @@ export async function runProviderProcess({
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe']
       });
+      trackProviderGroup(child);
 
       const allowedTools = new Set(allowedToolNames);
       const parser = createProviderOutputParser({ allowedTools, onEvent });
@@ -559,6 +566,65 @@ function terminateProviderProcess(child, { platform, windowsShim, killGraceMs })
     // The provider process has already exited.
   }
   return null;
+}
+
+function trackProviderGroup(child) {
+  const pid = child?.pid;
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  activeProviderGroups.add(pid);
+  child.once('exit', () => {
+    activeProviderGroups.delete(pid);
+  });
+}
+
+function installProviderShutdownHandlers() {
+  if (providerShutdownHandlersInstalled) return;
+  providerShutdownHandlersInstalled = true;
+
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    const onSignal = () => {
+      try {
+        killActiveProviderGroups();
+      } finally {
+        // Drop this listener and re-raise so the default action keeps the exit status
+        // and any other handlers still run.
+        process.removeListener(signal, onSignal);
+        process.kill(process.pid, signal);
+      }
+    };
+    process.on(signal, onSignal);
+  }
+
+  process.on('exit', () => {
+    killActiveProviderGroups();
+  });
+}
+
+function killActiveProviderGroups() {
+  for (const pid of [...activeProviderGroups]) {
+    killProviderGroupNow(pid);
+  }
+}
+
+function killProviderGroupNow(pid) {
+  if (process.platform === 'win32') {
+    // 'exit' can only run synchronous work. taskkill /T /F stops the whole tree.
+    try {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true
+      });
+    } catch {
+      // The provider process has already exited.
+    }
+    return;
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // ESRCH means the group is already gone.
+  }
 }
 
 function signalProcessGroup(child, signal) {

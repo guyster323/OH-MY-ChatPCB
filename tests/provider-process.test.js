@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -754,6 +755,54 @@ test('Windows shim kill command is taskkill /T /F with an args array', () => {
   assert.equal(posix.escalateSignal, 'SIGKILL');
 });
 
+test('SIGINT on the parent kills detached provider and grandchild processes', { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-sigint-orphan-'));
+  const providerScript = path.join(root, 'provider.cjs');
+  const parentScript = path.join(root, 'parent.mjs');
+  const pidFile = path.join(root, 'pids.json');
+  await writeFile(providerScript, sigintProviderScript(), 'utf8');
+  await writeFile(parentScript, sigintParentScript(), 'utf8');
+
+  // SIGINT has to hit the process that spawned the detached provider, not this test runner.
+  const parent = spawn(process.execPath, [parentScript, providerScript, pidFile], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stderr = '';
+  parent.stderr?.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  parent.stdout?.on('data', () => {});
+  let pids = null;
+
+  try {
+    pids = await waitForJson(pidFile);
+    assert.equal(typeof pids.provider, 'number');
+    assert.equal(typeof pids.grandchild, 'number');
+    process.kill(pids.provider, 0);
+    process.kill(pids.grandchild, 0);
+
+    const exited = waitForProcessExit(parent, 2000);
+    process.kill(parent.pid, 'SIGINT');
+    const result = await exited;
+    assert.equal(result.code, null);
+    assert.equal(result.signal, 'SIGINT');
+    await assertPidGone(pids.provider);
+    await assertPidGone(pids.grandchild);
+  } catch (error) {
+    error.message += `\nparent stderr: ${stderr}`;
+    throw error;
+  } finally {
+    try {
+      if (parent.exitCode === null && parent.signalCode === null) process.kill(parent.pid, 'SIGKILL');
+    } catch {
+      // The parent has already exited.
+    }
+    if (pids?.provider) forceKillTree(pids.provider);
+    if (pids?.grandchild) forceKillPid(pids.grandchild);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('timeout kills the process group when the child and grandchild ignore SIGTERM', { skip: process.platform === 'win32' }, async () => {
   await assertProcessTreeStopped({
     timeoutMs: 2000,
@@ -861,6 +910,37 @@ async function assertProcessTreeStopped({ timeoutMs, killGraceMs, signal, expect
   }
 }
 
+function sigintParentScript() {
+  const moduleUrl = new URL('../src/runtime/provider-process.js', import.meta.url).href;
+  return [
+    `import { runProviderProcess } from ${JSON.stringify(moduleUrl)};`,
+    'const [providerScript, pidFile] = process.argv.slice(2);',
+    'await runProviderProcess({',
+    '  command: process.execPath,',
+    '  args: [providerScript, pidFile],',
+    '  timeoutMs: 30000',
+    '});',
+    ''
+  ].join('\n');
+}
+
+function sigintProviderScript() {
+  return [
+    "const { spawn } = require('node:child_process');",
+    "const fs = require('node:fs');",
+    'const pidFile = process.argv[2];',
+    'const grandchild = [',
+    "  'process.on(\"SIGTERM\", () => {});',",
+    "  'process.on(\"SIGINT\", () => {});',",
+    "  'setInterval(() => {}, 1000);'",
+    "].join('');",
+    "const child = spawn(process.execPath, ['-e', grandchild], { stdio: 'ignore' });",
+    'fs.writeFileSync(pidFile, JSON.stringify({ provider: process.pid, grandchild: child.pid }));',
+    'setInterval(() => {}, 1000);',
+    ''
+  ].join('\n');
+}
+
 function processTreeScript() {
   return [
     "const fs = require('fs');",
@@ -894,6 +974,26 @@ function promptHoldScript() {
     'setInterval(() => {}, 1000);',
     ''
   ].join('\n');
+}
+
+function waitForProcessExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Process did not exit within ${timeoutMs}ms.`));
+    }, timeoutMs);
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 async function waitForJson(filePath) {
