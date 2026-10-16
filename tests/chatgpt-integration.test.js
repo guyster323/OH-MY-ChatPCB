@@ -11,7 +11,12 @@ import vm from 'node:vm';
 
 import { dispatchToolCall, startDaemon } from '../src/runtime/agent-daemon.js';
 import {
+  AUTH_ENDPOINT,
+  ISSUER,
+  JWKS_ENDPOINT,
+  TOKEN_ENDPOINT,
   clearJwksCache,
+  clearOidcDiscoveryCache,
   createChatGPTAuthManager,
   getOrCreateHostId,
   isValidHostId,
@@ -21,6 +26,7 @@ import {
   resolveChatGPTSettings,
   saveCredentials,
   startAuthFlow,
+  useFallbackAuthEndpoints,
   verifyIdToken
 } from '../src/runtime/auth/chatgpt-auth.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
@@ -33,7 +39,9 @@ const originalEnv = {
   XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
   CHATPCB_CHATGPT_MODEL: process.env.CHATPCB_CHATGPT_MODEL,
   CHATPCB_CHATGPT_CLIENT_ID: process.env.CHATPCB_CHATGPT_CLIENT_ID,
-  CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS: process.env.CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS
+  CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS: process.env.CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS,
+  CHATPCB_CHATGPT_AUTH_TIMEOUT_MS: process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS,
+  CHATPCB_CHATGPT_AUTH_GRACE_MS: process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS
 };
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -44,12 +52,31 @@ jwk.use = 'sig';
 
 const ALLOWED_TOOLS = [...PROVIDER_ALLOWED_TOOLS];
 const HOST_ID_V4 = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const OPENID_CONFIGURATION_URL = 'https://auth.openai.com/.well-known/openid-configuration';
 let portCursor = 28000;
+
+function openIdDocument(overrides = {}) {
+  return {
+    issuer: 'https://auth.openai.com',
+    authorization_endpoint: 'https://auth.openai.com/api/accounts/authorize',
+    token_endpoint: 'https://auth.openai.com/api/accounts/oauth/token',
+    revocation_endpoint: 'https://auth.openai.com/api/accounts/oauth/revoke',
+    jwks_uri: 'https://auth.openai.com/.well-known/jwks.json',
+    userinfo_endpoint: 'https://auth.openai.com/api/accounts/oauth/userinfo',
+    ...overrides
+  };
+}
 
 describe('ChatGPT integration', { concurrency: 1 }, () => {
   beforeEach(() => {
     delete process.env.CHATPCB_CHATGPT_CLIENT_ID;
+    delete process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS;
+    delete process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS;
     clearJwksCache();
+    // Drop any discovery document from the previous test, then seed the fallback
+    // so tests that do not exercise discovery keep their fetch counts and stay offline.
+    clearOidcDiscoveryCache();
+    useFallbackAuthEndpoints();
   });
 
   afterEach(() => {
@@ -58,6 +85,8 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     restoreEnv('CHATPCB_CHATGPT_MODEL');
     restoreEnv('CHATPCB_CHATGPT_CLIENT_ID');
     restoreEnv('CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS');
+    restoreEnv('CHATPCB_CHATGPT_AUTH_TIMEOUT_MS');
+    restoreEnv('CHATPCB_CHATGPT_AUTH_GRACE_MS');
   });
 
   it('accepts a JWKS-signed RS256 ID token', async () => {
@@ -713,6 +742,238 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     } finally {
       await flow.cancel();
     }
+  });
+
+  it('keeps the callback port after expiry and does not exchange a late code', async () => {
+    await withConfig(async () => {
+      const { spawnImpl } = fakeSpawn();
+      const logs = spyConsoleError();
+      const tokenCalls = [];
+      stubFetch(async (url) => {
+        tokenCalls.push(String(url));
+        return jsonResponse({
+          access_token: 'LATE',
+          refresh_token: 'LATE',
+          expires_in: 3600,
+          id_token: 'late.not.used'
+        });
+      });
+      const manager = createChatGPTAuthManager({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort(),
+        timeoutMs: 60
+      });
+      const events = [];
+      try {
+        const started = await manager.startAuth({}, (_type, payload) => events.push(payload));
+        assert.match(started.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+        const until = Date.parse(started.expiresAt) - Date.now();
+        assert.ok(until > 0 && until <= 120, `expiresAt is not the short timeout: ${until}`);
+        const waiting = await manager.getAuthStatus();
+        assert.equal(waiting.state, 'waiting');
+        assert.equal(waiting.expiresAt, started.expiresAt);
+        assert.equal(waiting.attemptId, started.attemptId);
+
+        const authUrl = new URL(started.authUrl);
+        const state = authUrl.searchParams.get('state');
+        const redirect = authUrl.searchParams.get('redirect_uri');
+        const port = redirectPort(started.authUrl);
+        await waitFor(() => events.some((event) => event.code === 'timeout'));
+        const expiredStatus = await manager.getAuthStatus();
+        assert.equal(expiredStatus.state, 'error');
+        assert.equal(expiredStatus.code, 'timeout');
+        assert.equal(expiredStatus.expiresAt, started.expiresAt);
+        assert.ok((await manager.reopenAuth({ attemptId: started.attemptId })).error);
+
+        const lateUrl = `${redirect}?code=CODE&state=${state}`;
+        const first = await httpGet(lateUrl);
+        const second = await httpGet(lateUrl);
+        assert.equal(first.status, 410);
+        assert.equal(second.status, 410);
+        assert.match(first.body, /This sign-in attempt expired/);
+        assert.match(first.body, /Nothing was saved/);
+        assert.match(first.body, /Continue with ChatGPT/);
+        assert.match(first.body, /로그인 시도가 만료되었습니다/);
+        assert.match(first.body, /저장된 내용은 없습니다/);
+        assert.match(first.body, /ChatPCB/);
+        assert.equal(tokenCalls.length, 0);
+        assert.equal(await loadCredentials(), null);
+
+        const chatLogs = logs.lines.filter((line) => line.startsWith('ChatGPT sign-in') || line === 'late ChatGPT callback received after expiry');
+        assert.ok(chatLogs.includes(`ChatGPT sign-in waiting on http://127.0.0.1:${port}/auth/callback until ${started.expiresAt}`));
+        const expiredLog = chatLogs.find((line) => line.startsWith('ChatGPT sign-in attempt expired at '));
+        assert.equal(typeof expiredLog, 'string');
+        assert.equal(
+          expiredLog.startsWith(`ChatGPT sign-in attempt expired at ${started.expiresAt}; callback port kept for late redirects until `),
+          true
+        );
+        const graceUntil = Date.parse(expiredLog.split(' until ').at(-1));
+        const graceSpan = graceUntil - Date.parse(started.expiresAt);
+        assert.ok(graceSpan >= (10 * 60 * 1000) - 50 && graceSpan <= (10 * 60 * 1000) + 5000, `default grace was ${graceSpan}`);
+        assert.equal(chatLogs.filter((line) => line === 'late ChatGPT callback received after expiry').length, 2);
+        assert.equal(chatLogs.some((line) => line.includes(state) || line.includes('CODE') || line.includes('auth.openai.com') || line.includes('access_token')), false);
+      } finally {
+        logs.restore();
+        await manager.cancelAll();
+      }
+    });
+  });
+
+  it('honors auth timeout and grace env overrides, with options winning', async () => {
+    await withConfig(async () => {
+      const { spawnImpl } = fakeSpawn();
+      process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS = '150';
+      process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS = '500';
+      const fromEnv = createChatGPTAuthManager({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort()
+      });
+      const events = [];
+      try {
+        const started = await fromEnv.startAuth({}, (_type, payload) => events.push(payload));
+        const until = Date.parse(started.expiresAt) - Date.now();
+        assert.ok(until > 0 && until <= 250, `env timeout not applied: ${until}`);
+        const port = redirectPort(started.authUrl);
+        const redirect = new URL(started.authUrl).searchParams.get('redirect_uri');
+        await waitFor(() => events.some((event) => event.code === 'timeout'));
+        const page = await httpGet(`${redirect}?code=CODE&state=late`);
+        assert.equal(page.status, 410);
+        assert.match(page.body, /Nothing was saved/);
+        assert.equal(await waitForPortFree(port, 2000), true);
+        assert.equal((await httpGet(`${redirect}?code=CODE&state=late`)).status, 0);
+      } finally {
+        await fromEnv.cancelAll();
+      }
+
+      process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS = '50';
+      process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS = '80';
+      const fromOptions = createChatGPTAuthManager({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort(),
+        timeoutMs: 15 * 60 * 1000,
+        graceMs: 800
+      });
+      try {
+        const started = await fromOptions.startAuth();
+        const until = Date.parse(started.expiresAt) - Date.now();
+        assert.ok(until > 14 * 60 * 1000, `timeoutMs option lost to env: ${until}`);
+        await fromOptions.cancelAll();
+      } finally {
+        await fromOptions.cancelAll();
+      }
+
+      const short = createChatGPTAuthManager({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort(),
+        timeoutMs: 50,
+        graceMs: 800
+      });
+      const shortEvents = [];
+      try {
+        const started = await short.startAuth({}, (_type, payload) => shortEvents.push(payload));
+        const port = redirectPort(started.authUrl);
+        const redirect = new URL(started.authUrl).searchParams.get('redirect_uri');
+        await waitFor(() => shortEvents.some((event) => event.code === 'timeout'));
+        assert.equal((await httpGet(`${redirect}?code=CODE&state=late`)).status, 410);
+        await delay(200);
+        assert.equal(await canListen(port), false);
+        assert.equal((await httpGet(`${redirect}?code=CODE&state=late`)).status, 410);
+      } finally {
+        await short.cancelAll();
+      }
+    });
+  });
+
+  it('ignores non-positive auth timeout env values and waits 15 minutes', async () => {
+    await withConfig(async () => {
+      const { spawnImpl } = fakeSpawn();
+      try {
+        for (const bad of ['0', '-1', '1.5', 'nope', '', '15min']) {
+          process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS = bad;
+          process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS = bad;
+          const manager = createChatGPTAuthManager({
+            clientId: 'oaiapp_TEST',
+            spawnImpl,
+            portStart: allocPort()
+          });
+          const started = await manager.startAuth();
+          const until = Date.parse(started.expiresAt) - Date.now();
+          assert.ok(until > 14 * 60 * 1000 && until <= (15 * 60 * 1000) + 1000, `${bad} -> ${until}`);
+          await manager.cancelAll();
+        }
+      } finally {
+        delete process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS;
+        delete process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS;
+      }
+    });
+  });
+
+  it('closes the grace listener when a new attempt starts, on cancel, and on sign-out', async () => {
+    await withConfig(async () => {
+      const { spawnImpl } = fakeSpawn();
+      const tokenCalls = [];
+      stubFetch(async (url) => {
+        tokenCalls.push(String(url));
+        return new Response('no', { status: 500 });
+      });
+      const manager = createChatGPTAuthManager({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort(),
+        timeoutMs: 50
+      });
+      try {
+        const firstEvents = [];
+        const first = await manager.startAuth({}, (_type, payload) => firstEvents.push(payload));
+        const port1 = redirectPort(first.authUrl);
+        const redirect1 = new URL(first.authUrl).searchParams.get('redirect_uri');
+        const state1 = new URL(first.authUrl).searchParams.get('state');
+        await waitFor(() => firstEvents.some((event) => event.code === 'timeout'));
+        assert.equal((await httpGet(`${redirect1}?code=CODE&state=${state1}`)).status, 410);
+
+        const second = await manager.startAuth();
+        const port2 = redirectPort(second.authUrl);
+        const after = await httpGet(`${redirect1}?code=CODE&state=${state1}`);
+        if (port2 === port1) {
+          assert.notEqual(after.status, 410);
+          assert.match(after.body, /state mismatch/);
+        } else {
+          assert.equal(after.status, 0);
+          assert.equal(await canListen(port1), true);
+        }
+        assert.equal((await httpGet(`http://127.0.0.1:${port2}/health`)).status, 404);
+        assert.equal(tokenCalls.length, 0);
+        await manager.cancelAll();
+
+        const cancelEvents = [];
+        const cancelled = await manager.startAuth({}, (_type, payload) => cancelEvents.push(payload));
+        const cancelPort = redirectPort(cancelled.authUrl);
+        const cancelRedirect = new URL(cancelled.authUrl).searchParams.get('redirect_uri');
+        await waitFor(() => cancelEvents.some((event) => event.code === 'timeout'));
+        assert.equal((await httpGet(`${cancelRedirect}?code=CODE&state=late`)).status, 410);
+        assert.equal((await manager.cancelAuth({ attemptId: cancelled.attemptId })).state, 'signed_out');
+        assert.equal(await canListen(cancelPort), true);
+        assert.equal((await httpGet(`${cancelRedirect}?code=CODE&state=late`)).status, 0);
+
+        const signEvents = [];
+        const signed = await manager.startAuth({}, (_type, payload) => signEvents.push(payload));
+        const signPort = redirectPort(signed.authUrl);
+        const signRedirect = new URL(signed.authUrl).searchParams.get('redirect_uri');
+        await waitFor(() => signEvents.some((event) => event.code === 'timeout'));
+        assert.equal((await httpGet(`${signRedirect}?code=CODE&state=late`)).status, 410);
+        assert.equal((await manager.signOut()).state, 'signed_out');
+        assert.equal(await canListen(signPort), true);
+        assert.equal((await httpGet(`${signRedirect}?code=CODE&state=late`)).status, 0);
+        assert.equal(tokenCalls.length, 0);
+        assert.equal(await loadCredentials(), null);
+      } finally {
+        await manager.cancelAll();
+      }
+    });
   });
 
   it('reopen returns the active session URL', async () => {
@@ -1912,6 +2173,276 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     });
   });
 
+  it('pins fallback OpenID endpoints to the published discovery document', () => {
+    assert.deepEqual(
+      {
+        issuer: ISSUER,
+        authorizationEndpoint: AUTH_ENDPOINT,
+        tokenEndpoint: TOKEN_ENDPOINT,
+        jwksUri: JWKS_ENDPOINT
+      },
+      {
+        issuer: 'https://auth.openai.com',
+        authorizationEndpoint: 'https://auth.openai.com/api/accounts/authorize',
+        tokenEndpoint: 'https://auth.openai.com/api/accounts/oauth/token',
+        jwksUri: 'https://auth.openai.com/.well-known/jwks.json'
+      }
+    );
+  });
+
+  it('uses discovered authorize, token, refresh, and JWKS endpoints', async () => {
+    clearOidcDiscoveryCache();
+    clearJwksCache();
+    const doc = openIdDocument({
+      authorization_endpoint: 'https://auth.openai.com/discovered/authorize',
+      token_endpoint: 'https://auth.openai.com/discovered/oauth/token',
+      jwks_uri: 'https://auth.openai.com/discovered/jwks.json'
+    });
+    const calls = [];
+    const nonceRef = { nonce: null };
+    stubFetch(async (url, init) => {
+      const target = String(url);
+      calls.push({
+        url: target,
+        method: init?.method || 'GET',
+        body: init?.body ? String(init.body) : ''
+      });
+      if (target === OPENID_CONFIGURATION_URL) return jsonResponse(doc);
+      if (target === doc.jwks_uri) return jsonResponse({ keys: [jwk] });
+      if (target === doc.token_endpoint) {
+        if (String(init?.body || '').includes('grant_type=refresh_token')) {
+          return jsonResponse({ access_token: 'AT2', refresh_token: 'RT2', expires_in: 3600 });
+        }
+        return jsonResponse({
+          access_token: 'AT',
+          refresh_token: 'RT',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: PLAN_SCOPE,
+          id_token: signToken(claims({
+            nonce: nonceRef.nonce,
+            aud: 'oaiapp_TEST',
+            email: 'ada@ex.com'
+          }))
+        });
+      }
+      return new Response('no', { status: 404 });
+    });
+
+    await withConfig(async () => {
+      const { spawnImpl } = fakeSpawn();
+      const manager = createChatGPTAuthManager({
+        clientId: 'oaiapp_TEST',
+        spawnImpl,
+        portStart: allocPort(),
+        timeoutMs: 20000
+      });
+      try {
+        const started = await manager.startAuth();
+        assert.equal(started.authUrl.startsWith(`${doc.authorization_endpoint}?`), true);
+        const authUrl = new URL(started.authUrl);
+        nonceRef.nonce = authUrl.searchParams.get('nonce');
+        const page = await httpGet(
+          `${authUrl.searchParams.get('redirect_uri')}?code=CODE&state=${authUrl.searchParams.get('state')}`
+        );
+        assert.match(page.body, /Successfully signed in/);
+        const refreshed = await refreshAccessToken('RT', 'oaiapp_TEST');
+        assert.equal(refreshed.access_token, 'AT2');
+      } finally {
+        await manager.cancelAll();
+      }
+    });
+
+    assert.equal(calls.filter((call) => call.url === OPENID_CONFIGURATION_URL).length, 1);
+    const tokenCalls = calls.filter((call) => call.url === doc.token_endpoint);
+    assert.equal(tokenCalls.length, 2);
+    assert.equal(tokenCalls.every((call) => call.method === 'POST'), true);
+    assert.equal(tokenCalls.some((call) => call.body.includes('grant_type=authorization_code')), true);
+    assert.equal(tokenCalls.some((call) => call.body.includes('grant_type=refresh_token')), true);
+    assert.equal(calls.filter((call) => call.url === doc.jwks_uri).length, 1);
+    const allowed = new Set([OPENID_CONFIGURATION_URL, doc.token_endpoint, doc.jwks_uri]);
+    assert.deepEqual(calls.map((call) => call.url).filter((url) => !allowed.has(url)), []);
+    assert.equal(calls.some((call) => call.url.includes('/api/accounts/.well-known/jwks.json')), false);
+  });
+
+  it('accepts a discovery document that omits revocation and userinfo', async () => {
+    clearOidcDiscoveryCache();
+    clearJwksCache();
+    const seen = [];
+    const jwksUri = 'https://auth.openai.com/discovered/jwks.json';
+    stubFetch(async (url) => {
+      const target = String(url);
+      seen.push(target);
+      if (target === OPENID_CONFIGURATION_URL) {
+        return jsonResponse({
+          issuer: ISSUER,
+          authorization_endpoint: 'https://auth.openai.com/discovered/authorize',
+          token_endpoint: 'https://auth.openai.com/discovered/oauth/token',
+          jwks_uri: jwksUri
+        });
+      }
+      if (target === jwksUri) return jsonResponse({ keys: [jwk] });
+      return new Response('no', { status: 404 });
+    });
+    const payload = await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST');
+    assert.equal(payload.sub, 'user_123');
+    assert.equal(seen.includes(jwksUri), true);
+    assert.equal(seen.includes(JWKS_ENDPOINT), false);
+  });
+
+  it('uses fallback endpoints when discovery fails and never calls the blocked JWKS path', { timeout: 5000 }, async () => {
+    const logs = spyConsoleError();
+    try {
+      clearOidcDiscoveryCache();
+      clearJwksCache();
+      const seen = [];
+      const nonceRef = { nonce: null };
+      stubFetch(async (url, init) => {
+        const target = String(url);
+        seen.push(target);
+        if (target === OPENID_CONFIGURATION_URL) {
+          return new Response('jwks-body-should-not-leak', { status: 403 });
+        }
+        if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+        if (target === TOKEN_ENDPOINT) {
+          if (String(init?.body || '').includes('grant_type=refresh_token')) {
+            return jsonResponse({ access_token: 'AT2', refresh_token: 'RT2', expires_in: 3600 });
+          }
+          return jsonResponse({
+            access_token: 'AT',
+            refresh_token: 'RT',
+            expires_in: 3600,
+            token_type: 'Bearer',
+            scope: PLAN_SCOPE,
+            id_token: signToken(claims({
+              nonce: nonceRef.nonce,
+              aud: 'oaiapp_TEST',
+              email: 'ada@ex.com'
+            }))
+          });
+        }
+        return new Response('no', { status: 404 });
+      });
+
+      await withConfig(async () => {
+        const { spawnImpl } = fakeSpawn();
+        const manager = createChatGPTAuthManager({
+          clientId: 'oaiapp_TEST',
+          spawnImpl,
+          portStart: allocPort(),
+          timeoutMs: 20000
+        });
+        try {
+          const started = await manager.startAuth();
+          assert.equal(started.authUrl.startsWith(`${AUTH_ENDPOINT}?`), true);
+          const authUrl = new URL(started.authUrl);
+          nonceRef.nonce = authUrl.searchParams.get('nonce');
+          const page = await httpGet(
+            `${authUrl.searchParams.get('redirect_uri')}?code=CODE&state=${authUrl.searchParams.get('state')}`
+          );
+          assert.match(page.body, /Successfully signed in/);
+          assert.equal(page.body.includes('jwks-body-should-not-leak'), false);
+          const refreshed = await refreshAccessToken('RT', 'oaiapp_TEST');
+          assert.equal(refreshed.access_token, 'AT2');
+          await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST');
+        } finally {
+          await manager.cancelAll();
+        }
+      });
+
+      assert.equal(seen.filter((url) => url === OPENID_CONFIGURATION_URL).length, 1);
+      assert.equal(seen.includes(JWKS_ENDPOINT), true);
+      assert.equal(seen.some((url) => url.includes('/api/accounts/.well-known/jwks.json')), false);
+      assert.equal(seen.filter((url) => url === TOKEN_ENDPOINT).length, 2);
+      const discoveryLogs = logs.lines.filter((line) => line.includes('OpenID discovery failed'));
+      assert.equal(discoveryLogs.length, 1);
+      assert.match(discoveryLogs[0], /403/);
+      assert.equal(discoveryLogs[0].includes('jwks-body-should-not-leak'), false);
+
+      clearOidcDiscoveryCache();
+      clearJwksCache();
+      const networkSeen = [];
+      stubFetch(async (url) => {
+        const target = String(url);
+        networkSeen.push(target);
+        if (target === OPENID_CONFIGURATION_URL) {
+          throw Object.assign(new Error('secret-network-detail'), { code: 'ECONNREFUSED' });
+        }
+        if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+        return new Response('no', { status: 404 });
+      });
+      const payload = await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(payload.email, 'test@example.com');
+      assert.equal(networkSeen.includes(JWKS_ENDPOINT), true);
+      assert.equal(networkSeen.some((url) => url.includes('/api/accounts/.well-known/jwks.json')), false);
+      const networkLogs = logs.lines.filter((line) => line.includes('OpenID discovery failed'));
+      assert.equal(networkLogs.length, 2);
+      assert.match(networkLogs[1], /ECONNREFUSED/);
+      assert.equal(networkLogs[1].includes('secret-network-detail'), false);
+
+      clearOidcDiscoveryCache();
+      clearJwksCache();
+      const timeoutSeen = [];
+      stubFetch(async (url) => {
+        const target = String(url);
+        timeoutSeen.push(target);
+        if (target === OPENID_CONFIGURATION_URL) return new Promise(() => {});
+        if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+        return new Response('no', { status: 404 });
+      });
+      const timed = await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST', { fetchTimeoutMs: 40 });
+      assert.equal(timed.sub, 'user_123');
+      assert.equal(timeoutSeen.includes(JWKS_ENDPOINT), true);
+      assert.equal(timeoutSeen.some((url) => url.includes('/api/accounts/.well-known/jwks.json')), false);
+      const timeoutLogs = logs.lines.filter((line) => line.includes('OpenID discovery failed'));
+      assert.equal(timeoutLogs.length, 3);
+      assert.match(timeoutLogs[2], /timeout/);
+    } finally {
+      logs.restore();
+    }
+  });
+
+  it('rejects a discovery document with the wrong issuer or a non-https endpoint', async () => {
+    const distinct = openIdDocument({
+      authorization_endpoint: 'https://auth.openai.com/discovered/authorize',
+      token_endpoint: 'https://auth.openai.com/discovered/oauth/token',
+      jwks_uri: 'https://auth.openai.com/discovered/jwks.json'
+    });
+    const rejected = [
+      { ...distinct, issuer: 'https://evil.example' },
+      { ...distinct, issuer: 'https://auth.openai.com/' },
+      { ...distinct, jwks_uri: 'http://auth.openai.com/discovered/jwks.json' },
+      { ...distinct, authorization_endpoint: 'http://auth.openai.com/discovered/authorize' },
+      { ...distinct, token_endpoint: 'https://auth.openai.com.evil.example/oauth/token' },
+      { ...distinct, jwks_uri: 'https://evil.example/jwks.json' },
+      { ...distinct, userinfo_endpoint: 'http://auth.openai.com/api/accounts/oauth/userinfo' },
+      { ...distinct, revocation_endpoint: 'https://user:pass@auth.openai.com/revoke' },
+      { ...distinct, jwks_uri: 'https://auth.openai.com:8443/discovered/jwks.json' },
+      { ...distinct, registration_endpoint: 'http://auth.openai.com/register' },
+      { ...distinct, device_authorization_endpoint: 'https://evil.example/device' }
+    ];
+
+    for (const doc of rejected) {
+      clearOidcDiscoveryCache();
+      clearJwksCache();
+      const seen = [];
+      stubFetch(async (url) => {
+        const target = String(url);
+        seen.push(target);
+        if (target === OPENID_CONFIGURATION_URL) return jsonResponse(doc);
+        if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+        return new Response('no', { status: 404 });
+      });
+      const payload = await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(payload.sub, 'user_123', JSON.stringify(doc));
+      assert.deepEqual(
+        seen.filter((url) => url !== OPENID_CONFIGURATION_URL && url !== JWKS_ENDPOINT),
+        [],
+        JSON.stringify(doc)
+      );
+    }
+  });
+
   it('reads client id from the environment and config file', async () => {
     await withConfig(async (dir) => {
       await mkdir(path.join(dir, 'chatpcb'), { recursive: true });
@@ -2165,6 +2696,30 @@ function canListen(port) {
       server.close(() => resolve(true));
     });
   });
+}
+
+async function waitForPortFree(port, timeoutMs = 2000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await canListen(port)) return true;
+    await delay(25);
+  }
+  return false;
+}
+
+function spyConsoleError() {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => {
+    lines.push(args.map((part) => String(part)).join(' '));
+    original.apply(console, args);
+  };
+  return {
+    lines,
+    restore() {
+      console.error = original;
+    }
+  };
 }
 
 function httpGet(url) {

@@ -6,10 +6,13 @@ import http from 'node:http';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 
-const AUTH_ENDPOINT = 'https://auth.openai.com/api/accounts/authorize';
-const TOKEN_ENDPOINT = 'https://auth.openai.com/api/accounts/oauth/token';
-const JWKS_ENDPOINT = 'https://auth.openai.com/api/accounts/.well-known/jwks.json';
-const ISSUER = 'https://auth.openai.com';
+// Fallback when OpenID discovery is missing or rejected. These match
+// https://auth.openai.com/.well-known/openid-configuration. JWKS is the issuer
+// well-known URL: /api/accounts/.well-known/jwks.json is blocked with 403.
+export const AUTH_ENDPOINT = 'https://auth.openai.com/api/accounts/authorize';
+export const TOKEN_ENDPOINT = 'https://auth.openai.com/api/accounts/oauth/token';
+export const JWKS_ENDPOINT = 'https://auth.openai.com/.well-known/jwks.json';
+export const ISSUER = 'https://auth.openai.com';
 const RESOURCE = 'https://api.openai.com/v1';
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const DIRECT_USE_SCOPE = 'chatgpt.tokens.use.direct';
@@ -20,11 +23,24 @@ const ISSUED_CLIENT_ID = /^oaiapp_[A-Za-z0-9_-]+$/;
 // and may use the next two only while that port is still busy.
 const REDIRECT_URI_PORT_START = 41318;
 const REDIRECT_URI_PORT_MAX_ATTEMPTS = 3;
-const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+// Long enough for a real ChatGPT login. timeoutMs and
+// CHATPCB_CHATGPT_AUTH_TIMEOUT_MS override this when they are positive integers.
+const AUTH_TIMEOUT_MS = 15 * 60 * 1000;
+// After the attempt expires, the same callback port stays open so a late
+// browser redirect gets an expired page instead of a refused connection.
+const AUTH_GRACE_MS = 10 * 60 * 1000;
+const AUTH_TIMEOUT_ENV = 'CHATPCB_CHATGPT_AUTH_TIMEOUT_MS';
+const AUTH_GRACE_ENV = 'CHATPCB_CHATGPT_AUTH_GRACE_MS';
 const FETCH_TIMEOUT_MS = 10 * 1000;
 const RESPONSES_TIMEOUT_MS = 120 * 1000;
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
+const OIDC_DISCOVERY_TTL_MS = 60 * 60 * 1000;
+const REQUIRED_OIDC_ENDPOINTS = ['authorization_endpoint', 'token_endpoint', 'jwks_uri'];
 const jwksCache = new Map();
+let oidcCache = null;
+let oidcInflight = null;
+let oidcGeneration = 0;
+let oidcFailureLogged = false;
 const CLIENT_ID_ENV = 'CHATPCB_CHATGPT_CLIENT_ID';
 const MODEL_ENV = 'CHATPCB_CHATGPT_MODEL';
 const RESPONSES_TIMEOUT_ENV = 'CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS';
@@ -678,6 +694,144 @@ export function clearJwksCache() {
   jwksCache.clear();
 }
 
+export function clearOidcDiscoveryCache() {
+  oidcGeneration += 1;
+  oidcCache = null;
+  oidcInflight = null;
+  oidcFailureLogged = false;
+}
+
+// Tests seed this so a warm fallback does not add a discovery fetch. Production
+// starts empty and discovers on the first authorize, token, refresh, or JWKS use.
+export function useFallbackAuthEndpoints() {
+  oidcGeneration += 1;
+  oidcInflight = null;
+  oidcFailureLogged = false;
+  oidcCache = { fetchedAt: Date.now(), endpoints: fallbackAuthEndpoints() };
+}
+
+function fallbackAuthEndpoints() {
+  return {
+    authorization: AUTH_ENDPOINT,
+    token: TOKEN_ENDPOINT,
+    jwks: JWKS_ENDPOINT
+  };
+}
+
+function currentAuthEndpoints(now = Date.now()) {
+  if (!oidcCache) return null;
+  const age = now - oidcCache.fetchedAt;
+  if (age >= 0 && age < OIDC_DISCOVERY_TTL_MS) return oidcCache.endpoints;
+  return null;
+}
+
+function isThenable(value) {
+  return value != null && typeof value.then === 'function';
+}
+
+// A warm cache returns the endpoints object, not a promise. Callers must not
+// await that object: a refresh shared by concurrent callers starts its HTTP
+// request synchronously, and an extra await would drop that in-flight count.
+function discoverAuthEndpoints({ timeoutMs } = {}) {
+  const cached = currentAuthEndpoints();
+  if (cached) return cached;
+  if (!oidcInflight) {
+    const generation = oidcGeneration;
+    const pending = loadOidcEndpoints(generation, timeoutMs).finally(() => {
+      if (oidcInflight === pending) oidcInflight = null;
+    });
+    oidcInflight = pending;
+  }
+  return oidcInflight;
+}
+
+async function withAuthEndpoints(options, fn) {
+  const discovered = discoverAuthEndpoints(options);
+  const endpoints = isThenable(discovered) ? await discovered : discovered;
+  return fn(endpoints);
+}
+
+function isHttpsAuthOpenAIEndpoint(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) return false;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === 'https:'
+    && url.hostname === 'auth.openai.com'
+    && url.username === ''
+    && url.password === ''
+    && (url.port === '' || url.port === '443');
+}
+
+function isOidcEndpointField(field) {
+  return field === 'jwks_uri' || field.endsWith('_endpoint');
+}
+
+function endpointsFromDiscovery(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (body.issuer !== ISSUER) return null;
+  for (const field of Object.keys(body)) {
+    if (!isOidcEndpointField(field) || body[field] == null) continue;
+    if (!isHttpsAuthOpenAIEndpoint(body[field])) return null;
+  }
+  if (REQUIRED_OIDC_ENDPOINTS.some((field) => !isHttpsAuthOpenAIEndpoint(body[field]))) return null;
+  return {
+    authorization: body.authorization_endpoint,
+    token: body.token_endpoint,
+    jwks: body.jwks_uri
+  };
+}
+
+function rememberAuthEndpoints(generation, endpoints) {
+  if (generation !== oidcGeneration) return endpoints;
+  oidcCache = { fetchedAt: Date.now(), endpoints };
+  return endpoints;
+}
+
+function discoveryFailureLabel(error) {
+  if (error?.code === 'timeout') return 'timeout';
+  if (typeof error?.code === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(error.code)) return error.code;
+  return 'network';
+}
+
+function logDiscoveryFailure(reason) {
+  if (oidcFailureLogged) return;
+  oidcFailureLogged = true;
+  logAuth(`ChatGPT OpenID discovery failed (${reason}); using fallback endpoints`);
+}
+
+async function loadOidcEndpoints(generation, timeoutMs) {
+  try {
+    const response = await fetchWithTimeout(
+      `${ISSUER}/.well-known/openid-configuration`,
+      {},
+      timeoutMs,
+      'OpenID discovery'
+    );
+    if (generation !== oidcGeneration) return fallbackAuthEndpoints();
+    if (!response.ok) {
+      logDiscoveryFailure(Number.isInteger(response.status) ? String(response.status) : 'http');
+      return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+    }
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+    }
+    const endpoints = endpointsFromDiscovery(body);
+    if (!endpoints) return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+    return rememberAuthEndpoints(generation, endpoints);
+  } catch (error) {
+    if (generation !== oidcGeneration) return fallbackAuthEndpoints();
+    logDiscoveryFailure(discoveryFailureLabel(error));
+    return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+  }
+}
+
 async function fetchJWKS({
   issuer = ISSUER,
   timeoutMs = FETCH_TIMEOUT_MS,
@@ -691,7 +845,9 @@ async function fetchJWKS({
     const age = now - cached.fetchedAt;
     if (age >= 0 && age < ttlMs) return cached.body;
   }
-  const response = await fetchWithTimeout(JWKS_ENDPOINT, { signal }, timeoutMs, 'JWKS fetch');
+  const response = await withAuthEndpoints({ timeoutMs }, (endpoints) => (
+    fetchWithTimeout(endpoints.jwks, { signal }, timeoutMs, 'JWKS fetch')
+  ));
   if (!response.ok) {
     throw new Error(`Failed to fetch JWKS: ${response.status}`);
   }
@@ -747,12 +903,14 @@ async function requestRefresh(refreshToken, clientId, { fetchTimeoutMs, signal }
     resource: RESOURCE
   });
 
-  const response = await fetchWithTimeout(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-    signal
-  }, fetchTimeoutMs, 'Token refresh');
+  const response = await withAuthEndpoints({ timeoutMs: fetchTimeoutMs }, (endpoints) => (
+    fetchWithTimeout(endpoints.token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal
+    }, fetchTimeoutMs, 'Token refresh')
+  ));
 
   if (!response.ok) {
     const failure = await oauthFailure('Token refresh failed', response);
@@ -947,7 +1105,9 @@ export function startAuthFlow({
   portStart,
   portAttempts,
   timeoutMs,
-  fetchTimeoutMs
+  graceMs,
+  fetchTimeoutMs,
+  onGraceClosed
 } = {}) {
   const requestedClientId = typeof clientId === 'string' ? clientId.trim() : '';
   const pendingClientId = requestedClientId || DYNAMIC_CLIENT_ID;
@@ -960,7 +1120,8 @@ export function startAuthFlow({
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const portBase = Number.isInteger(portStart) ? portStart : REDIRECT_URI_PORT_START;
   const attempts = Number.isInteger(portAttempts) ? portAttempts : REDIRECT_URI_PORT_MAX_ATTEMPTS;
-  const authTimeoutMs = Number.isInteger(timeoutMs) ? timeoutMs : AUTH_TIMEOUT_MS;
+  const authTimeoutMs = resolveAuthTimeoutMs(timeoutMs);
+  const authGraceMs = resolveAuthGraceMs(graceMs);
   const requestTimeoutMs = Number.isFinite(fetchTimeoutMs) && fetchTimeoutMs > 0
     ? fetchTimeoutMs
     : FETCH_TIMEOUT_MS;
@@ -968,11 +1129,15 @@ export function startAuthFlow({
   let server = null;
   let actualPort = null;
   let timeoutHandle = null;
+  let graceHandle = null;
+  let expiresAtIso = null;
   let authUrl = null;
   let hostId = null;
   let settled = false;
   let terminal = false;
   let readySettled = false;
+  // starting → waiting → expired (grace listener) → closed.
+  let phase = 'starting';
   let attemptSerial = 0;
   const exchangeAbort = new AbortController();
   const callbacks = new Set();
@@ -998,6 +1163,11 @@ export function startAuthFlow({
       clearTimeout(timeoutHandle);
       timeoutHandle = null;
     }
+    if (graceHandle) {
+      clearTimeout(graceHandle);
+      graceHandle = null;
+    }
+    phase = 'closed';
     const closing = server;
     server = null;
     if (!closing) return Promise.resolve();
@@ -1016,6 +1186,46 @@ export function startAuthFlow({
         try { closing.closeAllConnections(); } catch { /* already closed */ }
       }
     });
+  };
+
+  const notifyGraceClosed = () => {
+    if (typeof onGraceClosed !== 'function') return;
+    try {
+      onGraceClosed();
+    } catch {
+      // The manager may already have dropped this attempt.
+    }
+  };
+
+  // Stop accepting a code, but keep the loopback socket open for a late redirect.
+  const expireAttempt = () => {
+    if (phase !== 'waiting') return;
+    phase = 'expired';
+    timeoutHandle = null;
+    invalidate();
+    const graceUntilIso = new Date(Date.now() + authGraceMs).toISOString();
+    logAuth(`ChatGPT sign-in attempt expired at ${expiresAtIso}; callback port kept for late redirects until ${graceUntilIso}`);
+    if (!terminal) {
+      terminal = true;
+      const error = { code: 'timeout', message: 'Sign-in timed out' };
+      if (!readySettled) {
+        readySettled = true;
+        readyReject(error);
+      }
+      rejectAuth(error);
+    }
+    if (typeof onTimeout === 'function') {
+      try { onTimeout(); } catch { /* the panel hook is best-effort */ }
+    }
+    if (phase !== 'expired') return;
+    graceHandle = setTimeout(() => {
+      graceHandle = null;
+      if (phase !== 'expired') return;
+      cleanup({ force: true }).finally(notifyGraceClosed);
+    }, authGraceMs);
+    // The open callback socket keeps the process up while it can answer a late
+    // redirect. This close timer must not keep the process alive on its own.
+    if (typeof graceHandle.unref === 'function') graceHandle.unref();
   };
 
   // Bumps the attempt generation synchronously so a late token response cannot save.
@@ -1112,6 +1322,25 @@ export function startAuthFlow({
       return;
     }
 
+    // A code that arrives after the attempt expired is never exchanged.
+    // A closed listener can still be draining a keep-alive socket; a wrong
+    // state must stay a mismatch and must not end a newer attempt.
+    if (phase === 'expired') {
+      logAuth('late ChatGPT callback received after expiry');
+      try {
+        res.writeHead(410, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(createExpiredPage());
+      } catch {
+        // The grace listener may already be closing.
+      }
+      return;
+    }
+
+    if (phase === 'starting') {
+      endQuietly(res);
+      return;
+    }
+
     const callbackState = url.searchParams.get('state');
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
@@ -1176,7 +1405,12 @@ export function startAuthFlow({
         resource: RESOURCE
       });
 
-      const tokenResponse = await fetchWithTimeout(TOKEN_ENDPOINT, {
+      const endpoints = await withAuthEndpoints({ timeoutMs: requestTimeoutMs }, (value) => value);
+      if (!attemptStillCurrent(serial)) {
+        endQuietly(res);
+        return;
+      }
+      const tokenResponse = await fetchWithTimeout(endpoints.token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: tokenBody.toString(),
@@ -1339,10 +1573,14 @@ export function startAuthFlow({
         if (idTokenHint) authParams.set('id_token_hint', idTokenHint);
         if (loginHint) authParams.set('login_hint', loginHint);
       }
-      authUrl = `${AUTH_ENDPOINT}?${authParams.toString()}`;
+      const endpoints = await withAuthEndpoints({ timeoutMs: requestTimeoutMs }, (value) => value);
+      if (settled || terminal) return;
+      authUrl = `${endpoints.authorization}?${authParams.toString()}`;
+      expiresAtIso = new Date(Date.now() + authTimeoutMs).toISOString();
+      phase = 'waiting';
+      logAuth(`ChatGPT sign-in waiting on http://127.0.0.1:${actualPort}/auth/callback until ${expiresAtIso}`);
       timeoutHandle = setTimeout(() => {
-        if (typeof onTimeout === 'function') onTimeout();
-        finish({ code: 'timeout', message: 'Sign-in timed out after 5 minutes' }, { force: true }).catch(() => {});
+        expireAttempt();
       }, authTimeoutMs);
       if (!readySettled) {
         readySettled = true;
@@ -1377,10 +1615,22 @@ export function startAuthFlow({
   return {
     attemptId,
     get authUrl() { return authUrl; },
+    get expiresAt() { return expiresAtIso; },
+    isWaiting() { return phase === 'waiting'; },
+    isGraceListening() { return phase === 'expired'; },
     whenReady,
     promise,
     invalidate,
     cancel: (code = 'cancelled') => {
+      if (phase === 'closed') return Promise.resolve();
+      if (phase === 'expired') {
+        const closed = cleanup({ force: true });
+        return (async () => {
+          await whenCallbacksSettled();
+          await closed;
+          notifyGraceClosed();
+        })();
+      }
       const closed = finish(cancelError(code), { force: true });
       return (async () => {
         await whenCallbacksSettled();
@@ -1399,6 +1649,18 @@ function createSuccessPage() {
   <h1>Successfully signed in</h1>
   <p>You can close this window and return to ChatPCB.</p>
   <p>브라우저를 닫고 ChatPCB로 돌아가세요.</p>
+</body>
+</html>`;
+}
+
+function createExpiredPage() {
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Sign-in expired</title></head>
+<body>
+  <h1>This sign-in attempt expired</h1>
+  <p>Nothing was saved. Go back to ChatPCB and press "Continue with ChatGPT" again.</p>
+  <p>로그인 시도가 만료되었습니다. 저장된 내용은 없습니다. ChatPCB로 돌아가서 "Continue with ChatGPT"를 다시 누르세요.</p>
 </body>
 </html>`;
 }
@@ -1442,15 +1704,39 @@ export function createChatGPTAuthManager({
   portStart,
   portAttempts,
   timeoutMs,
+  graceMs,
   fetchTimeoutMs
 } = {}) {
   const activeAuthAttempts = new Map();
+  const graceFlows = new Set();
   let startQueue = Promise.resolve();
   // Always restart at the base port. A busy base port may use the next few
   // ports in the fixed range, then the base port again once it is free.
   const callbackPortStart = Number.isInteger(portStart) ? portStart : REDIRECT_URI_PORT_START;
 
+  function waitingStatus(flow) {
+    return {
+      state: 'waiting',
+      attemptId: flow.attemptId,
+      authUrl: flow.authUrl,
+      expiresAt: flow.expiresAt
+    };
+  }
+
   async function getAuthStatus() {
+    for (const flow of activeAuthAttempts.values()) {
+      if (flow.isWaiting()) return waitingStatus(flow);
+    }
+    for (const flow of graceFlows) {
+      if (flow.isGraceListening()) {
+        return {
+          state: 'error',
+          code: 'timeout',
+          attemptId: flow.attemptId,
+          expiresAt: flow.expiresAt
+        };
+      }
+    }
     const creds = await loadCredentials();
     if (!creds || !creds.access_token) return { state: 'signed_out' };
     const plan = extractPlan(creds);
@@ -1468,8 +1754,15 @@ export function createChatGPTAuthManager({
     await Promise.all(flows.map((flow) => Promise.resolve(flow.cancel('superseded')).catch(() => {})));
   }
 
+  async function closeGraceFlows() {
+    const flows = [...graceFlows];
+    graceFlows.clear();
+    await Promise.all(flows.map((flow) => Promise.resolve(flow.cancel('superseded')).catch(() => {})));
+  }
+
   async function beginStart(args, emitFn) {
     await closeActiveAttempts();
+    await closeGraceFlows();
     // Replacing an invalid host id drops registrations for the old host
     // before a client id is chosen for this attempt.
     await getOrCreateHostId();
@@ -1490,13 +1783,18 @@ export function createChatGPTAuthManager({
       portStart: callbackPortStart,
       portAttempts,
       timeoutMs,
+      graceMs,
       fetchTimeoutMs,
+      onGraceClosed: () => {
+        graceFlows.delete(authFlow);
+      },
       onBrowserOpen: ({ authUrl, error }) => {
         emitAuth(emitFn, {
           state: error ? 'error' : 'waiting',
           code: error || undefined,
           authUrl,
-          attemptId: authFlow.attemptId
+          attemptId: authFlow.attemptId,
+          ...(error ? {} : { expiresAt: authFlow.expiresAt })
         });
       },
       onError: ({ code, authUrl }) => {
@@ -1508,6 +1806,7 @@ export function createChatGPTAuthManager({
     authFlow.promise.then(
       (creds) => {
         activeAuthAttempts.delete(authFlow.attemptId);
+        graceFlows.delete(authFlow);
         emitAuth(emitFn, {
           state: 'signed_in',
           account: creds.account,
@@ -1517,11 +1816,14 @@ export function createChatGPTAuthManager({
       },
       (error) => {
         activeAuthAttempts.delete(authFlow.attemptId);
+        if (error?.code === 'timeout' && authFlow.isGraceListening()) graceFlows.add(authFlow);
+        else graceFlows.delete(authFlow);
         if (!error || error.code === 'superseded') return;
         emitAuth(emitFn, {
           state: 'error',
           code: error.code || 'unknown',
-          attemptId: authFlow.attemptId
+          attemptId: authFlow.attemptId,
+          ...(error?.code === 'timeout' ? { expiresAt: authFlow.expiresAt } : {})
         });
       }
     );
@@ -1538,7 +1840,8 @@ export function createChatGPTAuthManager({
     return {
       state: 'waiting',
       authUrl: readyUrl,
-      attemptId: authFlow.attemptId
+      attemptId: authFlow.attemptId,
+      expiresAt: authFlow.expiresAt
     };
   }
 
@@ -1586,15 +1889,25 @@ export function createChatGPTAuthManager({
     const attemptId = args?.attemptId;
     if (!attemptId) return { error: 'attemptId is required' };
     const authFlow = activeAuthAttempts.get(attemptId);
-    if (!authFlow) return { state: 'signed_out' };
-    authFlow.invalidate();
-    await authFlow.cancel('cancelled');
-    activeAuthAttempts.delete(attemptId);
+    if (authFlow) {
+      authFlow.invalidate();
+      await authFlow.cancel('cancelled');
+      activeAuthAttempts.delete(attemptId);
+      graceFlows.delete(authFlow);
+      return { state: 'signed_out' };
+    }
+    for (const flow of graceFlows) {
+      if (flow.attemptId !== attemptId) continue;
+      graceFlows.delete(flow);
+      await flow.cancel('cancelled');
+      return { state: 'signed_out' };
+    }
     return { state: 'signed_out' };
   }
 
   async function cancelAll() {
     await closeActiveAttempts();
+    await closeGraceFlows();
   }
 
   async function signOut() {
@@ -1603,7 +1916,9 @@ export function createChatGPTAuthManager({
     // after that bump; the issued client id stays for the next sign-in.
     bumpSessionGeneration();
     for (const flow of activeAuthAttempts.values()) flow.invalidate();
+    for (const flow of graceFlows) flow.invalidate();
     await closeActiveAttempts();
+    await closeGraceFlows();
     await clearStoredSession();
     return { state: 'signed_out' };
   }
@@ -1671,4 +1986,31 @@ function firstTimeout(...values) {
     if (Number.isFinite(ms) && ms > 0) return ms;
   }
   return null;
+}
+
+function positiveInteger(value) {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^[0-9]+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function resolveAuthTimeoutMs(timeoutMs) {
+  return positiveInteger(timeoutMs)
+    ?? positiveInteger(process.env[AUTH_TIMEOUT_ENV])
+    ?? AUTH_TIMEOUT_MS;
+}
+
+function resolveAuthGraceMs(graceMs) {
+  return positiveInteger(graceMs)
+    ?? positiveInteger(process.env[AUTH_GRACE_ENV])
+    ?? AUTH_GRACE_MS;
+}
+
+function logAuth(message) {
+  console.error(message);
 }

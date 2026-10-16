@@ -56,7 +56,7 @@ async function startStaticServer() {
 // Opens the real panel with a fake daemon socket. startResult is what auth.chatgpt.start returns.
 // reopenFailure is an { ok: false, error } tool result. reopenResultFailure nests that object in result.
 // reopenThrow makes the socket throw while sending auth.chatgpt.reopen.
-async function openChatGPTWaiting(t, { locale, startResult, reopenFailure, reopenResultFailure, reopenThrow } = {}) {
+async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenFailure, reopenResultFailure, reopenThrow } = {}) {
   const browser = await getBrowser();
   if (!browser) {
     t.skip('No Chromium browser available. Set CHATPCB_BROWSER_PATH or run npx playwright install chromium.');
@@ -89,9 +89,19 @@ async function openChatGPTWaiting(t, { locale, startResult, reopenFailure, reope
         let result = {};
         let error;
         let authUrl;
-        if (call.name === 'auth.chatgpt.status') result = { state: 'signed_out' };
+        if (call.name === 'auth.chatgpt.start' && config.expiresInMs) {
+          window.__authExpiresAt = new Date(Date.now() + config.expiresInMs).toISOString();
+          result = { ...config.start, expiresAt: window.__authExpiresAt };
+        } else if (call.name === 'auth.chatgpt.start') {
+          result = config.start;
+        }
+        if (call.name === 'auth.chatgpt.status') {
+          const started = window.__sent.some((entry) => entry.name === 'auth.chatgpt.start');
+          result = started && window.__authExpiresAt
+            ? { ...config.start, state: 'waiting', expiresAt: window.__authExpiresAt }
+            : { state: 'signed_out' };
+        }
         if (call.name === 'provider.status') result = { provider: call.args?.provider ?? 'codex', status: 'signed-out' };
-        if (call.name === 'auth.chatgpt.start') result = config.start;
         if (call.name === 'auth.chatgpt.reopen') {
           if (config.reopenFailure) {
             ok = false;
@@ -114,6 +124,7 @@ async function openChatGPTWaiting(t, { locale, startResult, reopenFailure, reope
     window.WebSocket = FakeSocket;
   }, {
     start: startResult,
+    expiresInMs: expiresInMs ?? null,
     reopenFailure: reopenFailure ?? null,
     reopenResultFailure: reopenResultFailure ?? null,
     reopenThrow: reopenThrow ?? null
@@ -233,6 +244,77 @@ test('reopen shows the browser-open error when the result is ok:false', async (t
     await reopen.waitFor();
     await reopen.click();
     await assertBrowserOpenError(page, { title: '브라우저를 열 수 없습니다. 아래 링크를 사용하세요.', pageErrors });
+  } finally {
+    await context.close();
+  }
+});
+
+test('waiting card shows when the sign-in link expires', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'ko-KR',
+    startResult: waiting,
+    expiresInMs: 60 * 60 * 1000
+  });
+  if (!opened) return;
+  const { page, context, pageErrors, button } = opened;
+  try {
+    await button.click();
+    const expiry = page.locator('#chatgpt-auth-expiry');
+    await expiry.waitFor();
+    const expected = await page.evaluate(() => {
+      const time = new Intl.DateTimeFormat('ko-KR', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(new Date(window.__authExpiresAt));
+      return `이 로그인 링크는 ${time}에 만료됩니다.`;
+    });
+    assert.equal((await expiry.innerText()).trim(), expected);
+    assert.match(await page.locator('#chatgpt-auth-card').innerText(), /브라우저에서 로그인을 마쳐 주세요/);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('expired sign-in shows a retry button and stops polling', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'en-US',
+    startResult: waiting,
+    expiresInMs: 4500
+  });
+  if (!opened) return;
+  const { page, context, pageErrors, button } = opened;
+  try {
+    await button.click();
+    const expiry = page.locator('#chatgpt-auth-expiry');
+    await expiry.waitFor();
+    const expected = await page.evaluate(() => {
+      const time = new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(new Date(window.__authExpiresAt));
+      return `This sign-in link expires at ${time}.`;
+    });
+    assert.equal((await expiry.innerText()).trim(), expected);
+    await page.waitForFunction(
+      () => window.__sent.filter((call) => call.name === 'auth.chatgpt.status').length >= 2,
+      null,
+      { timeout: 8000 }
+    );
+    const card = page.locator('#chatgpt-auth-card');
+    await card.locator('h2', { hasText: 'Sign-in timed out' }).waitFor({ timeout: 8000 });
+    const text = await card.innerText();
+    assert.match(text, /Nothing was saved/);
+    assert.match(text, /Try again/);
+    const countAtExpiry = await page.evaluate(() => window.__sent.filter((call) => call.name === 'auth.chatgpt.status').length);
+    await page.waitForTimeout(2500);
+    const countAfter = await page.evaluate(() => window.__sent.filter((call) => call.name === 'auth.chatgpt.status').length);
+    assert.equal(countAfter, countAtExpiry);
+    assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
   }

@@ -1,6 +1,7 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
+const CHATGPT_AUTH_POLL_MS = 2000;
 
 // i18n helper
 let i18nLocale = 'en';
@@ -27,6 +28,18 @@ function t(key, replacements = {}) {
     text = text.replace(`{${placeholder}}`, value);
   }
   return text;
+}
+
+function formatChatGPTAuthExpiry(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const tag = locale === 'ko' ? 'ko-KR' : 'en-US';
+  return new Intl.DateTimeFormat(tag, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
 }
 
 // Detect locale from browser
@@ -164,6 +177,8 @@ const pendingCalls = new Map();
 const workflowCaptionEl = document.querySelector('#workflow-caption');
 const workflowCliEl = document.querySelector('#workflow-cli');
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
+let chatgptAuthPoll = null;
+let chatgptAuthExpiryTimer = null;
 
 connect();
 syncWorkflow();
@@ -446,13 +461,7 @@ function handleEnvelope(envelope) {
     }
   }
   if (callName === 'auth.chatgpt.status') {
-    const result = envelope.payload.result;
-    chatgptAuthState = {
-      state: result.state || 'signed_out',
-      account: result.account,
-      plan: result.plan
-    };
-    renderChatGPTAuth();
+    applyChatGPTAuthStatus(envelope.payload.result || {});
     return;
   }
   if (callName === 'auth.chatgpt.start') {
@@ -461,12 +470,17 @@ function handleEnvelope(envelope) {
       ...chatgptAuthState,
       state: result.state || 'waiting',
       attemptId: result.attemptId,
-      authUrl: result.authUrl
+      authUrl: result.authUrl,
+      expiresAt: result.expiresAt,
+      code: undefined
     };
     renderChatGPTAuth();
+    if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
+    else stopChatGPTAuthPolling();
     return;
   }
   if (callName === 'auth.chatgpt.cancel' || callName === 'auth.chatgpt.signOut') {
+    stopChatGPTAuthPolling();
     chatgptAuthState = { state: 'signed_out' };
     renderChatGPTAuth();
     return;
@@ -1245,8 +1259,104 @@ function refreshChatGPTAuthStatus() {
   sendToolCall({ id, name: 'auth.chatgpt.status', args: {} });
 }
 
+function stopChatGPTAuthPolling() {
+  if (chatgptAuthPoll) {
+    clearInterval(chatgptAuthPoll);
+    chatgptAuthPoll = null;
+  }
+  if (chatgptAuthExpiryTimer) {
+    clearTimeout(chatgptAuthExpiryTimer);
+    chatgptAuthExpiryTimer = null;
+  }
+}
+
+function chatGPTAuthExpiredLocally() {
+  const expiresAt = Date.parse(chatgptAuthState.expiresAt);
+  return Number.isFinite(expiresAt) && Date.now() >= expiresAt;
+}
+
+function showChatGPTAuthExpired() {
+  stopChatGPTAuthPolling();
+  if (chatgptAuthState.state === 'error' && chatgptAuthState.code === 'timeout') return;
+  chatgptAuthState = {
+    ...chatgptAuthState,
+    state: 'error',
+    code: 'timeout'
+  };
+  renderChatGPTAuth();
+  updateLiveRegion({ state: 'error', code: 'timeout' });
+}
+
+function startChatGPTAuthPolling() {
+  stopChatGPTAuthPolling();
+  if (chatgptAuthState.state !== 'waiting') return;
+  const expiresAt = Date.parse(chatgptAuthState.expiresAt);
+  if (!Number.isFinite(expiresAt)) return;
+  const delay = expiresAt - Date.now();
+  if (delay <= 0) {
+    showChatGPTAuthExpired();
+    return;
+  }
+  chatgptAuthExpiryTimer = setTimeout(() => {
+    if (chatgptAuthState.state === 'waiting') showChatGPTAuthExpired();
+  }, delay);
+  chatgptAuthPoll = setInterval(() => {
+    if (chatgptAuthState.state !== 'waiting') {
+      stopChatGPTAuthPolling();
+      return;
+    }
+    if (chatGPTAuthExpiredLocally()) {
+      showChatGPTAuthExpired();
+      return;
+    }
+    refreshChatGPTAuthStatus();
+  }, CHATGPT_AUTH_POLL_MS);
+}
+
+function applyChatGPTAuthStatus(result) {
+  if (chatgptAuthState.state === 'error' && chatgptAuthState.code === 'timeout' && result.state === 'waiting') {
+    return;
+  }
+  if (result.state === 'waiting') {
+    const previous = chatgptAuthState;
+    chatgptAuthState = {
+      ...chatgptAuthState,
+      state: 'waiting',
+      attemptId: result.attemptId ?? chatgptAuthState.attemptId,
+      authUrl: result.authUrl ?? chatgptAuthState.authUrl,
+      expiresAt: result.expiresAt ?? chatgptAuthState.expiresAt,
+      code: undefined
+    };
+    const changed = previous.state !== 'waiting'
+      || previous.expiresAt !== chatgptAuthState.expiresAt
+      || previous.attemptId !== chatgptAuthState.attemptId
+      || previous.authUrl !== chatgptAuthState.authUrl;
+    if (changed) renderChatGPTAuth();
+    if (chatgptAuthState.state === 'waiting' && !chatgptAuthPoll) startChatGPTAuthPolling();
+    return;
+  }
+  if (chatgptAuthState.state === 'waiting' && (result.code === 'timeout' || chatGPTAuthExpiredLocally())) {
+    showChatGPTAuthExpired();
+    return;
+  }
+  stopChatGPTAuthPolling();
+  chatgptAuthState = {
+    state: result.state || 'signed_out',
+    account: result.account,
+    plan: result.plan,
+    code: result.code,
+    attemptId: result.attemptId ?? null,
+    authUrl: result.authUrl ?? null,
+    expiresAt: result.expiresAt ?? null
+  };
+  renderChatGPTAuth();
+  if (result.state === 'error' && result.code) updateLiveRegion({ state: 'error', code: result.code });
+}
+
 function handleChatGPTAuthChanged(payload) {
   chatgptAuthState = { ...chatgptAuthState, ...payload };
+  if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
+  else stopChatGPTAuthPolling();
   renderChatGPTAuth();
   updateLiveRegion(payload);
 }
@@ -1280,11 +1390,16 @@ function renderChatGPTAuth() {
     const reopenLink = authHref
       ? `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" onclick="reopenChatGPTSignIn()">${t('auth.chatgpt.waiting.reopen')}<span class="sr-only"> ${t('auth.chatgpt.opens-browser')}</span></button>`
       : `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" disabled aria-describedby="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen')}</button> <span id="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen-unavailable')}</span>`;
+    const expiryTime = formatChatGPTAuthExpiry(chatgptAuthState.expiresAt);
+    const expiryLine = expiryTime
+      ? `<p id="chatgpt-auth-expiry">${t('auth.chatgpt.waiting.expires', { time: escapeHtml(expiryTime) })}</p>`
+      : '';
     chatgptAuthCardEl.innerHTML = `
       <h2 id="chatgpt-auth-title" tabindex="-1">
         <span class="spinner" aria-hidden="true"></span>
         ${t('auth.chatgpt.waiting.title')}
       </h2>
+      ${expiryLine}
       <p>
         ${reopenLink}
         · 
@@ -1324,7 +1439,7 @@ function renderChatGPTAuth() {
       actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
     } else if (code === 'timeout') {
       title = t('auth.chatgpt.error.timeout');
-      body = '';
+      body = t('auth.chatgpt.error.timeout.body');
       actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
     } else if (code === 'open_failed') {
       title = t('auth.chatgpt.error.open-failed');
@@ -1372,7 +1487,10 @@ function updateLiveRegion(payload) {
   let message = '';
   
   if (state === 'waiting') {
-    message = t('auth.chatgpt.waiting.title');
+    const time = formatChatGPTAuthExpiry(payload.expiresAt);
+    message = time
+      ? `${t('auth.chatgpt.waiting.title')} ${t('auth.chatgpt.waiting.expires', { time })}`
+      : t('auth.chatgpt.waiting.title');
   } else if (state === 'signed_in') {
     const plan = payload.plan;
     if (plan) {
@@ -1450,6 +1568,7 @@ function reopenFailureFrom(payload) {
 }
 
 function showChatGPTSignInError(error, authUrl) {
+  stopChatGPTAuthPolling();
   const code = chatGPTSignInErrorCode(error);
   chatgptAuthState = {
     ...chatgptAuthState,
