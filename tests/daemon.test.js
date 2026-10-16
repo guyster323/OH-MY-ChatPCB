@@ -918,6 +918,83 @@ test('daemon ignores disallowed schematic.generate on existing project and falls
   }
 });
 
+test('PROVIDER_DISALLOWED_TOOL names the disallowed tools in Korean and English', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-disallowed-message-'));
+
+  try {
+    await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+
+    const cases = [
+      {
+        prompt: '회로를 수정해 주세요.',
+        tools: ['project.create'],
+        message: /AI가 이 단계에서 쓸 수 없는 작업\(project\.create\)을 시도해/
+      },
+      {
+        prompt: 'Add a reset button.',
+        tools: ['project.create'],
+        message: /The AI attempted an operation \(project\.create\) that is not allowed at this stage/
+      },
+      {
+        prompt: '회로에 버튼을 추가해 주세요.',
+        tools: ['schematic.generate'],
+        message: /AI가 이 단계에서 쓸 수 없는 작업\(schematic\.generate\)을 시도해/
+      },
+      {
+        prompt: 'Add a status LED.',
+        tools: ['schematic.generate'],
+        message: /The AI attempted an operation \(schematic\.generate\) that is not allowed at this stage/
+      },
+      {
+        prompt: 'Change the connector.',
+        tools: ['schematic.generate', 'project.create'],
+        message: /The AI attempted an operation \(schematic\.generate, project\.create\) that is not allowed at this stage/
+      }
+    ];
+
+    for (const item of cases) {
+      const mutex = createProjectMutexRegistry();
+      await mutex.runExclusive({ projectDir: root }, async () => {
+        const result = await dispatchToolCall(
+          {
+            id: `call_disallowed_message_${item.tools.join('_')}`,
+            name: 'project.request',
+            args: { provider: 'codex', projectDir: root, prompt: item.prompt }
+          },
+          {
+            projectMutexRegistry: mutex,
+            checkProviderAvailabilityImpl: async ({ provider }) => ({
+              provider,
+              command: 'codex',
+              available: true,
+              status: 'available'
+            }),
+            runProviderProcessImpl: async () => ({
+              exitCode: 0,
+              stderr: '',
+              events: item.tools.map((name, index) => createEnvelope('tool.call', {
+                id: `call_disallowed_${name}_${index}`,
+                name,
+                args: { projectName: 'Blocked', prompt: 'Blocked' }
+              }))
+            })
+          }
+        );
+
+        assert.equal(result.ok, false);
+        assert.equal(result.error.code, 'PROVIDER_DISALLOWED_TOOL');
+        assert.match(result.error.message, item.message);
+        assert.doesNotMatch(result.error.message, /프로젝트 생성|project creation/);
+      });
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('daemon retains the last generation or patch result after later provider tools', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-multi-tool-'));
 
@@ -1253,6 +1330,124 @@ test('daemon ignores disallowed calls after patch preview and succeeds without r
     for (const [file, content] of originalFiles) {
       assert.deepEqual(await readFile(file), content);
     }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon restores an existing project snapshot after an exceptional provider exit', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-exception-restore-'));
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const before = await readFile(generated.files.spec, 'utf8');
+
+    const rejected = await dispatchToolCall(
+      {
+        id: 'call_provider_exception_restore',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => ({
+          exitCode: 0,
+          stderr: '',
+          events: [
+            createEnvelope('tool.call', {
+              id: 'call_provider_inspect_then_fail',
+              name: 'project.inspect',
+              args: {}
+            })
+          ]
+        }),
+        inspectProjectImpl: async () => {
+          await writeFile(generated.files.spec, 'mutated before exceptional exit\n', 'utf8');
+          throw new Error('inspection failed after mutating the project');
+        }
+      }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error.message, /inspection failed after mutating the project/);
+    assert.equal(await readFile(generated.files.spec, 'utf8'), before);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon removes provider-created files when restoring after an exceptional project request', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-created-file-restore-'));
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const originalFiles = await Promise.all(
+      Object.values(generated.files).map(async (file) => [file, await readFile(file)])
+    );
+    const createdFile = path.join(root, 'exception-created.kicad_sch');
+    let candidateDir;
+
+    const rejected = await dispatchToolCall(
+      {
+        id: 'call_provider_created_file_exception_restore',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => ({
+          exitCode: 0,
+          stderr: '',
+          events: [
+            createEnvelope('tool.call', {
+              id: 'call_patch_then_fail',
+              name: 'schematic.patch',
+              args: { prompt: 'STM32 board with USB-C power and UART header.' }
+            }),
+            createEnvelope('tool.call', {
+              id: 'call_provider_inspect_after_patch',
+              name: 'project.inspect',
+              args: {}
+            })
+          ]
+        }),
+        validateProjectImpl: async ({ projectDir }) => {
+          if (path.resolve(projectDir) !== path.resolve(root)) candidateDir = projectDir;
+          return { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } };
+        },
+        validateBoardImpl: passingDrc,
+        inspectProjectImpl: async () => {
+          await writeFile(createdFile, 'provider-created schematic\n', 'utf8');
+          throw new Error('dispatch failed after creating a project file');
+        }
+      }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error.message, /dispatch failed after creating a project file/);
+    await assert.rejects(() => access(createdFile), { code: 'ENOENT' });
+    for (const [file, content] of originalFiles) {
+      assert.deepEqual(await readFile(file), content);
+    }
+    assert.ok(candidateDir);
+    assert.equal(path.resolve(candidateDir).startsWith(`${path.resolve(root)}${path.sep}`), false);
+    await assert.rejects(() => access(candidateDir), { code: 'ENOENT' });
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -2071,7 +2266,7 @@ test('rollback and status are unavailable through provider allowed tools', async
     assert.ok(!allowedToolNames.includes('project.transaction.rollback'));
     assert.equal(result.ok, true);
     assert.equal(result.result.toolResults.every((toolResult) => toolResult.ok === false), true);
-    assert.equal(result.result.toolResults.every((toolResult) => toolResult.error.code === 'UNKNOWN_TOOL'), true);
+    assert.equal(result.result.toolResults.every((toolResult) => toolResult.error.code === 'DISALLOWED_TOOL'), true);
 
     const status = await dispatchToolCall({
       name: 'project.transaction.status',
@@ -2427,7 +2622,7 @@ test('daemon ignores disallowed calls from real child process provider and retri
       prompt: 'RP2040 board with USB-C power and I2C connector.'
     });
 
-    const fakeProviderPath = path.join(import.meta.dirname, 'fixtures', 'fake-provider-disallowed.sh');
+    const fakeProviderPath = path.join(import.meta.dirname, 'fixtures', 'fake-provider-disallowed.mjs');
     let callCount = 0;
 
     const result = await dispatchToolCall(
@@ -2437,8 +2632,14 @@ test('daemon ignores disallowed calls from real child process provider and retri
         args: { provider: 'codex', projectDir: created.result.projectDir, prompt: 'Add reset button.' }
       },
       {
-        checkProviderAvailabilityImpl: async () => ({ provider: 'codex', command: fakeProviderPath, available: true, status: 'available' }),
-        getProviderDefinitionImpl: () => ({ id: 'codex', label: 'Codex CLI', command: fakeProviderPath, args: [], description: 'Test provider' }),
+        checkProviderAvailabilityImpl: async () => ({ provider: 'codex', command: process.execPath, available: true, status: 'available' }),
+        getProviderDefinitionImpl: () => ({
+          id: 'codex',
+          label: 'Codex CLI',
+          command: process.execPath,
+          args: [fakeProviderPath],
+          description: 'Test provider'
+        }),
         validateProjectImpl: passingErc,
         validateBoardImpl: passingDrc,
         runProviderProcessImpl: async (options) => {

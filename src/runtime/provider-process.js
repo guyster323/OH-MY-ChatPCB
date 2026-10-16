@@ -3,9 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { PROVIDER_ALLOWED_TOOLS } from '../shared/constants.js';
 import { createEnvelope } from './envelope.js';
-
-const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 
 export function runProviderProcess({
   command,
@@ -14,7 +13,7 @@ export function runProviderProcess({
   cwd = process.cwd(),
   env = {},
   timeoutMs = 120000,
-  allowedToolNames = DEFAULT_ALLOWED_TOOL_NAMES,
+  allowedToolNames = PROVIDER_ALLOWED_TOOLS,
   traceDir,
   signal,
   onEvent

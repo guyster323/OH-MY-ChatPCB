@@ -1,8 +1,10 @@
 import http from 'node:http';
 import { createHash } from 'node:crypto';
-import { readdir } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
 import { buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
@@ -20,12 +22,12 @@ import { assertSafeProjectDir, createNamedProject } from '../workflow/project-wo
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
 
-const ALL_PROVIDER_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
-
 function computeAllowedToolsForContext({ allowGenerate = false, allowCreate = false } = {}) {
-  const tools = new Set(['schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice']);
-  if (allowGenerate) tools.add('schematic.generate');
-  if (allowCreate) tools.add('project.create');
+  const tools = new Set(
+    PROVIDER_ALLOWED_TOOLS.filter((name) => name !== ToolName.SCHEMATIC_GENERATE && name !== ToolName.PROJECT_CREATE)
+  );
+  if (allowGenerate) tools.add(ToolName.SCHEMATIC_GENERATE);
+  if (allowCreate) tools.add(ToolName.PROJECT_CREATE);
   return tools;
 }
 
@@ -40,6 +42,20 @@ function emitProgress(ctx, payload) {
 
 function progressCopy(prompt, ko, en) {
   return /[가-힣]/.test(prompt ?? '') ? ko : en;
+}
+
+function providerDisallowedMessage(prompt, disallowedCalls) {
+  const names = [];
+  for (const call of disallowedCalls ?? []) {
+    if (typeof call?.name !== 'string' || call.name.length === 0 || names.includes(call.name)) continue;
+    names.push(call.name);
+  }
+  const tools = names.join(', ');
+  return progressCopy(
+    prompt,
+    `AI가 이 단계에서 쓸 수 없는 작업(${tools})을 시도해 요청을 마치지 못했어요. 파일은 바뀌지 않았어요. 다시 시도해 주세요.`,
+    `The AI attempted an operation (${tools}) that is not allowed at this stage. No files were changed. Please try again.`
+  );
 }
 
 function emitProviderEvent(ctx, event) {
@@ -318,7 +334,7 @@ async function invokeProvider(call, ctx) {
       command: definition.command,
       args: definition.args,
       input,
-      allowedToolNames: ALL_PROVIDER_TOOLS,
+      allowedToolNames: PROVIDER_ALLOWED_TOOLS,
       signal: controller.signal,
       onEvent: (event) => {
         alreadyStreamed = true;
@@ -457,6 +473,8 @@ async function requestProject(call, ctx) {
   let firstPreview = null;
   let retryAttempted = false;
   const invocationId = args.invocationId ?? call.id;
+  const provisionalPlans = [];
+  ctx.provisionalPlans = provisionalPlans;
   const providerCtx = {
     ...ctx,
     allowGenerate: !hasSpec,
@@ -464,8 +482,10 @@ async function requestProject(call, ctx) {
     projectExists: hasSpec,
     retainProviderController: true
   };
-  
+
+  let snapshot = null;
   try {
+    snapshot = hasSpec ? await snapshotProject(projectDir) : null;
     throwIfProviderCancelled(ctx.providerControllers, invocationId);
     providerResult = await invokeProvider({
       ...call,
@@ -505,11 +525,7 @@ async function requestProject(call, ctx) {
       }, ctx);
       if (!generated.ok) {
         if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
-          const disallowedError = new Error(
-            /[가-힣]/.test(prompt)
-              ? 'AI가 이 단계에서 쓸 수 없는 작업(프로젝트 생성)을 시도해 요청을 마치지 못했어요. 파일은 바뀌지 않았어요. 다시 시도해 주세요.'
-              : 'The AI attempted an operation (project creation) that is not allowed at this stage. No files were changed. Please try again.'
-          );
+          const disallowedError = new Error(providerDisallowedMessage(prompt, providerResult.disallowedCalls));
           disallowedError.code = 'PROVIDER_DISALLOWED_TOOL';
           disallowedError.conversation = conversation;
           disallowedError.technicalDetail = providerResult.disallowedCalls.map((dc) => `${dc.name}: ${dc.reason}`).join('; ');
@@ -537,6 +553,11 @@ async function requestProject(call, ctx) {
       conversation
     };
   } catch (error) {
+    // PROJECT_BUSY means another transaction holds the project and may be writing.
+    if (snapshot && error?.code !== 'PROJECT_BUSY') {
+      await restoreProjectSnapshot(snapshot, projectDir);
+    }
+    await disposeProvisionalPlans(provisionalPlans, ctx.patchApprovalRegistry, projectDir);
     if (error?.code === 'PROJECT_BUSY') throw error;
     const wrapped = error instanceof Error ? error : new Error(String(error?.message ?? error));
     wrapped.code = error?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
@@ -544,7 +565,38 @@ async function requestProject(call, ctx) {
     if (error?.technicalDetail) wrapped.technicalDetail = error.technicalDetail;
     throw wrapped;
   } finally {
+    if (snapshot?.root) await rm(snapshot.root, { force: true, recursive: true });
     releaseProviderInvocation(ctx.providerControllers, invocationId);
+  }
+}
+
+async function snapshotProject(projectDir) {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-snapshot-'));
+  try {
+    const copy = path.join(root, 'project');
+    await cp(projectDir, copy, { recursive: true });
+    return { root, copy };
+  } catch (error) {
+    await rm(root, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+async function restoreProjectSnapshot(snapshot, projectDir) {
+  const currentEntries = await readdir(path.resolve(projectDir), { withFileTypes: true });
+  for (const entry of currentEntries) {
+    await rm(path.join(projectDir, entry.name), { force: true, recursive: true });
+  }
+  await cp(snapshot.copy, projectDir, { recursive: true });
+}
+
+async function disposeProvisionalPlans(plans, registry, projectDir) {
+  for (const plan of plans) {
+    const patchId = plan?.proposalId ?? plan?.patchId;
+    if (registry && patchId && projectDir) {
+      registry.consume({ patchId, projectDir });
+    }
+    await disposeSchematicPatchPlan(plan);
   }
 }
 
@@ -819,6 +871,8 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
     if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
     throw error;
   }
+
+  if (Array.isArray(ctx.provisionalPlans)) ctx.provisionalPlans.push(plan);
 
   const registration = ctx.patchApprovalRegistry.register({
     patchId: plan.proposalId,
