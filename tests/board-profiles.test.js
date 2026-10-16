@@ -5,9 +5,14 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug nets and full interfaces', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-esp32-profile-'));
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -110,12 +115,17 @@ test('ESP32-S3 supported sensor profile expands requested SWD into ESP32 debug n
     assert.ok(result.review.findings.notes.some((finding) => /SWD request was mapped/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code === 'missing-swd'));
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('STM32 supported sensor profile keeps the same board structure but implements SWD directly', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-stm32-profile-'));
+  const previous = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -204,12 +214,14 @@ test('STM32 supported sensor profile keeps the same board structure but implemen
     assert.ok(result.review.findings.notes.some((finding) => /supported STM32 USB-C sensor profile/i.test(finding.message)));
     assert.ok(!result.review.findings.blockers.some((finding) => finding.code.startsWith('missing-')));
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('README Korean ESP32-S3 sensor prompt selects the supported ESP32-S3 profile', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-readme-profile-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -222,6 +234,7 @@ test('README Korean ESP32-S3 sensor prompt selects the supported ESP32-S3 profil
     assert.equal(metadata.mcu.package, 'ESP32-S3-WROOM-1-N8R2');
     assert.ok(result.files.board);
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -246,6 +259,7 @@ test('generic STM32 prompt without sensor or USB-C stays off the supported profi
 
 test('ADBMS6830 prompt selects a schematic-only 16S BMS example profile', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-profile-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -280,6 +294,7 @@ test('ADBMS6830 prompt selects a schematic-only 16S BMS example profile', async 
     assert.ok(!result.review.findings.notes.some((finding) => /USB-C sensor profile/i.test(finding.message)));
     assert.ok(result.review.residualRisks.some((risk) => /safety-review/i.test(risk)));
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
