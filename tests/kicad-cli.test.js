@@ -697,20 +697,23 @@ test('private KiCad config is copied from KICAD_CONFIG_HOME, then the real platf
     const legacy = path.join(root, 'chatpcb-kicad-config-legacy');
     writeConfigMarker(path.join(legacy, 'kicad'), 'from-legacy\n');
     const ignoredLegacy = await runKicadCli([], {
-      env: { ...baseEnv, HOME: home, KICAD_CONFIG_HOME: path.join(legacy, 'kicad') }
+      env: { ...baseEnv, HOME: home, KICAD_CONFIG_HOME: path.join(legacy, 'kicad') },
+      platform: 'linux'
     });
     assert.match(ignoredLegacy.stdout, /from-home/);
     assert.equal(ignoredLegacy.stdout.includes('from-legacy'), false, ignoredLegacy.stdout);
 
     const flatpakCli = await runKicadCli([], {
-      env: { ...baseEnv, HOME: home, KICAD_CLI_FLATPAK: '1' }
+      env: { ...baseEnv, HOME: home, KICAD_CLI_FLATPAK: '1' },
+      platform: 'linux'
     });
     assert.equal(flatpakCli.source, 'flatpak');
     assert.match(flatpakCli.stdout, /from-flatpak/);
     assert.equal(flatpakCli.stdout.includes('from-home'), false, flatpakCli.stdout);
 
     const nativeCli = await runKicadCli([], {
-      env: { ...baseEnv, HOME: home }
+      env: { ...baseEnv, HOME: home },
+      platform: 'linux'
     });
     assert.match(nativeCli.stdout, /from-home/);
     assert.equal(nativeCli.stdout.includes('from-flatpak'), false, nativeCli.stdout);
