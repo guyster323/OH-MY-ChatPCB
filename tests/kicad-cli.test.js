@@ -917,12 +917,68 @@ function ercCounts(reportPath) {
   return { errorCount, warningCount, byType };
 }
 
+function pathInside(root, candidate) {
+  if (!root || !candidate) return false;
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (
+    !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)
+  );
+}
+
 function flatpakChildEnv(configHome) {
   const env = { ...process.env, KICAD_CONFIG_HOME: configHome };
+  // Stock flatpak mounts $HOME for filesystems=home. A test hook can point HOME
+  // at a temp dir, which hides the account-home probe. Give the sandbox the
+  // passwd home, where the probe and the copied config live.
+  const home = realAccountHome();
+  if (home) {
+    env.HOME = home;
+    env.USERPROFILE = home;
+    const xdg = typeof env.XDG_CONFIG_HOME === 'string' ? env.XDG_CONFIG_HOME.trim() : '';
+    if (xdg && !pathInside(home, xdg)) delete env.XDG_CONFIG_HOME;
+  }
   for (const key of Object.keys(env)) {
     if (/^KICAD\d*(?:_[A-Z0-9]+)+_DIR$/.test(key)) delete env[key];
   }
   return env;
+}
+
+function directoryExists(candidate) {
+  try {
+    return fs.statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+// os.homedir() follows HOME. A test hook can point that at an empty temp dir
+// and pin the real KiCad config on KICAD_CONFIG_HOME. The passwd home is what
+// the stock flatpak sandbox (filesystems=home) can see.
+function realAccountHome() {
+  try {
+    const home = os.userInfo().homedir;
+    if (typeof home === 'string' && home.trim()) return home.trim();
+  } catch {
+    // No passwd entry.
+  }
+  return null;
+}
+
+function stockFlatpakConfigDir() {
+  const pinned = typeof process.env.KICAD_CONFIG_HOME === 'string'
+    ? process.env.KICAD_CONFIG_HOME.trim()
+    : '';
+  if (pinned && directoryExists(pinned)) return pinned;
+  const home = realAccountHome();
+  if (!home) return null;
+  const candidate = path.join(home, '.var', 'app', 'org.kicad.KiCad', 'config', 'kicad');
+  return directoryExists(candidate) ? candidate : null;
+}
+
+function kicadCliIgnoringAmbientPath() {
+  const env = { ...process.env };
+  delete env.KICAD_CLI_PATH;
+  return resolveKicadCli({ env });
 }
 
 function runStockFlatpakKicad(args, configHome) {
@@ -944,13 +1000,30 @@ test('stock flatpak KiCad reads a home-visible config and ignores an empty one',
   assert.match(info.stdout, /filesystems=home/);
   assert.doesNotMatch(info.stdout, /filesystems=[^\n]*\/tmp/);
   const symbols = findInstalledSymbolLibraryDirectory();
-  const realConfig = path.join(os.homedir(), '.var', 'app', 'org.kicad.KiCad', 'config', 'kicad');
-  if (!symbols || !fs.existsSync(realConfig)) {
-    t.skip('real KiCad symbol library or config is not available');
+  if (!symbols) {
+    t.skip('real KiCad symbol library is not available');
+    return;
+  }
+  const realConfig = stockFlatpakConfigDir();
+  if (!realConfig) {
+    t.skip('real KiCad config is not available');
+    return;
+  }
+  const accountHome = realAccountHome();
+  if (!accountHome) {
+    t.skip('real account home is not available for a sandbox-visible KiCad probe');
+    return;
+  }
+  const stockCli = kicadCliIgnoringAmbientPath();
+  const ambientCli = typeof process.env.KICAD_CLI_PATH === 'string' ? process.env.KICAD_CLI_PATH.trim() : '';
+  if (!stockCli.path && ambientCli) {
+    t.skip(`ambient KICAD_CLI_PATH is a custom wrapper (${ambientCli}) and no stock kicad-cli is available`);
     return;
   }
 
-  const root = fs.mkdtempSync(path.join(os.homedir(), '.cache', 'chatpcb-flatpak-probe-'));
+  const visibleCache = path.join(accountHome, '.cache');
+  fs.mkdirSync(visibleCache, { recursive: true });
+  const root = fs.mkdtempSync(path.join(visibleCache, 'chatpcb-flatpak-probe-'));
   const previous = {
     KICAD_SYMBOL_DIR: process.env.KICAD_SYMBOL_DIR,
     KICAD10_SYMBOL_DIR: process.env.KICAD10_SYMBOL_DIR
@@ -999,17 +1072,21 @@ test('stock flatpak KiCad reads a home-visible config and ignores an empty one',
       };
       delete env.KICAD_SYMBOL_DIR;
       delete env.KICAD10_SYMBOL_DIR;
+      delete env.KICAD_CLI_PATH;
+      if (stockCli.path) env.KICAD_CLI_PATH = stockCli.path;
       return env;
     };
-    const upgrade = await runKicadCli(['sch', 'upgrade', '--force', schematic], {
-      env: hookedEnv(fullCopy),
+    const runHookedKicad = (args, configHome) => runKicadCli(args, {
+      env: hookedEnv(configHome),
+      explicitPath: stockCli.path || undefined,
       cwd: projectDir
     });
+    const upgrade = await runHookedKicad(['sch', 'upgrade', '--force', schematic], fullCopy);
     assert.equal(upgrade.exitCode, 0, upgrade.stderr);
     const report = path.join(projectDir, 'hooked-erc.json');
-    const erc = await runKicadCli(
+    const erc = await runHookedKicad(
       ['sch', 'erc', '--format', 'json', '--output', report, schematic],
-      { env: hookedEnv(fullCopy), cwd: projectDir }
+      fullCopy
     );
     const hookedCounts = ercCounts(report);
     assert.equal(erc.exitCode, 0, `${erc.stderr} ${JSON.stringify(hookedCounts)}`);
@@ -1017,9 +1094,9 @@ test('stock flatpak KiCad reads a home-visible config and ignores an empty one',
     assert.equal(hookedCounts.warningCount, 0, JSON.stringify(hookedCounts));
 
     const markedReport = path.join(projectDir, 'hooked-marked-erc.json');
-    const marked = await runKicadCli(
+    const marked = await runHookedKicad(
       ['sch', 'erc', '--format', 'json', '--output', markedReport, schematic],
-      { env: hookedEnv(markedCopy), cwd: projectDir }
+      markedCopy
     );
     assert.equal(fs.existsSync(markedReport), true, `${marked.stderr} ${marked.stdout}`);
     const markedCounts = ercCounts(markedReport);

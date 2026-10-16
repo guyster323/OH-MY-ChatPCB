@@ -709,7 +709,7 @@ test('processGroupAlive treats EPERM as a group that cannot be signalled', () =>
 });
 
 test('aborts during prompt write without spawning', async () => {
-  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-case-'));
   const controller = new AbortController();
   let releaseWrite;
   const writeGate = new Promise((resolve) => {
@@ -721,30 +721,35 @@ test('aborts during prompt write without spawning', async () => {
   });
   let spawns = 0;
 
-  const promise = runProviderProcess({
-    command: process.execPath,
-    args: ['-e', 'process.exit(0)'],
-    input: 'abort during write',
-    usePromptFile: true,
-    signal: controller.signal,
-    timeoutMs: 5000,
-    writeFileImpl: async (file, data, options) => {
-      entered();
-      controller.abort();
-      await writeGate;
-      return writeFile(file, data, options);
-    },
-    spawnImpl: () => {
-      spawns += 1;
-      throw new Error('spawn should not be called');
-    }
-  });
+  try {
+    const promise = runProviderProcess({
+      command: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      input: 'abort during write',
+      usePromptFile: true,
+      tempDirectory,
+      signal: controller.signal,
+      timeoutMs: 5000,
+      writeFileImpl: async (file, data, options) => {
+        entered();
+        controller.abort();
+        await writeGate;
+        return writeFile(file, data, options);
+      },
+      spawnImpl: () => {
+        spawns += 1;
+        throw new Error('spawn should not be called');
+      }
+    });
 
-  await writeEntered;
-  releaseWrite();
-  await assert.rejects(promise, /cancelled/);
-  assert.equal(spawns, 0);
-  assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+    await writeEntered;
+    releaseWrite();
+    await assert.rejects(promise, /cancelled/);
+    assert.equal(spawns, 0);
+    assert.deepEqual(await readdir(tempDirectory), []);
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test('parses a recorded grok json-schema result into one schematic.generate tool call', async () => {
