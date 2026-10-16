@@ -71,6 +71,9 @@ const patchApprovalTitleEl = document.querySelector('#patch-approval-title');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const approveWithoutErcButtonEl = document.querySelector('#approve-patch-without-erc');
+const applyWithoutErcConfirmEl = document.querySelector('#apply-without-erc-confirm');
+const confirmApplyWithoutErcButtonEl = document.querySelector('#confirm-apply-without-erc');
+const cancelApplyWithoutErcButtonEl = document.querySelector('#cancel-apply-without-erc');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const fixPatchButtonEl = document.querySelector('#fix-patch-button');
 const applyWhyEl = document.querySelector('#apply-why');
@@ -140,7 +143,9 @@ providerEl.addEventListener('change', refreshProviderStatus);
 openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
-approveWithoutErcButtonEl?.addEventListener('click', approvePatchWithoutErc);
+approveWithoutErcButtonEl?.addEventListener('click', revealApplyWithoutErcConfirm);
+confirmApplyWithoutErcButtonEl?.addEventListener('click', approvePatchWithoutErc);
+cancelApplyWithoutErcButtonEl?.addEventListener('click', cancelApplyWithoutErcConfirm);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
 fixPatchButtonEl?.addEventListener('click', askChatpcbToFixErc);
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
@@ -779,6 +784,7 @@ function clearPatchApproval(messageKey = 'patch.idle') {
     approveWithoutErcButtonEl.hidden = true;
     approveWithoutErcButtonEl.disabled = true;
   }
+  hideApplyWithoutErcConfirm();
   cancelPatchButtonEl.disabled = true;
   if (applyWhyEl) {
     applyWhyEl.hidden = true;
@@ -1017,6 +1023,7 @@ function renderPatchApproval() {
     approveWithoutErcButtonEl.hidden = !canOverride;
     approveWithoutErcButtonEl.disabled = !canOverride;
   }
+  hideApplyWithoutErcConfirm();
   if (active && !evidenceBlocked && !canApply) {
     const reason = patchRejectionCode
       ? t('patch.unverified.body')
@@ -1117,11 +1124,31 @@ function approvePatch() {
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
 }
 
+function hideApplyWithoutErcConfirm() {
+  if (applyWithoutErcConfirmEl) applyWithoutErcConfirmEl.hidden = true;
+}
+
+function revealApplyWithoutErcConfirm() {
+  if (!activeProject || !approveWithoutErcButtonEl || approveWithoutErcButtonEl.hidden || approveWithoutErcButtonEl.disabled) return;
+  if (!patchApprovalState.patchId || !applyWithoutErcConfirmEl) return;
+  const erc = ercBlockState();
+  if (erc.skipped !== true || erc.failed || erc.passed === true) return;
+  applyWithoutErcConfirmEl.hidden = false;
+  confirmApplyWithoutErcButtonEl?.focus();
+}
+
+function cancelApplyWithoutErcConfirm() {
+  hideApplyWithoutErcConfirm();
+  approveWithoutErcButtonEl?.focus();
+}
+
 function approvePatchWithoutErc() {
   if (!activeProject || !approveWithoutErcButtonEl || approveWithoutErcButtonEl.hidden || approveWithoutErcButtonEl.disabled) return;
+  if (!applyWithoutErcConfirmEl || applyWithoutErcConfirmEl.hidden) return;
   if (!patchApprovalState.patchId) return;
   const erc = ercBlockState();
   if (erc.skipped !== true || erc.failed || erc.passed === true) return;
+  hideApplyWithoutErcConfirm();
   appendProgress({ stage: 'apply', text: t('request.apply-progress') });
   renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
   const id = `patch_approve_${Date.now()}`;

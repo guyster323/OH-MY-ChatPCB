@@ -464,6 +464,17 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 .patch-cta-hero h2, .approval h3, #patch-approval-title { font-size: 15px; font-weight: 700; }
 #patch-approval-lead, #patch-approval-status { font-size: var(--fs-xs); }
 .patch-approval-actions, .actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.apply-without-erc-confirm {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--warn-bg);
+  color: var(--text);
+}
+.apply-without-erc-confirm p { margin: 0; font-size: var(--fs-xs); line-height: 1.45; }
+.apply-without-erc-confirm .row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .patch-approval-actions .btn, .patch-approval-actions button, .actions .btn { min-height: 32px; font-size: var(--fs-xs); }
 .erc {
   display: grid;

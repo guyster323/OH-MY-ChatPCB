@@ -146,16 +146,30 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(skipped.overrideHidden, false);
     assert.equal(skipped.overrideText, en['patch.apply.without-erc']);
     assert.equal(skipped.whyText, en['patch.apply.skipped']);
+    assert.equal(skipped.confirmHidden, true);
     assert.match(skipped.ercText, new RegExp(en['erc.skipped']));
     assert.deepEqual(skipped.sent, []);
 
-    const overridden = await showPatch(page, {
+    const armed = await showPatch(page, {
       validation: { ok: true, skipped: true, executed: false }
     }, 'override');
+    assert.deepEqual(armed.sent, []);
+    assert.equal(armed.confirmHidden, false);
+    assert.equal(armed.riskText, en['patch.apply.without-erc.risk']);
+
+    const overridden = await showPatch(page, {
+      validation: { ok: true, skipped: true, executed: false }
+    }, 'confirm-override');
     assert.equal(overridden.sent.length, 1);
     assert.equal(overridden.sent[0].args.approved, true);
     assert.equal(overridden.sent[0].args.ercOverride, 'skipped');
     assert.equal(overridden.sent[0].args.patchId, 'patch_test');
+
+    const cancelled = await showPatch(page, {
+      validation: { ok: true, skipped: true, executed: false }
+    }, 'cancel-override');
+    assert.deepEqual(cancelled.sent, []);
+    assert.equal(cancelled.confirmHidden, true);
 
     const missing = await showPatch(page, {
       validation: {},
@@ -189,9 +203,12 @@ function showPatch(page, state, click) {
     window.__chatpcbTest.showPatch(next);
     const button = document.querySelector('#approve-patch-button');
     const override = document.querySelector('#approve-patch-without-erc');
+    const confirm = document.querySelector('#apply-without-erc-confirm');
     const why = document.querySelector('#apply-why');
     if (which === 'apply') button.click();
-    if (which === 'override') override.click();
+    if (which === 'override' || which === 'confirm-override' || which === 'cancel-override') override.click();
+    if (which === 'confirm-override') document.querySelector('#confirm-apply-without-erc').click();
+    if (which === 'cancel-override') document.querySelector('#cancel-apply-without-erc').click();
     const sent = window.__sent.map((raw) => JSON.parse(raw)).map((event) => event.payload);
     return {
       ariaDisabled: button.getAttribute('aria-disabled'),
@@ -201,6 +218,8 @@ function showPatch(page, state, click) {
       overrideHidden: override.hidden,
       overrideDisabled: override.disabled,
       overrideText: override.textContent,
+      confirmHidden: confirm.hidden,
+      riskText: document.querySelector('#apply-without-erc-risk').textContent,
       ercText: document.querySelector('#patch-erc').textContent,
       ercRole: document.querySelector('#patch-erc').getAttribute('role'),
       sent
