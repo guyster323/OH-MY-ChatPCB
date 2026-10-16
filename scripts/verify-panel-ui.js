@@ -14,8 +14,10 @@ import { inspectProject } from '../src/workflow/inspect-project.js';
 
 const panelRoot = path.resolve('apps/panel');
 const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
-const projectName = '가스 센서 보드 01';
-const prompt = 'ESP32-S3와 가스 센서를 연결한 회로를 만들어줘';
+const projectName = 'STM32 센서 보드 01';
+// STM32 profile draft passes KiCad 10 ERC (0 errors). The ESP32-S3 draft currently
+// fails ERC, which made this flow hang waiting for 'Completed' (tracked in a separate issue).
+const prompt = 'STM32와 I2C 센서 커넥터, 리셋 버튼, 상태 LED가 있는 회로를 만들어줘';
 const protocolFailurePrompt = 'Simulate a provider protocol failure.';
 const rollbackPrompt = 'Simulate a validation rollback.';
 const zeroCountFailurePrompt = 'Simulate a zero-count validation failure.';
@@ -62,7 +64,7 @@ try {
   if (await page.locator('#approve-patch-button').isEnabled()) {
     await page.getByRole('button', { name: 'Approve' }).click();
   }
-  await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
+  await waitForCompletedOrFailFast(page);
   await page.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'current');
 
   const inspection = await page.evaluate(() => ({
@@ -514,11 +516,11 @@ async function fakeProviderTranscript({ input }) {
     exitCode: 0,
     stderr: '',
     events: [
-      createEnvelope('agent.delta', { text: 'Generating the gas sensor board.' }),
+      createEnvelope('agent.delta', { text: 'Generating the STM32 sensor board.' }),
       createEnvelope('tool.call', {
         id: 'call_fake_provider_generate',
         name: 'schematic.generate',
-        args: { prompt: 'ESP32-S3 board with USB-C power, I2C gas sensor connector, reset button, and status LED.' }
+        args: { prompt: 'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, and status LED.' }
       })
     ]
   };
@@ -585,4 +587,30 @@ function contentType(filePath) {
   if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
   if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
   return 'application/octet-stream';
+}
+
+// Fail immediately with the panel's ERC/validation details instead of timing out
+// while waiting for 'Completed' when apply is rejected.
+async function waitForCompletedOrFailFast(page, timeout = 120000) {
+  const outcome = await page.waitForFunction(() => {
+    const status = document.querySelector('#request-status');
+    const text = status?.textContent ?? '';
+    if (status?.dataset.state === 'completed' || /Completed/.test(text)) return 'completed';
+    if (status?.dataset.state === 'failed' || /ERC validation failed/.test(document.body.innerText)) return 'failed';
+    return false;
+  }, null, { timeout });
+  if ((await outcome.jsonValue()) === 'completed') {
+    await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'Completed' }).waitFor();
+    return;
+  }
+  const details = await page.evaluate(() => ({
+    status: document.querySelector('#request-status')?.textContent?.trim(),
+    progress: document.querySelector('#request-progress')?.innerText?.trim(),
+    erc: document.querySelector('#inspection-erc')?.textContent?.trim(),
+    validation: [...document.querySelectorAll('[id*="erc"], [id*="validation"], [class*="erc"], [class*="validation"]')]
+      .map((node) => node.innerText?.trim())
+      .filter(Boolean)
+      .join('\n')
+  }));
+  throw new Error(`Apply failed instead of completing (ERC validation failed?).\n${JSON.stringify(details, null, 2)}`);
 }
