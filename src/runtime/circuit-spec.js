@@ -311,6 +311,17 @@ function resolveDiscreteSupply(prompt, scan) {
       texts: highVoltageMessage(volts)
     };
   }
+  const unlabeledRange = scan.tokens.find((token) => (
+    token.kind === 'voltage' && token.range && token.role !== 'vf'
+  ));
+  if (unlabeledRange) {
+    return {
+      refused: true,
+      code: 'discrete-led-ambiguous-range',
+      supplyVolts: null,
+      texts: ambiguousRangeMessage(unlabeledRange)
+    };
+  }
   const distinct = distinctSupplyVolts(supplyCandidates(prompt, scan.tokens));
   if (distinct.length > 1) {
     return {
@@ -370,6 +381,23 @@ function promptTooLongMessage() {
   return {
     en: `Refusing to draft an LED circuit because the prompt is longer than ${MAX_DISCRETE_LED_PROMPT_CHARS} characters. Shorten the request and try again. No LED, resistor, or power symbol was generated.`,
     ko: `요청이 ${MAX_DISCRETE_LED_PROMPT_CHARS}자를 넘어 LED 회로를 만들지 않습니다. 요청을 줄여 다시 보내 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
+}
+
+function ambiguousRangeMessage(token) {
+  const min = formatVolts(token.range.min);
+  const max = formatVolts(token.range.max);
+  return {
+    en: `Refusing to draft an LED circuit because ${token.raw} is a voltage range with no Vf label. Which value is the supply and which is the forward voltage (Vf)? No LED, resistor, or power symbol was generated.`,
+    ko: `${min}V에서 ${max}V까지는 순방향 전압 표시가 없는 전압 범위입니다. 어느 값이 공급 전압이고 어느 값이 순방향 전압인지 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
+}
+
+function implausibleForwardMessage(volts) {
+  const shown = formatVolts(volts);
+  return {
+    en: `Refusing to draft an LED circuit because the forward voltage ${shown}V is implausible for an LED. Plausible forward voltages are 0.5V to 5V. No LED, resistor, or power symbol was generated.`,
+    ko: `순방향 전압 ${shown}V는 LED에 타당한 값이 아닙니다. 타당한 순방향 전압은 0.5V에서 5V입니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
   };
 }
 
@@ -773,6 +801,15 @@ export function parseDiscreteLedRequest(prompt) {
   const scan = classifyQuantities(text);
   const supply = resolveDiscreteSupply(text, scan);
   if (supply.refused) return refuseDiscreteLed({ ...supply, prompt: text });
+  const implausible = scan.tokens.find((token) => token.role === 'vf' && token.implausible === true);
+  if (implausible) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-implausible-vf',
+      prompt: text,
+      supplyVolts: null,
+      texts: implausibleForwardMessage(implausible.value)
+    });
+  }
   const supplyVolts = supply.supplyVolts;
   const supplyAssumed = supply.supplyAssumed === true;
   const forward = specifiedForward(scan.tokens);

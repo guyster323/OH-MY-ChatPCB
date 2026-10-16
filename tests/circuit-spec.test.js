@@ -1191,6 +1191,10 @@ test('every discrete LED message is one language and Korean has no English words
     'three red and green LEDs',
     'LED Vf 3.0-3.4V at 5V',
     'LED Vf 2.0 to 2.4 V at 5V',
+    'LED Vf=330',
+    '엘이디 Vf=0.4',
+    'LED 3.0\u20135V',
+    '엘이디 3.0\u20135V',
     'white LED on 3.3V',
     '빨간 LED를 5V에 연결해줘',
     'LED 5V forward voltage 3.2V',
@@ -1229,6 +1233,8 @@ test('every discrete LED message is one language and Korean has no English words
     'discrete-led-ac-supply',
     'discrete-led-ambiguous-supply',
     'discrete-led-below-vf',
+    'discrete-led-implausible-vf',
+    'discrete-led-ambiguous-range',
     'discrete-led',
     'discrete-led-red',
     'discrete-led-green',
@@ -1297,10 +1303,6 @@ test('unitless Vf is volts only when labeled Vf and between 0.5 and 5', () => {
   assert.equal(atSupply.resistanceOhms, null);
 
   const notVolts = [
-    ['LED Vf=0.4', 0.4],
-    ['LED Vf=0.49', 0.49],
-    ['LED Vf=5.1', 5.1],
-    ['LED Vf=6', 6],
     ['LED 5V 3.2', 3.2],
     ['LED forward voltage 3.2', 3.2]
   ];
@@ -1313,9 +1315,88 @@ test('unitless Vf is volts only when labeled Vf and between 0.5 and 5', () => {
     assert.equal(parsed.resistanceOhms, ohms, prompt);
   }
 
-  const gluedWithoutUnit = parseDiscreteLedRequest('LED 5V Vf3.2');
-  assert.notEqual(gluedWithoutUnit.specifiedVf, 3.2);
-  assert.notEqual(gluedWithoutUnit.resistorValue, '180Ω');
+});
+
+test('an em dash separates a forward-voltage range and a Vf value the way an en dash does', () => {
+  const range = parseDiscreteLedRequest('LED Vf 3.0\u20143.4V at 5V');
+  assert.equal(range.refused, false, JSON.stringify(range.reviewBlockers));
+  assert.equal(range.supplyVolts, 5);
+  assert.equal(range.specifiedVf, 3.4);
+  assert.equal(range.resistorValue, '160Ω');
+  assert.equal(range.reviewNotes.some((note) => note.code === 'discrete-led-vf-range'), true);
+
+  for (const prompt of ['LED Vf\u20143.2V 5V', 'LED Vf\u20133.2V 5V']) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.reviewBlockers.some((item) => item.code === 'discrete-led-ambiguous-supply'), false, prompt);
+    assert.equal(parsed.supplyVolts, 5, prompt);
+    assert.equal(parsed.specifiedVf, 3.2, prompt);
+    assert.equal(parsed.resistorValue, '180Ω', prompt);
+    const roles = classifyQuantities(prompt).tokens.map((token) => [token.raw, token.role]);
+    assert.deepEqual(roles, [['3.2V', 'vf'], ['5V', 'voltage']], prompt);
+  }
+});
+
+test('unitless glued vf3.2 is a forward voltage and an out-of-range Vf is implausible', () => {
+  for (const prompt of ['LED 5V vf3.2', 'LED 5V Vf3.2', 'LED 5V VF3.2']) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.reviewBlockers.some((item) => item.code === 'discrete-led-below-vf'), false, prompt);
+    assert.equal(parsed.supplyVolts, 5, prompt);
+    assert.equal(parsed.supplyAssumed, false, prompt);
+    assert.equal(parsed.specifiedVf, 3.2, prompt);
+    assert.equal(parsed.resistorExplicit, false, prompt);
+    assert.equal(parsed.resistorValue, '180Ω', prompt);
+  }
+
+  const cases = [
+    ['LED Vf=330', '330'],
+    ['LED Vf=0.4', '0.4'],
+    ['LED Vf=0.49', '0.49'],
+    ['LED Vf=5.1', '5.1'],
+    ['LED Vf=6', '6'],
+    ['엘이디 Vf=330', '330']
+  ];
+  for (const [prompt, shown] of cases) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, prompt);
+    const blocker = parsed.reviewBlockers[0];
+    assert.equal(blocker.code, 'discrete-led-implausible-vf', `${prompt} ${blocker.code} ${blocker.en}`);
+    assert.match(blocker.en, new RegExp(`\\b${shown.replace('.', '\\.')}V\\b`), blocker.en);
+    assert.match(blocker.en, /0\.5V to 5V/, blocker.en);
+    assert.equal(/not above/i.test(blocker.en), false, blocker.en);
+    assert.match(blocker.ko, new RegExp(`${shown.replace('.', '\\.')}V`), blocker.ko);
+    assert.match(blocker.ko, /0\.5V에서 5V/, blocker.ko);
+    assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.resistorExplicit, false, prompt);
+    assert.equal(parsed.specifiedVf ?? null, null, prompt);
+  }
+});
+
+test('a voltage range with no Vf label asks which value is the supply', () => {
+  for (const prompt of ['LED 3.0\u20135V', 'LED 3.0-5V', 'LED 3.0\u20145V', '엘이디 3.0\u20135V']) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.notEqual(parsed.supplyVolts, 5, prompt);
+    assert.equal(parsed.supplyVolts, null, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, prompt);
+    const blocker = parsed.reviewBlockers[0];
+    assert.equal(blocker.code, 'discrete-led-ambiguous-range', `${prompt} ${blocker.code}`);
+    assert.match(blocker.en, /which value is the supply/i, blocker.en);
+    assert.match(blocker.en, /forward voltage \(Vf\)/i, blocker.en);
+    assert.match(blocker.ko, /공급 전압/, blocker.ko);
+    assert.match(blocker.ko, /순방향 전압/, blocker.ko);
+    assert.equal(/5V supply/i.test(blocker.en), false, blocker.en);
+    assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
+  }
+
+  const labeled = parseDiscreteLedRequest('LED Vf 3.0\u20135V at 9V');
+  assert.equal(labeled.refused, false, JSON.stringify(labeled.reviewBlockers));
+  assert.equal(labeled.supplyVolts, 9);
+  assert.equal(labeled.specifiedVf, 5);
 });
 
 test('a discrete LED prompt longer than 4000 characters is blocked without tokenizing', { timeout: 20000 }, () => {

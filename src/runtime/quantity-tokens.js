@@ -366,19 +366,22 @@ function collectCounts(prompt, candidates) {
   }
 }
 
-// "Vf=3.2" and "Vf 3.2" are volts only for a Vf label and only inside the
-// usual LED forward range. Outside that range the number stays a resistor.
+// "Vf=3.2", "Vf 3.2", and glued "vf3.2" are a forward voltage when labeled Vf.
+// Inside 0.5V to 5V that value is used. Outside that range it is an implausible
+// forward voltage and is refused, not kept as a resistor.
 function collectUnitlessForward(prompt, candidates) {
-  const pattern = /\bvf\b(?:\s*[=:]\s*|\s+)(\d+(?:[.,]\d+)?)(?![\w.])/gi;
+  const pattern = /\bvf(?=\d|\b)(?:\s*[=:]\s*|\s+)?(\d+(?:[.,]\d+)?)(?![\w.]|Ω|옴)/gi;
   for (const match of prompt.matchAll(pattern)) {
     const rawNumber = match[1];
     const volts = parseVoltageNumber(rawNumber);
-    if (!(volts >= UNITLESS_VF_MIN && volts <= UNITLESS_VF_MAX)) continue;
+    if (!(volts > 0)) continue;
     const start = (match.index ?? 0) + match[0].length - rawNumber.length;
     const end = start + rawNumber.length;
     const token = voltageToken(prompt, start, end, volts, '', 'V');
     token.unit = 'V';
     token.form = 'voltage';
+    token.unitless = true;
+    token.implausible = !(volts >= UNITLESS_VF_MIN && volts <= UNITLESS_VF_MAX);
     candidates.push({ priority: PRIORITY.voltage, start, end, token, invalid: false });
   }
 }
@@ -491,7 +494,8 @@ function bindKeyword(tokens, keyword) {
 }
 
 function explicitLabelGap(text) {
-  return /^[\s:=]*$/i.test(text) || /^[\s:=]*of[\s:=]*$/i.test(text);
+  // En dash and em dash join a label to its value, as in "Vf—3.2V".
+  return /^[\s:=\u2013\u2014]*$/i.test(text) || /^[\s:=\u2013\u2014]*of[\s:=\u2013\u2014]*$/i.test(text);
 }
 
 function bindExplicitForwardVoltages(prompt, tokens) {
