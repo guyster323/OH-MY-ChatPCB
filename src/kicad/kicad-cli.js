@@ -269,25 +269,42 @@ function kicadConfigCandidates(env, { flatpak, platform, home, realHome }) {
   return candidates;
 }
 
-// A stock flatpak KiCad sandbox has home, not /tmp. The private copy lives
-// under $XDG_CACHE_HOME/chatpcb (default ~/.cache/chatpcb on the real account
-// home) so the sandbox can read it. With no home, it lives in the project.
-function privateConfigBase(env, cwd) {
+// The private copy is resolved from the env handed to this call, not from the
+// passwd home. An absolute XDG_CACHE_HOME wins. Otherwise use HOME/.cache
+// (USERPROFILE on win32). A relative XDG_CACHE_HOME is ignored. With no home,
+// the copy lives in the project directory.
+function privateConfigBase(env, cwd, platform = process.platform) {
   const xdg = typeof env.XDG_CACHE_HOME === 'string' ? env.XDG_CACHE_HOME.trim() : '';
-  if (xdg) return path.join(xdg, 'chatpcb');
-  const home = realAccountHome();
+  if (xdg && path.isAbsolute(xdg)) return path.join(xdg, 'chatpcb');
+  const home = cacheHomeDirectory(env, platform);
   if (home) return path.join(home, '.cache', 'chatpcb');
   return path.join(cwd || process.cwd(), '.chatpcb');
+}
+
+function cacheHomeDirectory(env, platform) {
+  const keys = platform === 'win32' ? ['USERPROFILE', 'HOME'] : ['HOME'];
+  for (const key of keys) {
+    const value = typeof env[key] === 'string' ? env[key].trim() : '';
+    if (value && path.isAbsolute(value)) return value;
+  }
+  return null;
+}
+
+async function chmodOwnerOnly(directory) {
+  if (process.platform === 'win32') return;
+  await fs.promises.chmod(directory, 0o700);
 }
 
 // Returns the private parent to delete. KICAD_CONFIG_HOME on the child is the
 // copied kicad directory inside that parent. An empty copy turns on KiCad's
 // default ERC checks, so copy the live config when one exists.
 async function assignPrivateKicadConfigHome(env, { flatpak, platform, cwd }) {
-  const base = privateConfigBase(env, cwd);
-  await fs.promises.mkdir(base, { recursive: true });
+  const base = privateConfigBase(env, cwd, platform);
+  await fs.promises.mkdir(base, { recursive: true, mode: 0o700 });
+  await chmodOwnerOnly(base);
   const parent = await fs.promises.mkdtemp(path.join(base, 'kicad-config-'));
   try {
+    await chmodOwnerOnly(parent);
     const dest = path.join(parent, 'kicad');
     const source = findKicadConfigSource(env, { flatpak, platform });
     if (source) {

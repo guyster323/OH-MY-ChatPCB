@@ -758,30 +758,146 @@ test('private KiCad config is copied from KICAD_CONFIG_HOME, then the real platf
   }
 });
 
-test('private KiCad config defaults to the real account cache, not HOME or /tmp', {
+function modeProbeScript(root) {
+  const scriptPath = path.join(root, 'mode-kicad-cli');
+  fs.writeFileSync(scriptPath, [
+    '#!/bin/sh',
+    'parent=$(dirname "$KICAD_CONFIG_HOME")',
+    'base=$(dirname "$parent")',
+    'printf "%s\\n" "$KICAD_CONFIG_HOME"',
+    'stat -c %a "$parent"',
+    'stat -c %a "$base"',
+    ''
+  ].join('\n'), { mode: 0o755 });
+  return scriptPath;
+}
+
+test('private KiCad config cache follows the injected env, not the account home', {
   skip: process.platform === 'win32' ? 'POSIX shell script' : false
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-config-cache-'));
   const scriptPath = configProbeScript(root);
   const home = path.join(root, 'empty-home');
+  const otherHome = path.join(root, 'other-home');
+  const project = path.join(root, 'project');
   fs.mkdirSync(home);
-  const realCache = path.join(os.userInfo().homedir, '.cache', 'chatpcb');
+  fs.mkdirSync(otherHome);
+  fs.mkdirSync(project);
+  const accountCache = path.join(os.userInfo().homedir, '.cache', 'chatpcb');
   try {
-    const result = await runKicadCli([], {
+    const injected = await runKicadCli([], {
       env: {
         KICAD_CLI_PATH: scriptPath,
         HOME: home,
         PATH: process.env.PATH ?? ''
+      },
+      cwd: project
+    });
+    assert.equal(injected.exitCode, 0, injected.stderr);
+    const injectedHome = privateConfigPath(injected.stdout);
+    assert.ok(injectedHome.startsWith(path.join(home, '.cache', 'chatpcb', 'kicad-config-')), injectedHome);
+    assert.ok(injectedHome.endsWith(`${path.sep}kicad`), injectedHome);
+    assert.equal(injectedHome.startsWith(accountCache), false, injectedHome);
+    assert.equal(fs.existsSync(injectedHome), false);
+
+    const cache = path.join(root, 'xdg-cache');
+    const absolute = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: cache,
+        HOME: home,
+        PATH: process.env.PATH ?? ''
       }
     });
-    assert.equal(result.exitCode, 0, result.stderr);
-    const configHome = privateConfigPath(result.stdout);
-    assert.ok(configHome.startsWith(path.join(realCache, 'kicad-config-')), configHome);
-    assert.ok(configHome.endsWith(`${path.sep}kicad`), configHome);
-    assert.equal(configHome.startsWith(os.tmpdir()), false, configHome);
-    assert.equal(configHome.startsWith(home), false, configHome);
-    assert.equal(fs.existsSync(configHome), false);
-    assert.equal(fs.existsSync(path.dirname(configHome)), false);
+    const absoluteHome = privateConfigPath(absolute.stdout);
+    assert.ok(absoluteHome.startsWith(path.join(cache, 'chatpcb', 'kicad-config-')), absoluteHome);
+    assert.equal(absoluteHome.startsWith(home), false, absoluteHome);
+
+    const relative = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: 'rel-cache',
+        HOME: home,
+        PATH: process.env.PATH ?? ''
+      },
+      cwd: project
+    });
+    const relativeHome = privateConfigPath(relative.stdout);
+    assert.ok(relativeHome.startsWith(path.join(home, '.cache', 'chatpcb', 'kicad-config-')), relativeHome);
+    assert.equal(fs.existsSync(path.join(project, 'rel-cache')), false);
+
+    const projectFallback = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: 'rel-cache',
+        PATH: process.env.PATH ?? ''
+      },
+      cwd: project
+    });
+    const projectHome = privateConfigPath(projectFallback.stdout);
+    assert.ok(projectHome.startsWith(path.join(project, '.chatpcb', 'kicad-config-')), projectHome);
+    assert.equal(projectHome.startsWith(accountCache), false, projectHome);
+
+    const profile = path.join(root, 'win-profile');
+    fs.mkdirSync(profile);
+    const windows = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        USERPROFILE: profile,
+        HOME: otherHome,
+        PATH: process.env.PATH ?? ''
+      },
+      platform: 'win32',
+      cwd: project
+    });
+    const windowsHome = privateConfigPath(windows.stdout);
+    assert.ok(windowsHome.startsWith(path.join(profile, '.cache', 'chatpcb', 'kicad-config-')), windowsHome);
+    assert.equal(windowsHome.startsWith(otherHome), false, windowsHome);
+    assert.equal(windowsHome.startsWith(accountCache), false, windowsHome);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('private KiCad config directories are mode 0700, including an existing parent', {
+  skip: process.platform === 'win32' ? 'POSIX modes' : false
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-config-mode-'));
+  const scriptPath = modeProbeScript(root);
+  const freshCache = path.join(root, 'fresh-cache');
+  const existingCache = path.join(root, 'existing-cache');
+  const existingBase = path.join(existingCache, 'chatpcb');
+  fs.mkdirSync(existingBase, { recursive: true });
+  fs.chmodSync(existingBase, 0o755);
+  assert.equal(fs.statSync(existingBase).mode & 0o777, 0o755);
+  try {
+    const fresh = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: freshCache,
+        PATH: process.env.PATH ?? ''
+      }
+    });
+    assert.equal(fresh.exitCode, 0, fresh.stderr);
+    const [freshHome, freshCallMode, freshBaseMode] = fresh.stdout.trim().split('\n');
+    assert.equal(freshCallMode, '700', fresh.stdout);
+    assert.equal(freshBaseMode, '700', fresh.stdout);
+    assert.equal(fs.statSync(path.join(freshCache, 'chatpcb')).mode & 0o777, 0o700);
+    assert.equal(fs.existsSync(path.dirname(freshHome)), false);
+
+    const existing = await runKicadCli([], {
+      env: {
+        KICAD_CLI_PATH: scriptPath,
+        XDG_CACHE_HOME: existingCache,
+        PATH: process.env.PATH ?? ''
+      }
+    });
+    assert.equal(existing.exitCode, 0, existing.stderr);
+    const [existingHome, existingCallMode, existingBaseMode] = existing.stdout.trim().split('\n');
+    assert.equal(existingCallMode, '700', existing.stdout);
+    assert.equal(existingBaseMode, '700', existing.stdout);
+    assert.equal(fs.statSync(existingBase).mode & 0o777, 0o700);
+    assert.equal(fs.existsSync(path.dirname(existingHome)), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
