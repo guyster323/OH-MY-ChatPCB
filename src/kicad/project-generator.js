@@ -810,6 +810,13 @@ function adbms6830PinConnections() {
   return pins;
 }
 
+function findingMessage(item) {
+  if (!item) return '';
+  if (typeof item.message === 'string') return item.message;
+  if (typeof item.en === 'string') return item.en;
+  return '';
+}
+
 function uniqueSchematicText(lines) {
   const seen = new Set();
   const unique = [];
@@ -826,9 +833,9 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
   const notes = spec.kind === 'discrete-led'
     ? uniqueSchematicText([
         `ChatPCB generated discrete LED draft: ${spec.title}`,
-        ...(spec.discrete?.reviewBlockers ?? []).map((blocker) => blocker.message),
-        ...(spec.discrete?.reviewNotes ?? []).map((note) => note.message),
-        ...(spec.discrete?.reviewWarnings ?? []).map((warning) => warning.message),
+        ...(spec.discrete?.reviewBlockers ?? []).map((blocker) => findingMessage(blocker)),
+        ...(spec.discrete?.reviewNotes ?? []).map((note) => findingMessage(note)),
+        ...(spec.discrete?.reviewWarnings ?? []).map((warning) => findingMessage(warning)),
         'Review all symbols, footprints, net labels, and design rules before production.'
       ])
     : spec.boardProfile?.kind === 'isolated-dcdc'
@@ -914,9 +921,9 @@ ${fixtureSymbols()
 export function renderSpiceFixture(spec) {
   if (spec.kind === 'discrete-led') {
     if (spec.discrete?.refused || !(spec.discrete?.count > 0)) {
-      const message = spec.discrete?.reviewBlockers?.[0]?.message
-        ?? spec.discrete?.reviewNotes?.[0]?.message
-        ?? 'Discrete LED draft was not generated.';
+      const message = findingMessage(spec.discrete?.reviewBlockers?.[0])
+        || findingMessage(spec.discrete?.reviewNotes?.[0])
+        || 'Discrete LED draft was not generated.';
       return [
         `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
         `* ${message}`,

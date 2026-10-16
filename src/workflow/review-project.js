@@ -142,23 +142,25 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     const notes = spec.discrete?.reviewNotes;
     if (Array.isArray(notes) && notes.length > 0) {
       for (const note of notes) {
-        addFinding(findings.notes, note.code, note.message);
+        addFinding(findings.notes, note.code, note);
       }
     } else if (!spec.discrete?.refused) {
-      addFinding(
-        findings.notes,
-        'discrete-led',
-        `Discrete LED draft uses series resistor ${spec.discrete?.resistorValue ?? 'unspecified'}; confirm it for the LED forward voltage and current before release.`
-      );
+      const resistor = spec.discrete?.resistorValue ?? 'unspecified';
+      const resistorKo = spec.discrete?.resistorValue ?? '지정되지 않음';
+      addFinding(findings.notes, 'discrete-led', forPrompt(
+        `Discrete LED draft uses series resistor ${resistor}; confirm it for the LED forward voltage and current before release.`,
+        `이산 LED 초안은 직렬 저항 ${resistorKo}을 사용합니다. LED 순방향 전압과 전류를 출시 전에 확인하세요.`,
+        spec.sourcePrompt
+      ));
     }
     for (const blocker of spec.discrete?.reviewBlockers ?? []) {
       if (blocker?.code && blocker?.message) {
-        addFinding(findings.blockers, blocker.code, blocker.message);
+        addFinding(findings.blockers, blocker.code, blocker);
       }
     }
     for (const warning of spec.discrete?.reviewWarnings ?? []) {
       if (warning?.code && warning?.message) {
-        addFinding(findings.warnings, warning.code, warning.message);
+        addFinding(findings.warnings, warning.code, warning);
       }
     }
     if (!spec.discrete?.refused) {
@@ -167,8 +169,16 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
         findings.warnings,
         'discrete-led-draft',
         usesSpecifiedVf
-          ? 'Discrete LED drafts assume 10mA and use the specified forward voltage; confirm the resistor and supply before release.'
-          : 'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.'
+          ? forPrompt(
+            'Discrete LED drafts assume 10mA and use the specified forward voltage; confirm the resistor and supply before release.',
+            '이산 LED 초안은 10mA와 지정한 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
+            spec.sourcePrompt
+          )
+          : forPrompt(
+            'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.',
+            '이산 LED 초안은 10mA와 일반적인 LED 순방향 전압을 가정합니다. 저항과 공급 전압을 출시 전에 확인하세요.',
+            spec.sourcePrompt
+          )
       );
     }
   }
@@ -206,7 +216,11 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
       addFinding(findings.blockers, 'footprint-library-unresolved', 'Footprint library links are unresolved; footprints must resolve before JLCPCB release.');
     }
   } else {
-    addFinding(findings.notes, 'validation-needed', 'Run ERC after reviewing or applying changes.');
+    addFinding(findings.notes, 'validation-needed', forPrompt(
+      'Run ERC after reviewing or applying changes.',
+      '변경을 검토하거나 적용한 뒤에 ERC를 실행하세요.',
+      spec.sourcePrompt
+    ));
   }
 
   if (findings.blockers.length > 0) {
@@ -284,10 +298,38 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   };
 }
 
-function addFinding(target, code, message) {
-  if (!target.some((finding) => finding.code === code)) {
-    target.push({ code, message });
+function promptUsesKorean(text) {
+  return /[가-힣]/.test(String(text ?? ''));
+}
+
+function finishPromptSentence(text) {
+  const value = String(text ?? '').trim();
+  if (!value || /[.。]$/.test(value)) return value;
+  return `${value}.`;
+}
+
+function forPrompt(en, ko, prompt) {
+  const finishedEn = finishPromptSentence(en);
+  const finishedKo = finishPromptSentence(ko);
+  return {
+    en: finishedEn,
+    ko: finishedKo,
+    message: promptUsesKorean(prompt) ? finishedKo : finishedEn
+  };
+}
+
+function addFinding(target, code, localized) {
+  if (target.some((finding) => finding.code === code)) return;
+  if (localized && typeof localized === 'object') {
+    const finding = { code, message: String(localized.message ?? '') };
+    if (typeof localized.en === 'string' && typeof localized.ko === 'string') {
+      finding.en = localized.en;
+      finding.ko = localized.ko;
+    }
+    target.push(finding);
+    return;
   }
+  target.push({ code, message: localized });
 }
 
 function dedupeFindingMessages(findings) {

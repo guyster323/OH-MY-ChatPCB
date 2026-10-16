@@ -1,3 +1,5 @@
+import { classifyQuantities, promptDescribesAcSupply } from './quantity-tokens.js';
+
 const FAMILY_PATTERNS = [
   ['STM32', /\bstm32\b/i],
   ['RP2040', /\brp2040\b|\braspberry\s*pi\s*pico\b/i],
@@ -183,229 +185,29 @@ function isSimpleDiscreteLedPrompt(prompt) {
   return hasLed && !DISCRETE_LED_EXCLUDE.test(prompt) && !DISCRETE_LED_BOARD_WORDS.test(prompt);
 }
 
-const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
-const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
-const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
-const FORWARD_VOLTAGE = /\bvf\b|\bforward\b|순방향/i;
-const SUPPLY_VOLTAGE = /\bsupply\b|\bpower\b|\bbattery\b|\brail\b|전원|배터리/i;
-const ON_AT_VOLTAGE = /\b(?:on|at)\s+(?:(?:a|an|the)\s+)?$/i;
+const RESISTOR_RANK = { rkm: 0, ohm: 1, suffix: 2, bare: 3 };
 
-function isPotentiometerResistor(prompt, start, end) {
-  const before = prompt.slice(Math.max(0, start - 48), start);
-  const after = prompt.slice(end, end + 48);
-  return POT_BEFORE.test(before) || POT_AFTER.test(after);
+function voltageContext(prompt, token, voltages) {
+  const previous = voltages.filter((other) => other.end <= token.start).at(-1);
+  const next = voltages.find((other) => other.start >= token.end);
+  const start = Math.max(previous ? previous.end : 0, token.start - 32);
+  const end = Math.min(next ? next.start : prompt.length, token.end + 32);
+  return `${prompt.slice(start, token.start)}\n${prompt.slice(token.end, end)}`;
 }
 
-function firstAcceptedOhms(prompt, source, flags, toOhms) {
-  const regex = new RegExp(source, flags.includes('g') ? flags : `${flags}g`);
-  for (const match of prompt.matchAll(regex)) {
-    const start = match.index ?? 0;
-    const end = start + match[0].length;
-    if (isPotentiometerResistor(prompt, start, end)) continue;
-    const ohms = toOhms(match);
-    if (Number.isFinite(ohms) && ohms > 0) return ohms;
-  }
-  return null;
+function explicitResistanceOhms(tokens) {
+  const chosen = tokens
+    .filter((token) => token.role === 'resistor' && token.value > 0)
+    .sort((left, right) => (
+      (RESISTOR_RANK[left.form] ?? 9) - (RESISTOR_RANK[right.form] ?? 9) || left.start - right.start
+    ));
+  return chosen[0]?.value ?? null;
 }
 
-function rkmToOhms(whole, fraction, letter) {
-  const multiplier = RESISTANCE_MULTIPLIER[String(letter).toLowerCase()];
-  if (!multiplier) return null;
-  const scale = 10 ** fraction.length;
-  return (Number(whole) * scale + Number(fraction)) * multiplier / scale;
-}
-
-function isBareNumberExcluded(after) {
-  if (/^\s*(?:[kKmM]\s*)?(?:volts?|vdc|vac|v|볼트)(?:\s*\/\s*a\.?c\.?)?(?:\b|\d)/i.test(after)) return true;
-  if (/^,\d{1,2}\s*(?:[kKmM]\s*)?(?:volts?|vdc|vac|v|볼트)/i.test(after)) return true;
-  if (/^\s*(?:m\s*a|ma|milli\s*amps?|milliamps?|amp(?:ere)?s?|암페어|밀리\s*암페어)\b/i.test(after)) return true;
-  if (/^\s*(?:x\s*)?(?:leds?|엘이디|발광(?:\s*다이오드)?)\b/i.test(after)) return true;
-  if (/^\s*개/.test(after)) return true;
-  return false;
-}
-
-// A bare number is a series resistor only in an LED prompt. Voltages, counts, and currents are not.
-function parseExplicitResistanceOhms(prompt) {
-  const rkm = firstAcceptedOhms(
-    prompt,
-    '(?<![\\w.])(\\d+)([rRkKmM])(\\d+)(?![\\w])',
-    'g',
-    (match) => rkmToOhms(match[1], match[3], match[2])
-  );
-  if (rkm != null) return rkm;
-
-  const withUnit = firstAcceptedOhms(
-    prompt,
-    '(\\d+(?:\\.\\d+)?)\\s*([rRkKmM])?\\s*(?:옴|ohms?|Ω)',
-    'gi',
-    (match) => Number(match[1]) * (match[2] ? RESISTANCE_MULTIPLIER[match[2].toLowerCase()] : 1)
-  );
-  if (withUnit != null) return withUnit;
-
-  const suffixed = firstAcceptedOhms(
-    prompt,
-    '(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*([rRkKmM])(?:\\s*[rR]\\b|\\b)(?![A-Za-z])',
-    'g',
-    (match) => Number(match[1]) * RESISTANCE_MULTIPLIER[match[2].toLowerCase()]
-  );
-  if (suffixed != null) return suffixed;
-
-  const bare = firstAcceptedOhms(
-    prompt,
-    '(?<![\\w.])(\\d+\\.\\d+|\\d+)(?![\\w]|\\.\\d)',
-    'g',
-    (match) => (isBareNumberExcluded(prompt.slice((match.index ?? 0) + match[0].length)) ? null : Number(match[1]))
-  );
-  return bare;
-}
-
-const VOLTAGE_UNIT = '(?:[Vv][Oo][Ll][Tt][Ss]?|[Vv][Dd][Cc]|[Vv][Aa][Cc]|[Vv]|볼트)';
-const VOLTAGE_TOKEN = new RegExp(
-  `([+\\-\\u2212])?(\\d+(?:[.,]\\d+)?)\\s*([kKmM])?\\s*${VOLTAGE_UNIT}(?:\\s*/\\s*[Aa]\\.?[Cc]\\.?)?(?![A-Za-z])`,
-  'g'
-);
-const UNCOVERED_VOLTAGE = [
-  '\\d+(?:[.,]\\d+)?\\s*[kKmM]?\\s*(?:volts|volt|vdc|vac|v|볼트)[A-Za-z]+',
-  '\\d+(?:,\\d+){2,}\\s*[kKmM]?\\s*(?:volts|volt|vdc|vac|v|볼트)(?![A-Za-z])',
-  '(?<![A-Za-z0-9.,])(?:volts|volt|vdc|vac|kv|mv|볼트)(?![A-Za-z])'
-];
-
-function roundVolts(volts) {
-  if (!Number.isFinite(volts)) return volts;
-  return Math.round(volts * 1000) / 1000;
-}
-
-function voltageScale(multiplier) {
-  if (!multiplier) return 1;
-  if (multiplier === 'k' || multiplier === 'K') return 1000;
-  if (multiplier === 'm') return 0.001;
-  if (multiplier === 'M') return 1_000_000;
-  return null;
-}
-
-// 3,3 is 3.3. A thousands separator such as 1,000 is not a voltage we will guess.
-function parseVoltageNumber(raw) {
-  if (/^\d+$/.test(raw)) return Number(raw);
-  if (/^\d+\.\d+$/.test(raw)) return Number(raw);
-  const comma = /^(\d+),(\d+)$/.exec(raw);
-  if (!comma) return null;
-  if (comma[2].length === 1 || comma[2].length === 2) return Number(`${comma[1]}.${comma[2]}`);
-  return null;
-}
-
-function leadingSign(prompt, index) {
-  let cursor = index;
-  while (cursor > 0 && /\s/.test(prompt[cursor - 1])) cursor -= 1;
-  if (cursor === 0) return null;
-  const sign = prompt[cursor - 1];
-  if (sign !== '+' && sign !== '-' && sign !== '\u2212') return null;
-  if (cursor > 1 && /[\w.]/.test(prompt[cursor - 2])) return null;
-  return { index: cursor - 1, negative: sign !== '+' };
-}
-
-function rememberVoltage(tokens, spans, index, end, volts) {
-  if (spans.some((span) => index < span.end && end > span.index)) return;
-  spans.push({ index, end });
-  if (Number.isFinite(volts)) tokens.push({ index, end, volts });
-}
-
-function spanCovers(spans, start, end) {
-  return spans.some((span) => start >= span.index && end <= span.end);
-}
-
-function hasUncoveredVoltage(prompt, spans) {
-  return UNCOVERED_VOLTAGE.some((source) => {
-    for (const match of prompt.matchAll(new RegExp(source, 'gi'))) {
-      const start = match.index ?? 0;
-      if (!spanCovers(spans, start, start + match[0].length)) return true;
-    }
-    return false;
-  });
-}
-
-function scanSupplyVoltages(prompt) {
-  const tokens = [];
-  const spans = [];
-  let unparseable = false;
-  // 3V3 and 5v0 are one token. A space, another digit, or a resistor suffix belongs to the next value.
-  for (const match of prompt.matchAll(/(\d+)v(\d)(?![\dk])/gi)) {
-    let index = match.index ?? 0;
-    let volts = Number(`${match[1]}.${match[2]}`);
-    const sign = leadingSign(prompt, index);
-    if (sign) {
-      index = sign.index;
-      if (sign.negative) volts = -volts;
-    }
-    rememberVoltage(tokens, spans, index, (match.index ?? 0) + match[0].length, roundVolts(volts));
-  }
-  for (const match of prompt.matchAll(new RegExp(VOLTAGE_TOKEN.source, 'g'))) {
-    let index = match.index ?? 0;
-    const end = index + match[0].length;
-    let negative = false;
-    if (match[1]) {
-      const before = index > 0 ? prompt[index - 1] : '';
-      if (before && /[\w.]/.test(before)) index += match[1].length;
-      else negative = match[1] !== '+';
-    }
-    const parsed = parseVoltageNumber(match[2]);
-    const scale = voltageScale(match[3]);
-    if (parsed == null || scale == null) {
-      if (!spanCovers(spans, index, end)) unparseable = true;
-      continue;
-    }
-    const volts = roundVolts(parsed * scale) * (negative ? -1 : 1);
-    const covered = spanCovers(spans, index, end);
-    rememberVoltage(tokens, spans, index, end, volts);
-    if (!covered && !Number.isFinite(volts)) unparseable = true;
-  }
-  if (hasUncoveredVoltage(prompt, spans)) unparseable = true;
-  tokens.sort((left, right) => left.index - right.index);
-  return { tokens, unparseable };
-}
-
-function voltageWindow(prompt, item, found) {
-  const previous = found.filter((other) => other.end <= item.index).at(-1);
-  const next = found.find((other) => other.index >= item.end);
-  const start = Math.max(previous ? previous.end : 0, item.index - 32);
-  const end = Math.min(next ? next.index : prompt.length, item.end + 32);
-  return {
-    before: prompt.slice(start, item.index),
-    after: prompt.slice(item.end, end)
-  };
-}
-
-function closestContextGap(before, after, pattern) {
-  let best = Number.POSITIVE_INFINITY;
-  for (const match of before.matchAll(new RegExp(pattern.source, 'gi'))) {
-    best = Math.min(best, before.length - (match.index + match[0].length));
-  }
-  for (const match of after.matchAll(new RegExp(pattern.source, 'gi'))) {
-    best = Math.min(best, match.index);
-  }
-  return best;
-}
-
-function contextOwned(gaps, index) {
-  const gap = gaps[index];
-  return Number.isFinite(gap) && gap <= 32 && gaps.every((other, otherIndex) => otherIndex === index || !(other < gap));
-}
-
-// Prefer a voltage tied to the supply. An LED forward voltage is never the rail.
-function classifySupplyVoltages(prompt, found) {
-  const windows = found.map((item) => voltageWindow(prompt, item, found));
-  const forwardGaps = windows.map(({ before, after }) => closestContextGap(before, after, FORWARD_VOLTAGE));
-  const supplyGaps = windows.map(({ before, after }) => closestContextGap(before, after, SUPPLY_VOLTAGE));
-  return found.map((item, index) => {
-    const onAt = ON_AT_VOLTAGE.test(windows[index].before);
-    const forwardOwned = contextOwned(forwardGaps, index);
-    const supplyOwned = contextOwned(supplyGaps, index);
-    const forward = forwardOwned && !onAt && !(supplyOwned && supplyGaps[index] < forwardGaps[index]);
-    return {
-      ...item,
-      forward,
-      supply: !forward && (onAt || supplyOwned)
-    };
-  });
+function requestedCurrentMilliamps(tokens) {
+  const currents = tokens.filter((token) => token.role === 'current' && token.value > 0);
+  if (currents.length === 0) return null;
+  return Math.max(...currents.map((token) => token.value));
 }
 
 function mentionsLedColor(text) {
@@ -414,63 +216,65 @@ function mentionsLedColor(text) {
 
 // Unlabeled voltages stay in the pool. A color-adjacent value is the LED Vf, not a
 // second rail, only when another voltage is already marked as the supply.
-function supplyCandidates(prompt, found) {
-  const labeled = classifySupplyVoltages(prompt, found);
-  const explicitSupply = labeled.some((item) => item.supply);
-  return labeled.filter((item) => {
-    if (item.forward) return false;
-    if (item.supply) return true;
+function supplyCandidates(prompt, tokens) {
+  const voltages = tokens.filter((token) => token.kind === 'voltage');
+  const explicitSupply = voltages.some((token) => token.role === 'supply');
+  return voltages.filter((token) => {
+    if (token.role === 'vf') return false;
+    if (token.role === 'supply') return true;
     if (!explicitSupply) return true;
-    const window = voltageWindow(prompt, item, found);
-    return !mentionsLedColor(`${window.before}\n${window.after}`);
-  }).sort((left, right) => left.index - right.index);
+    return !mentionsLedColor(voltageContext(prompt, token, voltages));
+  }).sort((left, right) => left.start - right.start);
 }
 
 function distinctSupplyVolts(candidates) {
   const seen = new Set();
   const volts = [];
   for (const item of candidates) {
-    const key = formatVolts(item.volts);
+    const key = formatVolts(item.value);
     if (seen.has(key)) continue;
     seen.add(key);
-    volts.push(item.volts);
+    volts.push(item.value);
   }
   return volts;
 }
 
-function pickSupplyVolts(prompt, found) {
-  return supplyCandidates(prompt, found)[0]?.volts ?? null;
+function pickSupplyVolts(prompt, tokens) {
+  return supplyCandidates(prompt, tokens)[0]?.value ?? null;
 }
 
 // One labeled forward voltage replaces the color default for every channel.
 // Two different labeled values stay on the color defaults instead of guessing.
-function specifiedForwardVoltage(prompt) {
-  const labeled = classifySupplyVoltages(prompt, scanSupplyVoltages(prompt).tokens);
-  const volts = distinctSupplyVolts(labeled.filter((item) => item.forward && item.volts > 0));
-  return volts.length === 1 ? volts[0] : null;
+// A forward-voltage range contributes its maximum.
+function specifiedForward(tokens) {
+  const labeled = tokens.filter((token) => token.role === 'vf' && token.value > 0);
+  const volts = distinctSupplyVolts(labeled);
+  if (volts.length !== 1) return null;
+  const key = formatVolts(volts[0]);
+  const ranged = labeled.find((token) => token.range && formatVolts(token.value) === key);
+  const token = ranged ?? labeled.find((item) => formatVolts(item.value) === key);
+  return {
+    volts: volts[0],
+    rangeRaw: token?.range ? token.raw : null,
+    rangeMin: token?.range?.min ?? null
+  };
 }
 
 const MAINS_SUPPLY = /상용\s*전원|교류\s*전원|\bmains\b|\bwall\s*outlet\b|\bline\s*voltage\b/i;
-const AC_SUPPLY = /교류|(?:^|[^A-Za-z])vac(?:[^A-Za-z]|$)|(?:^|[^A-Za-z])ac(?:[^A-Za-z]|$)/i;
 const MAX_DISCRETE_SUPPLY_VOLTS = 24;
 
-function promptIndicatesAc(prompt) {
-  return AC_SUPPLY.test(prompt);
-}
-
-function resolveDiscreteSupply(prompt) {
-  const scan = scanSupplyVoltages(prompt);
-  const labeled = classifySupplyVoltages(prompt, scan.tokens);
+function resolveDiscreteSupply(prompt, scan) {
+  const voltages = scan.tokens.filter((token) => token.kind === 'voltage');
   // A labeled forward voltage is the LED Vf, never a high-voltage rail.
-  const unsafe = labeled.find((token) => !token.forward && token.volts > MAX_DISCRETE_SUPPLY_VOLTS);
+  const unsafe = voltages.find((token) => token.role !== 'vf' && token.value > MAX_DISCRETE_SUPPLY_VOLTS);
   const mains = MAINS_SUPPLY.test(prompt);
-  if (promptIndicatesAc(prompt) && !mains && !unsafe) {
-    const volts = pickSupplyVolts(prompt, scan.tokens.filter((token) => token.volts > 0));
+  if (promptDescribesAcSupply(prompt, scan.tokens) && !mains && !unsafe) {
+    const volts = pickSupplyVolts(prompt, voltages.filter((token) => token.value > 0));
     return {
       refused: true,
       code: 'discrete-led-ac-supply',
       supplyVolts: Number.isFinite(volts) ? volts : null,
-      message: acSupplyMessage(volts)
+      texts: acSupplyMessage(volts)
     };
   }
   if (scan.unparseable) {
@@ -478,25 +282,32 @@ function resolveDiscreteSupply(prompt) {
       refused: true,
       code: 'discrete-led-invalid-voltage',
       supplyVolts: null,
-      message: 'Refusing to draft an LED circuit because the supply voltage could not be parsed. Write a positive low-voltage value such as 5V, 3.3V, 3300mV, or 3,3V. Unrecognized units, 0V, and negative values are rejected. No LED, resistor, or power symbol was generated.'
+      texts: {
+        en: 'Refusing to draft an LED circuit because the supply voltage could not be parsed. Write a positive low-voltage value such as 5V, 3.3V, 3300mV, or 3,3V. Unrecognized units, 0V, and negative values are rejected. No LED, resistor, or power symbol was generated.',
+        ko: '공급 전압을 해석할 수 없어 LED 회로를 만들지 않습니다. 5V, 3.3V, 3300mV, 3,3V처럼 양의 저전압을 적어 주세요. 알 수 없는 단위, 0V, 음의 값은 거부합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.'
+      }
     };
   }
-  const nonPositive = scan.tokens.find((token) => token.volts <= 0);
+  const nonPositive = voltages.find((token) => token.value <= 0);
   if (nonPositive) {
+    const shown = formatVolts(nonPositive.value);
     return {
       refused: true,
       code: 'discrete-led-invalid-voltage',
-      supplyVolts: nonPositive.volts,
-      message: `Refusing to draft an LED circuit because the supply voltage ${formatVolts(nonPositive.volts)}V is not positive. The discrete LED generator only supports low-voltage rails up to 24V. No LED, resistor, or power symbol was generated.`
+      supplyVolts: nonPositive.value,
+      texts: {
+        en: `Refusing to draft an LED circuit because the supply voltage ${shown}V is not positive. The discrete LED generator only supports low-voltage rails up to 24V. No LED, resistor, or power symbol was generated.`,
+        ko: `공급 전압 ${shown}V가 양수가 아니어서 LED 회로를 만들지 않습니다. 이산 LED 생성기는 24V 이하의 저전압만 지원합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+      }
     };
   }
   if (mains || unsafe) {
-    const volts = unsafe?.volts ?? pickSupplyVolts(prompt, scan.tokens);
+    const volts = unsafe?.value ?? pickSupplyVolts(prompt, scan.tokens);
     return {
       refused: true,
       code: 'discrete-led-high-voltage',
       supplyVolts: Number.isFinite(volts) ? volts : null,
-      message: highVoltageMessage(volts)
+      texts: highVoltageMessage(volts)
     };
   }
   const distinct = distinctSupplyVolts(supplyCandidates(prompt, scan.tokens));
@@ -505,7 +316,7 @@ function resolveDiscreteSupply(prompt) {
       refused: true,
       code: 'discrete-led-ambiguous-supply',
       supplyVolts: null,
-      message: ambiguousSupplyMessage(distinct)
+      texts: ambiguousSupplyMessage(distinct)
     };
   }
   const selected = distinct[0];
@@ -515,28 +326,50 @@ function resolveDiscreteSupply(prompt) {
   return { refused: false, supplyVolts: selected, supplyAssumed: false };
 }
 
+function usesKorean(text) {
+  return /[가-힣]/.test(String(text ?? ''));
+}
+
+function finishSentence(text) {
+  const value = String(text ?? '').trim();
+  if (!value || /[.。]$/.test(value)) return value;
+  return `${value}.`;
+}
+
+function asFinding(code, texts, prompt) {
+  const en = finishSentence(texts.en);
+  const ko = finishSentence(texts.ko);
+  return {
+    code,
+    en,
+    ko,
+    message: usesKorean(prompt) ? ko : en
+  };
+}
+
 function highVoltageMessage(volts) {
   const detected = Number.isFinite(volts) ? ` Detected ${formatVolts(volts)}V.` : '';
-  return bilingualNote(
-    `Refusing to draft a mains or high-voltage LED circuit.${detected} The discrete LED generator only supports low-voltage rails up to 24V (+3V3, +5V, +9V, and +12V). No LED, resistor, or power symbol was generated.`,
-    '고전압은 거부합니다. 이산 LED 생성기는 24V 이하의 저전압만 지원하며, LED·저항·전원 기호는 생성하지 않았습니다.'
-  );
+  const detectedKo = Number.isFinite(volts) ? ` 감지된 전압은 ${formatVolts(volts)}V입니다.` : '';
+  return {
+    en: `Refusing to draft a mains or high-voltage LED circuit.${detected} The discrete LED generator only supports low-voltage rails up to 24V (+3V3, +5V, +9V, and +12V). No LED, resistor, or power symbol was generated.`,
+    ko: `고전압은 거부합니다.${detectedKo} 이산 LED 생성기는 24V 이하의 저전압만 지원합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
 }
 
 function acSupplyMessage(volts) {
   const detected = Number.isFinite(volts) ? ` Detected ${formatVolts(volts)}V AC.` : '';
-  return bilingualNote(
-    `Refusing to draft an LED circuit because the supply is AC.${detected} The discrete LED generator only supports DC rails up to 24V. No LED, resistor, or power symbol was generated.`,
-    '교류는 전압과 관계없이 거부합니다. 이산 LED 생성기는 24V 이하의 직류만 지원하며, LED·저항·전원 기호는 생성하지 않았습니다.'
-  );
+  const detectedKo = Number.isFinite(volts) ? ` 감지된 전압은 ${formatVolts(volts)}V 교류입니다.` : '';
+  return {
+    en: `Refusing to draft an LED circuit because the supply is AC.${detected} The discrete LED generator only supports DC rails up to 24V. No LED, resistor, or power symbol was generated.`,
+    ko: `교류는 전압과 관계없이 거부합니다.${detectedKo} 이산 LED 생성기는 24V 이하의 직류만 지원합니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
 }
 
 function ambiguousSupplyMessage(volts) {
-  const list = joinVoltLabels(volts);
-  return bilingualNote(
-    `Refusing to draft an LED circuit because several supply voltages were given (${list}). Which supply should the LED use? No LED, resistor, or power symbol was generated.`,
-    `공급 전압이 여러 개입니다 (${list}). 어떤 공급 전압을 쓸지 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
-  );
+  return {
+    en: `Refusing to draft an LED circuit because several supply voltages were given (${joinVoltLabels(volts)}). Which supply should the LED use? No LED, resistor, or power symbol was generated.`,
+    ko: `공급 전압이 여러 개입니다 (${joinVoltLabelsKo(volts)}). 어떤 공급 전압을 쓸지 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
 }
 
 function joinVoltLabels(volts) {
@@ -544,6 +377,13 @@ function joinVoltLabels(volts) {
   if (labels.length <= 1) return labels.join('');
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(', ')}, and ${labels.at(-1)}`;
+}
+
+function joinVoltLabelsKo(volts) {
+  const labels = volts.map((value) => `${formatVolts(value)}V`);
+  if (labels.length <= 1) return labels.join('');
+  if (labels.length === 2) return `${labels[0]}와 ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')}와 ${labels.at(-1)}`;
 }
 
 const LED_COLOR_KO = {
@@ -558,18 +398,18 @@ function belowForwardMessage(supplyVolts, color, specifiedVf) {
   const supply = formatVolts(supplyVolts);
   if (Number.isFinite(specifiedVf)) {
     const vf = formatVolts(specifiedVf);
-    return bilingualNote(
-      `Refusing to draft an LED circuit because the supply ${supply}V is not above the specified forward voltage of ${vf}V. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
-      `공급 전압 ${supply}V가 지정한 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
-    );
+    return {
+      en: `Refusing to draft an LED circuit because the supply ${supply}V is not above the specified forward voltage of ${vf}V. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
+      ko: `공급 전압 ${supply}V가 지정한 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. 직렬 전류를 계산할 수 없습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    };
   }
   const spec = color ?? LED_COLOR_SPECS[0];
   const vf = formatVolts(spec.vf);
   const ko = LED_COLOR_KO[spec.id] ?? LED_COLOR_KO.red;
-  return bilingualNote(
-    `Refusing to draft an LED circuit because the supply ${supply}V is not above the typical ${spec.prose} LED forward voltage of ${vf}V. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
-    `공급 전압 ${supply}V가 ${ko} LED의 일반적인 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
-  );
+  return {
+    en: `Refusing to draft an LED circuit because the supply ${supply}V is not above LED Vf ${vf}V for a typical ${spec.prose} LED. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
+    ko: `공급 전압 ${supply}V가 ${ko} LED의 일반적인 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. 직렬 전류를 계산할 수 없습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+  };
 }
 
 function supplyNetName(volts) {
@@ -631,37 +471,34 @@ function findLedColors(prompt) {
   return found.map(({ index: _index, patterns: _patterns, ...color }) => color);
 }
 
-function bilingualNote(en, ko) {
-  return `${en} ${ko}`;
-}
-
 function unsupportedLedFeatures(prompt) {
   const items = [];
   if (/\brgb\b|풀\s*컬러|풀컬러|네오\s*픽셀|neopixel|addressable|어드레서블|ws2812|ws2811|sk6812|apa102|삼색|3\s*색|다색|led\s*matrix|매트릭스|charlieplex/i.test(prompt)) {
     items.push({
       id: 'rgb',
-      message: bilingualNote(
-        'Unsupported: RGB, addressable, and matrix LEDs are not supported by the discrete LED generator. A simple indicator LED was drafted instead.',
-        '어드레서블·WS2812·RGB·매트릭스 LED는 지원하지 않아 단일 표시 LED로 대체했습니다.'
-      )
+      en: 'Unsupported: RGB, addressable, and matrix LEDs are not supported by the discrete LED generator. A simple indicator LED was drafted instead.',
+      ko: '어드레서블·WS2812·RGB·매트릭스 LED는 지원하지 않아 단일 표시 LED로 대체했습니다.'
     });
   }
   if (/\bpwm\b|펄스\s*폭|밝기\s*조절|밝기조절|디밍|\bdimm|\bfade\b|페이딩/i.test(prompt)) {
     items.push({
       id: 'pwm',
-      message: 'Unsupported: PWM, dimming, and brightness control are not supported by the discrete LED generator. The draft is a static series LED.'
+      en: 'Unsupported: PWM, dimming, and brightness control are not supported by the discrete LED generator. The draft is a static series LED.',
+      ko: 'PWM, 디밍, 밝기 조절은 이산 LED 생성기가 지원하지 않습니다. 초안은 고정된 직렬 LED입니다.'
     });
   }
   if (/\bstrips?\b|스트립|엘이디\s*띠|\bled\s*띠/i.test(prompt)) {
     items.push({
       id: 'strip',
-      message: 'Unsupported: LED strips are not supported by the discrete LED generator. A simple indicator LED was drafted instead.'
+      en: 'Unsupported: LED strips are not supported by the discrete LED generator. A simple indicator LED was drafted instead.',
+      ko: 'LED 스트립은 이산 LED 생성기가 지원하지 않습니다. 단일 표시 LED로 대체했습니다.'
     });
   }
   if (/\bpots?\b|\bpotentiometers?\b|가변\s*저항/i.test(prompt)) {
     items.push({
       id: 'pot',
-      message: 'Unsupported: potentiometers are not supported by the discrete LED generator. The draft uses a fixed series resistor instead.'
+      en: 'Unsupported: potentiometers are not supported by the discrete LED generator. The draft uses a fixed series resistor instead.',
+      ko: '가변 저항은 이산 LED 생성기가 지원하지 않습니다. 초안은 고정 직렬 저항을 사용합니다.'
     });
   }
   return items;
@@ -681,23 +518,35 @@ function roundUpE24(ohms) {
   return Math.round(pick * (10 ** exp));
 }
 
-function resistorFromSupply({ supplyVolts, vf, colorLabel, assumed, specified = false }) {
+function resistorFromSupply({ supplyVolts, vf, color, assumed, specified = false }) {
   const rawOhms = (Math.round(supplyVolts * 1000) - Math.round(vf * 1000)) / TYPICAL_LED_CURRENT_MA;
   const resistanceOhms = roundUpE24(rawOhms);
   const resistorValue = formatOhms(resistanceOhms);
-  const formula = `(${formatVolts(supplyVolts)}V - ${formatVolts(vf)}V) / ${TYPICAL_LED_CURRENT_MA}mA = ${formatOhms(rawOhms)}`;
-  const rounding = formatOhms(rawOhms) === resistorValue
-    ? ''
-    : `, rounded up to the next E24 value ${resistorValue}`;
+  const shownVf = formatVolts(vf);
+  const formula = `(${formatVolts(supplyVolts)}V - ${shownVf}V) / ${TYPICAL_LED_CURRENT_MA}mA = ${formatOhms(rawOhms)}`;
+  const rounded = formatOhms(rawOhms) !== resistorValue;
+  const rounding = rounded ? `, rounded up to the next E24 value ${resistorValue}` : '';
+  const colorLabel = color?.prose ?? 'red';
+  const koColor = LED_COLOR_KO[color?.id ?? 'red'] ?? LED_COLOR_KO.red;
   const prefix = assumed
-    ? `No LED color was given, so the draft assumes a typical red LED Vf of ${formatVolts(vf)}V. `
+    ? `No LED color was given, so the draft assumes a typical red LED Vf of ${shownVf}V. `
     : '';
+  const koPrefix = assumed
+    ? `LED 색이 지정되지 않아 일반적인 빨간 LED 순방향 전압 ${shownVf}V로 가정합니다. `
+    : '';
+  const koRounded = `지정한 순방향 전압 ${shownVf}V로 ${formula}를 계산한 뒤 다음 E24 값 ${resistorValue}로 올렸습니다.`;
+  const koExact = `지정한 순방향 전압 ${shownVf}V로 직렬 저항 ${resistorValue}을 ${formula}로 계산했습니다.`;
+  const koColorRounded = `${koColor} LED의 일반적인 순방향 전압 ${shownVf}V로 ${formula}를 계산한 뒤 다음 E24 값 ${resistorValue}로 올렸습니다.`;
+  const koColorExact = `${koColor} LED의 일반적인 순방향 전압 ${shownVf}V로 직렬 저항 ${resistorValue}을 ${formula}로 계산했습니다.`;
   const summary = specified
-    ? bilingualNote(
-      `Series resistor ${resistorValue} was calculated as ${formula}${rounding} using the specified forward voltage of ${formatVolts(vf)}V.`,
-      `지정한 순방향 전압 ${formatVolts(vf)}V로 직렬 저항 ${resistorValue}을 계산했습니다`
-    )
-    : `${prefix}Series resistor ${resistorValue} was calculated as ${formula}${rounding} for a ${colorLabel} LED (typical Vf ${formatVolts(vf)}V).`;
+    ? {
+      en: `Series resistor ${resistorValue} was calculated as ${formula}${rounding} using the specified forward voltage of ${shownVf}V.`,
+      ko: rounded ? koRounded : koExact
+    }
+    : {
+      en: `${prefix}Series resistor ${resistorValue} was calculated as ${formula}${rounding} for a ${colorLabel} LED (typical Vf ${shownVf}V).`,
+      ko: `${koPrefix}${rounded ? koColorRounded : koColorExact}`
+    };
   return {
     vf,
     resistanceOhms,
@@ -716,7 +565,7 @@ function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms, spe
     : resistorFromSupply({
       supplyVolts,
       vf,
-      colorLabel: vfColor.prose,
+      color: color ?? (assumed ? LED_COLOR_SPECS[0] : vfColor),
       assumed,
       specified
     });
@@ -735,16 +584,36 @@ function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms, spe
 
 const HEADROOM_WARN_MV = 1000;
 const TINY_RESISTOR_OHMS = 68;
+const LED_CURRENT_WARN_MA = 30;
 
 function headroomMillivolts(supplyVolts, vf) {
   return Math.round(supplyVolts * 1000) - Math.round(vf * 1000);
 }
 
-function headroomWarning(channels, supplyVolts) {
+function channelCurrentMilliamps(supplyVolts, channel) {
+  const headroom = headroomMillivolts(supplyVolts, channel.vf);
+  if (!(headroom > 0) || !(channel.resistanceOhms > 0)) return 0;
+  return headroom / channel.resistanceOhms;
+}
+
+function formatCurrent(milliamps) {
+  const rounded = Math.round(milliamps);
+  if (rounded >= 1000) {
+    const amps = Math.round(rounded / 100) / 10;
+    return `${formatScaled(amps)}A`;
+  }
+  return `${rounded}mA`;
+}
+
+function headroomWarning(channels, supplyVolts, requestedCurrentMa, prompt) {
   const usable = channels.filter((channel) => headroomMillivolts(supplyVolts, channel.vf) > 0);
   const low = usable.filter((channel) => headroomMillivolts(supplyVolts, channel.vf) < HEADROOM_WARN_MV);
   const tiny = usable.filter((channel) => channel.resistanceOhms < TINY_RESISTOR_OHMS);
-  if (low.length === 0 && tiny.length === 0) return null;
+  const hot = usable
+    .map((channel) => ({ channel, milliamps: channelCurrentMilliamps(supplyVolts, channel) }))
+    .filter((item) => item.milliamps > LED_CURRENT_WARN_MA);
+  const requestedHigh = Number.isFinite(requestedCurrentMa) && requestedCurrentMa > LED_CURRENT_WARN_MA;
+  if (low.length === 0 && tiny.length === 0 && hot.length === 0 && !requestedHigh) return null;
   const english = [];
   const korean = [];
   if (low.length > 0) {
@@ -753,82 +622,110 @@ function headroomWarning(channels, supplyVolts) {
     ));
     const headroom = formatVolts(headroomMillivolts(supplyVolts, worst.vf) / 1000);
     english.push(`headroom is only ${headroom}V`);
-    korean.push(`여유 전압이 ${headroom}V뿐입니다`);
+    korean.push(`여유 전압이 ${headroom}V뿐입니다.`);
   }
   if (tiny.length > 0) {
     const smallest = tiny.reduce((best, channel) => (
       channel.resistanceOhms < best.resistanceOhms ? channel : best
     ));
     english.push(`series resistor ${smallest.resistorValue} is below 68Ω`);
-    korean.push(`직렬 저항 ${smallest.resistorValue}은 68Ω보다 작습니다`);
+    korean.push(`직렬 저항 ${smallest.resistorValue}은 68Ω보다 작습니다.`);
   }
+  if (hot.length > 0) {
+    const hottest = hot.reduce((best, item) => (item.milliamps > best.milliamps ? item : best));
+    const shown = formatCurrent(hottest.milliamps);
+    english.push(`current is about ${shown}, above ${LED_CURRENT_WARN_MA}mA`);
+    korean.push(`전류가 약 ${shown}로 ${LED_CURRENT_WARN_MA}mA를 넘습니다.`);
+  }
+  if (requestedHigh) {
+    const shown = formatCurrent(requestedCurrentMa);
+    english.push(`requested current ${shown} is above ${LED_CURRENT_WARN_MA}mA`);
+    korean.push(`요청한 전류 ${shown}가 ${LED_CURRENT_WARN_MA}mA를 넘습니다.`);
+  }
+  korean.push('출시 전에 LED 전류를 확인하세요.');
+  return asFinding('discrete-led-headroom', {
+    en: `Warning: LED supply ${english.join('; ')}. Confirm the LED current before release.`,
+    ko: korean.join(' ')
+  }, prompt);
+}
+
+function specifiedForwardTexts(specifiedVf) {
+  if (!Number.isFinite(specifiedVf)) return null;
+  const shown = formatVolts(specifiedVf);
   return {
-    code: 'discrete-led-headroom',
-    message: bilingualNote(
-      `Warning: LED supply ${english.join('; ')}. Confirm the LED current before release.`,
-      korean.join(' ')
-    )
+    en: `The specified forward voltage of ${shown}V is used instead of the color default.`,
+    ko: `지정한 순방향 전압 ${shown}V를 색상 기본값 대신 사용합니다.`
   };
 }
 
-function specifiedForwardNote(specifiedVf) {
-  if (!Number.isFinite(specifiedVf)) return '';
-  return ` ${bilingualNote(
-    `The specified forward voltage of ${formatVolts(specifiedVf)}V is used instead of the color default.`,
-    `지정한 순방향 전압 ${formatVolts(specifiedVf)}V를 색상 기본값 대신 사용합니다.`
-  )}`;
+function keepResistorTexts({ resistorValue, color, ledValue, names, specifiedVf }) {
+  const colorText = names ? ` for ${names}` : (color ? ` for ${ledValue}` : '');
+  const forward = specifiedForwardTexts(specifiedVf);
+  const koColor = color && !names ? `${LED_COLOR_KO[color.id]} LED에 ` : '';
+  const en = `Discrete LED draft keeps the requested series resistor ${resistorValue}${colorText}; confirm it for the LED forward voltage and current before release.${forward ? ` ${forward.en}` : ''}`;
+  const ko = `이산 LED 초안은 ${koColor}요청한 직렬 저항 ${resistorValue}을 유지합니다. LED 순방향 전압과 전류를 출시 전에 확인하세요.${forward ? ` ${forward.ko}` : ''}`;
+  return { en, ko };
 }
 
-function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels, supplyAssumed, specifiedVf }) {
+function conservativeVfMessage(rangeRaw, volts, rangeMin) {
+  const max = formatVolts(volts);
+  const min = Number.isFinite(rangeMin) ? formatVolts(rangeMin) : max;
+  return {
+    en: `Forward-voltage range ${rangeRaw} uses the maximum ${max}V so the series resistor stays conservative.`,
+    ko: `순방향 전압 범위 ${min}V에서 ${max}V까지는 직렬 저항을 보수적으로 계산하도록 상한 ${max}V를 사용합니다.`
+  };
+}
+
+function buildDiscreteReviewNotes({ prompt, color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels, supplyAssumed, specifiedVf, vfRangeRaw, vfRangeMin }) {
   const notes = [];
   if (perColor && resistorExplicit) {
     const names = channels.map((channel) => channel.ledValue).join(', ');
-    notes.push({
-      code: 'discrete-led',
-      message: `Discrete LED draft keeps the requested series resistor ${resistorValue} for ${names}; confirm it for the LED forward voltage and current before release.${specifiedForwardNote(specifiedVf)}`
-    });
+    notes.push(asFinding('discrete-led', keepResistorTexts({
+      resistorValue,
+      names,
+      specifiedVf
+    }), prompt));
   } else if (perColor) {
     for (const channel of channels) {
       const id = channel.color?.id ?? 'led';
-      notes.push({
-        code: `discrete-led-${id}`,
-        message: channel.calculation.summary
-      });
+      notes.push(asFinding(`discrete-led-${id}`, channel.calculation.summary, prompt));
     }
   } else if (resistorExplicit) {
-    const colorText = color ? ` for ${ledValue}` : '';
-    notes.push({
-      code: 'discrete-led',
-      message: `Discrete LED draft keeps the requested series resistor ${resistorValue}${colorText}; confirm it for the LED forward voltage and current before release.${specifiedForwardNote(specifiedVf)}`
-    });
+    notes.push(asFinding('discrete-led', keepResistorTexts({
+      resistorValue,
+      color,
+      ledValue,
+      specifiedVf
+    }), prompt));
   } else {
-    notes.push({ code: 'discrete-led', message: calculation.summary });
+    notes.push(asFinding('discrete-led', calculation.summary, prompt));
   }
   if (quantityCapped) {
-    notes.push({
-      code: 'discrete-led-quantity-capped',
-      message: bilingualNote(
-        `Requested ${requestedCount} LEDs; the discrete LED generator is capped at ${count}. Extra LEDs were not generated.`,
-        `요청한 LED는 ${requestedCount}개이고, 이산 LED 생성기는 ${count}개까지입니다. 넘는 LED는 만들지 않았습니다.`
-      )
-    });
+    notes.push(asFinding('discrete-led-quantity-capped', {
+      en: `Requested ${requestedCount} LEDs; the discrete LED generator is capped at ${count}. Extra LEDs were not generated.`,
+      ko: `요청한 LED는 ${requestedCount}개이고, 이산 LED 생성기는 ${count}개까지입니다. 넘는 LED는 만들지 않았습니다.`
+    }, prompt));
   }
   if (supplyAssumed) {
-    notes.push({
-      code: 'discrete-led-supply-assumed',
-      message: bilingualNote(
-        'No supply voltage was given, so the draft assumes 5V.',
-        '공급 전압이 없어서 5V로 가정했습니다.'
-      )
-    });
+    notes.push(asFinding('discrete-led-supply-assumed', {
+      en: 'No supply voltage was given, so the draft assumes 5V.',
+      ko: '공급 전압이 없어서 5V로 가정했습니다.'
+    }, prompt));
   }
   for (const item of unsupported) {
-    notes.push({ code: `discrete-led-unsupported-${item.id}`, message: item.message });
+    notes.push(asFinding(`discrete-led-unsupported-${item.id}`, item, prompt));
+  }
+  if (vfRangeRaw && Number.isFinite(specifiedVf)) {
+    notes.push(asFinding(
+      'discrete-led-vf-range',
+      conservativeVfMessage(vfRangeRaw, specifiedVf, vfRangeMin),
+      prompt
+    ));
   }
   return notes;
 }
 
-function refuseDiscreteLed({ code, message, supplyVolts, supplyAssumed = false }) {
+function refuseDiscreteLed({ code, texts, prompt, supplyVolts, supplyAssumed = false }) {
   return {
     count: 0,
     requestedCount: 0,
@@ -849,7 +746,7 @@ function refuseDiscreteLed({ code, message, supplyVolts, supplyAssumed = false }
     calculation: null,
     unsupported: [],
     reviewWarnings: [],
-    reviewBlockers: [{ code, message }],
+    reviewBlockers: [asFinding(code, texts, prompt)],
     reviewNotes: []
   };
 }
@@ -857,17 +754,20 @@ function refuseDiscreteLed({ code, message, supplyVolts, supplyAssumed = false }
 export function parseDiscreteLedRequest(prompt) {
   const text = String(prompt ?? '');
   if (!isSimpleDiscreteLedPrompt(text)) return null;
-  const supply = resolveDiscreteSupply(text);
-  if (supply.refused) return refuseDiscreteLed(supply);
+  const scan = classifyQuantities(text);
+  const supply = resolveDiscreteSupply(text, scan);
+  if (supply.refused) return refuseDiscreteLed({ ...supply, prompt: text });
   const supplyVolts = supply.supplyVolts;
   const supplyAssumed = supply.supplyAssumed === true;
-  const specifiedVf = specifiedForwardVoltage(text);
+  const forward = specifiedForward(scan.tokens);
+  const specifiedVf = forward?.volts ?? null;
   const colors = findLedColors(text);
   const explicitCount = parseLedCount(text);
   const perColor = colors.length > 1 && (explicitCount == null || explicitCount === colors.length);
   const requestedCount = perColor ? colors.length : Math.max(1, explicitCount ?? 1);
   const count = Math.min(MAX_DISCRETE_LEDS, requestedCount);
-  const explicitOhms = parseExplicitResistanceOhms(text);
+  const explicitOhms = explicitResistanceOhms(scan.tokens);
+  const requestedCurrentMa = requestedCurrentMilliamps(scan.tokens);
   const resistorExplicit = Number.isFinite(explicitOhms) && explicitOhms > 0;
   const channelColors = perColor
     ? colors.slice(0, count)
@@ -881,7 +781,8 @@ export function parseDiscreteLedRequest(prompt) {
       code: 'discrete-led-below-vf',
       supplyVolts,
       supplyAssumed,
-      message: belowForwardMessage(supplyVolts, channelColors[undersuppliedIndex], specifiedVf)
+      prompt: text,
+      texts: belowForwardMessage(supplyVolts, channelColors[undersuppliedIndex], specifiedVf)
     });
   }
   const channels = channelColors.map((color) => channelForLed({
@@ -896,9 +797,12 @@ export function parseDiscreteLedRequest(prompt) {
   const unsupported = unsupportedLedFeatures(text);
   if (!perColor && colors.length > 1) {
     const names = colors.map((item) => item.prose).join(', ');
+    const koNames = colors.map((item) => LED_COLOR_KO[item.id] ?? item.prose).join(', ');
+    const koFirst = LED_COLOR_KO[colors[0].id] ?? colors[0].prose;
     unsupported.push({
       id: 'mixed-color',
-      message: `Unsupported: multiple LED colors (${names}) in one draft are not supported. The draft uses ${colors[0].prose} for every LED.`
+      en: `Unsupported: multiple LED colors (${names}) in one draft are not supported. The draft uses ${colors[0].prose} for every LED.`,
+      ko: `한 초안에 LED 색이 여러 개(${koNames})인 것은 지원하지 않습니다. 초안은 모든 LED에 ${koFirst}색을 사용합니다.`
     });
   }
   const parsed = {
@@ -922,8 +826,13 @@ export function parseDiscreteLedRequest(prompt) {
     supplyAssumed,
     specifiedVf: Number.isFinite(specifiedVf) ? specifiedVf : null
   };
-  const reviewNotes = buildDiscreteReviewNotes(parsed);
-  const warning = headroomWarning(parsed.channels, supplyVolts);
+  const reviewNotes = buildDiscreteReviewNotes({
+    ...parsed,
+    prompt: text,
+    vfRangeRaw: forward?.rangeRaw ?? null,
+    vfRangeMin: forward?.rangeMin ?? null
+  });
+  const warning = headroomWarning(parsed.channels, supplyVolts, requestedCurrentMa, text);
   return {
     ...parsed,
     reviewNotes,
