@@ -743,6 +743,41 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           assert.match(connected, /[가-힣]/, `${theme}/${lang} connected korean`);
         }
 
+        const providerLine = await page.evaluate(async (nextLang) => {
+          const socket = window.__sockets[0];
+          const deliver = (status) => {
+            const before = window.__sent.length;
+            document.querySelector('#provider').dispatchEvent(new Event('change'));
+            const sent = window.__sent.slice(before).map((raw) => JSON.parse(raw));
+            const call = sent.map((event) => event.payload).find((payload) => payload?.name === 'provider.status');
+            if (!call) return '';
+            socket.dispatchEvent(new MessageEvent('message', {
+              data: JSON.stringify({
+                type: 'tool.result',
+                payload: { id: call.id, ok: true, result: { provider: 'codex', status } }
+              })
+            }));
+            return document.querySelector('#provider-status').textContent;
+          };
+          const missing = deliver('missing');
+          const available = deliver('available');
+          const otherLang = nextLang === 'ko' ? 'en' : 'ko';
+          await window.chatpcbI18n.setLang(otherLang);
+          const switched = document.querySelector('#provider-status').textContent;
+          await window.chatpcbI18n.setLang(nextLang);
+          return { missing, available, switched };
+        }, lang);
+        assert.equal(providerLine.missing, locale['provider.status.codex.missing'], `${theme}/${lang} provider missing`);
+        assert.equal(providerLine.available, locale['provider.status.codex.available'], `${theme}/${lang} provider available`);
+        assert.doesNotMatch(providerLine.missing, /codex:\s*missing/i, `${theme}/${lang} raw provider missing`);
+        assert.doesNotMatch(providerLine.available, /codex:\s*available/i, `${theme}/${lang} raw provider available`);
+        const otherLocale = lang === 'ko' ? en : ko;
+        assert.equal(providerLine.switched, otherLocale['provider.status.codex.available'], `${theme}/${lang} provider status follows language`);
+        if (lang === 'ko') {
+          assert.match(providerLine.missing, /[가-힣]/, `${theme}/${lang} provider missing korean`);
+          assert.match(providerLine.available, /[가-힣]/, `${theme}/${lang} provider available korean`);
+        }
+
         const gated = await page.evaluate(() => {
           const card = document.querySelector('#chatgpt-signin');
           const plan = document.querySelector('#chatgpt-plan');

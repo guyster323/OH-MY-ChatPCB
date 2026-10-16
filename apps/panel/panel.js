@@ -99,6 +99,7 @@ let lastWorkflowActive = 'circuit.concept';
 let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutReviewed: false };
 let connectionStatusKey = 'connection.connecting';
 let requestStatusKey = 'request.idle';
+let lastProviderStatus = null;
 let requestStatusVars = null;
 const laneOpen = new Map();
 const pendingCalls = new Map();
@@ -114,6 +115,7 @@ window.chatpcbI18n?.onChange(() => {
   syncWorkflow();
   renderPatchApproval();
   if (requestStatusKey) requestStatusEl.textContent = t(requestStatusKey, requestStatusVars);
+  if (lastProviderStatus) renderProviderStatus(lastProviderStatus);
 });
 
 newProjectFormEl.addEventListener('submit', (event) => {
@@ -486,11 +488,20 @@ function handleEnvelope(envelope) {
   }
   if (callName === 'schematic.patch.cancel') return;
   if (callName === 'provider.status') {
-    const provider = envelope.payload.result;
-    providerStatusEl.removeAttribute('data-i18n');
-    providerStatusEl.textContent = t('provider.status-line', { provider: provider.provider, status: provider.status });
-    providerStatusEl.dataset.status = provider.status;
+    renderProviderStatus(envelope.payload.result);
   }
+}
+
+function renderProviderStatus(provider) {
+  if (!providerStatusEl || !provider) return;
+  lastProviderStatus = provider;
+  providerStatusEl.removeAttribute('data-i18n');
+  const text = t(`provider.status.${provider.provider}.${provider.status}`);
+  providerStatusEl.textContent = text.startsWith('provider.status.')
+    ? t('provider.status.fallback')
+    : text;
+  if (provider.status) providerStatusEl.dataset.status = provider.status;
+  else delete providerStatusEl.dataset.status;
 }
 
 function activateProject(project) {
