@@ -1,3 +1,4 @@
+import './setup/isolate-home.mjs';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyTokenExpiry, extractPlan } from '../src/runtime/auth/chatgpt-auth.js';

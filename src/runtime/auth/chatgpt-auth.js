@@ -1,7 +1,7 @@
 import { createHash, createPublicKey, createVerify, randomBytes, randomUUID } from 'node:crypto';
-import { chmod, link, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { chmod, link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, resolve as resolvePath } from 'node:path';
 import http from 'node:http';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -138,6 +138,9 @@ function absoluteEnvPath(value) {
 // %USERPROFILE%\AppData\Roaming\chatpcb when APPDATA is unset. macOS uses
 // ~/Library/Application Support/chatpcb. Every other platform uses
 // $XDG_CONFIG_HOME/chatpcb or ~/.config/chatpcb.
+// When XDG_CONFIG_HOME is an absolute path other than ~/.config, credential
+// and host-id files that exist only under ~/.config/chatpcb are copied across
+// by migrateLegacyChatGPTConfig. Files already in the XDG directory stay put.
 export function resolveChatGPTConfigDir({
   platform = process.platform,
   env = process.env,
@@ -174,6 +177,7 @@ function uniqueTempPath(filePath) {
 }
 
 async function ensureConfigDir() {
+  await migrateLegacyChatGPTConfig();
   const dir = getConfigDir();
   await mkdir(dir, { recursive: true, mode: 0o700 });
   // mkdir leaves an existing directory's mode alone, and umask can widen a
@@ -186,6 +190,110 @@ async function ensureConfigDir() {
 
 function isCredentialFile(name) {
   return name === 'chatgpt-credentials.json' || /^chatgpt-credentials-.+\.json$/.test(name);
+}
+
+function sameConfigDir(left, right) {
+  const a = resolvePath(left);
+  const b = resolvePath(right);
+  if (a === b) return true;
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    // One side does not exist yet, so the resolved paths above are the answer.
+    return false;
+  }
+}
+
+async function pathExists(filePath) {
+  try {
+    await lstat(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+// Write the full file under a temporary name in the destination directory,
+// then link it into place. link fails if the name already exists, so a race
+// or a second call cannot replace a credential or host id.
+async function copyOwnedFileIfMissing(src, dest) {
+  let bytes;
+  try {
+    bytes = await readFile(src);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'EISDIR') return false;
+    throw error;
+  }
+  const tempPath = uniqueTempPath(dest);
+  try {
+    await writeFile(tempPath, bytes, { mode: 0o600 });
+    if (process.platform !== 'win32') await chmod(tempPath, 0o600);
+    try {
+      await link(tempPath, dest);
+    } catch (error) {
+      if (error.code === 'EEXIST') return false;
+      throw error;
+    }
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+  if (process.platform !== 'win32') await chmod(dest, 0o600).catch(() => {});
+  return true;
+}
+
+/**
+ * Copy credential and host-id files from ~/.config/chatpcb into the active
+ * config directory when XDG_CONFIG_HOME is absolute and is not ~/.config.
+ * A file that already exists at the destination is never replaced.
+ * Copied files are owner-only (0600) and the destination directory is
+ * owner-only (0700). macOS and Windows ignore XDG_CONFIG_HOME. A relative
+ * or empty XDG_CONFIG_HOME is ignored. `home` and `env` override the process
+ * environment so tests can inject a temporary home.
+ *
+ * @returns {Promise<string[]>} basenames copied on this call
+ */
+export async function migrateLegacyChatGPTConfig({
+  platform = process.platform,
+  env = process.env,
+  home
+} = {}) {
+  if (platform === 'win32' || platform === 'darwin') return [];
+  const xdg = absoluteEnvPath(env.XDG_CONFIG_HOME);
+  if (!xdg) return [];
+  const homeDir = resolvePath(home ?? homedir());
+  const legacyRoot = join(homeDir, '.config');
+  if (sameConfigDir(xdg, legacyRoot)) return [];
+  const legacyDir = join(legacyRoot, 'chatpcb');
+  const destDir = resolveChatGPTConfigDir({ platform, env, home: homeDir });
+  if (sameConfigDir(destDir, legacyDir)) return [];
+
+  let names;
+  try {
+    names = await readdir(legacyDir);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return [];
+    throw error;
+  }
+  const wanted = names.filter((name) => name === HOST_ID_FILE || isCredentialFile(name)).sort();
+  if (wanted.length === 0) return [];
+
+  const copied = [];
+  let prepared = false;
+  for (const name of wanted) {
+    const dest = join(destDir, name);
+    if (await pathExists(dest)) continue;
+    if (!prepared) {
+      await mkdir(destDir, { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') await chmod(destDir, 0o700).catch(() => {});
+      prepared = true;
+    }
+    if (await copyOwnedFileIfMissing(join(legacyDir, name), dest)) copied.push(name);
+  }
+  if (copied.length > 0) {
+    logAuth(`Copied ChatGPT config (${copied.join(', ')}) from ${legacyDir} to ${destDir}`);
+  }
+  return copied;
 }
 
 async function readTrimmedFile(path) {
@@ -390,6 +498,7 @@ function generateNonce() {
  * Legacy `chatgpt-credentials.json` is included. Temporary write files are not.
  */
 async function readCredentialRecords() {
+  await migrateLegacyChatGPTConfig();
   const configDir = getConfigDir();
   if (!existsSync(configDir)) return [];
   const files = await readdir(configDir);

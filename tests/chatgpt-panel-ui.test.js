@@ -1,3 +1,4 @@
+import './setup/isolate-home.mjs';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -517,6 +518,16 @@ test('daemon connection label stays separate from ChatGPT sign-in status', async
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
+  }
+});
+
+test('English and Korean panel catalogs have the same keys and placeholders', async () => {
+  const en = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
+  const ko = JSON.parse(await readFile(path.join(panelRoot, 'locales/ko.json'), 'utf8'));
+  assert.deepEqual(Object.keys(en).sort(), Object.keys(ko).sort());
+  const placeholders = (value) => [...String(value).matchAll(/\{[a-zA-Z0-9_-]+\}/g)].map((match) => match[0]).sort();
+  for (const key of Object.keys(en)) {
+    assert.deepEqual(placeholders(en[key]), placeholders(ko[key]), key);
   }
 });
 
