@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { boardPadGeometry } from './pad-geometry.js';
@@ -990,6 +990,10 @@ function kicadLibraryCandidatePaths(libraryType) {
     return symbolLibraryCandidateOverride;
   }
 
+  return kicadInstallLibraryCandidatePaths(libraryType);
+}
+
+function kicadInstallLibraryCandidatePaths(libraryType) {
   const kicadCliResult = resolveKicadCli();
   const kicadCliPath = kicadCliResult?.path;
   const relativeToKicadCli = kicadCliPath ? [
@@ -1018,6 +1022,36 @@ function kicadLibraryCandidatePaths(libraryType) {
       `C:/Program Files/KiCad/9.0/share/kicad/${libraryType}`
     ] : [])
   ].filter(Boolean);
+}
+
+export const UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE = 'No KiCad symbol library found. Set KICAD_SYMBOL_DIR or KICAD10_SYMBOL_DIR to a KiCad symbols directory, for example KICAD_SYMBOL_DIR=/path/to/kicad/symbols. For offline checks, tests/fixtures/kicad-libraries/symbols can be used.';
+
+// Install paths only. KICAD*_SYMBOL_DIR and the test candidate override are not installations.
+export function findInstalledSymbolLibraryDirectory() {
+  return kicadInstallLibraryCandidatePaths('symbols').find((dir) => directoryContainsKiCadSymbol(dir)) ?? null;
+}
+
+export function unconfiguredSymbolLibraryError(env = process.env) {
+  if (kicadSymbolDirConfigured(env) || findInstalledSymbolLibraryDirectory()) {
+    return null;
+  }
+
+  return UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE;
+}
+
+function kicadSymbolDirConfigured(env) {
+  return ['KICAD10_SYMBOL_DIR', 'KICAD_SYMBOL_DIR'].some((key) => {
+    const value = env[key];
+    return typeof value === 'string' && value.length > 0;
+  });
+}
+
+function directoryContainsKiCadSymbol(dir) {
+  try {
+    return readdirSync(dir).some((name) => name.endsWith('.kicad_sym'));
+  } catch {
+    return false;
+  }
 }
 
 function officialFootprintPath(library, footprintName) {

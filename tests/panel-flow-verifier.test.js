@@ -1,10 +1,34 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
+import {
+  findInstalledSymbolLibraryDirectory,
+  UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE,
+  unconfiguredSymbolLibraryError
+} from '../src/kicad/project-generator.js';
+import { FIXTURE_LIBS, restoreProcessEnv } from './helpers/kicad-library-env.js';
+
 const execFileAsync = promisify(execFile);
+
+function childEnvWithFixtureSymbols() {
+  const env = { ...process.env, KICAD_SYMBOL_DIR: FIXTURE_LIBS.symbols };
+  delete env.KICAD10_SYMBOL_DIR;
+  delete env.FORCE_COLOR;
+  return env;
+}
+
+function childEnvWithoutSymbolDirs() {
+  const env = { ...process.env };
+  delete env.KICAD_SYMBOL_DIR;
+  delete env.KICAD10_SYMBOL_DIR;
+  delete env.FORCE_COLOR;
+  return env;
+}
 
 test('panel user-flow verification script is exposed through npm', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
@@ -14,7 +38,8 @@ test('panel user-flow verification script is exposed through npm', async () => {
 
 test('panel user-flow verifier completes the daemon websocket project request', async () => {
   const { stdout } = await execFileAsync(process.execPath, ['./scripts/verify-panel-flow.js'], {
-    timeout: 60_000
+    timeout: 60_000,
+    env: childEnvWithFixtureSymbols()
   });
   const result = JSON.parse(stdout);
 
@@ -27,4 +52,56 @@ test('panel user-flow verifier completes the daemon websocket project request', 
   assert.equal(typeof result.erc.errorCount, 'number');
   assert.equal(typeof result.reviewStatus, 'string');
   assert.equal('dirtyHost' in result, false);
+});
+
+test('panel user-flow verifier exits before running when no symbol library is configured', async (t) => {
+  const message = unconfiguredSymbolLibraryError({});
+  if (message === null) {
+    t.skip('an installed KiCad symbol library is already on the generator candidate paths');
+    return;
+  }
+
+  await assert.rejects(
+    () => execFileAsync(process.execPath, ['./scripts/verify-panel-flow.js'], {
+      timeout: 60_000,
+      env: childEnvWithoutSymbolDirs()
+    }),
+    (error) => {
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, '');
+      assert.equal(error.stderr.trim(), message);
+      assert.equal(message, UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE);
+      return true;
+    }
+  );
+});
+
+test('symbol library startup error names the env var and the offline fixture', () => {
+  assert.match(UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE, /KICAD_SYMBOL_DIR=\/path\/to\/kicad\/symbols/);
+  assert.match(UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE, /KICAD10_SYMBOL_DIR/);
+  assert.match(UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE, /tests\/fixtures\/kicad-libraries\/symbols/);
+  assert.match(UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE, /offline checks/);
+  assert.equal(unconfiguredSymbolLibraryError({ KICAD_SYMBOL_DIR: FIXTURE_LIBS.symbols }), null);
+  assert.equal(unconfiguredSymbolLibraryError({ KICAD10_SYMBOL_DIR: FIXTURE_LIBS.symbols }), null);
+  assert.equal(
+    unconfiguredSymbolLibraryError({ KICAD_SYMBOL_DIR: '', KICAD10_SYMBOL_DIR: '' }),
+    unconfiguredSymbolLibraryError({})
+  );
+});
+
+test('installed symbol library lookup ignores KICAD_SYMBOL_DIR', () => {
+  const missing = path.join(tmpdir(), 'missing-chatpcb-symbols');
+  const previousSymbol = process.env.KICAD_SYMBOL_DIR;
+  const previousSymbol10 = process.env.KICAD10_SYMBOL_DIR;
+  process.env.KICAD_SYMBOL_DIR = missing;
+  process.env.KICAD10_SYMBOL_DIR = `${missing}-10`;
+
+  try {
+    const found = findInstalledSymbolLibraryDirectory();
+    assert.notEqual(found, process.env.KICAD_SYMBOL_DIR);
+    assert.notEqual(found, process.env.KICAD10_SYMBOL_DIR);
+  } finally {
+    restoreProcessEnv('KICAD_SYMBOL_DIR', previousSymbol);
+    restoreProcessEnv('KICAD10_SYMBOL_DIR', previousSymbol10);
+  }
 });
