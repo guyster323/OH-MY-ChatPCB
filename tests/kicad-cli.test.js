@@ -75,7 +75,10 @@ test('PATH lookup excludes the original project even when cwd is an inspection c
     cwd: '/tmp/chatpcb-copy/project',
     env: { PATH: '/untrusted-project/bin:/trusted/bin' },
     excludeProjectDir: '/untrusted-project',
-    exists: (candidate) => candidate.endsWith('kicad-cli')
+    exists: (candidate) => 
+      candidate.endsWith('kicad-cli') && 
+      !candidate.startsWith('/usr/') && 
+      !candidate.startsWith('/usr/local/')
   });
   assert.deepEqual(found, { path: '/trusted/bin/kicad-cli', source: 'path' });
 });

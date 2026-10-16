@@ -12,6 +12,7 @@ import { createEnvelope } from '../src/runtime/envelope.js';
 import { getProviderDefinition } from '../src/runtime/provider-registry.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { saveCircuitConversation } from '../src/runtime/request-conversation.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 const passingVerify = async () => ({
   erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
@@ -625,6 +626,7 @@ test('daemon creates a named project and runs provider generation with ERC valid
 
 test('project.request fills a missing provider generate prompt from the user request', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-missing-prompt-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const created = await dispatchToolCall({
@@ -657,6 +659,7 @@ test('project.request fills a missing provider generate prompt from the user req
     assert.match(result.result.files.schematic, /\.kicad_sch$/);
     assert.doesNotMatch(result.error?.message ?? '', /Circuit prompt is required/);
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
@@ -1037,6 +1040,7 @@ test('grok project.request uses a generate schema for a new project and a patch 
 
 test('project.request falls back to a native preview when the provider only inspects', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-inspect-only-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const created = await dispatchToolCall({
@@ -1083,6 +1087,7 @@ test('project.request falls back to a native preview when the provider only insp
     assert.ok(result.result.conversation.specRows.some((row) => row.label === 'MCU'));
     assert.equal((await kicadArtifacts(created.result.projectDir)).length, 0);
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
@@ -1912,13 +1917,18 @@ test('provider-emitted approval, rollback, nested selection, requiredValidation,
 
 test('rollback and status are unavailable through provider allowed tools', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-txn-tools-'));
-  const services = await transactionServices();
+  const services = await transactionServices({
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
   let allowedToolNames;
 
   try {
     await generateMcuPeripheralProject({
       projectDir: root,
-      prompt: 'RP2040 board with USB-C power and I2C connector.'
+      prompt: 'RP2040 board with USB-C power and I2C connector.',
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc
     });
     const preview = await dispatchToolCall({
       name: 'schematic.generate',
@@ -2044,12 +2054,17 @@ test('public daemon preview omits absolute candidate paths, live validator paths
 
 test('direct approval applies through ProjectTransaction and rollback restores the journaled project', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-txn-apply-'));
-  const services = await transactionServices();
+  const services = await transactionServices({
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
 
   try {
     const before = await generateMcuPeripheralProject({
       projectDir: root,
-      prompt: 'RP2040 board with USB-C power and I2C connector.'
+      prompt: 'RP2040 board with USB-C power and I2C connector.',
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc
     });
     const originalSpec = await readFile(before.files.spec, 'utf8');
     const preview = await dispatchToolCall({
@@ -2162,6 +2177,7 @@ test('provider requiredValidation cannot disable artifact-derived ERC', async ()
 
 test('board-regenerating daemon preview runs candidate DRC', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-board-drc-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
   const drcCalls = [];
   try {
     const result = await dispatchToolCall({
@@ -2182,6 +2198,7 @@ test('board-regenerating daemon preview runs candidate DRC', async () => {
     assert.equal(result.result.candidateVerification.drc.status, 'passed');
     assert.equal(result.result.requiredValidation.drc, true);
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -2244,6 +2261,7 @@ test('direct project.inspect forwards trusted selection and keeps provider neste
 
 test('follow-up project.request after a spec exists uses the new prompt', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-followup-prompt-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
   try {
     await generateMcuPeripheralProject({
       projectDir: root,
@@ -2271,6 +2289,7 @@ test('follow-up project.request after a spec exists uses the new prompt', async 
     assert.equal(result.result.requiresApproval, true);
     assert.match(result.result.diff ?? JSON.stringify(result.result), /ESP32-S3|ESP32_S3/);
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
