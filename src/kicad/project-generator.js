@@ -970,10 +970,24 @@ function kicadLibraryEnvPaths(libraryType) {
   return unique(envVars.map((key) => process.env[key]).filter((value) => typeof value === 'string' && value.length > 0));
 }
 
+let symbolLibraryCandidateOverride = null;
+
+// Tests point symbol search at a fixture or an empty directory without setting
+// KICAD*_SYMBOL_DIR. Environment directories still win when they are set.
+export function setSymbolLibraryCandidateOverrideForTests(candidates) {
+  const previous = symbolLibraryCandidateOverride;
+  symbolLibraryCandidateOverride = Array.isArray(candidates) ? [...candidates] : null;
+  return previous;
+}
+
 function kicadLibraryCandidatePaths(libraryType) {
   const envPaths = kicadLibraryEnvPaths(libraryType);
   if (envPaths.length > 0) {
     return envPaths;
+  }
+
+  if (libraryType === 'symbols' && Array.isArray(symbolLibraryCandidateOverride)) {
+    return symbolLibraryCandidateOverride;
   }
 
   const kicadCliResult = resolveKicadCli();
@@ -1500,7 +1514,6 @@ function renderOfficialCachedSymbol(libId) {
   const libraryPath = officialSymbolLibraryPath(library);
   if (!libraryPath) {
     throwIfRequiredSymbolLibraryMissing(library);
-    return null;
   }
 
   try {
@@ -1511,17 +1524,24 @@ function renderOfficialCachedSymbol(libId) {
     if (error?.code === 'KICAD_LIBRARY_MISSING') {
       throw error;
     }
-    throwIfRequiredSymbolLibraryMissing(library);
+    // The library file was found, but this symbol body could not be read.
+    // Configured symbol directories fail fast. Otherwise keep the null
+    // fallback so callers that drop empty blocks can continue.
+    if (kicadLibraryEnvPaths('symbols').length > 0) {
+      throwIfRequiredSymbolLibraryMissing(library);
+    }
     return null;
   }
 }
 
 function throwIfRequiredSymbolLibraryMissing(library) {
-  if (kicadLibraryEnvPaths('symbols').length === 0) {
-    return;
-  }
-
-  const error = new Error(`KICAD_LIBRARY_MISSING: required Symbol library "${library}" was not found`);
+  const searched = kicadLibraryCandidatePaths('symbols');
+  const searchedText = searched.length > 0
+    ? searched.map((dir) => `"${dir}"`).join(', ')
+    : '(none)';
+  const error = new Error(
+    `KICAD_LIBRARY_MISSING: required Symbol library "${library}" was not found. Searched paths: ${searchedText}. Set KICAD*_SYMBOL_DIR or install the KiCad libraries.`
+  );
   error.code = 'KICAD_LIBRARY_MISSING';
   throw error;
 }

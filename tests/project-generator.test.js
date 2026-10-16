@@ -190,6 +190,7 @@ test('review blocker names the requested MCU family instead of a hard-coded part
 
 test('supported release profiles generate a PCB draft and manufacturing metadata', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-pcb-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -225,6 +226,7 @@ test('supported release profiles generate a PCB draft and manufacturing metadata
     assert.equal(metadata.boardProfile.manufacturing.exports.gerber.status, 'pending');
     assert.equal(metadata.boardProfile.manufacturing.exports.drill.status, 'pending');
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -514,6 +516,7 @@ test('maps no-net pad centers through their containing footprint transform', () 
 
 test('ADBMS6830 BMS example generates cell filters, balancing branches, thermistors, and isoSPI', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-schematic-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -552,12 +555,14 @@ test('ADBMS6830 BMS example generates cell filters, balancing branches, thermist
     assert.equal(metadata.boardProfile.releaseTarget, 'example-review');
     assert.equal(metadata.boardProfile.releaseEvidence.status, 'incomplete');
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
 
 test('ADBMS6830 EEPROM companion uses GPIO3/GPIO4 serial pins when requested', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-adbms6830-eeprom-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
 
   try {
     const { saveCircuitConversation } = await import('../src/runtime/request-conversation.js');
@@ -579,6 +584,7 @@ test('ADBMS6830 EEPROM companion uses GPIO3/GPIO4 serial pins when requested', a
     assert.equal(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO4')], 'EEPROM_SCL');
     assert.notEqual(u1.pinNets[Object.keys(u1.pinNets).find((key) => u1.pins[Number(key) - 1] === 'GPIO6')], 'EEPROM_SDA');
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });

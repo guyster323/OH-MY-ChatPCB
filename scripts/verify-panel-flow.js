@@ -7,6 +7,11 @@ import path from 'node:path';
 import { createEnvelope, parseEnvelope } from '../src/runtime/envelope.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 
+const fixtureSymbols = path.resolve(import.meta.dirname, '../tests/fixtures/kicad-libraries/symbols');
+if (!process.env.KICAD_SYMBOL_DIR && !process.env.KICAD10_SYMBOL_DIR) {
+  process.env.KICAD_SYMBOL_DIR = fixtureSymbols;
+}
+
 const projectName = '가스 센서 보드 01';
 const prompt = 'ESP32-S3와 가스 센서를 연결하고 3.3V 전원을 사용하는 회로를 만들어줘.';
 const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-panel-flow-'));

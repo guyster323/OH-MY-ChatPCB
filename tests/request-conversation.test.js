@@ -16,6 +16,7 @@ import {
 } from '../src/runtime/request-conversation.js';
 import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 const USER_PROMPT = 'ESP32와 7인치 터치디스플레이, 18650기반 전원공급, CAN트랜시버를 갖는 회로를 작성해줘';
 const PRO = { proMode: true };
@@ -167,6 +168,7 @@ test('an MCU DC-DC request does not classify as isolated converter', () => {
 
 test('closest-profile generate still emits an MCU draft when isolated DC-DC also matched historically', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-closest-mcu-'));
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
   try {
     const conversation = {
       status: 'generate',
@@ -185,6 +187,7 @@ test('closest-profile generate still emits an MCU draft when isolated DC-DC also
     assert.doesNotMatch(schematic, /ISOLATED_DCDC/);
     assert.match(schematic, /ESP32-S3-WROOM|ESP32_S3_WROOM/);
   } finally {
+    restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
   }
 });
