@@ -44,6 +44,17 @@ function progressCopy(prompt, ko, en) {
   return /[가-힣]/.test(prompt ?? '') ? ko : en;
 }
 
+const PROJECT_BUSY_KO = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+const PROJECT_BUSY_EN = 'Another operation is using this project. Try again in a moment.';
+
+function projectBusyClientMessage(prompt) {
+  return progressCopy(prompt, PROJECT_BUSY_KO, PROJECT_BUSY_EN);
+}
+
+function projectBusyFailure(prompt) {
+  return failure('PROJECT_BUSY', projectBusyClientMessage(prompt));
+}
+
 // Set only after this request has acquired the project mutex. Nested preview
 // re-enters the same project; external apply/patch calls do not see the symbol.
 const projectLockHeld = Symbol('projectLockHeld');
@@ -198,11 +209,12 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       try {
         return ok(await requestProject(call, ctx));
       } catch (error) {
-        if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+        if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call.args?.prompt);
         const extra = { conversation: error.conversation };
         if (error?.technicalDetail) extra.technicalDetail = error.technicalDetail;
         const failed = failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
         if (typeof error?.snapshotPath === 'string') failed.error.snapshotPath = error.snapshotPath;
+        if (typeof error?.backupPath === 'string') failed.error.backupPath = error.backupPath;
         return failed;
       }
 
@@ -228,7 +240,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       return failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${call.name}`);
   }
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call?.args?.prompt);
     throw error;
   }
 }
@@ -269,7 +281,7 @@ async function dispatchSchematicPatch(args, ctx) {
   const plan = peeked.record.plan;
   try {
     await ensureReconciled(projectDir, ctx);
-    return ok(sanitizeApplyResult(await applySchematicPatch({
+    const applied = sanitizeApplyResult(await applySchematicPatch({
       projectDir,
       prompt: args.prompt,
       projectName: args.projectName,
@@ -282,9 +294,11 @@ async function dispatchSchematicPatch(args, ctx) {
       approvalRegistry: patchApprovalRegistry,
       mutexRegistry: projectMutexRegistry,
       journal: transactionJournal
-    })));
+    }));
+    if (applied?.reason?.code === 'PROJECT_BUSY') return projectBusyFailure(args.prompt);
+    return ok(applied);
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(args.prompt);
     throw error;
   } finally {
     const still = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
@@ -592,7 +606,7 @@ async function requestProject(call, ctx) {
       let thrown = error;
       if (snapshot && error?.code !== 'PROJECT_BUSY') {
         try {
-          await restoreProjectSnapshot(snapshot, projectDir, fsOps);
+          await restoreProjectSnapshot(snapshot, projectDir, fsOps, { ctx, prompt });
         } catch (restoreError) {
           keepSnapshot = true;
           thrown = projectSnapshotRestoreError(error, restoreError, snapshot, conversation);
@@ -631,21 +645,48 @@ async function snapshotProject(projectDir, fsOps = resolveSnapshotFs()) {
 
 function projectSnapshotRestoreError(original, restoreError, snapshot, conversation) {
   const originalMessage = original instanceof Error ? original.message : String(original?.message ?? original);
-  const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError?.message ?? restoreError);
+  let restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError?.message ?? restoreError);
+  const backupPath = typeof restoreError?.backupPath === 'string' ? restoreError.backupPath : undefined;
+  if (backupPath && !restoreMessage.includes(backupPath)) {
+    restoreMessage = `${restoreMessage} Original project remains at ${backupPath}.`;
+  }
   const error = new Error(
     `${originalMessage} Failed to restore the project snapshot: ${restoreMessage} Snapshot kept at ${snapshot.root}.`
   );
   error.code = original?.code ?? 'PROVIDER_FAILED';
   error.snapshotPath = snapshot.root;
+  if (backupPath) error.backupPath = backupPath;
   error.conversation = conversation ?? original?.conversation;
   if (original?.technicalDetail) error.technicalDetail = original.technicalDetail;
   error.cause = restoreError;
   return error;
 }
 
+function restoreBackupCleanupWarning(prompt, backup, error) {
+  const detail = error instanceof Error ? error.message : String(error?.message ?? error);
+  const reason = detail ? ` (${detail})` : '';
+  return progressCopy(
+    prompt,
+    `프로젝트는 복원됐지만 백업 폴더를 지우지 못했어요${reason}. 직접 삭제해 주세요: ${backup}`,
+    `The project was restored, but the backup directory could not be removed${reason}. Delete it manually: ${backup}`
+  );
+}
+
+// Progress delivery must not turn a finished restore into a failure.
+function warnLeftoverRestoreBackup(ctx, prompt, backup, error) {
+  const text = restoreBackupCleanupWarning(prompt, backup, error);
+  try {
+    emitProgress(ctx, { stage: 'fail', sprite: 'fail', text });
+  } catch {
+    // The restore already finished. A progress listener must not roll it back.
+  }
+}
+
 // Copy onto a sibling, then swap directory names. A failed copy never deletes
-// the live project. A failed rename puts the original directory back.
-async function restoreProjectSnapshot(snapshot, projectDir, fsOps = resolveSnapshotFs()) {
+// the live project. A failed rename puts the original directory back. Once both
+// renames succeed, failing to delete the backup only warns and leaves the
+// restored project in place.
+async function restoreProjectSnapshot(snapshot, projectDir, fsOps = resolveSnapshotFs(), { ctx, prompt } = {}) {
   const resolved = path.resolve(projectDir);
   const parent = path.dirname(resolved);
   const base = path.basename(resolved);
@@ -660,7 +701,6 @@ async function restoreProjectSnapshot(snapshot, projectDir, fsOps = resolveSnaps
     moved.project = true;
     await fsOps.rename(staging, resolved);
     moved.staging = true;
-    await fsOps.rm(backup, { recursive: true, force: true });
   } catch (error) {
     try {
       await rollbackProjectRestore({ fsOps, projectDir: resolved, staging, backup, moved });
@@ -670,11 +710,29 @@ async function restoreProjectSnapshot(snapshot, projectDir, fsOps = resolveSnaps
     }
     throw error;
   }
+
+  try {
+    await fsOps.rm(backup, { recursive: true, force: true });
+  } catch (error) {
+    warnLeftoverRestoreBackup(ctx, prompt, backup, error);
+  }
+}
+
+function projectRestoreBackupError(error, backup) {
+  const detail = error instanceof Error ? error.message : String(error?.message ?? error);
+  const wrapped = new Error(`${detail} Original project remains at ${backup}.`, { cause: error });
+  wrapped.backupPath = backup;
+  if (error?.code) wrapped.code = error.code;
+  return wrapped;
 }
 
 async function rollbackProjectRestore({ fsOps, projectDir, staging, backup, moved }) {
   if (moved.staging && moved.project) {
-    await fsOps.rename(projectDir, staging);
+    try {
+      await fsOps.rename(projectDir, staging);
+    } catch (error) {
+      throw projectRestoreBackupError(error, backup);
+    }
     try {
       await fsOps.rename(backup, projectDir);
     } catch (error) {
@@ -683,14 +741,18 @@ async function rollbackProjectRestore({ fsOps, projectDir, staging, backup, move
       } catch {
         // The pre-restore directory is still at `backup`.
       }
-      throw new Error(`${error.message} Original project remains at ${backup}.`, { cause: error });
+      throw projectRestoreBackupError(error, backup);
     }
     await fsOps.rm(staging, { recursive: true, force: true }).catch(() => {});
     return;
   }
   if (moved.project) {
-    await fsOps.rename(backup, projectDir);
-    moved.project = false;
+    try {
+      await fsOps.rename(backup, projectDir);
+      moved.project = false;
+    } catch (error) {
+      throw projectRestoreBackupError(error, backup);
+    }
   }
   await fsOps.rm(staging, { recursive: true, force: true }).catch(() => {});
 }
@@ -973,7 +1035,7 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       validateBoardImpl: ctx.validateBoardImpl
     }));
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(prompt);
     throw error;
   }
 
@@ -1036,7 +1098,7 @@ async function dispatchTransactionStatus(args, ctx) {
       transactions: records.map(publicTransaction)
     });
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure();
     throw error;
   }
 }
@@ -1048,14 +1110,16 @@ async function dispatchTransactionRollback(args, ctx) {
   const projectDir = args.projectDir;
   try {
     await ensureReconciled(projectDir, ctx);
-    return ok(await rollbackProjectTransaction({
+    const rolled = await rollbackProjectTransaction({
       projectDir,
       transactionId: args.transactionId,
       mutexRegistry: ctx.projectMutexRegistry,
       journal: ctx.transactionJournal
-    }));
+    });
+    if (rolled?.reason?.code === 'PROJECT_BUSY') return projectBusyFailure();
+    return ok(rolled);
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure();
     throw error;
   }
 }

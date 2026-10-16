@@ -269,6 +269,11 @@ function handleEnvelope(envelope) {
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
   pendingCalls.delete(id);
 
+  if (!envelope.payload.ok && envelope.payload.error?.code === 'PROJECT_BUSY' && isProjectBusyCall(callName)) {
+    showProjectBusy(callName, envelope.payload.error?.message);
+    return;
+  }
+
   if (!envelope.payload.ok) {
     if (callName === 'schematic.generate') {
       setRequestBusy(false);
@@ -1121,6 +1126,37 @@ function stopConflictWatch() {
 function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
+}
+
+function isProjectBusyCall(callName) {
+  return callName === 'project.request'
+    || callName === 'schematic.generate'
+    || callName === 'schematic.patch'
+    || callName === 'schematic.patch.approve'
+    || callName === 'schematic.patch.cancel';
+}
+
+function showProjectBusy(callName, message) {
+  const summary = typeof message === 'string' && message.trim()
+    ? message.trim()
+    : '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+  if (callName === 'project.request') {
+    const requestProjectDir = activeRequestProjectDir;
+    pendingCalls.delete(activeRequestId);
+    activeRequestId = null;
+    activeRequestProjectDir = null;
+    setRequestBusy(false);
+    if (requestProjectDir !== activeProject?.projectDir) return;
+  } else if (callName === 'schematic.generate') {
+    setRequestBusy(Boolean(activeRequestId));
+    offerNativeDraft();
+  } else if (callName === 'schematic.patch.approve' || callName === 'schematic.patch' || callName === 'schematic.patch.cancel') {
+    // Keep the patch preview so Apply can be clicked again. A request that is still running keeps the composer locked.
+    setRequestBusy(Boolean(activeRequestId));
+    if (callName !== 'schematic.patch.cancel') renderPatchApproval();
+  }
+  appendProgress({ stage: 'fail', text: summary });
+  renderRequestStatus({ state: 'failed', summary });
 }
 
 async function awaitStatus(statusPromise) {

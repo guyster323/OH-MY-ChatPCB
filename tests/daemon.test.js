@@ -1567,6 +1567,287 @@ test('daemon puts the project back when the restore rename fails and keeps the s
   }
 });
 
+test('daemon names the backup directory when the restore swap and rollback renames both fail', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-double-rename-'));
+  const specPath = path.join(root, 'board.chatpcb.json');
+  let rejected;
+
+  try {
+    await writeFile(specPath, 'original-spec\n');
+    let renames = 0;
+
+    rejected = await dispatchToolCall(
+      {
+        id: 'call_restore_swap_and_rollback_fail',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          await writeFile(specPath, 'mutated-spec\n');
+          throw new Error('provider exploded after mutating the project');
+        },
+        snapshotFs: {
+          rename: async (source, dest) => {
+            renames += 1;
+            if (renames >= 2) {
+              const error = new Error(`EPERM ${renames}`);
+              error.code = 'EPERM';
+              throw error;
+            }
+            return rename(source, dest);
+          }
+        }
+      }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.equal(renames >= 3, true);
+    assert.equal(typeof rejected.error.backupPath, 'string');
+    assert.match(rejected.error.backupPath, /\.chatpcb-backup-/);
+    assert.equal(typeof rejected.error.snapshotPath, 'string');
+    assert.ok(rejected.error.message.includes(rejected.error.backupPath));
+    assert.ok(rejected.error.message.includes(rejected.error.snapshotPath));
+    assert.match(rejected.error.message, /provider exploded after mutating the project/);
+    assert.match(rejected.error.message, /EPERM/);
+    await assert.rejects(() => access(root), { code: 'ENOENT' });
+    assert.equal(await readFile(path.join(rejected.error.backupPath, 'board.chatpcb.json'), 'utf8'), 'mutated-spec\n');
+    assert.equal(
+      await readFile(path.join(rejected.error.snapshotPath, 'project', 'board.chatpcb.json'), 'utf8'),
+      'original-spec\n'
+    );
+  } finally {
+    if (rejected?.error?.snapshotPath) await rm(rejected.error.snapshotPath, { recursive: true, force: true });
+    if (rejected?.error?.backupPath) await rm(rejected.error.backupPath, { recursive: true, force: true });
+    const parent = path.dirname(root);
+    const base = path.basename(root);
+    const names = await readdir(parent).catch(() => []);
+    await Promise.all(names.filter((name) => (
+      name.startsWith(`.chatpcb-staging-${base}-`) || name.startsWith(`.chatpcb-backup-${base}-`)
+    )).map((name) => rm(path.join(parent, name), { recursive: true, force: true })));
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('daemon keeps the restored project and warns when backup cleanup fails', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-restore-backup-rm-fail-'));
+  const progress = [];
+  const snapshotRoots = [];
+  let rejected;
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const before = await readFile(generated.files.spec, 'utf8');
+
+    rejected = await dispatchToolCall(
+      {
+        id: 'call_restore_backup_rm_fails',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Inspect then fail.' }
+      },
+      {
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          await writeFile(generated.files.spec, `${before}\nmutated during request\n`, 'utf8');
+          throw new Error('provider exploded after mutating the project');
+        },
+        emit: (type, payload) => progress.push({ type, ...payload }),
+        snapshotFs: {
+          mkdtemp: async (prefix) => {
+            const created = await mkdtemp(prefix);
+            snapshotRoots.push(created);
+            return created;
+          },
+          rm: async (target, options) => {
+            if (String(target).includes('.chatpcb-backup-')) {
+              const error = new Error('injected backup rm failure');
+              error.code = 'EPERM';
+              throw error;
+            }
+            return rm(target, options);
+          }
+        }
+      }
+    );
+
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.error.message, 'provider exploded after mutating the project');
+    assert.equal(rejected.error.snapshotPath, undefined);
+    assert.equal(rejected.error.backupPath, undefined);
+    assert.doesNotMatch(rejected.error.message, /Failed to restore|injected backup rm failure/);
+    assert.equal(await readFile(generated.files.spec, 'utf8'), before);
+    const warning = progress.find((item) => (
+      item.type === 'agent.delta'
+      && item.channel === 'progress'
+      && typeof item.text === 'string'
+      && item.text.includes('.chatpcb-backup-')
+    ));
+    assert.ok(warning);
+    const backupPath = warning.text.match(/(\S*\.chatpcb-backup-\S+)/)?.[1];
+    assert.equal(typeof backupPath, 'string');
+    assert.ok(warning.text.includes(backupPath));
+    assert.equal(
+      await readFile(path.join(backupPath, path.basename(generated.files.spec)), 'utf8'),
+      `${before}\nmutated during request\n`
+    );
+    assert.equal(snapshotRoots.length > 0, true);
+    for (const snapshotRoot of snapshotRoots) {
+      await assert.rejects(() => access(snapshotRoot), { code: 'ENOENT' });
+    }
+  } finally {
+    if (rejected?.error?.snapshotPath) await rm(rejected.error.snapshotPath, { recursive: true, force: true });
+    if (rejected?.error?.backupPath) await rm(rejected.error.backupPath, { recursive: true, force: true });
+    const parent = path.dirname(root);
+    const base = path.basename(root);
+    const names = await readdir(parent).catch(() => []);
+    await Promise.all(names.filter((name) => (
+      name.startsWith(`.chatpcb-staging-${base}-`) || name.startsWith(`.chatpcb-backup-${base}-`)
+    )).map((name) => rm(path.join(parent, name), { recursive: true, force: true })));
+    await Promise.all(snapshotRoots.map((snapshotRoot) => rm(snapshotRoot, { recursive: true, force: true })));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('daemon PROJECT_BUSY responses hide the project path and follow the prompt language', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-busy-'));
+  const mutex = createProjectMutexRegistry();
+  const registry = createPatchApprovalRegistry();
+  const services = await transactionServices({
+    projectMutexRegistry: mutex,
+    patchApprovalRegistry: registry
+  });
+  const english = 'Another operation is using this project. Try again in a moment.';
+  const korean = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+  const assertHidden = (result) => {
+    const encoded = JSON.stringify(result);
+    assert.equal(encoded.includes(root), false);
+    assert.equal(encoded.includes('Another ChatPCB transaction is active'), false);
+  };
+
+  try {
+    await writeFile(path.join(root, 'board.chatpcb.json'), '{}\n');
+    registry.register({
+      patchId: 'patch-busy',
+      projectDir: root,
+      plan: { proposalId: 'patch-busy', changes: [] }
+    });
+
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    let started;
+    const startedLock = new Promise((resolve) => {
+      started = resolve;
+    });
+    const lockPromise = mutex.runExclusive({ projectDir: root }, async () => {
+      started();
+      await held;
+    });
+    await startedLock;
+
+    try {
+      const request = await dispatchToolCall({
+        id: 'busy-request-en',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: 'Add a status LED.' }
+      }, services);
+      assert.equal(request.ok, false);
+      assert.equal(request.error.code, 'PROJECT_BUSY');
+      assert.equal(request.error.message, english);
+      assertHidden(request);
+
+      const requestKo = await dispatchToolCall({
+        id: 'busy-request-ko',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: root, prompt: '상태 LED를 추가해 주세요.' }
+      }, services);
+      assert.equal(requestKo.ok, false);
+      assert.equal(requestKo.error.code, 'PROJECT_BUSY');
+      assert.equal(requestKo.error.message, korean);
+      assertHidden(requestKo);
+
+      const patch = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir: root, prompt: 'Add a UART header.' }
+      }, services);
+      assert.equal(patch.ok, false);
+      assert.equal(patch.error.code, 'PROJECT_BUSY');
+      assert.equal(patch.error.message, english);
+      assertHidden(patch);
+
+      const generate = await dispatchToolCall({
+        name: 'schematic.generate',
+        args: { projectDir: root, prompt: 'UART 헤더를 추가해 주세요.' }
+      }, services);
+      assert.equal(generate.ok, false);
+      assert.equal(generate.error.code, 'PROJECT_BUSY');
+      assert.equal(generate.error.message, korean);
+      assertHidden(generate);
+
+      const apply = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir: root, approved: true, patchId: 'patch-busy' }
+      }, services);
+      assert.equal(apply.ok, false);
+      assert.equal(apply.error.code, 'PROJECT_BUSY');
+      assert.equal(apply.error.message, english);
+      assertHidden(apply);
+
+      const applyKo = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir: root, approved: true, patchId: 'patch-busy', prompt: 'LED를 추가해 주세요.' }
+      }, services);
+      assert.equal(applyKo.ok, false);
+      assert.equal(applyKo.error.code, 'PROJECT_BUSY');
+      assert.equal(applyKo.error.message, korean);
+      assertHidden(applyKo);
+
+      const bareApply = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir: root, approved: true, patchId: 'patch-busy' }
+      }, {
+        projectMutexRegistry: mutex,
+        patchApprovalRegistry: registry
+      });
+      assert.equal(bareApply.ok, false);
+      assert.equal(bareApply.error.code, 'PROJECT_BUSY');
+      assert.equal(bareApply.error.message, english);
+      assertHidden(bareApply);
+
+      const status = await dispatchToolCall({
+        name: 'project.transaction.status',
+        args: { projectDir: root }
+      }, services);
+      assert.equal(status.ok, false);
+      assert.equal(status.error.code, 'PROJECT_BUSY');
+      assert.equal(status.error.message, english);
+      assertHidden(status);
+    } finally {
+      release();
+      await lockPromise;
+    }
+  } finally {
+    registry.disposeAll();
+    await rm(root, { recursive: true, force: true });
+    await rm(services.stateRoot, { recursive: true, force: true });
+  }
+});
+
 test('schematic apply issued during a failing project.request runs after it and keeps its changes', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-request-apply-serialize-'));
   const services = await transactionServices();
