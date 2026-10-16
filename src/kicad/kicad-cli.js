@@ -9,6 +9,17 @@ const WINDOWS_CANDIDATES = [
   'C:/Program Files/KiCad/7.0/bin/kicad-cli.exe'
 ];
 
+const MACOS_CANDIDATES = [
+  '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli',
+  '/Applications/KiCad 10.0/KiCad.app/Contents/MacOS/kicad-cli',
+  '/Applications/KiCad 9.0/KiCad.app/Contents/MacOS/kicad-cli'
+];
+
+const LINUX_CANDIDATES = [
+  '/usr/bin/kicad-cli',
+  '/usr/local/bin/kicad-cli'
+];
+
 export function resolveKicadCli({
   explicitPath,
   env = process.env,
@@ -34,6 +45,20 @@ export function resolveKicadCli({
     const installPath = WINDOWS_CANDIDATES.find((candidate) => exists(candidate));
     if (installPath) {
       return { path: installPath, source: 'windows-install' };
+    }
+  }
+
+  if (platform === 'darwin') {
+    const installPath = MACOS_CANDIDATES.find((candidate) => exists(candidate));
+    if (installPath) {
+      return { path: installPath, source: 'macos-install' };
+    }
+  }
+
+  if (platform === 'linux') {
+    const installPath = LINUX_CANDIDATES.find((candidate) => exists(candidate));
+    if (installPath) {
+      return { path: installPath, source: 'linux-install' };
     }
   }
 

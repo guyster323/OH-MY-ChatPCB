@@ -77,7 +77,8 @@ export async function validateBoard({
     };
   } catch (error) {
     if (error?.code === 'ENOENT' || /\bENOENT\b/i.test(error.message ?? '')) {
-      return skipped('KICAD_CLI_UNAVAILABLE', error.message);
+      const message = 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.';
+      return skipped('KICAD_CLI_UNAVAILABLE', message);
     }
 
     return {

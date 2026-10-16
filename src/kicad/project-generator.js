@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
+import { resolveKicadCli } from './kicad-cli.js';
 
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
@@ -65,19 +67,30 @@ export function renderKiCadProject(baseName) {
   )}\n`;
 }
 
-export function renderKiCadBoard({ baseName, schematic, boardProfile }) {
+export function renderKiCadBoard({ baseName, schematic, boardProfile, warnings = [] }) {
   const profileMode = Boolean(boardProfile?.id);
   const components = schematic.components.filter((component) => component.footprint);
   const netIds = boardNetIdsFor(components);
   const padCentersByNet = new Map();
+  const unresolvedFootprints = new Set();
   const netDeclarations = [...netIds.entries()].map(([name, id]) => `  (net ${id} "${escapeSchText(name)}")`).join('\n');
   const footprints = components
     .map((component, index) => {
       const placement = boardPlacementFor(component, index, profileMode);
-      return renderBoardFootprint(component, placement.x, placement.y, placement.rotation, netIds, padCentersByNet);
+      const result = renderBoardFootprint(component, placement.x, placement.y, placement.rotation, netIds, padCentersByNet);
+
+      if (result === null) {
+        unresolvedFootprints.add(component.footprint);
+        warnings.push(`Skipping routing for component ${component.ref} due to unresolved footprint: ${component.footprint}`);
+        return renderFallbackFootprint(component, placement.x, placement.y, placement.rotation);
+      }
+
+      return result;
     })
     .join('\n');
-  const segments = renderBoardSegments(padCentersByNet, netIds, profileMode);
+
+  const shouldSkipRouting = profileMode && unresolvedFootprints.size > 0;
+  const segments = shouldSkipRouting ? '' : renderBoardSegments(padCentersByNet, netIds, profileMode);
   const groundZone = renderGroundZone(netIds, profileMode);
 
   return `(kicad_pcb
@@ -902,11 +915,10 @@ ${[...fixtureBlocks, ...officialBlocks].join('\n')}
 }
 
 function renderBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet = null) {
-  const embedded = renderEmbeddedBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet);
-  if (embedded) {
-    return embedded;
-  }
+  return renderEmbeddedBoardFootprint(componentModel, x, y, rotation, netIds, padCentersByNet);
+}
 
+function renderFallbackFootprint(componentModel, x, y, rotation) {
   const uuid = randomUUID();
 
   return `  (footprint "${escapeSchText(componentModel.footprint)}"
@@ -950,14 +962,196 @@ function boardNetIdsFor(components) {
   return new Map(netNames.map((name, index) => [name, index + 1]));
 }
 
-function officialFootprintPath(library, footprintName) {
-  const candidates = [
-    process.env.KICAD_FOOTPRINT_DIR,
-    'C:/Users/windo/AppData/Local/Programs/KiCad/10.0/share/kicad/footprints',
-    'C:/Program Files/KiCad/10.0/share/kicad/footprints'
-  ].filter(Boolean);
+function kicadLibraryEnvPaths(libraryType) {
+  const envVars = libraryType === 'footprints'
+    ? ['KICAD10_FOOTPRINT_DIR', 'KICAD_FOOTPRINT_DIR']
+    : ['KICAD10_SYMBOL_DIR', 'KICAD_SYMBOL_DIR'];
 
-  return candidates.map((dir) => `${dir}/${library}.pretty/${footprintName}.kicad_mod`).find((file) => existsSync(file)) ?? null;
+  return unique(envVars.map((key) => process.env[key]).filter((value) => typeof value === 'string' && value.length > 0));
+}
+
+let symbolLibraryCandidateOverride = null;
+
+// Tests point symbol search at a fixture or an empty directory without setting
+// KICAD*_SYMBOL_DIR. Environment directories still win when they are set.
+export function setSymbolLibraryCandidateOverrideForTests(candidates) {
+  const previous = symbolLibraryCandidateOverride;
+  symbolLibraryCandidateOverride = Array.isArray(candidates) ? [...candidates] : null;
+  return previous;
+}
+
+function kicadLibraryCandidatePaths(libraryType) {
+  const envPaths = kicadLibraryEnvPaths(libraryType);
+  if (envPaths.length > 0) {
+    return envPaths;
+  }
+
+  if (libraryType === 'symbols' && Array.isArray(symbolLibraryCandidateOverride)) {
+    return symbolLibraryCandidateOverride;
+  }
+
+  return kicadInstallLibraryCandidatePaths(libraryType);
+}
+
+let flatpakLibraryRootOverride = null;
+
+// Tests point runtime discovery at a fake tree with the Flatpak layout.
+// Null restores /var/lib/flatpak and ~/.local/share/flatpak.
+export function setFlatpakLibraryRootsForTests(roots) {
+  const previous = flatpakLibraryRootOverride;
+  flatpakLibraryRootOverride = Array.isArray(roots) ? [...roots] : null;
+  return previous;
+}
+
+function flatpakLibraryRoots() {
+  if (Array.isArray(flatpakLibraryRootOverride)) {
+    return flatpakLibraryRootOverride;
+  }
+  if (process.platform !== 'linux') {
+    return [];
+  }
+
+  const roots = ['/var/lib/flatpak'];
+  if (typeof process.env.HOME === 'string' && process.env.HOME.length > 0) {
+    roots.push(path.join(process.env.HOME, '.local', 'share', 'flatpak'));
+  }
+  return roots.map((candidate) => underLibrarySearchRoot(candidate));
+}
+
+// Test-only. CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS is a filesystem root: system
+// paths and Flatpak roots are resolved under it. Unset keeps host paths.
+function librarySearchRoot() {
+  const value = process.env.CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS;
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return null;
+  }
+  return value.trim();
+}
+
+function underLibrarySearchRoot(candidate) {
+  const root = librarySearchRoot();
+  if (!root) {
+    return candidate;
+  }
+  if (!path.isAbsolute(candidate)) {
+    return path.join(root, candidate);
+  }
+
+  const resolved = path.resolve(candidate);
+  return path.join(root, path.relative(path.parse(resolved).root, resolved));
+}
+
+function flatpakRuntimeName(libraryType) {
+  if (libraryType === 'symbols') {
+    return 'org.kicad.KiCad.Library.Symbols';
+  }
+  if (libraryType === 'footprints') {
+    return 'org.kicad.KiCad.Library.Footprints';
+  }
+  return null;
+}
+
+function readFlatpakPathEntries(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+// KiCad Flatpak stores symbols and footprints in runtime extensions, not in the app tree.
+// <root>/runtime/org.kicad.KiCad.Library.<Kind>/<arch>/<branch>/active/files/<symbols|footprints>
+function flatpakRuntimeLibraryCandidatePaths(libraryType) {
+  const runtimeName = flatpakRuntimeName(libraryType);
+  if (!runtimeName) {
+    return [];
+  }
+
+  const candidates = [];
+  for (const root of flatpakLibraryRoots()) {
+    const runtimeRoot = path.join(root, 'runtime', runtimeName);
+    for (const arch of readFlatpakPathEntries(runtimeRoot)) {
+      const archDir = path.join(runtimeRoot, arch);
+      for (const branch of readFlatpakPathEntries(archDir)) {
+        const libraryDir = path.join(archDir, branch, 'active', 'files', libraryType);
+        if (existsSync(libraryDir)) {
+          candidates.push(libraryDir);
+        }
+      }
+    }
+  }
+  return candidates;
+}
+
+export function kicadInstallLibraryCandidatePaths(libraryType) {
+  const kicadCliResult = resolveKicadCli();
+  const kicadCliPath = kicadCliResult?.path;
+  const relativeToKicadCli = kicadCliPath ? [
+    path.join(path.dirname(kicadCliPath), '..', 'share', 'kicad', libraryType),
+    path.join(path.dirname(kicadCliPath), '..', '..', 'share', 'kicad', libraryType)
+  ] : [];
+
+  return [
+    ...relativeToKicadCli.map((candidate) => underLibrarySearchRoot(candidate)),
+    ...(process.platform === 'darwin' ? [
+      `/Applications/KiCad/KiCad.app/Contents/SharedSupport/${libraryType}`,
+      `/Applications/KiCad 10.0/KiCad.app/Contents/SharedSupport/${libraryType}`
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
+    ...(process.platform === 'linux' ? [
+      `/usr/share/kicad/${libraryType}`,
+      `/usr/local/share/kicad/${libraryType}`,
+      `/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`,
+      `${process.env.HOME}/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`
+    ].filter(Boolean).map((candidate) => underLibrarySearchRoot(candidate)) : []),
+    ...flatpakRuntimeLibraryCandidatePaths(libraryType),
+    ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
+      `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/${libraryType}`,
+      `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/${libraryType}`
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
+    ...(process.platform === 'win32' ? [
+      `C:/Program Files/KiCad/10.0/share/kicad/${libraryType}`,
+      `C:/Program Files/KiCad/9.0/share/kicad/${libraryType}`
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : [])
+  ].filter(Boolean);
+}
+
+export const UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE = 'No KiCad symbol library found. Set KICAD_SYMBOL_DIR or KICAD10_SYMBOL_DIR to a KiCad symbols directory, for example KICAD_SYMBOL_DIR=/path/to/kicad/symbols. For offline checks, tests/fixtures/kicad-libraries/symbols can be used.';
+
+// Install paths only. KICAD*_SYMBOL_DIR and the test candidate override are not installations.
+export function findInstalledSymbolLibraryDirectory() {
+  return kicadInstallLibraryCandidatePaths('symbols').find((dir) => directoryContainsKiCadSymbol(dir)) ?? null;
+}
+
+export function unconfiguredSymbolLibraryError(env = process.env) {
+  if (kicadSymbolDirConfigured(env) || findInstalledSymbolLibraryDirectory()) {
+    return null;
+  }
+
+  return UNCONFIGURED_SYMBOL_LIBRARY_MESSAGE;
+}
+
+function kicadSymbolDirConfigured(env) {
+  return ['KICAD10_SYMBOL_DIR', 'KICAD_SYMBOL_DIR'].some((key) => {
+    const value = env[key];
+    return typeof value === 'string' && value.length > 0;
+  });
+}
+
+function directoryContainsKiCadSymbol(dir) {
+  try {
+    return readdirSync(dir).some((name) => name.endsWith('.kicad_sym'));
+  } catch {
+    return false;
+  }
+}
+
+function officialFootprintPath(library, footprintName) {
+  const candidates = kicadLibraryCandidatePaths('footprints');
+  const footprintPath = candidates.map((dir) => `${dir}/${library}.pretty/${footprintName}.kicad_mod`).find((file) => existsSync(file));
+  return footprintPath ?? null;
 }
 
 function transformBoardFootprintBlock(source, componentModel, x, y, rotation, library, footprintName, netIds, padCentersByNet = null) {
@@ -1447,26 +1641,43 @@ function renderOfficialCachedSymbol(libId) {
 
   const libraryPath = officialSymbolLibraryPath(library);
   if (!libraryPath) {
-    return null;
+    throwIfRequiredSymbolLibraryMissing(library);
   }
 
   try {
     const source = readFileSync(libraryPath, 'utf8');
     const block = extractSymbolBlock(source, symbolName);
     return indentOfficialSymbolBlock(transformOfficialSymbolBlock(block, library, symbolName));
-  } catch {
+  } catch (error) {
+    if (error?.code === 'KICAD_LIBRARY_MISSING') {
+      throw error;
+    }
+    // The library file was found, but this symbol body could not be read.
+    // Configured symbol directories fail fast. Otherwise keep the null
+    // fallback so callers that drop empty blocks can continue.
+    if (kicadLibraryEnvPaths('symbols').length > 0) {
+      throwIfRequiredSymbolLibraryMissing(library);
+    }
     return null;
   }
 }
 
-function officialSymbolLibraryPath(library) {
-  const candidates = [
-    process.env.KICAD_SYMBOL_DIR,
-    'C:/Users/windo/AppData/Local/Programs/KiCad/10.0/share/kicad/symbols',
-    'C:/Program Files/KiCad/10.0/share/kicad/symbols'
-  ].filter(Boolean);
+function throwIfRequiredSymbolLibraryMissing(library) {
+  const searched = kicadLibraryCandidatePaths('symbols');
+  const searchedText = searched.length > 0
+    ? searched.map((dir) => `"${dir}"`).join(', ')
+    : '(none)';
+  const error = new Error(
+    `KICAD_LIBRARY_MISSING: required Symbol library "${library}" was not found. Searched paths: ${searchedText}. Set KICAD*_SYMBOL_DIR or install the KiCad libraries.`
+  );
+  error.code = 'KICAD_LIBRARY_MISSING';
+  throw error;
+}
 
-  return candidates.map((dir) => `${dir}/${library}.kicad_sym`).find((file) => existsSync(file)) ?? null;
+function officialSymbolLibraryPath(library) {
+  const candidates = kicadLibraryCandidatePaths('symbols');
+  const symbolPath = candidates.map((dir) => `${dir}/${library}.kicad_sym`).find((file) => existsSync(file));
+  return symbolPath ?? null;
 }
 
 function extractSymbolBlock(source, symbolName) {
@@ -1683,7 +1894,7 @@ function officialPinDefinitionsFor(libId) {
         pinDef('B8', 15.24, -15.24, 180),
         pinDef('B9', 15.24, 15.24, 180),
         pinDef('B12', 0, -22.86, 90),
-        pinDef('SH', -7.62, -22.86, 90)
+        pinDef('S1', -7.62, -22.86, 90)
       ];
     default:
       return [];
