@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -10,9 +11,13 @@ import { PROMPT_FILE_PLACEHOLDER } from './provider-registry.js';
 const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 const DEFAULT_KILL_GRACE_MS = 2000;
 // Detached children are their own process group, so SIGINT/SIGTERM/SIGHUP sent
-// to this process does not reach them. The set holds group ids until the group
-// itself is gone, which can be after the leader has exited.
-const activeProviderGroups = new Set();
+// to this process does not reach them. Ids stay until the group itself is gone,
+// which can be after the leader has exited. On Linux the leader's start time is
+// kept so a reused pid is not signalled. Finished ids are dropped on the next
+// spawn and on a timer, so a dead group is not held until another provider starts.
+export const PROVIDER_GROUP_PRUNE_MS = 30000;
+const activeProviderGroups = new Map();
+let providerGroupPruneTimer = null;
 let providerShutdownHandlersInstalled = false;
 
 function reportProviderDiagnostic(message, error) {
@@ -643,21 +648,57 @@ function trackProviderGroup(child) {
   const pid = child?.pid;
   if (!Number.isInteger(pid) || pid <= 0) return;
   pruneDeadProviderGroups();
-  activeProviderGroups.add(pid);
+  noteActiveProviderGroup(pid);
   child.once('exit', () => {
     // The leader can exit while grandchildren still share its process group.
-    // processGroupAlive is kill(-pid, 0); drop the id only when that reports the group gone.
-    if (!processGroupAlive(pid)) activeProviderGroups.delete(pid);
+    // Drop the id when the group is gone, or when this pid now belongs to someone else.
+    if (!providerGroupStillOwned(pid)) releaseProviderGroup(pid);
   });
 }
 
-function pruneDeadProviderGroups() {
+export function noteActiveProviderGroup(pid, startTime = readProcessStartTime(pid)) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  activeProviderGroups.set(pid, { startTime: startTime ?? null });
+  ensureProviderGroupPruneTimer();
+}
+
+export function activeProviderGroupIds() {
+  return [...activeProviderGroups.keys()];
+}
+
+export function providerGroupPruneScheduled() {
+  return providerGroupPruneTimer !== null;
+}
+
+export function pruneDeadProviderGroups() {
   // Windows cannot probe a process group with kill(-pid, 0). Those pids are
   // removed when the leader exits, because processGroupAlive is always false there.
-  if (process.platform === 'win32') return;
-  for (const pid of [...activeProviderGroups]) {
-    if (!processGroupAlive(pid)) activeProviderGroups.delete(pid);
+  if (process.platform !== 'win32') {
+    for (const pid of [...activeProviderGroups.keys()]) {
+      if (!providerGroupStillOwned(pid)) activeProviderGroups.delete(pid);
+    }
   }
+  stopProviderGroupPruneTimerIfEmpty();
+}
+
+function ensureProviderGroupPruneTimer() {
+  if (providerGroupPruneTimer !== null || activeProviderGroups.size === 0) return;
+  providerGroupPruneTimer = setInterval(() => {
+    pruneDeadProviderGroups();
+  }, PROVIDER_GROUP_PRUNE_MS);
+  // A tracked group must not keep the CLI alive after the provider run has settled.
+  providerGroupPruneTimer.unref();
+}
+
+function stopProviderGroupPruneTimerIfEmpty() {
+  if (activeProviderGroups.size > 0 || providerGroupPruneTimer === null) return;
+  clearInterval(providerGroupPruneTimer);
+  providerGroupPruneTimer = null;
+}
+
+function releaseProviderGroup(pid) {
+  activeProviderGroups.delete(pid);
+  stopProviderGroupPruneTimerIfEmpty();
 }
 
 function installProviderShutdownHandlers() {
@@ -689,14 +730,17 @@ function installProviderShutdownHandlers() {
   });
 }
 
-function killActiveProviderGroups() {
-  for (const pid of [...activeProviderGroups]) {
+export function killActiveProviderGroups() {
+  // Drop finished groups before signalling. A pgid kept after the leader exits
+  // can be reused by an unrelated process-group leader.
+  pruneDeadProviderGroups();
+  for (const pid of [...activeProviderGroups.keys()]) {
     killProviderGroupNow(pid);
   }
   pruneDeadProviderGroups();
 }
 
-function killProviderGroupNow(pid) {
+export function killProviderGroupNow(pid) {
   if (process.platform === 'win32') {
     // 'exit' can only run synchronous work. taskkill /T /F stops the whole tree.
     try {
@@ -710,6 +754,11 @@ function killProviderGroupNow(pid) {
     return;
   }
 
+  if (!activeProviderGroups.has(pid) || !providerGroupStillOwned(pid)) {
+    releaseProviderGroup(pid);
+    return;
+  }
+
   try {
     process.kill(-pid, 'SIGKILL');
   } catch (error) {
@@ -720,6 +769,9 @@ function killProviderGroupNow(pid) {
 
 function signalProcessGroup(child, signal) {
   if (!child?.pid) return;
+  // A dropped id is not ours anymore. Falling back to liveness would signal a
+  // recycled pid whose group happens to be alive.
+  if (!activeProviderGroups.has(child.pid) || !providerGroupStillOwned(child.pid)) return;
   try {
     process.kill(-child.pid, signal);
   } catch (error) {
@@ -742,17 +794,50 @@ function processGroupAlive(pid) {
   }
 }
 
+function providerGroupStillOwned(pid) {
+  if (!processGroupAlive(pid)) return false;
+  const recorded = activeProviderGroups.get(pid)?.startTime ?? null;
+  // /proc was not available when the group was tracked. Liveness is the only check.
+  if (recorded == null) return true;
+  const current = readProcessStartTime(pid);
+  // The leader has been reaped and grandchildren may still share the group, or
+  // /proc cannot be read now. Either way, do not treat the live group as foreign.
+  if (current == null) return true;
+  return current === recorded;
+}
+
+function readProcessStartTime(pid) {
+  if (process.platform !== 'linux' || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    return parseProcStatStartTime(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Field 22 of /proc/pid/stat is starttime (clock ticks since boot). comm is field 2,
+// wrapped in parentheses, and may itself contain spaces and parentheses.
+export function parseProcStatStartTime(stat) {
+  const text = String(stat);
+  const end = text.lastIndexOf(')');
+  if (end < 0) return null;
+  const startTime = text.slice(end + 1).trim().split(/\s+/)[19];
+  if (!/^\d+$/.test(startTime ?? '')) return null;
+  return startTime;
+}
+
 async function waitForProcessGroupExit(pid, terminatedAt, killGraceMs) {
   const remaining = Math.max(0, terminatedAt + killGraceMs - Date.now());
   if (remaining > 0) await delay(remaining);
-  if (!processGroupAlive(pid)) return;
+  // Same ownership check as shutdown: a reused pid must not be signalled.
+  if (!activeProviderGroups.has(pid) || !providerGroupStillOwned(pid)) return;
   try {
     process.kill(-pid, 'SIGKILL');
   } catch {
     // ESRCH means the group is already gone. Any other error is retried by the poll below.
   }
   const deadline = Date.now() + 1000;
-  while (processGroupAlive(pid) && Date.now() < deadline) {
+  while (activeProviderGroups.has(pid) && providerGroupStillOwned(pid) && Date.now() < deadline) {
     await delay(20);
   }
 }

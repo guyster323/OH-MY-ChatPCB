@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildProviderKillCommand, providerProcessCommand, runProviderProcess } from '../src/runtime/provider-process.js';
+import {
+  activeProviderGroupIds,
+  buildProviderKillCommand,
+  killProviderGroupNow,
+  noteActiveProviderGroup,
+  parseProcStatStartTime,
+  providerProcessCommand,
+  pruneDeadProviderGroups,
+  runProviderProcess
+} from '../src/runtime/provider-process.js';
 import { PROMPT_FILE_PLACEHOLDER } from '../src/runtime/provider-registry.js';
 
 test('parses provider stdout into deltas and tool calls', async () => {
@@ -819,6 +828,122 @@ test('SIGHUP on the parent kills a grandchild after the provider leader has exit
   await assertLeaderlessGroupKilled('SIGHUP');
 });
 
+test('shutdown does not signal a stale provider group id after the group has exited', { skip: process.platform === 'win32' }, async () => {
+  const observed = await observeExitedProviderGroup('kill');
+  assert.equal(observed.trackedWhileGrandchildLives, true);
+  assert.equal(observed.groupGone, true);
+  assert.equal(observed.trackedAfterGroupExit, true);
+  assert.equal(observed.signalled, false);
+  assert.equal(observed.trackedAfter, false);
+});
+
+test('prune removes finished provider groups without spawning another provider', { skip: process.platform === 'win32' }, async () => {
+  const observed = await observeExitedProviderGroup('prune');
+  assert.equal(observed.trackedWhileGrandchildLives, true);
+  assert.equal(observed.keptWhileGrandchildLives, true);
+  assert.equal(observed.groupGone, true);
+  assert.equal(observed.trackedAfterGroupExit, true);
+  assert.equal(observed.trackedAfter, false);
+  assert.equal(observed.signalled, false);
+});
+
+test('periodic prune drops finished provider groups and stops when none remain', { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pgid-interval-'));
+  const runner = path.join(root, 'runner.mjs');
+  const resultFile = path.join(root, 'result.json');
+  await writeFile(runner, intervalPruneRunnerScript(), 'utf8');
+  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', runner, resultFile], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const output = collectProcessOutput(child);
+
+  try {
+    const result = await waitForProcessExit(child, 8000);
+    const body = JSON.parse(await readFile(resultFile, 'utf8'));
+    assert.equal(result.code, 0, `${output.stderr()}\n${JSON.stringify(body)}`);
+    assert.equal(body.trackedStale, true);
+    assert.equal(body.trackedLive, true);
+    assert.equal(body.scheduledWhileTracked, true);
+    assert.equal(body.staleBefore, true);
+    assert.equal(body.liveBefore, true);
+    assert.equal(body.staleAfter, false);
+    assert.equal(body.liveAfter, true);
+    assert.equal(body.scheduledWhileLive, true);
+    assert.equal(body.groupGone, true);
+    assert.equal(body.liveAfterExit, false);
+    assert.equal(body.scheduledAfterEmpty, false);
+  } catch (error) {
+    error.message += `\nstderr: ${output.stderr()}`;
+    throw error;
+  } finally {
+    forceKillPid(child.pid);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('the provider group prune timer does not keep the process alive', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-pgid-unref-'));
+  const runner = path.join(root, 'runner.mjs');
+  await writeFile(runner, unrefPruneTimerScript(), 'utf8');
+  const child = spawn(process.execPath, [runner], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const output = collectProcessOutput(child);
+
+  try {
+    const result = await waitForProcessExit(child, 2000);
+    assert.equal(result.code, 0, output.stderr());
+  } finally {
+    forceKillPid(child.pid);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('shutdown does not signal a reused pid whose start time differs', { skip: process.platform !== 'linux' }, async () => {
+  const child = spawnDetachedSleeper();
+
+  try {
+    await waitForGroupLeader(child.pid);
+    const realStart = parseProcStatStartTime(readFileSync(`/proc/${child.pid}/stat`, 'utf8'));
+    assert.notEqual(realStart, '1');
+    noteActiveProviderGroup(child.pid, '1');
+    const calls = captureProcessKill(() => {
+      pruneDeadProviderGroups();
+      killProviderGroupNow(child.pid);
+    });
+    assert.equal(calls.some(([pid, signal]) => pid === -child.pid && signal && signal !== 0), false);
+    assert.equal(activeProviderGroupIds().includes(child.pid), false);
+    process.kill(child.pid, 0);
+  } finally {
+    forceKillPid(child.pid);
+  }
+});
+
+test('shutdown still signals a provider group whose leader start time matches', { skip: process.platform !== 'linux' }, async () => {
+  const child = spawnDetachedSleeper();
+
+  try {
+    await waitForGroupLeader(child.pid);
+    noteActiveProviderGroup(child.pid);
+    const calls = captureProcessKill(() => {
+      killProviderGroupNow(child.pid);
+    });
+    assert.equal(calls.some(([pid, signal]) => pid === -child.pid && signal === 'SIGKILL'), true);
+    await assertPidGone(child.pid);
+  } finally {
+    forceKillPid(child.pid);
+    pruneDeadProviderGroups();
+  }
+});
+
+test('linux proc stat start time is field 22, after the comm field', () => {
+  const fields = ['S', '1', '42', '42', '0', '-1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '20', '0', '1', '0', '999888'];
+  assert.equal(fields.length, 20);
+  assert.equal(parseProcStatStartTime(`42 (comm with spaces) ${fields.join(' ')}\n`), '999888');
+  assert.equal(parseProcStatStartTime(`7 (na)me) ${fields.join(' ')}\n`), '999888');
+  assert.equal(parseProcStatStartTime('no comm field'), null);
+});
+
 test('an extra SIGINT listener on the parent runs once', { skip: process.platform === 'win32' }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-sigint-once-'));
   const providerScript = path.join(root, 'provider.cjs');
@@ -1068,6 +1193,305 @@ async function assertLeaderlessGroupKilled(signal) {
     if (pids?.grandchild) forceKillPid(pids.grandchild);
     await rm(root, { force: true, recursive: true });
   }
+}
+
+async function observeExitedProviderGroup(mode) {
+  const root = await mkdtemp(path.join(tmpdir(), `chatpcb-pgid-${mode}-`));
+  const providerScript = path.join(root, 'provider.cjs');
+  const runnerScript = path.join(root, 'runner.mjs');
+  const pidFile = path.join(root, 'pids.json');
+  const resultFile = path.join(root, 'result.json');
+  await writeFile(providerScript, exitingLeaderProviderScript(), 'utf8');
+  await writeFile(runnerScript, exitedProviderGroupRunnerScript(), 'utf8');
+  const child = spawn(process.execPath, [runnerScript, providerScript, pidFile, resultFile, mode], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const output = collectProcessOutput(child);
+
+  try {
+    const result = await waitForProcessExit(child, 8000);
+    let body = {};
+    try {
+      body = JSON.parse(await readFile(resultFile, 'utf8'));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (result.code !== 0 || body.error) {
+      throw new Error(`provider group observer exited ${result.code} signal ${result.signal}\n${body.error || ''}\n${output.stderr()}\n${output.stdout()}`);
+    }
+    return body;
+  } catch (error) {
+    error.message += `\nstderr: ${output.stderr()}\nstdout: ${output.stdout()}`;
+    throw error;
+  } finally {
+    forceKillPid(child.pid);
+    await rm(root, { force: true, recursive: true });
+  }
+}
+
+function exitedProviderGroupRunnerScript() {
+  const moduleUrl = JSON.stringify(new URL('../src/runtime/provider-process.js', import.meta.url).href);
+  return String.raw`
+import { readFileSync, writeFileSync } from 'node:fs';
+import {
+  activeProviderGroupIds,
+  killActiveProviderGroups,
+  pruneDeadProviderGroups,
+  runProviderProcess
+} from ${moduleUrl};
+
+const [providerScript, pidFile, resultFile, mode] = process.argv.slice(2);
+let grandchild = null;
+
+try {
+  await runProviderProcess({
+    command: process.execPath,
+    args: [providerScript, pidFile],
+    timeoutMs: 5000
+  });
+  const pids = JSON.parse(readFileSync(pidFile, 'utf8'));
+  grandchild = pids.grandchild;
+  const trackedWhileGrandchildLives = activeProviderGroupIds().includes(pids.provider);
+  let keptWhileGrandchildLives = null;
+  if (mode === 'prune') {
+    pruneDeadProviderGroups();
+    keptWhileGrandchildLives = activeProviderGroupIds().includes(pids.provider);
+  }
+  process.kill(grandchild, 'SIGKILL');
+  const started = Date.now();
+  let groupGone = false;
+  while (Date.now() - started < 2000) {
+    try {
+      process.kill(-pids.provider, 0);
+    } catch (error) {
+      if (error.code === 'ESRCH') {
+        groupGone = true;
+        break;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const trackedAfterGroupExit = activeProviderGroupIds().includes(pids.provider);
+  const calls = [];
+  const originalKill = process.kill;
+  process.kill = (pid, signal) => {
+    calls.push([pid, signal]);
+    return originalKill.call(process, pid, signal);
+  };
+  try {
+    if (mode === 'kill') killActiveProviderGroups();
+    else pruneDeadProviderGroups();
+  } finally {
+    process.kill = originalKill;
+  }
+  const signalled = calls.some(([pid, signal]) => pid === -pids.provider && signal && signal !== 0);
+  writeFileSync(resultFile, JSON.stringify({
+    trackedWhileGrandchildLives,
+    keptWhileGrandchildLives,
+    groupGone,
+    trackedAfterGroupExit,
+    signalled,
+    trackedAfter: activeProviderGroupIds().includes(pids.provider)
+  }));
+} catch (error) {
+  writeFileSync(resultFile, JSON.stringify({ error: error.stack || String(error) }));
+  process.exitCode = 1;
+} finally {
+  if (grandchild) {
+    try { process.kill(grandchild, 'SIGKILL'); } catch { /* already exited */ }
+  }
+}
+`;
+}
+
+function intervalPruneRunnerScript() {
+  const moduleUrl = JSON.stringify(new URL('../src/runtime/provider-process.js', import.meta.url).href);
+  return String.raw`
+import { mock } from 'node:test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import {
+  activeProviderGroupIds,
+  noteActiveProviderGroup,
+  PROVIDER_GROUP_PRUNE_MS,
+  providerGroupPruneScheduled
+} from ${moduleUrl};
+
+const resultFile = process.argv[2];
+let sleeper = null;
+
+function unusedPid() {
+  for (let pid = 2000000001; pid < 2000000100; pid += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (error.code === 'ESRCH') return pid;
+    }
+  }
+  throw new Error('no unused pid');
+}
+
+function waitForLeader(pid) {
+  const started = Date.now();
+  while (Date.now() - started < 2000) {
+    try {
+      process.kill(-pid, 0);
+      if (process.platform !== 'linux') return;
+      const stat = readFileSync('/proc/' + pid + '/stat', 'utf8');
+      const pgrp = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[2]);
+      if (pgrp !== pid) throw new Error('sleeper is not a process group leader');
+      return;
+    } catch (error) {
+      if (error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+  throw new Error('leader not ready');
+}
+
+try {
+  sleeper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  waitForLeader(sleeper.pid);
+  mock.timers.enable({ apis: ['setInterval'] });
+  const stalePid = unusedPid();
+  noteActiveProviderGroup(stalePid);
+  noteActiveProviderGroup(sleeper.pid);
+  const trackedStale = activeProviderGroupIds().includes(stalePid);
+  const trackedLive = activeProviderGroupIds().includes(sleeper.pid);
+  const scheduledWhileTracked = providerGroupPruneScheduled();
+  mock.timers.tick(PROVIDER_GROUP_PRUNE_MS - 1);
+  const staleBefore = activeProviderGroupIds().includes(stalePid);
+  const liveBefore = activeProviderGroupIds().includes(sleeper.pid);
+  mock.timers.tick(1);
+  const staleAfter = activeProviderGroupIds().includes(stalePid);
+  const liveAfter = activeProviderGroupIds().includes(sleeper.pid);
+  const scheduledWhileLive = providerGroupPruneScheduled();
+  process.kill(-sleeper.pid, 'SIGKILL');
+  // setTimeout, not a blocking wait: the sleeper is this process's child, and a
+  // zombie still answers kill(-pid, 0) until the event loop reaps it.
+  const groupGone = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(false), 2000);
+    const poll = () => {
+      try {
+        process.kill(-sleeper.pid, 0);
+        setTimeout(poll, 20);
+      } catch (error) {
+        clearTimeout(timer);
+        if (error.code === 'ESRCH') resolve(true);
+        else reject(error);
+      }
+    };
+    poll();
+  });
+  mock.timers.tick(PROVIDER_GROUP_PRUNE_MS);
+  const liveAfterExit = activeProviderGroupIds().includes(sleeper.pid);
+  const scheduledAfterEmpty = providerGroupPruneScheduled();
+  writeFileSync(resultFile, JSON.stringify({
+    trackedStale,
+    trackedLive,
+    scheduledWhileTracked,
+    staleBefore,
+    liveBefore,
+    staleAfter,
+    liveAfter,
+    scheduledWhileLive,
+    groupGone,
+    liveAfterExit,
+    scheduledAfterEmpty
+  }));
+} catch (error) {
+  try {
+    writeFileSync(resultFile, JSON.stringify({ error: error.stack || String(error) }));
+  } catch {
+    // The result path may be missing if startup failed.
+  }
+  process.exitCode = 1;
+} finally {
+  try { mock.timers.reset(); } catch { /* timers were not enabled */ }
+  if (sleeper?.pid) {
+    try { process.kill(sleeper.pid, 'SIGKILL'); } catch { /* already exited */ }
+  }
+}
+`;
+}
+
+function unrefPruneTimerScript() {
+  const moduleUrl = JSON.stringify(new URL('../src/runtime/provider-process.js', import.meta.url).href);
+  return String.raw`
+import { noteActiveProviderGroup } from ${moduleUrl};
+
+let pid = null;
+for (let candidate = 2000000001; candidate < 2000000100; candidate += 1) {
+  try {
+    process.kill(candidate, 0);
+  } catch (error) {
+    if (error.code === 'ESRCH') {
+      pid = candidate;
+      break;
+    }
+  }
+}
+if (pid === null) throw new Error('no unused pid');
+noteActiveProviderGroup(pid);
+`;
+}
+
+function spawnDetachedSleeper() {
+  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], {
+    detached: true,
+    stdio: 'ignore'
+  });
+}
+
+async function waitForGroupLeader(pid) {
+  const started = Date.now();
+  while (Date.now() - started < 2000) {
+    try {
+      process.kill(-pid, 0);
+      if (process.platform !== 'linux') return;
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const pgrp = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[2]);
+      if (pgrp === pid) return;
+    } catch (error) {
+      if (error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
+    }
+    await delay(20);
+  }
+  throw new Error(`Process ${pid} did not become its own process group leader.`);
+}
+
+function captureProcessKill(fn) {
+  const calls = [];
+  const original = process.kill;
+  process.kill = (pid, signal) => {
+    calls.push([pid, signal]);
+    return original.call(process, pid, signal);
+  };
+  try {
+    fn();
+  } finally {
+    process.kill = original;
+  }
+  return calls;
+}
+
+function collectProcessOutput(child) {
+  let stderr = '';
+  let stdout = '';
+  child.stderr?.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  child.stdout?.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  return {
+    stderr: () => stderr,
+    stdout: () => stdout
+  };
 }
 
 function exitingLeaderParentScript() {
