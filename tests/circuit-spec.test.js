@@ -148,15 +148,18 @@ test('count markers are quantities and only small or fractional bare numbers sta
     assert.equal(parsed.reviewWarnings.length, 0, prompt);
     assert.equal(parsed.reviewBlockers.length, 1, prompt);
     const blocker = parsed.reviewBlockers[0];
+    const shown = escapeRegExp(raw);
     assert.equal(blocker.code, 'discrete-led-ambiguous-number', `${prompt} ${blocker.code} ${blocker.en}`);
-    assert.match(blocker.en, new RegExp(`\\b${raw.replace('.', '\\.')}\\b has no unit`), blocker.en);
-    assert.match(blocker.en, /series resistor/i, blocker.en);
+    assert.match(blocker.en, new RegExp(`^Is ${shown} a resistor in ohms, an LED count, or something else\\?`), blocker.en);
     assert.match(blocker.en, /LED count/i, blocker.en);
-    assert.match(blocker.en, /3 pcs/, blocker.en);
-    assert.match(blocker.ko, new RegExp(`단위 없는 숫자 ${raw.replace('.', '\\.')}`), blocker.ko);
-    assert.match(blocker.ko, /330옴/, blocker.ko);
+    assert.match(blocker.en, /330Ω/, blocker.en);
+    assert.match(blocker.en, /3개/, blocker.en);
+    assert.equal(blocker.en.includes('Refusing to draft'), false, blocker.en);
+    assert.match(blocker.ko, new RegExp(`^${shown}(?:은|는) 저항\\(Ω\\)인가요, LED 개수인가요\\?`), blocker.ko);
+    assert.match(blocker.ko, /330Ω/, blocker.ko);
     assert.match(blocker.ko, /3개/, blocker.ko);
     assert.equal(blocker.ko.includes('ohm'), false, blocker.ko);
+    assert.equal(blocker.ko.includes('생성하지 않았습니다'), false, blocker.ko);
     assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
     assert.equal(/below 68/i.test(blocker.en), false, blocker.en);
   }
@@ -174,6 +177,9 @@ test('count markers are quantities and only small or fractional bare numbers sta
     ['2.5 LEDs on 5V', '2.5'],
     ['2,5 LEDs on 5V', '2,5'],
     ['2,5 leds on 5V', '2,5'],
+    ['two and a half LEDs', '2.5'],
+    ['one and a half LEDs', '1.5'],
+    ['two and a half LEDs on 5V', '2.5'],
     ['LED 0x', '0'],
     ['LED x0', '0'],
     ['0 LEDs', '0'],
@@ -338,13 +344,8 @@ test('an R label is a resistor and a bare E24 value of at least 100 is a resisto
   assert.equal(ten.resistanceOhms, null);
   assert.equal(ten.resistorValue, null);
   assert.equal(ten.reviewBlockers[0].code, 'discrete-led-ambiguous-number');
-  assert.match(ten.reviewBlockers[0].en, /\b10\b has no unit/);
-
-  const both = parseDiscreteLedRequest('LED 330 and 4k7 on 5V');
-  assert.equal(both.refused, false, JSON.stringify(both.reviewBlockers));
-  assert.equal(both.resistorExplicit, true);
-  assert.equal(both.resistanceOhms, 4700);
-  assert.equal(both.resistorValue, '4.7kΩ');
+  assert.match(ten.reviewBlockers[0].en, /^Is 10 a resistor in ohms, an LED count, or something else\?/);
+  assert.match(ten.reviewBlockers[0].ko, /^10은 저항\(Ω\)인가요, LED 개수인가요\?/);
 
   const oneOhm = parseDiscreteLedRequest('LED 5V 1Ω');
   assert.equal(oneOhm.refused, false, JSON.stringify(oneOhm.reviewBlockers));
@@ -385,8 +386,7 @@ test('bare resistors are E24 values of at least 100, and LED package codes are n
     ['LED 12R', 12, '12Ω'],
     ['LED 10Ω', 10, '10Ω'],
     ['LED 5V R=2', 2, '2Ω'],
-    ['LED R1=330', 330, '330Ω'],
-    ['LED 330 and 4k7 on 5V', 4700, '4.7kΩ']
+    ['LED R1=330', 330, '330Ω']
   ];
   for (const [prompt, ohms, label] of resistors) {
     const parsed = parseDiscreteLedRequest(prompt);
@@ -400,6 +400,7 @@ test('bare resistors are E24 values of at least 100, and LED package codes are n
   const ambiguous = [
     ['LED 10', '10'],
     ['LED 12', '12'],
+    ['LED 24', '24'],
     ['LED 47', '47'],
     ['LED 91', '91'],
     ['LED 99', '99'],
@@ -409,12 +410,7 @@ test('bare resistors are E24 values of at least 100, and LED package codes are n
     ['LED 123', '123'],
     ['LED 250', '250'],
     ['LED 333', '333'],
-    ['LED 999', '999'],
-    ['LED 5V 2019', '2019'],
-    ['LED 5V 2835', '2835'],
-    ['LED 5V 5050', '5050'],
-    ['LED 5V 0603', '0603'],
-    ['LED 5V 1210', '1210']
+    ['LED 999', '999']
   ];
   for (const [prompt, raw] of ambiguous) {
     const parsed = parseDiscreteLedRequest(prompt);
@@ -423,13 +419,16 @@ test('bare resistors are E24 values of at least 100, and LED package codes are n
     assert.equal(parsed.resistanceOhms, null, prompt);
     assert.equal(parsed.resistorValue, null, prompt);
     assert.equal(parsed.channels.length, 0, prompt);
+    assert.notEqual(parsed.supplyVolts, Number(raw), prompt);
     assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-ambiguous-number', prompt);
-    assert.match(parsed.reviewBlockers[0].en, new RegExp(`\\b${raw}\\b has no unit`), parsed.reviewBlockers[0].en);
-    assert.match(parsed.reviewBlockers[0].ko, new RegExp(`단위 없는 숫자 ${raw}`), parsed.reviewBlockers[0].ko);
+    assert.match(parsed.reviewBlockers[0].en, new RegExp(`^Is ${raw} a resistor in ohms, an LED count, or something else\\?`), parsed.reviewBlockers[0].en);
+    assert.match(parsed.reviewBlockers[0].ko, new RegExp(`^${raw}(?:은|는) 저항\\(Ω\\)인가요`), parsed.reviewBlockers[0].ko);
+    assert.equal(parsed.reviewBlockers[0].en.includes('Refusing to draft'), false, prompt);
+    assert.equal(parsed.reviewBlockers[0].ko.includes('생성하지 않았습니다'), false, prompt);
   }
 
   for (const code of requiredPackages) {
-    for (const prompt of [`${code} LED 5V`, `LED ${code} 5V`, `SMD ${code} LED`]) {
+    for (const prompt of [`${code} LED 5V`, `LED ${code} 5V`, `LED 5V ${code}`, `SMD ${code} LED`]) {
       const parsed = parseDiscreteLedRequest(prompt);
       assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
       assert.equal(parsed.count, 1, prompt);
@@ -477,6 +476,81 @@ test('bare resistors are E24 values of at least 100, and LED package codes are n
   }
 });
 
+test('several resistor candidates, years, pins, and package codes ask or are consumed', () => {
+  const several = [
+    ['LED 330 and 4k7 on 5V', ['330Ω', '4.7kΩ']],
+    ['LED 5V 330 470', ['330Ω', '470Ω']],
+    ['LED 5V 330Ω 470Ω', ['330Ω', '470Ω']],
+    ['엘이디 5V 330Ω 470Ω', ['330Ω', '470Ω']]
+  ];
+  for (const [prompt, labels] of several) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.count, 0, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.resistorValue, null, prompt);
+    assert.equal(parsed.resistorExplicit, false, prompt);
+    assert.equal(parsed.channels.length, 0, prompt);
+    assert.equal(parsed.reviewBlockers.length, 1, prompt);
+    const blocker = parsed.reviewBlockers[0];
+    assert.equal(blocker.code, 'discrete-led-ambiguous-resistor', `${prompt} ${blocker.code} ${blocker.en}`);
+    assert.match(blocker.en, /^Which resistor should the LED use,/, blocker.en);
+    assert.match(blocker.ko, /^어느 것을 직렬 저항으로 쓸까요,/, blocker.ko);
+    for (const label of labels) {
+      assert.match(blocker.en, new RegExp(escapeRegExp(label)), blocker.en);
+      assert.match(blocker.ko, new RegExp(escapeRegExp(label)), blocker.ko);
+    }
+    assert.match(blocker.ko, /Ω과 /, blocker.ko);
+    assert.equal(blocker.ko.includes('Ω와'), false, blocker.ko);
+    assert.equal(blocker.en.includes('Refusing to draft'), false, blocker.en);
+    assert.equal(blocker.ko.includes('생성하지 않았습니다'), false, blocker.ko);
+    assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
+  }
+
+  const consumed = [
+    ['LED 5V 2025년', '2025년', 'year', null],
+    ['LED 5V in 2025', 'in 2025', 'year', null],
+    ['LED 5V pin 13', 'pin 13', 'pin', null],
+    ['LED 5V GPIO 13', 'GPIO 13', 'pin', null],
+    ['LED 5V D13', 'D13', 'pin', null],
+    ['LED 5V PA5', 'PA5', 'pin', null],
+    ['LED 5V 0805', '0805', 'package', '0805'],
+    ['LED 5V pin 330', 'pin 330', 'pin', null],
+    ['LED 5V GPIO 220', 'GPIO 220', 'pin', null],
+    ['LED 5V in 2200', 'in 2200', 'year', null],
+    ['엘이디 5V 2025년', '2025년', 'year', null]
+  ];
+  for (const [prompt, raw, kind, packageCode] of consumed) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.resistorExplicit, false, prompt);
+    assert.equal(parsed.resistanceOhms, 300, prompt);
+    assert.equal(parsed.supplyVolts, 5, prompt);
+    assert.equal(parsed.package ?? null, packageCode, prompt);
+    const tokens = classifyQuantities(prompt).tokens;
+    assert.equal(tokens.some((token) => token.kind === 'resistance' || token.kind === 'ambiguous'), false, `${prompt} ${JSON.stringify(tokens)}`);
+    const consumedToken = tokens.find((token) => token.raw === raw);
+    assert.ok(consumedToken, `${prompt} ${JSON.stringify(tokens.map((token) => token.raw))}`);
+    if (kind === 'package') assert.equal(consumedToken.kind, 'package', prompt);
+    else {
+      assert.equal(consumedToken.kind, 'context', prompt);
+      assert.equal(consumedToken.form, kind, prompt);
+    }
+    assert.notEqual(consumedToken.role, 'resistor', prompt);
+  }
+
+  for (const [prompt, raw, particle] of [['LED 12', '12', '는'], ['LED 24', '24', '는']]) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, `${prompt} drafted ${parsed.resistorValue} supply ${parsed.supplyVolts}`);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-ambiguous-number', prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.resistorValue, null, prompt);
+    assert.notEqual(parsed.supplyVolts, Number(raw), prompt);
+    assert.match(parsed.reviewBlockers[0].en, new RegExp(`^Is ${raw} a resistor in ohms`), parsed.reviewBlockers[0].en);
+    assert.match(parsed.reviewBlockers[0].ko, new RegExp(`^${raw}${particle} 저항\\(Ω\\)인가요`), parsed.reviewBlockers[0].ko);
+  }
+});
+
 test('amp, milliamp, and microamp currents are normalized, and out-of-range currents are refused', () => {
   const recognized = [
     ['0.02A', 20, 'A'],
@@ -518,6 +592,9 @@ test('amp, milliamp, and microamp currents are normalized, and out-of-range curr
   const refused = [
     ['LED 5V 0mA', '0mA', false],
     ['LED 5V 0 mA', '0mA', false],
+    ['LED 5V -20mA', '-20mA', false],
+    ['LED 5V -20 mA', '-20mA', false],
+    ['LED 5V \u221220mA', '-20mA', false],
     ['LED 5V 0A', '0mA', false],
     ['LED 5V 0uA', '0mA', false],
     ['LED 5V 500mA', '500mA', false],
@@ -683,12 +760,15 @@ test('korean particles follow the final consonant of the previous value', () => 
 
   const one = parseDiscreteLedRequest('LED 1').reviewBlockers[0];
   assert.equal(one.code, 'discrete-led-ambiguous-number');
-  assert.match(one.ko, /단위 없는 숫자 1은 저항으로/);
+  assert.match(one.en, /^Is 1 a resistor in ohms, an LED count, or something else\?/);
+  assert.match(one.ko, /^1은 저항\(Ω\)인가요, LED 개수인가요\?/);
   assert.equal(one.ko.includes('1는'), false);
+  assert.equal(one.en.includes('Refusing to draft'), false);
 
   const four = parseDiscreteLedRequest('LED 4').reviewBlockers[0];
   assert.equal(four.code, 'discrete-led-ambiguous-number');
-  assert.match(four.ko, /단위 없는 숫자 4는 저항으로/);
+  assert.match(four.en, /^Is 4 a resistor in ohms, an LED count, or something else\?/);
+  assert.match(four.ko, /^4는 저항\(Ω\)인가요, LED 개수인가요\?/);
   assert.equal(four.ko.includes('4은'), false);
 
   // Ω is read 옴 (batchim) → 을. V is read 볼트 and A is 에이 (no batchim) → 가.
@@ -1527,6 +1607,9 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     ['LED 세개', [{ value: 3, unit: 'count', raw: '세개' }]],
     ['다섯 개의 LED', [{ value: 5, unit: 'count', raw: '다섯 개' }]],
     ['2.5 LEDs', [{ value: 2.5, unit: 'count', raw: '2.5 LEDs' }]],
+    ['two and a half LEDs', [{ value: 2.5, unit: 'count', raw: 'two and a half LEDs' }]],
+    ['-20mA', [{ value: -20, unit: 'mA', raw: '-20mA' }]],
+    ['0mA', [{ value: 0, unit: 'mA', raw: '0mA' }]],
     ['2,5 LEDs', [{ value: 2.5, unit: 'count', raw: '2,5 LEDs' }]],
     ['2.5 pcs LED', [{ value: 2.5, unit: 'count', raw: '2.5 pcs' }]],
     ['LED ２개 5V', [
@@ -2044,7 +2127,17 @@ test('every discrete LED message is one language and Korean has no English words
     '5050 엘이디 5V',
     'SMD 0603 LED',
     'LED 5V 0mA',
+    'LED 5V -20mA',
     '엘이디 5V 0mA',
+    'two and a half LEDs',
+    'LED 330 and 4k7 on 5V',
+    'LED 5V 330 470',
+    'LED 5V 330Ω 470Ω',
+    'LED 12',
+    'LED 24',
+    'LED 5V 2025년',
+    'LED 5V pin 13',
+    'LED 5V 0805',
     'LED 5V 500mA',
     '엘이디 5V 500mA',
     'LED 5V 20mA 330Ω',
@@ -2108,6 +2201,7 @@ test('every discrete LED message is one language and Korean has no English words
     'discrete-led-implausible-vf',
     'discrete-led-ambiguous-range',
     'discrete-led-ambiguous-number',
+    'discrete-led-ambiguous-resistor',
     'discrete-led-invalid-count',
     'discrete-led-resistor-too-small',
     'discrete-led',
@@ -2371,11 +2465,15 @@ test('a voltage range with no Vf label asks which value is the supply', () => {
     assert.equal(parsed.resistanceOhms, null, prompt);
     assert.equal(parsed.reviewBlockers.length, 1, prompt);
     const blocker = parsed.reviewBlockers[0];
+    const shown = prompt.match(/\d[\d.\u2013\u2014-]*V/)[0];
     assert.equal(blocker.code, 'discrete-led-ambiguous-range', `${prompt} ${blocker.code}`);
-    assert.match(blocker.en, /which value is the supply/i, blocker.en);
+    assert.match(blocker.en, new RegExp(`^Which value is the supply and which is the LED Vf in ${escapeRegExp(shown)}\\?`), blocker.en);
     assert.match(blocker.en, /forward voltage \(Vf\)/i, blocker.en);
-    assert.match(blocker.ko, /공급 전압/, blocker.ko);
+    assert.match(blocker.ko, /^어느 값이 공급 전압이고 어느 값이/, blocker.ko);
     assert.match(blocker.ko, /순방향 전압/, blocker.ko);
+    assert.match(blocker.ko, new RegExp(escapeRegExp(shown)), blocker.ko);
+    assert.equal(blocker.en.includes('Refusing to draft'), false, blocker.en);
+    assert.equal(blocker.ko.includes('생성하지 않았습니다'), false, blocker.ko);
     assert.equal(/5V supply/i.test(blocker.en), false, blocker.en);
     assert.equal(blocker.message, /[가-힣]/.test(prompt) ? blocker.ko : blocker.en, prompt);
   }
@@ -2434,6 +2532,10 @@ test('quantity tokenization stays fast on long digit runs below the prompt cap',
   assert.equal(result.unparseable, false);
   assert.equal(result.tokens.some((token) => token.raw === '5V'), true);
 });
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function strayKoreanAscii(text) {
   const allowed = new Set([

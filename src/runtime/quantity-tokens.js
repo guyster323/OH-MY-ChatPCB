@@ -20,9 +20,12 @@ const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
 const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
 const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
 // A bare integer is a resistor only when it is an E24 value of at least 100
-// and not an LED package code. 10–99, non-E24 values, package codes, and
-// fractions stay ambiguous unless ohm/resistor wording is beside them. "LED"
-// itself is not that context. An "R=" / "R1" label is collected separately.
+// and not an LED package code. 10–99, non-E24 values, and fractions stay
+// ambiguous unless ohm/resistor wording is beside them. Package codes, years
+// ("2025년", "in 2025"), and pin names ("pin 13", "GPIO 13", "D13", "PA5")
+// are consumed and are never resistors. "LED" itself is not resistor context.
+// An "R=" / "R1" label is collected separately. Each resistor candidate is
+// reported; more than one is refused by the discrete LED parser.
 const RESISTOR_CONTEXT_WORD = '(?:\\bohms?\\b|\\bresistors?\\b|저항(?:값|은|는|이|가|을|를|의)?|(?<![가-힣])옴)';
 const RESISTOR_CONTEXT_BEFORE = new RegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
 const RESISTOR_CONTEXT_AFTER = new RegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
@@ -35,6 +38,9 @@ const PRIORITY = {
   ohm: 4,
   suffix: 5,
   current: 6,
+  // Years and pin names beat a bare number, and a year beats a package code
+  // that shares its digits ("2019년").
+  context: 6,
   // Same rank as tolerance. Both beat a count, so "5050 LED" is a package.
   package: 7,
   tolerance: 7,
@@ -47,7 +53,8 @@ const E24_RESISTOR_MANTISSA = Object.freeze([
   10, 11, 12, 13, 15, 16, 18, 20, 22, 24, 27, 30, 33, 36, 39, 43, 47, 51, 56, 62, 68, 75, 82, 91
 ]);
 
-// LED and chip packages. The only list: bare package codes are never resistors.
+// LED and chip packages. The only list: a package code is never a resistor,
+// whether or not it sits beside the word LED.
 export const LED_PACKAGE_CODES = Object.freeze([
   '0201', '0402', '0603', '0805', '1005', '1206', '1210', '1608', '1812', '2010',
   '2012', '2016', '2019', '2020', '2216', '2512', '2525', '2727', '2835', '3014',
@@ -55,8 +62,6 @@ export const LED_PACKAGE_CODES = Object.freeze([
   '4040', '5025', '5050', '5054', '5630', '5730', '5733', '6332', '7020', '7070'
 ]);
 const LED_PACKAGE_SET = new Set(LED_PACKAGE_CODES);
-const LED_NEAR = '(?:\\bleds?\\b|엘이디|발광(?:\\s*다이오드)?)';
-const SMD_NEAR = '(?:\\bsmds?\\b|\\bsmts?\\b|\\bchip\\b|\\bpackages?\\b|패키지)';
 
 export function isStandardE24Ohms(ohms) {
   if (!Number.isInteger(ohms) || ohms < 100) return false;
@@ -69,14 +74,6 @@ function isBareE24Resistor(rawNumber) {
   if (!/^[1-9]\d*$/.test(rawNumber)) return false;
   if (LED_PACKAGE_SET.has(rawNumber)) return false;
   return isStandardE24Ohms(Number(rawNumber));
-}
-
-function packageNextToLed(prompt, start, end) {
-  const before = prompt.slice(Math.max(0, start - 48), start);
-  const after = prompt.slice(end, end + 48);
-  const beforeLed = new RegExp(`${LED_NEAR}(?:\\s+${SMD_NEAR})?\\s*$`, 'i');
-  const afterLed = new RegExp(`^\\s*(?:${SMD_NEAR}\\s+)?${LED_NEAR}`, 'i');
-  return beforeLed.test(before) || afterLed.test(after);
 }
 
 const COUNT_WORD = {
@@ -435,7 +432,8 @@ function scaleCurrent(amount, unitText) {
 
 function collectCurrent(prompt, candidates) {
   // Hangul is not a word character, so \b never matches after 밀리암페어.
-  // Bare "A" is last so "mA" and "uA" keep their prefixes. 0mA stays a current.
+  // Bare "A" is last so "mA" and "uA" keep their prefixes. 0mA and a leading
+  // minus stay currents so the draft can refuse them.
   const boundary = '(?![A-Za-z0-9_])';
   const unit = [
     'milli\\s*amps?',
@@ -449,17 +447,18 @@ function collectCurrent(prompt, candidates) {
     '암페어',
     'a'
   ].join('|');
-  const pattern = new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
+  const pattern = new RegExp(`(?<![\\w.])([+\\-\\u2212]\\s*)?(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
   for (const match of prompt.matchAll(pattern)) {
-    const amount = Number(match[1]);
+    const amount = Number(match[2]);
     if (!Number.isFinite(amount) || amount < 0) continue;
-    const scaled = scaleCurrent(amount, match[2]);
-    pushCurrent(candidates, prompt, match, scaled.milliamps, scaled.unit);
+    const negative = /^[-\u2212]/.test(match[1] ?? '');
+    const scaled = scaleCurrent(amount, match[3]);
+    pushCurrent(candidates, prompt, match, negative ? -scaled.milliamps : scaled.milliamps, scaled.unit);
   }
 }
 
 function pushCurrent(candidates, prompt, match, milliamps, unit) {
-  if (!Number.isFinite(milliamps) || milliamps < 0) return;
+  if (!Number.isFinite(milliamps)) return;
   const start = match.index ?? 0;
   const end = start + match[0].length;
   candidates.push({
@@ -602,6 +601,16 @@ function pushWordCountToken(candidates, prompt, start, end, value) {
 // covers only the number word. "two pcs LED" is already a pcs count.
 function collectEnglishWordCounts(prompt, candidates) {
   const words = Object.keys(COUNT_WORD).join('|');
+  // "two and a half LEDs" is a fractional count, same as "2.5 LEDs". The
+  // integer word matcher would otherwise keep "two" and drop the half.
+  const fractional = new RegExp(`\\b(${words})\\s+and\\s+(?:a|one)\\s+half\\s+leds?\\b`, 'i');
+  const fraction = fractional.exec(prompt);
+  if (fraction) {
+    const value = COUNT_WORD[fraction[1].toLowerCase()] + 0.5;
+    const start = fraction.index ?? 0;
+    pushWordCountToken(candidates, prompt, start, start + fraction[0].length, value);
+    return true;
+  }
   const englishLed = new RegExp(`\\b(${words})\\b(?:\\s+\\w+){0,3}\\s+leds?\\b`, 'i');
   const english = englishLed.exec(prompt);
   if (!english) return false;
@@ -724,6 +733,56 @@ function ambiguousNumberToken(prompt, start, end, value) {
   };
 }
 
+function contextToken(prompt, start, end, form) {
+  return {
+    value: null,
+    unit: form,
+    raw: prompt.slice(start, end),
+    start,
+    end,
+    kind: 'context',
+    form,
+    range: null,
+    ac: false,
+    dc: false,
+    pot: false
+  };
+}
+
+function pushContext(candidates, prompt, match, form) {
+  const start = match.index ?? 0;
+  const end = start + match[0].length;
+  candidates.push({
+    priority: PRIORITY.context,
+    start,
+    end,
+    invalid: false,
+    token: contextToken(prompt, start, end, form)
+  });
+}
+
+// Years and pin names own their digits. "in 2200" and "pin 330" are not
+// resistors even when the number is an E24 value. "5V" after a pin name stays
+// a voltage because the digit is followed by a unit letter.
+function collectContext(prompt, candidates) {
+  const years = [
+    /(?<![\w.])\d{4}\s*년/g,
+    /(?<![A-Za-z])in\s+\d{4}(?![\w.])/gi
+  ];
+  const pins = [
+    /(?<![A-Za-z])pins?\s*\d+(?![\w.])/gi,
+    /(?<![A-Za-z])GPIO\s*\d+(?![\w.])/gi,
+    /(?<![A-Za-z])D\d+(?![\w.])/g,
+    /(?<![A-Za-z])P[A-Za-z]\d+(?![\w.])/g
+  ];
+  for (const pattern of years) {
+    for (const match of prompt.matchAll(pattern)) pushContext(candidates, prompt, match, 'year');
+  }
+  for (const pattern of pins) {
+    for (const match of prompt.matchAll(pattern)) pushContext(candidates, prompt, match, 'pin');
+  }
+}
+
 function collectPackages(prompt, candidates) {
   const pattern = /(?<![\w.])(\d{4})(?![\w.])/g;
   for (const match of prompt.matchAll(pattern)) {
@@ -731,7 +790,6 @@ function collectPackages(prompt, candidates) {
     if (!LED_PACKAGE_SET.has(code)) continue;
     const start = match.index ?? 0;
     const end = start + code.length;
-    if (!packageNextToLed(prompt, start, end)) continue;
     candidates.push({
       priority: PRIORITY.package,
       start,
@@ -763,7 +821,7 @@ function collectBare(prompt, candidates) {
     const rawNumber = match[1];
     const ohms = Number(rawNumber);
     if (!(ohms > 0)) continue;
-    if (LED_PACKAGE_SET.has(rawNumber) && packageNextToLed(prompt, start, end)) continue;
+    if (LED_PACKAGE_SET.has(rawNumber)) continue;
     const asResistor = bareHasResistorContext(prompt, start, end) || isBareE24Resistor(rawNumber);
     const token = asResistor
       ? resistanceToken(prompt, start, end, ohms, 'bare')
@@ -817,6 +875,7 @@ export function tokenizeQuantities(prompt) {
   collectTolerance(text, candidates);
   collectCounts(text, candidates);
   collectPackages(text, candidates);
+  collectContext(text, candidates);
   collectUnitlessForward(text, candidates);
   collectBare(text, candidates);
 

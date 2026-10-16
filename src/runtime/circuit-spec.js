@@ -137,7 +137,8 @@ function titleFromPrompt(prompt) {
 }
 
 const DISCRETE_LED_EXCLUDE = /\besp32\b|\bstm32\b|\brp2040\b|\bnrf52\b|\batmega\b|\barduino\b|\bmcu\b|마이크로\s*컨트롤러|\bbms\b|adbms|ltc681|센서|sensor|\busb-?c\b|\busb\b|\bbattery\s+monitor\b|\bbattery\s+management\b|배터리\s*모니터|배터리\s*관리/i;
-const DISCRETE_LED_BOARD_WORDS = /\b(?:button|reset|boot|regulator|connector|header|i2c|spi|uart|gpio|display|lcd|switch|buzzer|motor|relay)\b|버튼|리셋|커넥터|헤더|레귤레이터|디스플레이/i;
+// "GPIO 13" is a pin number on an LED prompt. "GPIO header" is still a board.
+const DISCRETE_LED_BOARD_WORDS = /\b(?:button|reset|boot|regulator|connector|header|i2c|spi|uart|display|lcd|switch|buzzer|motor|relay)\b|\bgpio\b(?!\s*\d)|버튼|리셋|커넥터|헤더|레귤레이터|디스플레이/i;
 const DISCRETE_PROFILE_KINDS = new Set(['battery-monitor', 'isolated-dcdc', 'bms']);
 const MAX_DISCRETE_LEDS = 8;
 const MAX_DISCRETE_LED_PROMPT_CHARS = 4000;
@@ -382,11 +383,10 @@ function promptTooLongMessage() {
 }
 
 function ambiguousRangeMessage(token) {
-  const min = formatVolts(token.range.min);
-  const max = formatVolts(token.range.max);
+  const raw = token.raw;
   return {
-    en: `Refusing to draft an LED circuit because ${token.raw} is a voltage range with no Vf label. Which value is the supply and which is the forward voltage (Vf)? No LED, resistor, or power symbol was generated.`,
-    ko: `${min}V에서 ${max}V까지는 순방향 전압 표시가 없는 전압 범위입니다. 어느 값이 공급 전압이고 어느 값이 순방향 전압인지 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    en: `Which value is the supply and which is the LED Vf in ${raw}? Name the supply and the forward voltage (Vf), then ask again.`,
+    ko: `어느 값이 공급 전압이고 어느 값이 LED 순방향 전압인가요, ${raw}? 공급 전압과 순방향 전압을 따로 적어 다시 요청해 주세요.`
   };
 }
 
@@ -409,8 +409,30 @@ function invalidCountMessage(token) {
 function ambiguousNumberMessage(token) {
   const raw = token.raw;
   return {
-    en: `Refusing to draft an LED circuit because ${raw} has no unit. Is it a series resistor (for example 330Ω or 330 ohm) or an LED count (for example 3 pcs)? No LED, resistor, or power symbol was generated.`,
-    ko: `단위 없는 숫자 ${withJosa(raw, '은/는')} 저항으로 만들지 않습니다. 직렬 저항인지(330Ω 또는 330옴) LED 개수인지(3개) 알려 주세요. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    en: `Is ${raw} a resistor in ohms, an LED count, or something else? Add a unit (330Ω) or a count (3개), then ask again.`,
+    ko: `${withJosa(raw, '은/는')} 저항(Ω)인가요, LED 개수인가요? 단위(330Ω)나 개수(3개)를 붙여 다시 요청해 주세요.`
+  };
+}
+
+function joinResistorChoices(labels, english) {
+  if (labels.length <= 1) return labels.join('');
+  if (labels.length === 2) {
+    return english
+      ? `${labels[0]} or ${labels[1]}`
+      : `${labels[0]}${josa(labels[0], '과/와')} ${labels[1]}`;
+  }
+  const last = labels.at(-1);
+  const head = labels.slice(0, -1);
+  return english
+    ? `${head.join(', ')}, or ${last}`
+    : `${head.join(', ')}${josa(head.at(-1), '과/와')} ${last}`;
+}
+
+function ambiguousResistorMessage(tokens) {
+  const labels = tokens.map((token) => formatOhms(token.value) ?? token.raw);
+  return {
+    en: `Which resistor should the LED use, ${joinResistorChoices(labels, true)}? Name one series resistor, then ask again.`,
+    ko: `어느 것을 직렬 저항으로 쓸까요, ${joinResistorChoices(labels, false)}? 저항을 하나만 적어 다시 요청해 주세요.`
   };
 }
 
@@ -964,6 +986,19 @@ export function parseDiscreteLedRequest(prompt) {
       supplyVolts: supply.supplyVolts,
       supplyAssumed: supply.supplyAssumed === true,
       texts: ambiguousNumberMessage(ambiguousNumber)
+    });
+  }
+  // Two resistor candidates are not a per-LED list. Ask instead of picking one.
+  const resistors = scan.tokens
+    .filter((token) => token.role === 'resistor' && token.value > 0)
+    .sort((left, right) => left.start - right.start);
+  if (resistors.length > 1) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-ambiguous-resistor',
+      prompt: text,
+      supplyVolts: supply.supplyVolts,
+      supplyAssumed: supply.supplyAssumed === true,
+      texts: ambiguousResistorMessage(resistors)
     });
   }
   const supplyVolts = supply.supplyVolts;

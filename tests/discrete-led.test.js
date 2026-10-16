@@ -173,8 +173,10 @@ test('count markers draft LEDs and a unitless number is not placed as ohms', asy
   assert.equal(ambiguous.review.status, 'blocked');
   const ambiguousBlocker = ambiguous.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
   assert.ok(ambiguousBlocker, JSON.stringify(ambiguous.review.findings.blockers));
-  assert.match(ambiguousBlocker.en, /2 has no unit/);
-  assert.match(ambiguousBlocker.ko, /단위 없는 숫자 2/);
+  assert.match(ambiguousBlocker.en, /^Is 2 a resistor in ohms, an LED count, or something else\?/);
+  assert.match(ambiguousBlocker.ko, /^2는 저항\(Ω\)인가요, LED 개수인가요\?/);
+  assert.equal(ambiguousBlocker.en.includes('Refusing to draft'), false);
+  assert.equal(ambiguousBlocker.ko.includes('생성하지 않았습니다'), false);
   assert.equal(ambiguousBlocker.message, ambiguousBlocker.en);
   assert.equal(ambiguous.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false);
 
@@ -274,7 +276,9 @@ test('tolerance, labeled and bare resistors, fullwidth digits, and sub-ohm refus
 
   const fraction = await generateLed('LED 5V 3.2');
   assert.equal(fraction.spec.discrete.refused, true);
-  assert.match(fraction.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number').ko, /3\.2는/);
+  const fractionBlocker = fraction.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
+  assert.match(fractionBlocker.en, /^Is 3\.2 a resistor in ohms, an LED count, or something else\?/);
+  assert.match(fractionBlocker.ko, /^3\.2는 저항\(Ω\)인가요, LED 개수인가요\?/);
 
   for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0.5Ω', 'LED 5V R47']) {
     const refused = await generateLed(prompt);
@@ -300,11 +304,15 @@ test('tolerance, labeled and bare resistors, fullwidth digits, and sub-ohm refus
 
   const one = await generateLed('LED 1');
   const oneBlocker = one.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
-  assert.match(oneBlocker.ko, /단위 없는 숫자 1은 /);
+  assert.match(oneBlocker.en, /^Is 1 a resistor in ohms/);
+  assert.match(oneBlocker.ko, /^1은 저항\(Ω\)인가요/);
+  assert.equal(oneBlocker.ko.includes('1는'), false);
 
   const four = await generateLed('LED 4');
   const fourBlocker = four.review.findings.blockers.find((finding) => finding.code === 'discrete-led-ambiguous-number');
-  assert.match(fourBlocker.ko, /단위 없는 숫자 4는 /);
+  assert.match(fourBlocker.en, /^Is 4 a resistor in ohms/);
+  assert.match(fourBlocker.ko, /^4는 저항\(Ω\)인가요/);
+  assert.equal(fourBlocker.ko.includes('4은'), false);
 });
 
 test('a specified LED current sizes the series resistor', async () => {
@@ -347,7 +355,9 @@ test('LED package codes, bare E24 resistors, and current units fail closed', asy
     ['5050 LED 5V', '5050', 5, '300Ω', false],
     ['LED 2835 5V', '2835', 5, '300Ω', false],
     ['SMD 0603 LED', '0603', 5, '300Ω', true],
-    ['3528 LED 12V', '3528', 12, '1kΩ', false]
+    ['3528 LED 12V', '3528', 12, '1kΩ', false],
+    ['LED 5V 0805', '0805', 5, '300Ω', false],
+    ['LED 5V 2019', '2019', 5, '300Ω', false]
   ];
   for (const [prompt, code, supply, resistor, assumed] of packages) {
     const result = await generateLed(prompt);
@@ -382,7 +392,7 @@ test('LED package codes, bare E24 resistors, and current units fail closed', asy
   assert.equal(components(kept, 'Device:LED').length, 3);
   assert.ok(components(kept, 'Device:R').every((part) => part.value === '470Ω'));
 
-  for (const prompt of ['LED 12 5V', 'LED 5V 12', 'LED 10', 'LED 333', 'LED 123', 'LED 5V 2019']) {
+  for (const prompt of ['LED 12 5V', 'LED 5V 12', 'LED 10', 'LED 12', 'LED 24', 'LED 333', 'LED 123']) {
     const refused = await generateLed(prompt);
     assert.equal(refused.spec.discrete.refused, true, `${prompt} drafted ${refused.spec.discrete.resistorValue}`);
     assert.equal(components(refused, 'Device:LED').length, 0, prompt);
@@ -391,6 +401,10 @@ test('LED package codes, bare E24 resistors, and current units fail closed', asy
     assert.equal(refused.review.status, 'blocked', prompt);
     const blocker = refused.review.findings.blockers.find((item) => item.code === 'discrete-led-ambiguous-number');
     assert.ok(blocker, `${prompt} ${JSON.stringify(refused.review.findings.blockers)}`);
+    assert.match(blocker.en, /^Is \S+ a resistor in ohms/, blocker.en);
+    assert.match(blocker.ko, /^\S+(?:은|는) 저항\(Ω\)인가요/, blocker.ko);
+    assert.equal(blocker.en.includes('Refusing to draft'), false, blocker.en);
+    assert.equal(blocker.ko.includes('생성하지 않았습니다'), false, blocker.ko);
   }
 
   const currents = [
@@ -413,7 +427,7 @@ test('LED package codes, bare E24 resistors, and current units fail closed', asy
     assert.equal(result.review.status, 'ready-for-prototype-review', prompt);
   }
 
-  for (const [prompt, shown] of [['LED 5V 500mA', '500mA'], ['LED 5V 0mA', '0mA'], ['LED 5V 0.5A', '500mA']]) {
+  for (const [prompt, shown] of [['LED 5V 500mA', '500mA'], ['LED 5V 0mA', '0mA'], ['LED 5V 0.5A', '500mA'], ['LED 5V -20mA', '-20mA']]) {
     const refused = await generateLed(prompt);
     assert.equal(refused.spec.discrete.refused, true, prompt);
     assert.equal(components(refused, 'Device:LED').length, 0, prompt);
