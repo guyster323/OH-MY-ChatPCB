@@ -199,9 +199,7 @@ $env:CHATPCB_GROK_TIMEOUT_MS = "420000"
 
 ## ChatGPT
 
-Choose **Continue with ChatGPT** in the panel to use a ChatGPT plan. Sign-in opens the system browser. Do not enter the account password in ChatPCB.
-
-OpenAI dynamic client registration issues an `oaiapp_` client id for this app. OpenAI expects that client id to be reused on the next sign-in, together with this machine's host id. Sign-out keeps the credentials file so the next **Continue with ChatGPT** can send the same client id. It does not start a new registration.
+OpenAI dynamic client registration issues an `oaiapp_` client id for this app. OpenAI expects that client id to be reused on the next sign-in, together with this machine's host id. Sign-out keeps the credentials file so the next sign-in can send the same client id. It does not start a new registration.
 
 After sign-out the file holds only that registration. When each value was stored, the keys are exactly:
 

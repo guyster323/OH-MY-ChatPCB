@@ -59,7 +59,7 @@ async function main() {
     }, `ws://127.0.0.1:${daemon.port}/ws`);
 
     await page.goto(`${staticServer.url}/index.html`);
-    await page.getByText('Daemon connected', { exact: true }).waitFor();
+    await page.getByText('Connected', { exact: true }).waitFor();
     await expectSendDisabled(page);
 
     await page.getByLabel('Workspace root').fill(workspaceRoot);
@@ -180,7 +180,7 @@ async function main() {
       };
     }, `ws://127.0.0.1:${daemon.port}/ws`);
     await silentHostPage.goto(`${staticServer.url}/index.html`);
-    await silentHostPage.getByText('Daemon connected', { exact: true }).waitFor();
+    await silentHostPage.getByText('Connected', { exact: true }).waitFor();
     await silentHostPage.getByLabel('Workspace root').fill(workspaceRoot);
     await silentHostPage.getByLabel('Project name').fill('Silent host board');
     await silentHostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
@@ -214,7 +214,7 @@ async function main() {
       };
     }, `ws://127.0.0.1:${daemon.port}/ws`);
     await hostPage.goto(`${staticServer.url}/index.html`);
-    await hostPage.getByText('Daemon connected', { exact: true }).waitFor();
+    await hostPage.getByText('Connected', { exact: true }).waitFor();
     await hostPage.getByLabel('Workspace root').fill(workspaceRoot);
     await hostPage.getByLabel('Project name').fill('Host status board');
     await hostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();

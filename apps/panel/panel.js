@@ -1,124 +1,6 @@
 const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
-const CHATGPT_AUTH_POLL_MS = 2000;
-
-// i18n helper
-let i18nStrings = {};
-let i18nReady = false;
-let daemonConnectionState = 'connecting';
-
-const DAEMON_CONNECTION_COPY = {
-  connecting: { en: 'Connecting', ko: '연결 중' },
-  open: { en: 'Daemon connected', ko: '데몬 연결됨' },
-  closed: { en: 'Daemon disconnected', ko: '데몬 연결 끊김' },
-  error: { en: 'Daemon connection error', ko: '데몬 연결 오류' }
-};
-
-async function loadI18n(localeName = 'en') {
-  try {
-    const response = await fetch(`./locales/${localeName}.json`);
-    if (response.ok) {
-      i18nStrings = await response.json();
-    } else if (localeName !== 'en') {
-      await loadI18n('en');
-      return;
-    }
-  } catch {
-    // Fallback to English if locale fails to load
-    if (localeName !== 'en') {
-      await loadI18n('en');
-      return;
-    }
-  }
-  i18nReady = true;
-  renderDaemonConnection();
-  renderChatGPTAuth();
-}
-
-function daemonConnectionLabel() {
-  const key = `connection.daemon.${daemonConnectionState}`;
-  if (i18nStrings[key]) return i18nStrings[key];
-  const copy = DAEMON_CONNECTION_COPY[daemonConnectionState] || DAEMON_CONNECTION_COPY.connecting;
-  return locale === 'ko' ? copy.ko : copy.en;
-}
-
-function renderDaemonConnection() {
-  if (!statusEl) return;
-  statusEl.textContent = daemonConnectionLabel();
-  statusEl.dataset.role = 'daemon';
-  statusEl.dataset.state = daemonConnectionState;
-  statusEl.classList.add('daemon-connection');
-}
-
-function setDaemonConnectionState(state) {
-  daemonConnectionState = state;
-  renderDaemonConnection();
-}
-
-function approvalNoManifestMessage() {
-  const translated = t('approval.no-manifest');
-  if (translated && translated !== 'approval.no-manifest') return translated;
-  return locale === 'ko'
-    ? '부품 목록은 스키매틱에 적용한 뒤 확인됩니다.'
-    : 'Parts list will be checked after you apply to the schematic.';
-}
-
-function approvalNoManifestDetail() {
-  const translated = t('approval.no-manifest-detail');
-  if (translated && translated !== 'approval.no-manifest-detail') return translated;
-  return locale === 'ko'
-    ? '파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인합니다.'
-    : 'The patch is still matched to the current files before anything is written.';
-}
-
-function t(key, replacements = {}) {
-  let text = i18nStrings[key] || key;
-  for (const [placeholder, value] of Object.entries(replacements)) {
-    text = text.replace(`{${placeholder}}`, value);
-  }
-  return text;
-}
-
-function formatChatGPTAuthExpiry(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  const tag = locale === 'ko' ? 'ko-KR' : 'en-US';
-  return new Intl.DateTimeFormat(tag, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(date);
-}
-
-// Detect locale from browser
-const browserLocale = navigator.language || navigator.userLanguage || 'en';
-const locale = browserLocale.startsWith('ko') ? 'ko' : 'en';
-loadI18n(locale);
-
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
-}
-
-// Only https URLs may be written into an auth href. The returned string is HTML-escaped.
-function chatgptAuthHref(value) {
-  if (typeof value !== 'string' || value.length === 0) return null;
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== 'https:') return null;
-  return escapeHtml(parsed.href);
-}
-
 const PROGRESS_COPY = {
   conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
   provider: { title: 'CLI와 대화 중', sprite: 'cli' },
@@ -200,23 +82,13 @@ const inspectionArtifactCountEl = document.querySelector('#inspection-artifact-c
 const inspectionErcEl = document.querySelector('#inspection-erc');
 const inspectionDrcEl = document.querySelector('#inspection-drc');
 const patchApprovalCardEl = document.querySelector('#patch-approval-card');
-const patchApprovalSourceEl = document.querySelector('#patch-approval-source');
-const patchApprovalPartsEl = document.querySelector('#patch-approval-parts');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
-const patchApprovalTechnicalDetailsEl = document.querySelector('#patch-approval-technical-details');
-const patchApprovalTechnicalDetailEl = document.querySelector('#patch-approval-technical-detail');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
 const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
 const kiCadFallbackEl = document.querySelector('#kicad-fallback');
-const chatgptAuthCardEl = document.querySelector('#chatgpt-auth-card');
-const chatgptSwitchOfferEl = document.querySelector('#chatgpt-switch-offer');
-const chatgptSwitchOfferTextEl = document.querySelector('#chatgpt-switch-offer-text');
-const chatgptSwitchOfferAcceptEl = document.querySelector('#chatgpt-switch-offer-accept');
-const chatgptSwitchOfferDismissEl = document.querySelector('#chatgpt-switch-offer-dismiss');
-const authLiveRegionEl = document.querySelector('#auth-live-region');
 
 let socket;
 let activeProject = null;
@@ -235,22 +107,7 @@ let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutRevie
 const pendingCalls = new Map();
 const workflowCaptionEl = document.querySelector('#workflow-caption');
 const workflowCliEl = document.querySelector('#workflow-cli');
-let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
-let chatgptAuthKnown = false;
-let chatgptAuthPoll = null;
-let chatgptAuthExpiryTimer = null;
-let switchOfferEpoch = 0;
-let activeSwitchOfferStorageKey = null;
-let activeSwitchIdentity = '';
-let anonymousSwitchOfferRecorded = false;
-const switchOfferRecordedKeys = new Set();
-const pageOnlySwitchIdentities = new Set();
-const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
-const CHATGPT_SWITCH_OFFER_PREFIX = 'chatpcb.chatgpt-switch-offered';
-const CHATGPT_SWITCH_OFFER_HASH_HEX = 16;
 
-restoreProviderSelection();
-renderDaemonConnection();
 connect();
 syncWorkflow();
 
@@ -266,14 +123,7 @@ formEl.addEventListener('submit', (event) => {
   event.preventDefault();
   sendProjectRequest();
 });
-providerEl.addEventListener('change', () => {
-  rememberProvider(providerEl.value);
-  refreshProviderStatus();
-  updateChatGPTAuthVisibility();
-  syncChatGPTSwitchOffer();
-});
-chatgptSwitchOfferAcceptEl?.addEventListener('click', acceptChatGPTSwitchOffer);
-chatgptSwitchOfferDismissEl?.addEventListener('click', dismissChatGPTSwitchOffer);
+providerEl.addEventListener('change', refreshProviderStatus);
 openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
@@ -300,21 +150,19 @@ document.addEventListener('visibilitychange', () => {
 
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
-  window.__daemonSocket = socket;
   socket.addEventListener('open', () => {
-    setDaemonConnectionState('open');
+    statusEl.textContent = 'Connected';
     clearPatchApproval();
     refreshProviderStatus();
-    refreshChatGPTAuthStatus();
     inspectActiveProject();
   });
   socket.addEventListener('message', (event) => handleEnvelope(JSON.parse(event.data)));
   socket.addEventListener('close', () => {
-    setDaemonConnectionState('closed');
+    statusEl.textContent = 'Disconnected';
     setTimeout(connect, 1500);
   });
   socket.addEventListener('error', () => {
-    setDaemonConnectionState('error');
+    statusEl.textContent = 'Connection error';
   });
 }
 
@@ -395,77 +243,6 @@ function refreshProviderStatus() {
   sendToolCall({ id, name: 'provider.status', args: { provider: providerEl.value } });
 }
 
-function refreshProviderStatusForAuth(previous, next) {
-  if (next !== 'signed_in' && next !== 'signed_out') return;
-  if (previous === next) return;
-  refreshProviderStatus();
-}
-
-function restoreProviderSelection() {
-  const stored = readStoredProvider();
-  if (!stored || !providerEl) return;
-  const listed = [...providerEl.options].some((option) => option.value === stored);
-  if (listed) providerEl.value = stored;
-}
-
-function readStoredProvider() {
-  try {
-    return localStorage.getItem(PROVIDER_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function rememberProvider(provider) {
-  try {
-    localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
-  } catch {
-    // The select still works for this page when storage is blocked.
-  }
-}
-
-function accountSwitchIdentity(account) {
-  const sub = typeof account?.sub === 'string' ? account.sub.trim() : '';
-  if (sub) return sub;
-  const email = typeof account?.email === 'string' ? account.email.trim() : '';
-  return email;
-}
-
-async function shortSha256Hex(value) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  let hex = '';
-  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, '0');
-  return hex.slice(0, CHATGPT_SWITCH_OFFER_HASH_HEX);
-}
-
-function readStoredSwitchOffer(key) {
-  if (switchOfferRecordedKeys.has(key)) return true;
-  try {
-    return localStorage.getItem(key) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function rememberChatGPTSwitchOffered() {
-  if (activeSwitchOfferStorageKey) {
-    switchOfferRecordedKeys.add(activeSwitchOfferStorageKey);
-    try {
-      localStorage.setItem(activeSwitchOfferStorageKey, '1');
-    } catch {
-      // The choice still sticks for this page when storage is blocked.
-    }
-  } else if (activeSwitchIdentity) {
-    pageOnlySwitchIdentities.add(activeSwitchIdentity);
-  } else {
-    anonymousSwitchOfferRecorded = true;
-  }
-  if (chatgptSwitchOfferEl) {
-    chatgptSwitchOfferEl.hidden = true;
-    chatgptSwitchOfferEl.dataset.decision = 'hidden';
-  }
-}
-
 function sendToolCall(payload) {
   const envelope = {
     version: 1,
@@ -488,19 +265,11 @@ function handleEnvelope(envelope) {
     handleProgressDelta(envelope.payload);
     return;
   }
-  if (envelope.type === 'auth.chatgpt.changed') {
-    handleChatGPTAuthChanged(envelope.payload);
-    return;
-  }
   if (envelope.type !== 'tool.result') return;
   const id = envelope.payload.id;
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
   pendingCalls.delete(id);
 
-  if (callName === 'auth.chatgpt.reopen') {
-    applyChatGPTReopenResult(envelope.payload);
-    return;
-  }
   if (!envelope.payload.ok && envelope.payload.error?.code === 'PROJECT_BUSY' && isProjectBusyCall(callName)) {
     showProjectBusy(callName, envelope.payload.error?.message);
     return;
@@ -545,9 +314,9 @@ function handleEnvelope(envelope) {
       const errorCode = envelope.payload.error?.code;
       const errorMessage = envelope.payload.error?.message ?? 'Tool call failed.';
       const technicalDetail = envelope.payload.technicalDetail ?? errorMessage;
-
+      
       appendProgress({ stage: 'fail', text: errorMessage });
-
+      
       if (errorCode === 'PROVIDER_DISALLOWED_TOOL') {
         renderRequestStatus({
           state: 'failed',
@@ -614,52 +383,6 @@ function handleEnvelope(envelope) {
     const provider = envelope.payload.result;
     providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
     providerStatusEl.dataset.status = provider.status;
-    
-    // If this is chatgpt, also update auth state
-    if (provider.provider === 'chatgpt') {
-      chatgptAuthState = {
-        state: provider.status === 'signed-in' ? 'signed_in' : 'signed_out',
-        account: provider.account,
-        plan: provider.plan
-      };
-      chatgptAuthKnown = true;
-      renderChatGPTAuth();
-    }
-  }
-  if (callName === 'auth.chatgpt.status') {
-    applyChatGPTAuthStatus(envelope.payload.result || {});
-    return;
-  }
-  if (callName === 'auth.chatgpt.start') {
-    const result = envelope.payload.result;
-    chatgptAuthState = {
-      ...chatgptAuthState,
-      state: result.state || 'waiting',
-      attemptId: result.attemptId,
-      authUrl: result.authUrl,
-      expiresAt: result.expiresAt,
-      code: undefined
-    };
-    chatgptAuthKnown = true;
-    renderChatGPTAuth();
-    if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
-    else stopChatGPTAuthPolling();
-    return;
-  }
-  if (callName === 'auth.chatgpt.cancel') {
-    stopChatGPTAuthPolling();
-    chatgptAuthState = { state: 'signed_out' };
-    chatgptAuthKnown = true;
-    renderChatGPTAuth();
-    return;
-  }
-  if (callName === 'auth.chatgpt.signOut') {
-    stopChatGPTAuthPolling();
-    chatgptAuthState = { state: 'signed_out' };
-    chatgptAuthKnown = true;
-    renderChatGPTAuth();
-    refreshProviderStatus();
-    return;
   }
 }
 
@@ -886,44 +609,6 @@ function renderInspectionValidation(label, result) {
     : `DRC ${summary.violationCount ?? 0}/${summary.unconnectedCount ?? 0}`;
 }
 
-function draftSourceLabel(source) {
-  if (!source) return '';
-  if (source.via === 'provider' && source.provider === 'chatgpt') return t('source.chatgpt');
-  if (source.via === 'native-fallback') return t('source.native');
-  return '';
-}
-
-function draftParts(preview) {
-  return Array.isArray(preview?.components) ? preview.components : [];
-}
-
-function renderDraftEvidence(preview) {
-  if (!patchApprovalSourceEl || !patchApprovalPartsEl) return;
-  const source = preview?.source ?? preview?.conversation?.lastSource ?? null;
-  const label = draftSourceLabel(source);
-  patchApprovalSourceEl.textContent = label;
-  patchApprovalSourceEl.hidden = label.length === 0;
-  const parts = draftParts(preview);
-  patchApprovalPartsEl.replaceChildren();
-  for (const part of parts) {
-    const item = document.createElement('li');
-    item.textContent = `${part.ref ?? ''} · ${part.value ?? ''} · ${part.libId ?? ''}`;
-    patchApprovalPartsEl.append(item);
-  }
-  patchApprovalPartsEl.hidden = parts.length === 0;
-}
-
-function clearDraftEvidence() {
-  if (patchApprovalSourceEl) {
-    patchApprovalSourceEl.textContent = '';
-    patchApprovalSourceEl.hidden = true;
-  }
-  if (patchApprovalPartsEl) {
-    patchApprovalPartsEl.replaceChildren();
-    patchApprovalPartsEl.hidden = true;
-  }
-}
-
 function setPatchApproval(preview) {
   clearPatchApproval();
   patchApprovalState = { patchId: preview.patchId, expiresAt: preview.expiresAt, timeout: null };
@@ -935,14 +620,6 @@ function setPatchApproval(preview) {
     }, delay);
   }
   renderPatchApproval();
-  renderDraftEvidence(preview);
-}
-
-function setPatchApprovalTechnicalDetail(text) {
-  if (!patchApprovalTechnicalDetailsEl || !patchApprovalTechnicalDetailEl) return;
-  const detail = typeof text === 'string' ? text : '';
-  patchApprovalTechnicalDetailEl.textContent = detail;
-  patchApprovalTechnicalDetailsEl.hidden = detail.length === 0;
 }
 
 function clearPatchApproval(message = 'No patch preview active.') {
@@ -950,8 +627,6 @@ function clearPatchApproval(message = 'No patch preview active.') {
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
   patchApprovalStatusEl.dataset.state = 'idle';
   patchApprovalStatusEl.textContent = message;
-  clearDraftEvidence();
-  setPatchApprovalTechnicalDetail('');
   approvePatchButtonEl.disabled = true;
   cancelPatchButtonEl.disabled = true;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
@@ -965,7 +640,6 @@ function renderPatchApproval() {
   approvePatchButtonEl.disabled = !active || !approvedEvidence;
   cancelPatchButtonEl.disabled = !active;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = !active;
-  setPatchApprovalTechnicalDetail('');
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
@@ -980,8 +654,7 @@ function renderPatchApproval() {
   }
   if (freshness === 'missing' || !freshness) {
     patchApprovalStatusEl.dataset.state = 'warning';
-    patchApprovalStatusEl.textContent = approvalNoManifestMessage();
-    setPatchApprovalTechnicalDetail(approvalNoManifestDetail());
+    patchApprovalStatusEl.textContent = 'Approval allowed with no manifest evidence; exact patch hashes will still be verified.';
     return;
   }
   patchApprovalStatusEl.dataset.state = 'ready';
@@ -1497,449 +1170,3 @@ async function awaitStatus(statusPromise) {
     clearTimeout(timeout);
   }
 }
-
-// ChatGPT Auth functions
-function updateChatGPTAuthVisibility() {
-  const isChatGPT = providerEl.value === 'chatgpt';
-  
-  if (isChatGPT) {
-    refreshChatGPTAuthStatus();
-  } else {
-    chatgptAuthCardEl.hidden = true;
-  }
-}
-
-function refreshChatGPTAuthStatus() {
-  const id = `auth_chatgpt_status_${Date.now()}`;
-  pendingCalls.set(id, 'auth.chatgpt.status');
-  sendToolCall({ id, name: 'auth.chatgpt.status', args: {} });
-}
-
-function stopChatGPTAuthPolling() {
-  if (chatgptAuthPoll) {
-    clearInterval(chatgptAuthPoll);
-    chatgptAuthPoll = null;
-  }
-  if (chatgptAuthExpiryTimer) {
-    clearTimeout(chatgptAuthExpiryTimer);
-    chatgptAuthExpiryTimer = null;
-  }
-}
-
-function chatGPTAuthExpiredLocally() {
-  const expiresAt = Date.parse(chatgptAuthState.expiresAt);
-  return Number.isFinite(expiresAt) && Date.now() >= expiresAt;
-}
-
-function showChatGPTAuthExpired() {
-  stopChatGPTAuthPolling();
-  if (chatgptAuthState.state === 'error' && chatgptAuthState.code === 'timeout') return;
-  chatgptAuthState = {
-    ...chatgptAuthState,
-    state: 'error',
-    code: 'timeout'
-  };
-  chatgptAuthKnown = true;
-  renderChatGPTAuth();
-  updateLiveRegion({ state: 'error', code: 'timeout' });
-}
-
-function startChatGPTAuthPolling() {
-  stopChatGPTAuthPolling();
-  if (chatgptAuthState.state !== 'waiting') return;
-  const expiresAt = Date.parse(chatgptAuthState.expiresAt);
-  if (!Number.isFinite(expiresAt)) return;
-  const delay = expiresAt - Date.now();
-  if (delay <= 0) {
-    showChatGPTAuthExpired();
-    return;
-  }
-  chatgptAuthExpiryTimer = setTimeout(() => {
-    if (chatgptAuthState.state === 'waiting') showChatGPTAuthExpired();
-  }, delay);
-  chatgptAuthPoll = setInterval(() => {
-    if (chatgptAuthState.state !== 'waiting') {
-      stopChatGPTAuthPolling();
-      return;
-    }
-    if (chatGPTAuthExpiredLocally()) {
-      showChatGPTAuthExpired();
-      return;
-    }
-    refreshChatGPTAuthStatus();
-  }, CHATGPT_AUTH_POLL_MS);
-}
-
-function applyChatGPTAuthStatus(result) {
-  chatgptAuthKnown = true;
-  if (chatgptAuthState.state === 'error' && chatgptAuthState.code === 'timeout' && result.state === 'waiting') {
-    syncChatGPTSwitchOffer();
-    return;
-  }
-  if (result.state === 'waiting') {
-    const previous = chatgptAuthState;
-    chatgptAuthState = {
-      ...chatgptAuthState,
-      state: 'waiting',
-      attemptId: result.attemptId ?? chatgptAuthState.attemptId,
-      authUrl: result.authUrl ?? chatgptAuthState.authUrl,
-      expiresAt: result.expiresAt ?? chatgptAuthState.expiresAt,
-      code: undefined
-    };
-    const changed = previous.state !== 'waiting'
-      || previous.expiresAt !== chatgptAuthState.expiresAt
-      || previous.attemptId !== chatgptAuthState.attemptId
-      || previous.authUrl !== chatgptAuthState.authUrl;
-    if (changed) renderChatGPTAuth();
-    else syncChatGPTSwitchOffer();
-    if (chatgptAuthState.state === 'waiting' && !chatgptAuthPoll) startChatGPTAuthPolling();
-    return;
-  }
-  if (chatgptAuthState.state === 'waiting' && (result.code === 'timeout' || chatGPTAuthExpiredLocally())) {
-    showChatGPTAuthExpired();
-    return;
-  }
-  const previousAuthState = chatgptAuthState.state;
-  stopChatGPTAuthPolling();
-  chatgptAuthState = {
-    state: result.state || 'signed_out',
-    account: result.account,
-    plan: result.plan,
-    code: result.code,
-    attemptId: result.attemptId ?? null,
-    authUrl: result.authUrl ?? null,
-    expiresAt: result.expiresAt ?? null
-  };
-  renderChatGPTAuth();
-  if (result.state === 'error' && result.code) updateLiveRegion({ state: 'error', code: result.code });
-  refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
-}
-
-function handleChatGPTAuthChanged(payload) {
-  const previousAuthState = chatgptAuthState.state;
-  chatgptAuthState = { ...chatgptAuthState, ...payload };
-  chatgptAuthKnown = true;
-  if (chatgptAuthState.state === 'waiting') startChatGPTAuthPolling();
-  else stopChatGPTAuthPolling();
-  renderChatGPTAuth();
-  updateLiveRegion(payload);
-  refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
-}
-
-async function syncChatGPTSwitchOffer() {
-  if (!chatgptSwitchOfferEl || !providerEl || !i18nReady || !chatgptAuthKnown) return;
-  const epoch = ++switchOfferEpoch;
-  const signedIn = chatgptAuthState.state === 'signed_in';
-  const identity = signedIn ? accountSwitchIdentity(chatgptAuthState.account) : '';
-  if (identity !== activeSwitchIdentity) {
-    chatgptSwitchOfferEl.hidden = true;
-    chatgptSwitchOfferEl.dataset.decision = 'pending';
-  }
-  let storageKey = null;
-  let already = false;
-  if (identity) {
-    try {
-      storageKey = `${CHATGPT_SWITCH_OFFER_PREFIX}.${await shortSha256Hex(identity)}`;
-    } catch {
-      storageKey = null;
-    }
-    if (epoch !== switchOfferEpoch) return;
-    already = storageKey ? readStoredSwitchOffer(storageKey) : pageOnlySwitchIdentities.has(identity);
-  } else if (signedIn) {
-    already = anonymousSwitchOfferRecorded;
-  }
-  if (epoch !== switchOfferEpoch) return;
-  activeSwitchOfferStorageKey = storageKey;
-  activeSwitchIdentity = identity;
-  const show = signedIn && providerEl.value !== 'chatgpt' && !already;
-  chatgptSwitchOfferEl.dataset.decision = show ? 'shown' : 'hidden';
-  if (!show) {
-    chatgptSwitchOfferEl.hidden = true;
-    return;
-  }
-  if (chatgptSwitchOfferTextEl) chatgptSwitchOfferTextEl.textContent = t('auth.chatgpt.switch-offer.prompt');
-  if (chatgptSwitchOfferAcceptEl) chatgptSwitchOfferAcceptEl.textContent = t('auth.chatgpt.switch-offer.accept');
-  if (chatgptSwitchOfferDismissEl) chatgptSwitchOfferDismissEl.textContent = t('auth.chatgpt.switch-offer.dismiss');
-  chatgptSwitchOfferEl.hidden = false;
-}
-
-function acceptChatGPTSwitchOffer() {
-  rememberChatGPTSwitchOffered();
-  if (!providerEl || providerEl.value === 'chatgpt') {
-    syncChatGPTSwitchOffer();
-    return;
-  }
-  providerEl.value = 'chatgpt';
-  providerEl.dispatchEvent(new Event('change'));
-}
-
-function dismissChatGPTSwitchOffer() {
-  rememberChatGPTSwitchOffered();
-  syncChatGPTSwitchOffer();
-}
-
-function renderChatGPTAuth() {
-  syncChatGPTSwitchOffer();
-  if (!i18nReady || !chatgptAuthCardEl || !providerEl) return;
-  const isChatGPT = providerEl.value === 'chatgpt';
-  
-  if (!isChatGPT) {
-    chatgptAuthCardEl.hidden = true;
-    return;
-  }
-
-  const state = chatgptAuthState.state;
-  const code = chatgptAuthState.code;
-  
-  chatgptAuthCardEl.hidden = false;
-  chatgptAuthCardEl.className = 'chatgpt-auth-card';
-  
-  if (state === 'signed_out' || !state) {
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title">${t('auth.chatgpt.intro.title')}</h2>
-      <p>${t('auth.chatgpt.intro.body')}</p>
-      <button class="chatgpt-sign-in-btn" onclick="startChatGPTSignIn()" lang="en">
-        ${t('auth.chatgpt.button')}
-      </button>
-    `;
-    setRequestBusy(true);
-  } else if (state === 'waiting') {
-    const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
-    // Always ask the daemon to open the system browser instead of a WebView link.
-    const reopenLink = authHref
-      ? `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" onclick="reopenChatGPTSignIn()">${t('auth.chatgpt.waiting.reopen')}<span class="sr-only"> ${t('auth.chatgpt.opens-browser')}</span></button>`
-      : `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" disabled aria-describedby="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen')}</button> <span id="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen-unavailable')}</span>`;
-    const expiryTime = formatChatGPTAuthExpiry(chatgptAuthState.expiresAt);
-    const expiryLine = expiryTime
-      ? `<p id="chatgpt-auth-expiry">${t('auth.chatgpt.waiting.expires', { time: escapeHtml(expiryTime) })}</p>`
-      : '';
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title" tabindex="-1">
-        <span class="spinner" aria-hidden="true"></span>
-        ${t('auth.chatgpt.waiting.title')}
-      </h2>
-      ${expiryLine}
-      <p>
-        ${reopenLink}
-        · 
-        <button class="chatgpt-secondary-btn" onclick="copyChatGPTLink()">${t('auth.chatgpt.waiting.copy')}</button>
-      </p>
-      <div class="chatgpt-auth-actions">
-        <button class="chatgpt-secondary-btn" onclick="cancelChatGPTSignIn()">${t('auth.chatgpt.cancel')}</button>
-      </div>
-    `;
-    setRequestBusy(true);
-  } else if (state === 'signed_in') {
-    const account = chatgptAuthState.account || {};
-    const plan = chatgptAuthState.plan;
-    const email = escapeHtml(account.email || 'Unknown');
-    const planText = plan ? escapeHtml(plan) : '';
-    const accountText = planText 
-      ? t('auth.chatgpt.signed-in.account', { email, plan: planText })
-      : email;
-    
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title" tabindex="-1">${t('auth.chatgpt.signed-in.title')}</h2>
-      <p translate="no">${accountText}</p>
-      <p>${t('auth.chatgpt.signed-in.usage')}</p>
-      <div class="chatgpt-auth-actions">
-        <button class="chatgpt-secondary-btn" onclick="signOutChatGPT()">${t('auth.chatgpt.sign-out')}</button>
-      </div>
-    `;
-    setRequestBusy(false);
-  } else if (state === 'error') {
-    chatgptAuthCardEl.className = 'chatgpt-auth-card error';
-    
-    let title, body, actions;
-    
-    if (code === 'cancelled' || code === 'access_denied') {
-      title = t('auth.chatgpt.error.cancelled');
-      body = '';
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    } else if (code === 'timeout') {
-      title = t('auth.chatgpt.error.timeout');
-      body = t('auth.chatgpt.error.timeout.body');
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    } else if (code === 'open_failed') {
-      title = t('auth.chatgpt.error.open-failed');
-      const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
-      body = authHref ? `<p><a href="${authHref}" target="_blank" rel="noopener noreferrer">${authHref}</a></p>` : '';
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    } else if (code === 'not_eligible') {
-      title = t('auth.chatgpt.error.not-eligible.title');
-      body = t('auth.chatgpt.error.not-eligible.body');
-      actions = `
-        <button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.switch-account')}</button>
-        <button class="chatgpt-secondary-btn" onclick="focusProviderSelect()">${t('auth.chatgpt.switch-provider')}</button>
-      `;
-    } else if (code === 'usage_limit') {
-      title = t('auth.chatgpt.error.usage-limit.title');
-      body = t('auth.chatgpt.error.usage-limit.body');
-      actions = `<button class="chatgpt-secondary-btn" onclick="focusProviderSelect()">${t('auth.chatgpt.switch-provider')}</button>`;
-    } else {
-      title = t('auth.chatgpt.error.route');
-      body = '';
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    }
-    
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title" tabindex="-1">${title}</h2>
-      ${body ? `<p>${body}</p>` : ''}
-      <div class="chatgpt-auth-actions">${actions}</div>
-    `;
-    setRequestBusy(true);
-  }
-  
-  // Focus management
-  const titleEl = chatgptAuthCardEl.querySelector('h2[tabindex="-1"]');
-  if (titleEl && state !== 'signed_out') {
-    setTimeout(() => titleEl.focus(), 100);
-  }
-}
-
-function updateLiveRegion(payload) {
-  if (!authLiveRegionEl) return;
-  
-  const state = payload.state;
-  const code = payload.code;
-  
-  let message = '';
-  
-  if (state === 'waiting') {
-    const time = formatChatGPTAuthExpiry(payload.expiresAt);
-    message = time
-      ? `${t('auth.chatgpt.waiting.title')} ${t('auth.chatgpt.waiting.expires', { time })}`
-      : t('auth.chatgpt.waiting.title');
-  } else if (state === 'signed_in') {
-    const plan = payload.plan;
-    if (plan) {
-      message = `${t('auth.chatgpt.signed-in.title')}, ${plan}`;
-    } else {
-      message = t('auth.chatgpt.signed-in.title');
-    }
-  } else if (state === 'signed_out') {
-    message = t('auth.chatgpt.signed-out.title');
-  } else if (state === 'error' && code) {
-    if (code === 'cancelled' || code === 'access_denied') message = t('auth.chatgpt.error.cancelled');
-    else if (code === 'timeout') message = t('auth.chatgpt.error.timeout');
-    else if (code === 'not_eligible') message = t('auth.chatgpt.error.not-eligible.title');
-    else if (code === 'usage_limit') message = t('auth.chatgpt.error.usage-limit.title');
-    else if (code === 'open_failed') message = t('auth.chatgpt.error.open-failed');
-  }
-  
-  if (message) {
-    // Clear and re-set to ensure re-announcement
-    authLiveRegionEl.textContent = '';
-    setTimeout(() => {
-      authLiveRegionEl.textContent = message;
-    }, 50);
-  }
-}
-
-window.startChatGPTSignIn = function() {
-  const id = `auth_chatgpt_start_${Date.now()}`;
-  pendingCalls.set(id, 'auth.chatgpt.start');
-  sendToolCall({ id, name: 'auth.chatgpt.start', args: { locale } });
-};
-
-window.reopenChatGPTSignIn = function() {
-  if (!chatgptAuthState.attemptId) return;
-  const id = `auth_chatgpt_reopen_${Date.now()}`;
-  pendingCalls.set(id, 'auth.chatgpt.reopen');
-  try {
-    sendToolCall({ id, name: 'auth.chatgpt.reopen', args: { attemptId: chatgptAuthState.attemptId } });
-  } catch (error) {
-    pendingCalls.delete(id);
-    showChatGPTSignInError(error);
-  }
-};
-
-// auth.chatgpt.reopen either throws or comes back as { ok: false, error } when the browser cannot be opened.
-function applyChatGPTReopenResult(payload) {
-  try {
-    const failure = reopenFailureFrom(payload);
-    if (failure) {
-      showChatGPTSignInError(failure.error, failure.authUrl);
-      return;
-    }
-    const result = payload.result;
-    chatgptAuthState = {
-      ...chatgptAuthState,
-      state: result.state || 'waiting',
-      attemptId: result.attemptId,
-      authUrl: result.authUrl
-    };
-    chatgptAuthKnown = true;
-    renderChatGPTAuth();
-  } catch (error) {
-    showChatGPTSignInError(error);
-  }
-}
-
-function reopenFailureFrom(payload) {
-  if (!payload || payload.ok === false) {
-    return { error: payload?.error, authUrl: payload?.authUrl || payload?.error?.authUrl };
-  }
-  const result = payload.result;
-  if (result && result.ok === false) {
-    return { error: result.error, authUrl: result.authUrl || result.error?.authUrl };
-  }
-  return null;
-}
-
-function showChatGPTSignInError(error, authUrl) {
-  stopChatGPTAuthPolling();
-  const code = chatGPTSignInErrorCode(error);
-  chatgptAuthState = {
-    ...chatgptAuthState,
-    state: 'error',
-    code,
-    authUrl: authUrl || error?.authUrl || chatgptAuthState.authUrl
-  };
-  chatgptAuthKnown = true;
-  renderChatGPTAuth();
-  updateLiveRegion({ state: 'error', code });
-}
-
-function chatGPTSignInErrorCode(error) {
-  const code = error && typeof error === 'object' ? error.code : undefined;
-  if (code === 'cancelled' || code === 'access_denied' || code === 'timeout' || code === 'open_failed' || code === 'not_eligible' || code === 'usage_limit') {
-    return code;
-  }
-  return 'open_failed';
-}
-
-window.cancelChatGPTSignIn = function() {
-  if (!chatgptAuthState.attemptId) return;
-  const id = `auth_chatgpt_cancel_${Date.now()}`;
-  pendingCalls.set(id, 'auth.chatgpt.cancel');
-  sendToolCall({ id, name: 'auth.chatgpt.cancel', args: { attemptId: chatgptAuthState.attemptId } });
-};
-
-window.signOutChatGPT = function() {
-  const id = `auth_chatgpt_signout_${Date.now()}`;
-  pendingCalls.set(id, 'auth.chatgpt.signOut');
-  sendToolCall({ id, name: 'auth.chatgpt.signOut', args: {} });
-};
-
-window.copyChatGPTLink = function() {
-  if (!chatgptAuthState.authUrl) return;
-  navigator.clipboard.writeText(chatgptAuthState.authUrl).then(() => {
-    updateLiveRegion({ state: 'info', code: 'copied' });
-    if (authLiveRegionEl) {
-      authLiveRegionEl.textContent = t('auth.chatgpt.waiting.copied');
-    }
-  });
-};
-
-window.focusProviderSelect = function() {
-  if (providerEl) providerEl.focus();
-};
-
-// Handle Escape key in waiting state
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && chatgptAuthState.state === 'waiting') {
-    window.cancelChatGPTSignIn();
-  }
-});
-
