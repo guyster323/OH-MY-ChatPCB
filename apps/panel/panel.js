@@ -16,8 +16,6 @@ const DAEMON_CONNECTION_COPY = {
   error: { en: 'Daemon connection error', ko: '데몬 연결 오류' }
 };
 
-const NO_MANIFEST_INTERNAL = 'Approval allowed with no manifest evidence; exact patch hashes will still be verified.';
-
 async function loadI18n(localeName = 'en') {
   i18nLocale = localeName;
   try {
@@ -64,8 +62,16 @@ function approvalNoManifestMessage() {
   const translated = t('approval.no-manifest');
   if (translated && translated !== 'approval.no-manifest') return translated;
   return locale === 'ko'
-    ? '부품 근거(manifest) 없이 승인 가능: 부품 목록을 확인하세요'
-    : 'Approval allowed without part evidence; review the parts list';
+    ? '부품 목록은 스키매틱에 적용한 뒤 확인됩니다.'
+    : 'Parts list will be checked after you apply to the schematic.';
+}
+
+function approvalNoManifestDetail() {
+  const translated = t('approval.no-manifest-detail');
+  if (translated && translated !== 'approval.no-manifest-detail') return translated;
+  return locale === 'ko'
+    ? '파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인합니다.'
+    : 'The patch is still matched to the current files before anything is written.';
 }
 
 function t(key, replacements = {}) {
@@ -899,7 +905,7 @@ function renderPatchApproval() {
   if (freshness === 'missing' || !freshness) {
     patchApprovalStatusEl.dataset.state = 'warning';
     patchApprovalStatusEl.textContent = approvalNoManifestMessage();
-    setPatchApprovalTechnicalDetail(NO_MANIFEST_INTERNAL);
+    setPatchApprovalTechnicalDetail(approvalNoManifestDetail());
     return;
   }
   patchApprovalStatusEl.dataset.state = 'ready';

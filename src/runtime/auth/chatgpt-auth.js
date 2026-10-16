@@ -2165,25 +2165,58 @@ function resolveAuthGraceMs(graceMs) {
 }
 
 const SECRET_FIELD = 'access_token|refresh_token|id_token|code_verifier|client_secret|code';
-const SECRET_JSON_KEYS = new RegExp(`"(${SECRET_FIELD})"(\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`, 'g');
-const SECRET_JSON_SINGLE_KEYS = new RegExp(`'(${SECRET_FIELD})'(\\s*:\\s*)'(?:\\\\.|[^'\\\\])*'`, 'g');
+const SECRET_JSON_KEYS = new RegExp(`"(${SECRET_FIELD})"(\\s*:\\s*)"((?:\\\\.|[^"\\\\])*)"`, 'g');
+const SECRET_JSON_SINGLE_KEYS = new RegExp(`'(${SECRET_FIELD})'(\\s*:\\s*)'((?:\\\\.|[^'\\\\])*)'`, 'g');
 // Form bodies and query strings. The value runs until `&` or whitespace.
 // `code_verifier` is listed before `code` so the longer name wins.
-const SECRET_FORM_FIELDS = new RegExp(`\\b(${SECRET_FIELD})=[^&\\s]*`, 'g');
+const SECRET_FORM_FIELDS = new RegExp(`\\b(${SECRET_FIELD})=([^&\\s]*)`, 'g');
+// URL-encoded `name%3Dvalue` (the encoded equals sign). Same value boundary.
+const SECRET_FORM_ENCODED = new RegExp(`\\b(${SECRET_FIELD})(%3[Dd])([^&\\s]*)`, 'g');
+// Unquoted `name: value`. A quote before the name is JSON and is handled above.
+const SECRET_COLON_FIELDS = new RegExp(
+  `(^|[^A-Za-z0-9_"'])(${SECRET_FIELD})(\\s*:\\s*)(?:"((?:\\\\.|[^"\\\\])*)"|'((?:\\\\.|[^'\\\\])*)'|([^&\\s"']*))`,
+  'g'
+);
 const BEARER_TOKEN = /\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi;
 const API_KEY = /\bsk-[A-Za-z0-9_-]{8,}/g;
-const REFRESH_TOKEN = /\brt_[A-Za-z0-9._~+/=-]{8,}/g;
+// Any rt_ token of length 1 or more. The word boundary keeps start_ intact.
+const REFRESH_TOKEN = /\brt_[A-Za-z0-9._~+/=-]{1,}/g;
 const SESSION_KEY = /\bsess-[A-Za-z0-9._~+/=-]{8,}/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){0,2}/g;
 const EMAIL_ADDRESS = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 
+// OAuth and OIDC error codes are not credentials. They often arrive under `code`.
+const OAUTH_ERROR_CODES = new Set([
+  'invalid_request',
+  'invalid_client',
+  'invalid_grant',
+  'unauthorized_client',
+  'unsupported_grant_type',
+  'unsupported_response_type',
+  'invalid_scope',
+  'access_denied',
+  'server_error',
+  'temporarily_unavailable'
+]);
+
+function isVisibleErrorCode(key, value) {
+  return key === 'code' && OAUTH_ERROR_CODES.has(value);
+}
+
 /**
  * Redact credentials in ChatGPT API errors and daemon logs.
- * Values shorter than 8 characters are left alone so a stand-in like "AT"
- * cannot rewrite ordinary words. Email local-parts keep their first character.
- * The same field names are masked in JSON, single-quoted fields, and
- * form-encoded `name=value` text (the value ends at `&` or whitespace).
- * A sess- key is masked when 8 or more token characters follow.
+ * Free-floating stand-ins shorter than 8 characters are left alone so a
+ * value like "AT" cannot rewrite ordinary words. `rt_` tokens are the
+ * exception: one or more characters after `rt_` are masked, and a word
+ * boundary leaves words such as "start_" alone. Email local-parts keep
+ * their first character.
+ * Only secret-bearing keys are masked: access_token, refresh_token,
+ * id_token, code_verifier, client_secret, and an authorization code.
+ * That covers JSON, single quotes, `name=value`, URL-encoded `name%3Dvalue`,
+ * and unquoted `name: value` (the value ends at `&` or whitespace).
+ * Error fields stay visible, including "code":"invalid_client",
+ * "error":"invalid_grant", and error_description. A sess- key is masked
+ * when 8 or more token characters follow.
  */
 export function maskSecrets(text, accessToken) {
   let masked = String(text ?? '');
@@ -2193,15 +2226,33 @@ export function maskSecrets(text, accessToken) {
   SECRET_JSON_KEYS.lastIndex = 0;
   SECRET_JSON_SINGLE_KEYS.lastIndex = 0;
   SECRET_FORM_FIELDS.lastIndex = 0;
+  SECRET_FORM_ENCODED.lastIndex = 0;
+  SECRET_COLON_FIELDS.lastIndex = 0;
   BEARER_TOKEN.lastIndex = 0;
   API_KEY.lastIndex = 0;
   REFRESH_TOKEN.lastIndex = 0;
   SESSION_KEY.lastIndex = 0;
   JWT.lastIndex = 0;
   EMAIL_ADDRESS.lastIndex = 0;
-  masked = masked.replace(SECRET_JSON_KEYS, '"$1"$2"[REDACTED]"');
-  masked = masked.replace(SECRET_JSON_SINGLE_KEYS, "'$1'$2'[REDACTED]'");
-  masked = masked.replace(SECRET_FORM_FIELDS, '$1=[REDACTED]');
+  masked = masked.replace(SECRET_JSON_KEYS, (match, key, sep, value) => (
+    isVisibleErrorCode(key, value) ? match : `"${key}"${sep}"[REDACTED]"`
+  ));
+  masked = masked.replace(SECRET_JSON_SINGLE_KEYS, (match, key, sep, value) => (
+    isVisibleErrorCode(key, value) ? match : `'${key}'${sep}'[REDACTED]'`
+  ));
+  masked = masked.replace(SECRET_FORM_FIELDS, (match, key, value) => (
+    isVisibleErrorCode(key, value) ? match : `${key}=[REDACTED]`
+  ));
+  masked = masked.replace(SECRET_FORM_ENCODED, (match, key, encodedEquals, value) => (
+    isVisibleErrorCode(key, value) ? match : `${key}${encodedEquals}[REDACTED]`
+  ));
+  masked = masked.replace(SECRET_COLON_FIELDS, (match, prefix, key, sep, doubleQuoted, singleQuoted, bare) => {
+    const value = doubleQuoted ?? singleQuoted ?? bare ?? '';
+    if (isVisibleErrorCode(key, value)) return match;
+    if (doubleQuoted !== undefined) return `${prefix}${key}${sep}"[REDACTED]"`;
+    if (singleQuoted !== undefined) return `${prefix}${key}${sep}'[REDACTED]'`;
+    return `${prefix}${key}${sep}[REDACTED]`;
+  });
   masked = masked.replace(BEARER_TOKEN, 'Bearer [REDACTED]');
   masked = masked.replace(SESSION_KEY, '[REDACTED]');
   masked = masked.replace(JWT, '[REDACTED]');

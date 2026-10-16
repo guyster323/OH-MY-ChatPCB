@@ -1580,7 +1580,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
 
     const plain = [
       'Route the 3V3 net with a 10k resistor. The code review passed.',
-      'See sk-12, rt_ab, Bearer, eyJabc, sess-12, and sketch this board.',
+      'See sk-12, start_, Bearer, eyJabc, sess-12, and sketch this board.',
       'code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM response_type=code client_id=oaiapp_TEST',
       'ChatGPT API error: 400 Input must be a list',
       'ChatGPT sign-in waiting on http://127.0.0.1:41318/auth/callback until 2026-10-16T00:00:00.000Z',
@@ -1594,6 +1594,64 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     const once = maskSecrets(combined, 'test-access-token-DO-NOT-USE-0123456789');
     assert.equal(maskSecrets(once), once);
     for (const secret of secrets) assert.equal(once.includes(secret), false, secret);
+  });
+
+  it('masks secret assignments and short rt_ tokens without hiding error codes', () => {
+    const errors = [
+      '{"code":"invalid_client","error":"invalid_grant","error_description":"client authentication failed"}',
+      "'code': 'invalid_client', 'error': 'invalid_grant', 'error_description': 'client authentication failed'",
+      'error=invalid_grant&error_description=client authentication failed&code=invalid_client',
+      'error%3Dinvalid_grant&error_description%3Dclient+authentication+failed&code%3Dinvalid_client',
+      'error: invalid_grant',
+      'error_description: client authentication failed',
+      'code: invalid_client',
+      'start_',
+      'start_here smart_ prefixrt_ab',
+      'rt_',
+      'See sk-12 and sess-12.'
+    ];
+    for (const text of errors) assert.equal(maskSecrets(text), text, text);
+
+    assert.equal(maskSecrets('access_token: xyz'), 'access_token: [REDACTED]');
+    assert.equal(maskSecrets('before access_token: xyz after'), 'before access_token: [REDACTED] after');
+    assert.equal(maskSecrets('access_token=xyz'), 'access_token=[REDACTED]');
+    assert.equal(maskSecrets('refresh_token%3Dxyz'), 'refresh_token%3D[REDACTED]');
+    assert.equal(maskSecrets('access_token%3Dxyz'), 'access_token%3D[REDACTED]');
+    assert.equal(maskSecrets('id_token%3Dxyz'), 'id_token%3D[REDACTED]');
+    assert.equal(maskSecrets('refresh_token%3dxyz&next=keep'), 'refresh_token%3d[REDACTED]&next=keep');
+    assert.equal(maskSecrets('token rt_a end'), 'token [REDACTED] end');
+    assert.equal(maskSecrets('token rt_ab end'), 'token [REDACTED] end');
+    assert.equal(maskSecrets('(rt_x)'), '([REDACTED])');
+    assert.equal(
+      maskSecrets('error_description=leaked access_token=xyz and rt_ab today'),
+      'error_description=leaked access_token=[REDACTED] and [REDACTED] today'
+    );
+    assert.equal(
+      maskSecrets('error_description=refresh_token%3Dxyz'),
+      'error_description=refresh_token%3D[REDACTED]'
+    );
+    assert.equal(maskSecrets('code: auth-code-value'), 'code: [REDACTED]');
+
+    const samples = [
+      'access_token: xyz',
+      'access_token=xyz',
+      'refresh_token%3Dxyz',
+      'access_token%3Dxyz',
+      'id_token%3Dxyz',
+      'rt_a rt_ab',
+      '{"code":"invalid_client","error":"invalid_grant","error_description":"client authentication failed","access_token":"xyz"}',
+      'start_ smart_'
+    ];
+    for (const sample of samples) {
+      const once = maskSecrets(sample);
+      assert.equal(maskSecrets(once), once, sample);
+      assert.equal(once.includes('xyz'), false, sample);
+    }
+    const visible = maskSecrets(samples[6]);
+    assert.match(visible, /"code":"invalid_client"/);
+    assert.match(visible, /"error":"invalid_grant"/);
+    assert.match(visible, /"error_description":"client authentication failed"/);
+    assert.match(visible, /"access_token":"\[REDACTED\]"/);
   });
 
   it('leaves the original credential file intact when restore fails mid-write', async () => {

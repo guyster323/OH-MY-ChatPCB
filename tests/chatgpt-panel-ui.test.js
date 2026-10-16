@@ -520,7 +520,27 @@ test('daemon connection label stays separate from ChatGPT sign-in status', async
   }
 });
 
-test('missing manifest approval uses user language and keeps the internal sentence in technical details', async (t) => {
+test('approval copy is plain language in English and Korean', async () => {
+  const en = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
+  const ko = JSON.parse(await readFile(path.join(panelRoot, 'locales/ko.json'), 'utf8'));
+  assert.equal(en['approval.no-manifest'], 'Parts list will be checked after you apply to the schematic.');
+  assert.equal(ko['approval.no-manifest'], '부품 목록은 스키매틱에 적용한 뒤 확인됩니다.');
+  assert.equal(
+    en['approval.no-manifest-detail'],
+    'The patch is still matched to the current files before anything is written.'
+  );
+  assert.equal(
+    ko['approval.no-manifest-detail'],
+    '파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인합니다.'
+  );
+  for (const copy of [en, ko]) {
+    assert.equal(copy['approval.no-manifest'].includes('manifest'), false);
+    assert.equal(copy['approval.no-manifest-detail'].includes('manifest'), false);
+    assert.equal(copy['approval.no-manifest'].includes('part evidence'), false);
+  }
+});
+
+test('missing manifest approval uses plain language on the card and in technical details', async (t) => {
   const opened = await openChatGPTWaiting(t, {
     locale: 'en-US',
     startResult: waiting,
@@ -539,14 +559,16 @@ test('missing manifest approval uses user language and keeps the internal senten
     const status = page.locator('#patch-approval-status');
     await page.waitForFunction(() => (
       document.querySelector('#patch-approval-status')?.textContent
-        === 'Approval allowed without part evidence; review the parts list'
+        === 'Parts list will be checked after you apply to the schematic.'
     ));
-    assert.equal((await status.innerText()).includes('Approval allowed with no manifest evidence'), false);
+    assert.equal((await status.innerText()).includes('manifest'), false);
+    assert.equal((await status.innerText()).includes('part evidence'), false);
     const detail = page.locator('#patch-approval-technical-detail');
     assert.equal(
       await detail.evaluate((node) => node.textContent),
-      'Approval allowed with no manifest evidence; exact patch hashes will still be verified.'
+      'The patch is still matched to the current files before anything is written.'
     );
+    assert.equal((await detail.evaluate((node) => node.textContent)).includes('manifest'), false);
     assert.equal(await page.locator('#patch-approval-technical-details').isHidden(), false);
     assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
     assert.deepEqual(pageErrors, []);
@@ -584,7 +606,7 @@ test('draft card shows the generator source and discrete parts', async (t) => {
     assert.match(partsText, /330/);
     assert.equal(
       await page.locator('#patch-approval-status').innerText(),
-      'Approval allowed without part evidence; review the parts list'
+      'Parts list will be checked after you apply to the schematic.'
     );
     await page.evaluate(() => {
       window.__draftSource = { provider: null, via: 'native-fallback' };
