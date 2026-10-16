@@ -49,7 +49,16 @@ export async function selectChatGPTModel(accessToken, override) {
   return slugs[0];
 }
 
-export async function callChatGPTResponses({
+export async function callChatGPTResponses(options = {}) {
+  try {
+    return await callChatGPTResponsesUnlogged(options);
+  } catch (error) {
+    console.error(maskSecrets(error?.message || 'ChatGPT request failed'));
+    throw error;
+  }
+}
+
+async function callChatGPTResponsesUnlogged({
   prompt,
   onChunk,
   onError,
@@ -89,7 +98,9 @@ export async function callChatGPTResponses({
       await persistSession(activeCreds, generation, clientId, [originalRefresh, activeCreds.refresh_token || '']);
       accessToken = refreshed.access_token;
     } catch (error) {
-      if (onError) onError({ code: 'refresh_failed', message: error.message });
+      const message = error?.message || 'unknown';
+      console.warn(maskSecrets(`ChatGPT token refresh failed: ${message}`));
+      if (onError) onError({ code: 'refresh_failed', message: maskSecrets(message) });
     }
   }
 

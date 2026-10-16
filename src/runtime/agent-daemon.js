@@ -8,7 +8,7 @@ import { parseProviderMessage, runProviderProcess } from './provider-process.js'
 import { PROVIDER_ALLOWED_TOOLS, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
 import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
-import { publicProposal } from '../workflow/native-proposal-source.js';
+import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
 import { createProjectMutexRegistry } from './project-mutex-registry.js';
@@ -393,7 +393,11 @@ async function invokeProvider(call, ctx) {
     });
     toolResults.push({
       id: event.payload.id,
-      ...(await dispatchToolCall(toolCall, ctx))
+      name: toolCall.name,
+      ...(await dispatchToolCall(toolCall, {
+        ...ctx,
+        designSource: proposalSource({ provider: definition.id, via: 'provider' })
+      }))
     });
   }
 
@@ -480,6 +484,7 @@ async function requestProject(call, ctx) {
       allowGenerate: !hasSpec,
       forceProjectDir: true
     });
+    logChatGptRequestDecision(args.provider, providerResult);
     let preview = lastMutatingResult(providerResult.toolResults);
     if (!preview) {
       emitProgress(ctx, {
@@ -491,7 +496,10 @@ async function requestProject(call, ctx) {
         projectDir,
         prompt: generatePrompt,
         context: args.selection
-      }, ctx);
+      }, {
+        ...ctx,
+        designSource: proposalSource({ via: 'native-fallback' })
+      });
       if (!generated.ok) {
         const error = new Error(generated.error.message);
         error.code = generated.error.code;
@@ -522,10 +530,32 @@ async function requestProject(call, ctx) {
   }
 }
 
-function lastMutatingResult(toolResults) {
-  return toolResults.findLast((toolResult) => (
+function lastMutatingTool(toolResults) {
+  return [...(toolResults ?? [])].reverse().find((toolResult) => (
     toolResult.ok && (toolResult.result?.files || toolResult.result?.requiresApproval === true)
-  ))?.result ?? null;
+  )) ?? null;
+}
+
+function lastMutatingResult(toolResults) {
+  return lastMutatingTool(toolResults)?.result ?? null;
+}
+
+function chatGptFallbackReason(providerResult) {
+  const calls = (providerResult?.events ?? []).filter((event) => event?.type === 'tool.call');
+  if (calls.length === 0) return 'provider returned no tool call';
+  const failed = [...(providerResult.toolResults ?? [])].reverse().find((result) => result?.ok === false);
+  const message = failed?.error?.message;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  return 'provider returned no mutating tool call';
+}
+
+function logChatGptRequestDecision(provider, providerResult) {
+  if (provider !== 'chatgpt') return;
+  const mutating = lastMutatingTool(providerResult?.toolResults);
+  const line = mutating
+    ? `provider chatgpt: tool call ${mutating.name || 'tool'} via provider`
+    : `provider chatgpt: fell back to native: ${chatGptFallbackReason(providerResult)}`;
+  console.error(maskSecrets(line));
 }
 
 async function projectHasSpec(projectDir) {
@@ -604,7 +634,11 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
-  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && (name === 'schematic.generate' || name === 'schematic.patch')) {
+  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && name === 'schematic.generate') {
+    // The daemon prompt carries the profile and conversation facts. A short model
+    // prompt such as "draft it" would drop the parts list the native path keeps.
+    args.prompt = prompt;
+  } else if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && name === 'schematic.patch') {
     if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
       args.prompt = prompt;
     }
@@ -759,7 +793,8 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       projectName,
       context,
       validateProjectImpl: ctx.validateProjectImpl,
-      validateBoardImpl: ctx.validateBoardImpl
+      validateBoardImpl: ctx.validateBoardImpl,
+      source: ctx.designSource ?? proposalSource()
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);

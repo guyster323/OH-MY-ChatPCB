@@ -5,9 +5,9 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'n
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import net from 'node:net';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import vm from 'node:vm';
 
 import { dispatchToolCall, startDaemon } from '../src/runtime/agent-daemon.js';
@@ -35,6 +35,7 @@ import { createEnvelope } from '../src/runtime/envelope.js';
 import { parseProviderMessage, validateProviderToolCall } from '../src/runtime/provider-process.js';
 import { PROVIDER_ALLOWED_TOOLS } from '../src/runtime/provider-registry.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
+import { isolateHome } from './isolate-home.js';
 
 const originalFetch = globalThis.fetch;
 const originalEnv = {
@@ -70,7 +71,9 @@ function openIdDocument(overrides = {}) {
 }
 
 describe('ChatGPT integration', { concurrency: 1 }, () => {
-  beforeEach(() => {
+  let homeIsolation = null;
+
+  beforeEach(async () => {
     delete process.env.CHATPCB_CHATGPT_CLIENT_ID;
     delete process.env.CHATPCB_CHATGPT_AUTH_TIMEOUT_MS;
     delete process.env.CHATPCB_CHATGPT_AUTH_GRACE_MS;
@@ -79,9 +82,10 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     // so tests that do not exercise discovery keep their fetch counts and stay offline.
     clearOidcDiscoveryCache();
     useFallbackAuthEndpoints();
+    homeIsolation = await isolateHome();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     globalThis.fetch = originalFetch;
     restoreEnv('XDG_CONFIG_HOME');
     restoreEnv('CHATPCB_CHATGPT_MODEL');
@@ -89,6 +93,48 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     restoreEnv('CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS');
     restoreEnv('CHATPCB_CHATGPT_AUTH_TIMEOUT_MS');
     restoreEnv('CHATPCB_CHATGPT_AUTH_GRACE_MS');
+    if (homeIsolation) {
+      await homeIsolation.restore();
+      homeIsolation = null;
+    }
+  });
+
+  it('keeps ChatGPT config writes in the temporary home', async () => {
+    const id = await getOrCreateHostId();
+    const hostPath = path.join(process.env.XDG_CONFIG_HOME, 'chatpcb', 'chatgpt-host-id.txt');
+    assert.equal((await readFile(hostPath, 'utf8')).trim(), id);
+    const realHome = userInfo().homedir;
+    const fromHome = path.relative(path.resolve(realHome), path.resolve(hostPath));
+    assert.equal(fromHome === '' || fromHome.startsWith('..') || path.isAbsolute(fromHome), true);
+  });
+
+  it('refuses a ChatPCB config directory inside the real home under node --test', async () => {
+    const realHome = userInfo().homedir;
+    const saved = {
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+      APPDATA: process.env.APPDATA
+    };
+    try {
+      process.env.HOME = realHome;
+      process.env.USERPROFILE = realHome;
+      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.APPDATA;
+      await assert.rejects(loadCredentials(), (error) => {
+        assert.equal(error.code, 'CHATPCB_TEST_CONFIG_HOME');
+        assert.match(error.message, /real home/);
+        assert.match(error.message, /node --test/);
+        return true;
+      });
+      process.env.XDG_CONFIG_HOME = `${realHome}-chatpcb-sibling`;
+      assert.equal(await loadCredentials(), null);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it('accepts a JWKS-signed RS256 ID token', async () => {
@@ -2746,38 +2792,198 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       jwks_uri: 'https://auth.openai.com/discovered/jwks.json'
     });
     const rejected = [
-      { ...distinct, issuer: 'https://evil.example' },
-      { ...distinct, issuer: 'https://auth.openai.com/' },
-      { ...distinct, jwks_uri: 'http://auth.openai.com/discovered/jwks.json' },
-      { ...distinct, authorization_endpoint: 'http://auth.openai.com/discovered/authorize' },
-      { ...distinct, token_endpoint: 'https://auth.openai.com.evil.example/oauth/token' },
-      { ...distinct, jwks_uri: 'https://evil.example/jwks.json' },
-      { ...distinct, userinfo_endpoint: 'http://auth.openai.com/api/accounts/oauth/userinfo' },
-      { ...distinct, revocation_endpoint: 'https://user:pass@auth.openai.com/revoke' },
-      { ...distinct, jwks_uri: 'https://auth.openai.com:8443/discovered/jwks.json' },
-      { ...distinct, registration_endpoint: 'http://auth.openai.com/register' },
-      { ...distinct, device_authorization_endpoint: 'https://evil.example/device' }
+      { doc: { ...distinct, issuer: 'https://evil.example' }, reason: /wrong issuer/ },
+      { doc: { ...distinct, issuer: 'https://auth.openai.com/' }, reason: /wrong issuer/ },
+      { doc: { ...distinct, jwks_uri: 'http://auth.openai.com/discovered/jwks.json' }, reason: /non-https endpoint \(jwks_uri\)/ },
+      { doc: { ...distinct, authorization_endpoint: 'http://auth.openai.com/discovered/authorize' }, reason: /non-https endpoint \(authorization_endpoint\)/ },
+      { doc: { ...distinct, token_endpoint: 'https://auth.openai.com.evil.example/oauth/token' }, reason: /foreign host \(token_endpoint\)/ },
+      { doc: { ...distinct, jwks_uri: 'https://evil.example/jwks.json' }, reason: /foreign host \(jwks_uri\)/ },
+      { doc: { ...distinct, userinfo_endpoint: 'http://auth.openai.com/api/accounts/oauth/userinfo' }, reason: /non-https endpoint \(userinfo_endpoint\)/ },
+      { doc: { ...distinct, revocation_endpoint: 'https://user:pass@auth.openai.com/revoke' }, reason: /non-https endpoint \(revocation_endpoint\)/ },
+      { doc: { ...distinct, jwks_uri: 'https://auth.openai.com:8443/discovered/jwks.json' }, reason: /non-https endpoint \(jwks_uri\)/ },
+      { doc: { ...distinct, registration_endpoint: 'http://auth.openai.com/register' }, reason: /non-https endpoint \(registration_endpoint\)/ },
+      { doc: { ...distinct, device_authorization_endpoint: 'https://evil.example/device' }, reason: /foreign host \(device_authorization_endpoint\)/ }
     ];
 
-    for (const doc of rejected) {
+    const logs = spyConsoleError();
+    try {
+      for (const { doc, reason } of rejected) {
+        clearOidcDiscoveryCache();
+        clearJwksCache();
+        logs.lines.length = 0;
+        const seen = [];
+        stubFetch(async (url) => {
+          const target = String(url);
+          seen.push(target);
+          if (target === OPENID_CONFIGURATION_URL) return jsonResponse(doc);
+          if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+          return new Response('no', { status: 404 });
+        });
+        const payload = await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST');
+        assert.equal(payload.sub, 'user_123', JSON.stringify(doc));
+        assert.deepEqual(
+          seen.filter((url) => url !== OPENID_CONFIGURATION_URL && url !== JWKS_ENDPOINT),
+          [],
+          JSON.stringify(doc)
+        );
+        const rejectedLogs = logs.lines.filter((line) => line.includes('OpenID discovery document rejected'));
+        assert.equal(rejectedLogs.length, 1, JSON.stringify(doc));
+        assert.match(rejectedLogs[0], reason, JSON.stringify(doc));
+        assert.equal(rejectedLogs[0].includes('evil.example'), false, rejectedLogs[0]);
+        assert.equal(rejectedLogs[0].includes('user:pass'), false, rejectedLogs[0]);
+        assert.equal(rejectedLogs[0].includes('8443'), false, rejectedLogs[0]);
+        assert.equal(rejectedLogs[0].includes('http://'), false, rejectedLogs[0]);
+      }
+    } finally {
+      logs.restore();
+    }
+  });
+
+  it('caches a good discovery document for an hour and a rejected document for 60 seconds', async () => {
+    mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    const logs = spyConsoleError();
+    try {
       clearOidcDiscoveryCache();
       clearJwksCache();
-      const seen = [];
+      let fetches = 0;
       stubFetch(async (url) => {
         const target = String(url);
-        seen.push(target);
-        if (target === OPENID_CONFIGURATION_URL) return jsonResponse(doc);
+        if (target === OPENID_CONFIGURATION_URL) {
+          fetches += 1;
+          return jsonResponse(openIdDocument());
+        }
         if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
         return new Response('no', { status: 404 });
       });
-      const payload = await verifyIdToken(signToken(claims()), 'nonce-1', 'oaiapp_TEST');
-      assert.equal(payload.sub, 'user_123', JSON.stringify(doc));
-      assert.deepEqual(
-        seen.filter((url) => url !== OPENID_CONFIGURATION_URL && url !== JWKS_ENDPOINT),
-        [],
-        JSON.stringify(doc)
-      );
+      const longLived = () => signToken(claims({ exp: Math.floor(Date.now() / 1000) + (10 * 24 * 3600) }));
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      mock.timers.tick(59 * 60 * 1000);
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(fetches, 1);
+      mock.timers.tick(2 * 60 * 1000);
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(fetches, 2);
+
+      clearOidcDiscoveryCache();
+      clearJwksCache();
+      let rejectedFetches = 0;
+      stubFetch(async (url) => {
+        const target = String(url);
+        if (target === OPENID_CONFIGURATION_URL) {
+          rejectedFetches += 1;
+          return jsonResponse({ ...openIdDocument(), issuer: 'https://evil.example' });
+        }
+        if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+        return new Response('no', { status: 404 });
+      });
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(rejectedFetches, 1);
+      const firstRejection = logs.lines.filter((line) => line.includes('discovery document rejected'));
+      assert.equal(firstRejection.length, 1);
+      assert.match(firstRejection[0], /wrong issuer/);
+      assert.equal(firstRejection[0].includes('evil.example'), false);
+      mock.timers.tick(59 * 1000);
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(rejectedFetches, 1);
+      mock.timers.tick(2 * 1000);
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(rejectedFetches, 2);
+      assert.equal(logs.lines.filter((line) => line.includes('discovery document rejected')).length, 1);
+
+      clearOidcDiscoveryCache();
+      clearJwksCache();
+      let httpFetches = 0;
+      stubFetch(async (url) => {
+        const target = String(url);
+        if (target === OPENID_CONFIGURATION_URL) {
+          httpFetches += 1;
+          return new Response('no', { status: 503 });
+        }
+        if (target === JWKS_ENDPOINT) return jsonResponse({ keys: [jwk] });
+        return new Response('no', { status: 404 });
+      });
+      const beforeHttp = logs.lines.filter((line) => line.includes('OpenID discovery failed')).length;
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(httpFetches, 1);
+      mock.timers.tick(61 * 1000);
+      clearJwksCache();
+      await verifyIdToken(longLived(), 'nonce-1', 'oaiapp_TEST');
+      assert.equal(httpFetches, 2);
+      const httpLogs = logs.lines.filter((line) => line.includes('OpenID discovery failed'));
+      assert.equal(httpLogs.length, beforeHttp + 1);
+      assert.match(httpLogs.at(-1), /503/);
+    } finally {
+      logs.restore();
+      mock.timers.reset();
     }
+  });
+
+  it('masks network, stream, and refresh failures logged by the ChatGPT provider', async () => {
+    await withConfig(async () => {
+      const secret = 'sk-TESTKEYDONOTUSE0123456789';
+      await saveCredentials(sampleCreds());
+      const errors = [];
+      const warns = [];
+      const originalError = console.error;
+      const originalWarn = console.warn;
+      console.error = (...args) => {
+        errors.push(args.map((part) => String(part)).join(' '));
+      };
+      console.warn = (...args) => {
+        warns.push(args.map((part) => String(part)).join(' '));
+      };
+      try {
+        stubFetch(async (url) => {
+          if (String(url).includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+          throw new Error(`socket hang up ${secret}`);
+        });
+        await assert.rejects(callChatGPTResponses({ prompt: 'hi' }), /socket hang up/);
+        assert.equal(errors.some((line) => line.includes('socket hang up')), true);
+        assert.equal(errors.join('\n').includes(secret), false);
+
+        errors.length = 0;
+        stubFetch(async (url) => {
+          const target = String(url);
+          if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+          if (target.includes('/v1/responses')) {
+            return sseResponse([
+              `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: `x ${secret}` })}`,
+              `data: not-json ${secret}`,
+              ''
+            ].join('\n'));
+          }
+          return new Response('no', { status: 404 });
+        });
+        await assert.rejects(callChatGPTResponses({ prompt: 'hi' }), /malformed event data/);
+        assert.equal(errors.some((line) => line.includes('malformed event data')), true);
+        assert.equal(errors.join('\n').includes(secret), false);
+        assert.equal(errors.join('\n').includes('not-json'), false);
+
+        await saveCredentials(expiredCreds());
+        stubFetch(async (url) => {
+          const target = String(url);
+          if (target.includes('/oauth/token')) throw new Error(`refresh failed ${secret}`);
+          if (target.includes('/v1/models')) return jsonResponse({ models: [{ slug: 'gpt-x', visibility: 'list' }] });
+          if (target.includes('/v1/responses')) return completedStream('ok');
+          return new Response('no', { status: 404 });
+        });
+        const refreshed = await callChatGPTResponses({ prompt: 'hi' });
+        assert.equal(refreshed.completed, true);
+        assert.equal(warns.some((line) => line.includes('ChatGPT token refresh failed')), true);
+        assert.equal(warns.join('\n').includes(secret), false);
+      } finally {
+        console.error = originalError;
+        console.warn = originalWarn;
+      }
+    });
   });
 
   it('returns account email and name from the record or the stored id token', async () => {

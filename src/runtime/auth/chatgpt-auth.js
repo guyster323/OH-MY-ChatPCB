@@ -1,9 +1,9 @@
 import { createHash, createPublicKey, createVerify, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import http from 'node:http';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { spawn } from 'node:child_process';
 
 // Fallback when OpenID discovery is missing or rejected. These match
@@ -37,6 +37,8 @@ const FETCH_TIMEOUT_MS = 10 * 1000;
 const RESPONSES_TIMEOUT_MS = 120 * 1000;
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
 const OIDC_DISCOVERY_TTL_MS = 60 * 60 * 1000;
+const OIDC_FAILURE_TTL_MS = 60 * 1000;
+const TEST_CONFIG_CODE = 'CHATPCB_TEST_CONFIG_HOME';
 const REQUIRED_OIDC_ENDPOINTS = ['authorization_endpoint', 'token_endpoint', 'jwks_uri'];
 const jwksCache = new Map();
 let oidcCache = null;
@@ -121,15 +123,49 @@ export function openSystemBrowser(url, { platform = process.platform, spawnImpl 
   });
 }
 
+function runningUnderNodeTest() {
+  if (process.env.NODE_TEST_CONTEXT) return true;
+  const args = [...process.execArgv, ...process.argv];
+  return args.some((arg) => arg === '--test' || arg.startsWith('--test='));
+}
+
+function assertTestConfigNotInRealHome(dir) {
+  if (!runningUnderNodeTest()) return;
+  let realHome = '';
+  try {
+    realHome = userInfo().homedir;
+  } catch {
+    return;
+  }
+  if (!realHome) return;
+  const resolvedDir = resolve(dir);
+  const resolvedHome = resolve(realHome);
+  const fromHome = relative(resolvedHome, resolvedDir);
+  const insideHome = fromHome === '' || (fromHome !== '' && !fromHome.startsWith('..') && !isAbsolute(fromHome));
+  if (!insideHome) return;
+  const error = new Error(
+    `Refusing ChatPCB config directory ${resolvedDir} because it is inside the real home ${resolvedHome} while running under node --test. Set XDG_CONFIG_HOME or HOME to a temporary directory.`
+  );
+  error.code = TEST_CONFIG_CODE;
+  throw error;
+}
+
+function rethrowIfTestConfigGuard(error) {
+  if (error?.code === TEST_CONFIG_CODE) throw error;
+}
+
 function getConfigDir() {
   const platform = process.platform;
+  let dir;
   if (platform === 'win32') {
-    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'chatpcb');
+    dir = join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'chatpcb');
+  } else if (platform === 'darwin') {
+    dir = join(homedir(), 'Library', 'Application Support', 'chatpcb');
+  } else {
+    dir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'chatpcb');
   }
-  if (platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'chatpcb');
-  }
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'chatpcb');
+  assertTestConfigNotInRealHome(dir);
+  return dir;
 }
 
 function getCredentialsPath(clientId = 'default') {
@@ -380,7 +416,8 @@ async function readCredentialRecords() {
 export async function loadCredentials() {
   try {
     return selectSavedAccount(await readCredentialRecords());
-  } catch {
+  } catch (error) {
+    rethrowIfTestConfigGuard(error);
     return null;
   }
 }
@@ -388,7 +425,8 @@ export async function loadCredentials() {
 async function loadSavedRegistration() {
   try {
     return selectSavedRegistration(await readCredentialRecords());
-  } catch {
+  } catch (error) {
+    rethrowIfTestConfigGuard(error);
     return null;
   }
 }
@@ -737,7 +775,9 @@ export function useFallbackAuthEndpoints() {
   oidcGeneration += 1;
   oidcInflight = null;
   oidcFailureLogged = false;
-  oidcCache = { fetchedAt: Date.now(), endpoints: fallbackAuthEndpoints() };
+  // A seeded fallback is a successful stand-in, so it keeps the long TTL.
+  // Only a discovery attempt that failed or was rejected uses the short TTL.
+  oidcCache = { fetchedAt: Date.now(), endpoints: fallbackAuthEndpoints(), fallback: false };
 }
 
 function fallbackAuthEndpoints() {
@@ -750,8 +790,9 @@ function fallbackAuthEndpoints() {
 
 function currentAuthEndpoints(now = Date.now()) {
   if (!oidcCache) return null;
+  const ttl = oidcCache.fallback === true ? OIDC_FAILURE_TTL_MS : OIDC_DISCOVERY_TTL_MS;
   const age = now - oidcCache.fetchedAt;
-  if (age >= 0 && age < OIDC_DISCOVERY_TTL_MS) return oidcCache.endpoints;
+  if (age >= 0 && age < ttl) return oidcCache.endpoints;
   return null;
 }
 
@@ -781,33 +822,45 @@ async function withAuthEndpoints(options, fn) {
   return fn(endpoints);
 }
 
-function isHttpsAuthOpenAIEndpoint(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) return false;
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return url.protocol === 'https:'
-    && url.hostname === 'auth.openai.com'
-    && url.username === ''
-    && url.password === ''
-    && (url.port === '' || url.port === '443');
-}
-
 function isOidcEndpointField(field) {
   return field === 'jwks_uri' || field.endsWith('_endpoint');
 }
 
-function endpointsFromDiscovery(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  if (body.issuer !== ISSUER) return null;
+function endpointRejectionReason(value, field) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
+    return `non-https endpoint (${field})`;
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return `non-https endpoint (${field})`;
+  }
+  if (url.protocol !== 'https:') return `non-https endpoint (${field})`;
+  if (url.hostname !== 'auth.openai.com') return `foreign host (${field})`;
+  if (url.username !== '' || url.password !== '' || (url.port !== '' && url.port !== '443')) {
+    return `non-https endpoint (${field})`;
+  }
+  return null;
+}
+
+function discoveryRejectionReason(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'invalid document';
+  if (body.issuer !== ISSUER) return 'wrong issuer';
   for (const field of Object.keys(body)) {
     if (!isOidcEndpointField(field) || body[field] == null) continue;
-    if (!isHttpsAuthOpenAIEndpoint(body[field])) return null;
+    const reason = endpointRejectionReason(body[field], field);
+    if (reason) return reason;
   }
-  if (REQUIRED_OIDC_ENDPOINTS.some((field) => !isHttpsAuthOpenAIEndpoint(body[field]))) return null;
+  for (const field of REQUIRED_OIDC_ENDPOINTS) {
+    const reason = endpointRejectionReason(body[field], field);
+    if (reason) return reason;
+  }
+  return null;
+}
+
+function endpointsFromDiscovery(body) {
+  if (discoveryRejectionReason(body)) return null;
   return {
     authorization: body.authorization_endpoint,
     token: body.token_endpoint,
@@ -815,9 +868,10 @@ function endpointsFromDiscovery(body) {
   };
 }
 
-function rememberAuthEndpoints(generation, endpoints) {
+function rememberAuthEndpoints(generation, endpoints, { fallback = false } = {}) {
   if (generation !== oidcGeneration) return endpoints;
-  oidcCache = { fetchedAt: Date.now(), endpoints };
+  oidcCache = { fetchedAt: Date.now(), endpoints, fallback };
+  if (!fallback) oidcFailureLogged = false;
   return endpoints;
 }
 
@@ -833,6 +887,12 @@ function logDiscoveryFailure(reason) {
   logAuth(`ChatGPT OpenID discovery failed (${reason}); using fallback endpoints`);
 }
 
+function logDiscoveryRejection(reason) {
+  if (oidcFailureLogged) return;
+  oidcFailureLogged = true;
+  logAuth(`ChatGPT OpenID discovery document rejected (${reason}); using fallback endpoints`);
+}
+
 async function loadOidcEndpoints(generation, timeoutMs) {
   try {
     const response = await fetchWithTimeout(
@@ -844,21 +904,25 @@ async function loadOidcEndpoints(generation, timeoutMs) {
     if (generation !== oidcGeneration) return fallbackAuthEndpoints();
     if (!response.ok) {
       logDiscoveryFailure(Number.isInteger(response.status) ? String(response.status) : 'http');
-      return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+      return rememberAuthEndpoints(generation, fallbackAuthEndpoints(), { fallback: true });
     }
     let body;
     try {
       body = await response.json();
     } catch {
-      return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+      logDiscoveryFailure('invalid-json');
+      return rememberAuthEndpoints(generation, fallbackAuthEndpoints(), { fallback: true });
     }
-    const endpoints = endpointsFromDiscovery(body);
-    if (!endpoints) return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
-    return rememberAuthEndpoints(generation, endpoints);
+    const rejection = discoveryRejectionReason(body);
+    if (rejection) {
+      logDiscoveryRejection(rejection);
+      return rememberAuthEndpoints(generation, fallbackAuthEndpoints(), { fallback: true });
+    }
+    return rememberAuthEndpoints(generation, endpointsFromDiscovery(body));
   } catch (error) {
     if (generation !== oidcGeneration) return fallbackAuthEndpoints();
     logDiscoveryFailure(discoveryFailureLabel(error));
-    return rememberAuthEndpoints(generation, fallbackAuthEndpoints());
+    return rememberAuthEndpoints(generation, fallbackAuthEndpoints(), { fallback: true });
   }
 }
 
@@ -2039,7 +2103,8 @@ async function readChatGPTConfig() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return parsed;
-  } catch {
+  } catch (error) {
+    rethrowIfTestConfigGuard(error);
     return {};
   }
 }

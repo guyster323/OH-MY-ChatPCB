@@ -33,5 +33,10 @@
   "provider.status.chatgpt.not-eligible": "ChatGPT: 자격 없음",
   "provider.status.chatgpt.usage-limited": "ChatGPT: 한도 초과",
   "auth.chatgpt.opens-browser": "(브라우저에서 열림)",
-  "auth.chatgpt.waiting.reopen-unavailable": "로그인 페이지 주소를 사용할 수 없어요. 취소한 뒤 다시 시도하세요."
+  "auth.chatgpt.waiting.reopen-unavailable": "로그인 페이지 주소를 사용할 수 없어요. 취소한 뒤 다시 시도하세요.",
+  "connection.daemon.connecting": "연결 중",
+  "connection.daemon.open": "데몬 연결됨",
+  "connection.daemon.closed": "데몬 연결 끊김",
+  "connection.daemon.error": "데몬 연결 오류",
+  "approval.no-manifest": "부품 근거(manifest) 없이 승인 가능: 부품 목록을 확인하세요"
 }

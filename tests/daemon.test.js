@@ -11,6 +11,8 @@ import { createTransactionJournal } from '../src/runtime/transaction-journal.js'
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { saveCircuitConversation } from '../src/runtime/request-conversation.js';
+import { saveCredentials } from '../src/runtime/auth/chatgpt-auth.js';
+import { isolateHome } from './isolate-home.js';
 
 const passingVerify = async () => ({
   erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
@@ -2081,6 +2083,176 @@ test('transaction status reconcile waits behind the project mutex', async () => 
     await lockPromise;
   } finally {
     await rm(root, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+const PROFILE_PROMPT = 'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, USB, SPI, GPIO header, reset button, and status LED.';
+
+function chatGptEventStream(text) {
+  return new Response([
+    `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: text })}`,
+    'data: {"type":"response.completed"}',
+    ''
+  ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+function stubChatGptFetch(responseText) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes('/v1/models')) {
+      return new Response(JSON.stringify({ models: [{ slug: 'gpt-x', visibility: 'list' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    if (target.includes('/v1/responses')) return chatGptEventStream(responseText);
+    return new Response('no', { status: 404 });
+  };
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
+async function withChatGptHome(fn) {
+  const home = await isolateHome();
+  try {
+    await saveCredentials({
+      client_id: 'oaiapp_TEST',
+      access_token: 'AT',
+      refresh_token: 'RT',
+      expires_in: 3600,
+      issued_at: Date.now(),
+      scope: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct',
+      scopes: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct'.split(' ')
+    });
+    return await fn();
+  } finally {
+    await home.restore();
+  }
+}
+
+function spyDaemonError() {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => {
+    lines.push(args.map((part) => String(part)).join(' '));
+  };
+  return {
+    lines,
+    restore() {
+      console.error = original;
+    }
+  };
+}
+
+function assertProfileParts(result) {
+  const components = result.components ?? [];
+  assert.equal(components.some((component) => component.value === 'TPS62177DQC' || String(component.libId).includes('TPS62177')), true);
+}
+
+test('chatgpt tool call records source.provider and keeps the profile parts list', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-chatgpt-source-'));
+  const services = await transactionServices({
+    validateProjectImpl: passingErc,
+    verifyAppliedProjectImpl: async () => ({
+      erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
+      drc: { ok: true, skipped: false, executed: true, violations: [], unconnectedItems: [] }
+    })
+  });
+  const logs = spyDaemonError();
+  const restoreFetch = stubChatGptFetch(JSON.stringify({
+    type: 'tool.call',
+    payload: {
+      id: 'call_draft',
+      name: 'schematic.generate',
+      args: { prompt: 'draft it' }
+    }
+  }));
+  try {
+    await withChatGptHome(async () => {
+      const created = await dispatchToolCall({
+        name: 'project.create',
+        args: { workspaceRoot, projectName: 'Sensor Board' }
+      });
+      const result = await dispatchToolCall({
+        id: 'call_chatgpt_profile',
+        name: 'project.request',
+        args: {
+          provider: 'chatgpt',
+          projectDir: created.result.projectDir,
+          prompt: PROFILE_PROMPT
+        }
+      }, services);
+      assert.equal(result.ok, true, result.error?.message);
+      assert.equal(result.result.requiresApproval, true);
+      assert.equal(result.result.source.provider, 'chatgpt');
+      assert.equal(result.result.source.via, 'provider');
+      assert.equal(result.result.source.id, 'native');
+      assertProfileParts(result.result);
+      const decision = logs.lines.filter((line) => line.includes('provider chatgpt:'));
+      assert.deepEqual(decision, ['provider chatgpt: tool call schematic.generate via provider']);
+
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: {
+          projectDir: created.result.projectDir,
+          approved: true,
+          patchId: result.result.patchId
+        }
+      }, services);
+      assert.equal(approved.ok, true, approved.error?.message);
+      assert.equal(approved.result.applied, true, JSON.stringify(approved.result.reason ?? approved.result));
+      const status = await dispatchToolCall({
+        name: 'project.transaction.status',
+        args: { projectDir: created.result.projectDir }
+      }, services);
+      assert.equal(status.ok, true, status.error?.message);
+      assert.equal(status.result.transactions[0].proposal.source.provider, 'chatgpt');
+      assert.equal(status.result.transactions[0].proposal.source.via, 'provider');
+    });
+  } finally {
+    logs.restore();
+    restoreFetch();
+    services.patchApprovalRegistry.disposeAll();
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('chatgpt native fallback records provider null and still drafts profile parts', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-chatgpt-fallback-'));
+  const services = await transactionServices({ validateProjectImpl: passingErc });
+  const logs = spyDaemonError();
+  const restoreFetch = stubChatGptFetch('The draft is ready.');
+  try {
+    await withChatGptHome(async () => {
+      const created = await dispatchToolCall({
+        name: 'project.create',
+        args: { workspaceRoot, projectName: 'Fallback Sensor' }
+      });
+      const result = await dispatchToolCall({
+        id: 'call_chatgpt_fallback',
+        name: 'project.request',
+        args: {
+          provider: 'chatgpt',
+          projectDir: created.result.projectDir,
+          prompt: PROFILE_PROMPT
+        }
+      }, services);
+      assert.equal(result.ok, true, result.error?.message);
+      assert.equal(result.result.source.provider, null);
+      assert.equal(result.result.source.via, 'native-fallback');
+      assertProfileParts(result.result);
+      const decision = logs.lines.filter((line) => line.includes('provider chatgpt:'));
+      assert.deepEqual(decision, ['provider chatgpt: fell back to native: provider returned no tool call']);
+    });
+  } finally {
+    logs.restore();
+    restoreFetch();
+    services.patchApprovalRegistry.disposeAll();
+    await rm(workspaceRoot, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });

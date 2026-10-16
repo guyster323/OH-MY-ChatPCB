@@ -3,6 +3,8 @@ import { access, chmod, mkdir, readdir, readFile, realpath, rename, rm, writeFil
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { proposalSource } from '../workflow/native-proposal-source.js';
+
 const SCHEMA_VERSION = 1;
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_PER_PROJECT = 20;
@@ -72,6 +74,15 @@ function serializeChange(change) {
     beforeHash: change.beforeHash ?? null,
     beforeBase64
   };
+}
+
+function recordedProposal(proposal) {
+  if (proposal == null) return null;
+  const copy = structuredClone(proposal);
+  if (copy?.source && typeof copy.source === 'object' && !Array.isArray(copy.source)) {
+    copy.source = proposalSource(copy.source);
+  }
+  return copy;
 }
 
 function persistable(record) {
@@ -305,7 +316,7 @@ export function createTransactionJournal({
       beforeTransactionDigest: input.beforeTransactionDigest,
       afterTransactionDigest: input.afterTransactionDigest,
       changes: serializeAll(input.changes),
-      proposal: input.proposal == null ? null : structuredClone(input.proposal),
+      proposal: recordedProposal(input.proposal),
       verification: null,
       createdAt,
       updatedAt: createdAt

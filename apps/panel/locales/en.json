@@ -33,5 +33,10 @@
   "provider.status.chatgpt.not-eligible": "ChatGPT: not eligible",
   "provider.status.chatgpt.usage-limited": "ChatGPT: limit reached",
   "auth.chatgpt.opens-browser": "(opens in your browser)",
-  "auth.chatgpt.waiting.reopen-unavailable": "The sign-in page address isn't available. Cancel and try again."
+  "auth.chatgpt.waiting.reopen-unavailable": "The sign-in page address isn't available. Cancel and try again.",
+  "connection.daemon.connecting": "Connecting",
+  "connection.daemon.open": "Daemon connected",
+  "connection.daemon.closed": "Daemon disconnected",
+  "connection.daemon.error": "Daemon connection error",
+  "approval.no-manifest": "Approval allowed without part evidence; review the parts list"
 }

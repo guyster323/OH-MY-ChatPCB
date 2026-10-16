@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <h1>ChatPCB</h1>
-          <p id="connection-status">Connecting</p>
+          <p id="connection-status" class="daemon-connection" data-role="daemon" data-state="connecting">Connecting</p>
         </div>
         <label class="pro-toggle" title="Off: apply every recommended choice (power, integration, sensors, MCU spec, datasheet companions) and generate. On: interview those choices one at a time.">
           <input id="pro-mode" type="checkbox" />
@@ -132,6 +132,10 @@
             </div>
           </div>
           <p id="patch-approval-status" data-state="idle">No patch preview active.</p>
+          <details id="patch-approval-technical-details" hidden>
+            <summary>Technical details</summary>
+            <pre id="patch-approval-technical-detail"></pre>
+          </details>
           <div class="patch-approval-actions">
             <button id="approve-patch-button" type="button" disabled aria-label="Approve">스키매틱에 적용</button>
             <button id="cancel-patch-button" type="button" disabled aria-label="Cancel">적용하지 않기</button>

@@ -28,7 +28,10 @@ function sampleChanges() {
 }
 
 function sampleProposal() {
-  return { proposalId: 'sha256:test', source: { id: 'native', version: '1' } };
+  return {
+    proposalId: 'sha256:test',
+    source: { id: 'native', version: '1', provider: null, via: 'native-fallback' }
+  };
 }
 
 async function prepareSample(journal, projectDir, extra = {}) {
@@ -60,6 +63,31 @@ async function journalFiles(stateRoot, projectDir) {
     throw error;
   }
 }
+
+test('prepare normalizes proposal source provider and via', async () => {
+  const stateRoot = await mkdirTemp('chatpcb-journal-source-state-');
+  const root = await makeRoot('chatpcb-journal-source-project-');
+  try {
+    const journal = createTransactionJournal({ stateRoot, now: () => 1000 });
+    const provided = await prepareSample(journal, root, {
+      proposal: { proposalId: 'sha256:chatgpt', source: { provider: 'chatgpt', via: 'provider' } }
+    });
+    assert.equal(provided.proposal.source.id, 'native');
+    assert.equal(provided.proposal.source.version, '1');
+    assert.equal(provided.proposal.source.provider, 'chatgpt');
+    assert.equal(provided.proposal.source.via, 'provider');
+    const fallback = await prepareSample(journal, root, {
+      beforeTransactionDigest: 'before-2',
+      afterTransactionDigest: 'after-2',
+      proposal: { proposalId: 'sha256:native', source: { id: 'native', version: '1' } }
+    });
+    assert.equal(fallback.proposal.source.provider, null);
+    assert.equal(fallback.proposal.source.via, 'native-fallback');
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('prepare persists schema version 1 records atomically with base64 before bytes', async () => {
   const stateRoot = await mkdirTemp('chatpcb-journal-state-');

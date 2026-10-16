@@ -6,20 +6,66 @@ const CHATGPT_AUTH_POLL_MS = 2000;
 // i18n helper
 let i18nLocale = 'en';
 let i18nStrings = {};
+let i18nReady = false;
+let daemonConnectionState = 'connecting';
 
-async function loadI18n(locale = 'en') {
-  i18nLocale = locale;
+const DAEMON_CONNECTION_COPY = {
+  connecting: { en: 'Connecting', ko: '연결 중' },
+  open: { en: 'Daemon connected', ko: '데몬 연결됨' },
+  closed: { en: 'Daemon disconnected', ko: '데몬 연결 끊김' },
+  error: { en: 'Daemon connection error', ko: '데몬 연결 오류' }
+};
+
+const NO_MANIFEST_INTERNAL = 'Approval allowed with no manifest evidence; exact patch hashes will still be verified.';
+
+async function loadI18n(localeName = 'en') {
+  i18nLocale = localeName;
   try {
-    const response = await fetch(`./locales/${locale}.json`);
+    const response = await fetch(`./locales/${localeName}.json`);
     if (response.ok) {
       i18nStrings = await response.json();
+    } else if (localeName !== 'en') {
+      await loadI18n('en');
+      return;
     }
   } catch {
     // Fallback to English if locale fails to load
-    if (locale !== 'en') {
+    if (localeName !== 'en') {
       await loadI18n('en');
+      return;
     }
   }
+  i18nReady = true;
+  renderDaemonConnection();
+  renderChatGPTAuth();
+}
+
+function daemonConnectionLabel() {
+  const key = `connection.daemon.${daemonConnectionState}`;
+  if (i18nStrings[key]) return i18nStrings[key];
+  const copy = DAEMON_CONNECTION_COPY[daemonConnectionState] || DAEMON_CONNECTION_COPY.connecting;
+  return locale === 'ko' ? copy.ko : copy.en;
+}
+
+function renderDaemonConnection() {
+  if (!statusEl) return;
+  statusEl.textContent = daemonConnectionLabel();
+  statusEl.dataset.role = 'daemon';
+  statusEl.dataset.state = daemonConnectionState;
+  statusEl.classList.add('daemon-connection');
+}
+
+function setDaemonConnectionState(state) {
+  daemonConnectionState = state;
+  renderDaemonConnection();
+}
+
+function approvalNoManifestMessage() {
+  const translated = t('approval.no-manifest');
+  if (translated && translated !== 'approval.no-manifest') return translated;
+  return locale === 'ko'
+    ? '부품 근거(manifest) 없이 승인 가능: 부품 목록을 확인하세요'
+    : 'Approval allowed without part evidence; review the parts list';
 }
 
 function t(key, replacements = {}) {
@@ -150,6 +196,8 @@ const inspectionErcEl = document.querySelector('#inspection-erc');
 const inspectionDrcEl = document.querySelector('#inspection-drc');
 const patchApprovalCardEl = document.querySelector('#patch-approval-card');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
+const patchApprovalTechnicalDetailsEl = document.querySelector('#patch-approval-technical-details');
+const patchApprovalTechnicalDetailEl = document.querySelector('#patch-approval-technical-detail');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
@@ -182,6 +230,7 @@ let chatgptAuthExpiryTimer = null;
 const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
 
 restoreProviderSelection();
+renderDaemonConnection();
 connect();
 syncWorkflow();
 
@@ -229,18 +278,18 @@ document.addEventListener('visibilitychange', () => {
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
   socket.addEventListener('open', () => {
-    statusEl.textContent = 'Connected';
+    setDaemonConnectionState('open');
     clearPatchApproval();
     refreshProviderStatus();
     inspectActiveProject();
   });
   socket.addEventListener('message', (event) => handleEnvelope(JSON.parse(event.data)));
   socket.addEventListener('close', () => {
-    statusEl.textContent = 'Disconnected';
+    setDaemonConnectionState('closed');
     setTimeout(connect, 1500);
   });
   socket.addEventListener('error', () => {
-    statusEl.textContent = 'Connection error';
+    setDaemonConnectionState('error');
   });
 }
 
@@ -756,11 +805,19 @@ function setPatchApproval(preview) {
   renderPatchApproval();
 }
 
+function setPatchApprovalTechnicalDetail(text) {
+  if (!patchApprovalTechnicalDetailsEl || !patchApprovalTechnicalDetailEl) return;
+  const detail = typeof text === 'string' ? text : '';
+  patchApprovalTechnicalDetailEl.textContent = detail;
+  patchApprovalTechnicalDetailsEl.hidden = detail.length === 0;
+}
+
 function clearPatchApproval(message = 'No patch preview active.') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
   patchApprovalStatusEl.dataset.state = 'idle';
   patchApprovalStatusEl.textContent = message;
+  setPatchApprovalTechnicalDetail('');
   approvePatchButtonEl.disabled = true;
   cancelPatchButtonEl.disabled = true;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
@@ -774,6 +831,7 @@ function renderPatchApproval() {
   approvePatchButtonEl.disabled = !active || !approvedEvidence;
   cancelPatchButtonEl.disabled = !active;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = !active;
+  setPatchApprovalTechnicalDetail('');
   if (freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
@@ -788,7 +846,8 @@ function renderPatchApproval() {
   }
   if (freshness === 'missing' || !freshness) {
     patchApprovalStatusEl.dataset.state = 'warning';
-    patchApprovalStatusEl.textContent = 'Approval allowed with no manifest evidence; exact patch hashes will still be verified.';
+    patchApprovalStatusEl.textContent = approvalNoManifestMessage();
+    setPatchApprovalTechnicalDetail(NO_MANIFEST_INTERNAL);
     return;
   }
   patchApprovalStatusEl.dataset.state = 'ready';
@@ -1395,6 +1454,7 @@ function handleChatGPTAuthChanged(payload) {
 }
 
 function renderChatGPTAuth() {
+  if (!i18nReady || !chatgptAuthCardEl || !providerEl) return;
   const isChatGPT = providerEl.value === 'chatgpt';
   
   if (!isChatGPT) {

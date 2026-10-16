@@ -13,6 +13,20 @@ h1 { font-size: 16px; }
 h2 { font-size: 12px; }
 h3 { font-size: 11px; }
 #connection-status, #provider-status, label, time { color: #607086; font-size: 11px; }
+#connection-status.daemon-connection { font-weight: 650; letter-spacing: 0.01em; }
+#connection-status.daemon-connection::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #94a3b8;
+  vertical-align: middle;
+}
+#connection-status.daemon-connection[data-state="open"]::before { background: #047857; }
+#connection-status.daemon-connection[data-state="closed"]::before,
+#connection-status.daemon-connection[data-state="error"]::before { background: #9f1239; }
 .provider-control, label { display: grid; gap: 3px; min-width: 0; }
 .provider-control { justify-items: end; min-width: 120px; }
 .pro-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #334155; }

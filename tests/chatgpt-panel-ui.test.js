@@ -56,7 +56,7 @@ async function startStaticServer() {
 // Opens the real panel with a fake daemon socket. startResult is what auth.chatgpt.start returns.
 // reopenFailure is an { ok: false, error } tool result. reopenResultFailure nests that object in result.
 // reopenThrow makes the socket throw while sending auth.chatgpt.reopen.
-async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenFailure, reopenResultFailure, reopenThrow, signedIn, leaveProvider } = {}) {
+async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenFailure, reopenResultFailure, reopenThrow, signedIn, leaveProvider, rememberChatGPT, watchRawKeys, delayLocales, approvalFlow } = {}) {
   const browser = await getBrowser();
   if (!browser) {
     t.skip('No Chromium browser available. Set CHATPCB_BROWSER_PATH or run npx playwright install chromium.');
@@ -67,9 +67,34 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  let releaseLocales = null;
+  if (delayLocales) {
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    releaseLocales = release;
+    await page.route('**/locales/*.json', async (route) => {
+      await gate;
+      await route.continue();
+    });
+  }
   await page.addInitScript((config) => {
     window.__sent = [];
     window.__chatgptSignedIn = config.signedIn === true;
+    if (config.rememberChatGPT) localStorage.setItem('chatpcb.provider', 'chatgpt');
+    if (config.watchRawKeys) {
+      window.__rawI18nSeen = [];
+      const note = () => {
+        const card = document.querySelector('#chatgpt-auth-card');
+        const text = card?.textContent ?? '';
+        if (text.includes('auth.chatgpt.')) window.__rawI18nSeen.push(text);
+        const connection = document.querySelector('#connection-status');
+        const connectionText = connection?.textContent ?? '';
+        if (connectionText.includes('connection.daemon.')) window.__rawI18nSeen.push(connectionText);
+      };
+      new MutationObserver(note).observe(document, { subtree: true, childList: true, characterData: true });
+    }
     class FakeSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
       constructor() {
@@ -128,6 +153,27 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
             result = config.start;
           }
         }
+        if (config.approvalFlow && call.name === 'project.create') {
+          result = { projectDir: '/tmp/chatpcb-ui-project', displayName: call.args?.projectName || 'Board' };
+        }
+        if (config.approvalFlow && call.name === 'project.inspect') {
+          result = {
+            manifest: { freshness: { status: 'missing', reason: 'No manifest' } },
+            inspection: { projectDigest: 'abcdef123456', artifactCount: 0 }
+          };
+        }
+        if (config.approvalFlow && call.name === 'project.request') {
+          result = {
+            requiresApproval: true,
+            approved: false,
+            applied: false,
+            patchId: 'sha256:preview',
+            expiresAt: Date.now() + 120000,
+            operation: 'generated',
+            files: {},
+            conversation: { messages: [] }
+          };
+        }
         const payload = { id: call.id, ok, result };
         if (error) payload.error = error;
         if (authUrl) payload.authUrl = authUrl;
@@ -142,7 +188,10 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
     reopenFailure: reopenFailure ?? null,
     reopenResultFailure: reopenResultFailure ?? null,
     reopenThrow: reopenThrow ?? null,
-    signedIn: signedIn === true
+    signedIn: signedIn === true,
+    rememberChatGPT: rememberChatGPT === true,
+    watchRawKeys: watchRawKeys === true,
+    approvalFlow: approvalFlow === true
   });
   await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
   const button = page.locator('.chatgpt-sign-in-btn');
@@ -150,7 +199,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
     await page.selectOption('#provider', 'chatgpt');
     if (!signedIn) await button.waitFor();
   }
-  return { page, context, pageErrors, button };
+  return { page, context, pageErrors, button, releaseLocales };
 }
 
 const waiting = { state: 'waiting', attemptId: 'attempt-1', authUrl: 'https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client&x=1' };
@@ -405,6 +454,100 @@ test('reopen shows the browser-open error when opening the browser throws', asyn
     await reopen.waitFor();
     await reopen.click();
     await assertBrowserOpenError(page, { title: "Couldn't open your browser. Use the link below.", pageErrors });
+  } finally {
+    await context.close();
+  }
+});
+
+test('login card waits for locale text and never shows raw i18n keys', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'en-US',
+    startResult: waiting,
+    leaveProvider: true,
+    rememberChatGPT: true,
+    watchRawKeys: true,
+    delayLocales: true
+  });
+  if (!opened) return;
+  const { page, context, pageErrors, releaseLocales } = opened;
+  try {
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
+    const duringDelay = await page.locator('#chatgpt-auth-card').innerText();
+    assert.equal(duringDelay.includes('auth.chatgpt.'), false);
+    assert.equal(await page.evaluate(() => window.__rawI18nSeen.length), 0);
+    releaseLocales();
+    await page.waitForFunction(() => document.querySelector('#chatgpt-auth-title')?.textContent === 'Use ChatPCB with your ChatGPT plan');
+    const afterLoad = await page.locator('#chatgpt-auth-card').innerText();
+    assert.equal(afterLoad.includes('auth.chatgpt.'), false);
+    assert.match(afterLoad, /You'll sign in using your system browser/);
+    assert.equal(await page.evaluate(() => window.__rawI18nSeen.length), 0);
+    assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    releaseLocales?.();
+    await context.close();
+  }
+});
+
+test('daemon connection label stays separate from ChatGPT sign-in status', async (t) => {
+  const opened = await openChatGPTWaiting(t, { locale: 'ko-KR', startResult: waiting, signedIn: true });
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    const connection = page.locator('#connection-status');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === '데몬 연결됨');
+    assert.equal(await connection.getAttribute('data-role'), 'daemon');
+    assert.equal(await connection.getAttribute('data-state'), 'open');
+    assert.equal(await connection.evaluate((node) => node.classList.contains('daemon-connection')), true);
+    const before = await connection.innerText();
+    assert.equal(before.includes('ChatGPT'), false);
+    await page.waitForFunction(() => document.querySelector('#chatgpt-auth-title')?.textContent === 'ChatGPT에 연결됨');
+    assert.notEqual(await page.locator('#chatgpt-auth-title').innerText(), before);
+    assert.equal(await page.locator('#provider-status').innerText(), 'chatgpt: signed-in');
+    const signOut = page.locator('#chatgpt-auth-card button', { hasText: /로그아웃|Sign out/ });
+    await signOut.click();
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-out');
+    assert.equal(await connection.innerText(), '데몬 연결됨');
+    assert.equal(await connection.getAttribute('data-state'), 'open');
+    await page.locator('.chatgpt-sign-in-btn').click();
+    await page.waitForFunction(() => (document.querySelector('#chatgpt-auth-title')?.textContent ?? '').includes('브라우저에서 로그인을 마쳐 주세요'));
+    assert.equal(await connection.innerText(), '데몬 연결됨');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('missing manifest approval uses user language and keeps the internal sentence in technical details', async (t) => {
+  const opened = await openChatGPTWaiting(t, {
+    locale: 'en-US',
+    startResult: waiting,
+    leaveProvider: true,
+    approvalFlow: true
+  });
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
+    await page.locator('#project-name').fill('Sensor board');
+    await page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
+    await page.getByRole('status', { name: 'Active project' }).waitFor();
+    await page.locator('#prompt').fill('ESP32-S3 sensor board');
+    await page.locator('#composer').getByRole('button', { name: 'Send' }).click();
+    const status = page.locator('#patch-approval-status');
+    await page.waitForFunction(() => (
+      document.querySelector('#patch-approval-status')?.textContent
+        === 'Approval allowed without part evidence; review the parts list'
+    ));
+    assert.equal((await status.innerText()).includes('Approval allowed with no manifest evidence'), false);
+    const detail = page.locator('#patch-approval-technical-detail');
+    assert.equal(
+      await detail.evaluate((node) => node.textContent),
+      'Approval allowed with no manifest evidence; exact patch hashes will still be verified.'
+    );
+    assert.equal(await page.locator('#patch-approval-technical-details').isHidden(), false);
+    assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
+    assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
   }
