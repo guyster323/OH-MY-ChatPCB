@@ -10,6 +10,27 @@ const GROK_PROVIDER_TIMEOUT_MS = 300000;
 const MAX_PROVIDER_TIMEOUT_MS = 2147483647;
 const DEFAULT_WINDOWS_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
 
+// Proven with `grok --json-schema` in a temp directory: the json result's
+// structuredOutput is the tool call. `--output-format plain` only returns prose.
+const GROK_TOOL_CALL_SCHEMA = JSON.stringify({
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'payload'],
+  properties: {
+    type: { type: 'string' },
+    payload: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'name', 'args'],
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        args: { type: 'object' }
+      }
+    }
+  }
+});
+
 const PROVIDERS = [
   {
     id: 'codex',
@@ -39,7 +60,7 @@ const PROVIDERS = [
     id: 'grok',
     label: 'Grok Build',
     command: 'grok',
-    args: ['--prompt-file', PROMPT_FILE_PLACEHOLDER, '--output-format', 'plain', '--disable-web-search', '--permission-mode', 'plan'],
+    args: ['--prompt-file', PROMPT_FILE_PLACEHOLDER, '--output-format', 'json', '--json-schema', GROK_TOOL_CALL_SCHEMA, '--disable-web-search', '--permission-mode', 'plan'],
     description: 'Uses an already-authenticated local Grok Build CLI session (grok login or XAI_API_KEY).',
     usePromptFile: true,
     modelEnvVar: 'CHATPCB_GROK_MODEL',
@@ -49,11 +70,15 @@ const PROVIDERS = [
   }
 ];
 
-export function listProviderDefinitions() {
-  return PROVIDERS.map((provider) => ({ ...provider, args: [...provider.args] }));
+export function listProviderDefinitions(env = process.env) {
+  return PROVIDERS.map((provider) => {
+    const copy = { ...provider, args: [...provider.args] };
+    applyResolvedTimeout(copy, env, false);
+    return copy;
+  });
 }
 
-export function getProviderDefinition(provider, env = process.env) {
+export function getProviderDefinition(provider, env = process.env, { strictTimeout = true } = {}) {
   const match = PROVIDERS.find((candidate) => candidate.id === provider);
   if (!match) {
     throw new Error(`Unknown provider: ${provider}`);
@@ -75,7 +100,7 @@ export function getProviderDefinition(provider, env = process.env) {
     }
   }
 
-  definition.timeoutMs = resolveProviderTimeoutMs(definition.id, definition.timeoutMs, env);
+  applyResolvedTimeout(definition, env, strictTimeout);
   return definition;
 }
 
@@ -88,14 +113,31 @@ export function buildProviderLaunchArgs(definition, projectDir) {
 }
 
 export function resolveProviderTimeoutMs(providerId, defaultTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS, env = process.env) {
+  const resolved = resolveProviderTimeout(providerId, defaultTimeoutMs, env);
+  if (resolved.warning) throw new Error(resolved.warning);
+  return resolved.timeoutMs;
+}
+
+function resolveProviderTimeout(providerId, defaultTimeoutMs, env) {
   const specificName = `CHATPCB_${String(providerId).toUpperCase()}_TIMEOUT_MS`;
   const specific = readTimeoutEnv(env, specificName);
-  if (specific !== undefined) return specific;
+  if (specific.warning) return { timeoutMs: defaultTimeoutMs, warning: specific.warning };
+  if (specific.value !== undefined) return { timeoutMs: specific.value };
 
   const globalTimeout = readTimeoutEnv(env, 'CHATPCB_PROVIDER_TIMEOUT_MS');
-  if (globalTimeout !== undefined) return globalTimeout;
+  if (globalTimeout.warning) return { timeoutMs: defaultTimeoutMs, warning: globalTimeout.warning };
+  if (globalTimeout.value !== undefined) return { timeoutMs: globalTimeout.value };
 
-  return defaultTimeoutMs;
+  return { timeoutMs: defaultTimeoutMs };
+}
+
+function applyResolvedTimeout(definition, env, strictTimeout) {
+  const resolved = resolveProviderTimeout(definition.id, definition.timeoutMs, env);
+  if (resolved.warning && strictTimeout) {
+    throw new Error(resolved.warning);
+  }
+  definition.timeoutMs = resolved.timeoutMs;
+  if (resolved.warning) definition.warning = resolved.warning;
 }
 
 export async function checkProviderAvailability({
@@ -107,17 +149,16 @@ export async function checkProviderAvailability({
   home,
   isExecutable
 } = {}) {
-  const definition = getProviderDefinition(provider, env);
+  const definition = getProviderDefinition(provider, env, { strictTimeout: false });
 
   if (commandExistsImpl) {
     const available = await commandExistsImpl(definition.command);
-    return {
-      provider: definition.id,
+    return providerAvailability(definition, {
       command: definition.command,
       resolvedPath: null,
       available: Boolean(available),
       status: available ? 'available' : 'missing'
-    };
+    });
   }
 
   const resolvedPath = await resolveProviderExecutable({
@@ -130,12 +171,20 @@ export async function checkProviderAvailability({
     isExecutable
   });
 
-  return {
-    provider: definition.id,
+  return providerAvailability(definition, {
     command: resolvedPath ?? definition.command,
     resolvedPath,
     available: Boolean(resolvedPath),
     status: resolvedPath ? 'available' : 'missing'
+  });
+}
+
+function providerAvailability(definition, fields) {
+  return {
+    provider: definition.id,
+    ...fields,
+    timeoutMs: definition.timeoutMs,
+    ...(definition.warning ? { warning: definition.warning } : {})
   };
 }
 
@@ -143,15 +192,30 @@ export function buildProviderPrompt({ provider, userMessage, projectDir, allowed
   const definition = getProviderDefinition(provider);
   const toolList = allowedTools.length ? allowedTools.map((tool) => `- ${tool}`).join('\n') : '- no tools allowed';
 
+  const toolCallShape = '{"type":"tool.call","payload":{"id":"call_<id>","name":"<tool>","args":{}}}';
+  const instructions = provider === 'grok'
+    ? [
+      `You are running as the ${definition.label} adapter for ChatPCB.`,
+      'Choose one allowed ChatPCB tool and return it as the structured response:',
+      toolCallShape,
+      'Set type to tool.call. Put the user request in args when that tool needs a prompt.',
+      'Do not emit tool.result. The local daemon executes tools and returns results.',
+      'Do not modify project files yourself.',
+      'Do not include API keys, tokens, or credentials in output.'
+    ]
+    : [
+      `You are running as the ${definition.label} adapter for ChatPCB.`,
+      'Respond with normal assistant text for reasoning or status.',
+      'When you need ChatPCB to act, emit exactly one JSON Lines object on its own line:',
+      toolCallShape,
+      'Do not emit tool.result. The local daemon executes tools and returns results.',
+      'Do not include API keys, tokens, or credentials in output.'
+    ];
+
   return [
-    `You are running as the ${definition.label} adapter for ChatPCB.`,
-    'Respond with normal assistant text for reasoning or status.',
-    'When you need ChatPCB to act, emit exactly one JSON Lines object on its own line:',
-    '{"type":"tool.call","payload":{"id":"call_<id>","name":"<tool>","args":{}}}',
+    ...instructions,
     'Allowed tool names:',
     toolList,
-    'Do not emit tool.result. The local daemon executes tools and returns results.',
-    'Do not include API keys, tokens, or credentials in output.',
     '',
     'User request:',
     userMessage ?? '',
@@ -202,22 +266,26 @@ export async function resolveProviderExecutable({
 }
 
 function readTimeoutEnv(env, name) {
-  if (!env || !Object.prototype.hasOwnProperty.call(env, name)) return undefined;
+  if (!env || !Object.prototype.hasOwnProperty.call(env, name)) return {};
   const raw = env[name];
-  if (raw === undefined || raw === null) return undefined;
+  if (raw === undefined || raw === null) return {};
 
   const text = String(raw).trim();
-  if (text === '') return undefined;
+  if (text === '') return {};
   if (!/^\d+$/.test(text)) {
-    throw new Error(`Invalid ${name}: expected a positive integer millisecond timeout no greater than ${MAX_PROVIDER_TIMEOUT_MS}.`);
+    return { warning: invalidTimeoutMessage(name) };
   }
 
   const value = Number(text);
   if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_PROVIDER_TIMEOUT_MS) {
-    throw new Error(`Invalid ${name}: expected a positive integer millisecond timeout no greater than ${MAX_PROVIDER_TIMEOUT_MS}.`);
+    return { warning: invalidTimeoutMessage(name) };
   }
 
-  return value;
+  return { value };
+}
+
+function invalidTimeoutMessage(name) {
+  return `Invalid ${name}: expected a positive integer millisecond timeout no greater than ${MAX_PROVIDER_TIMEOUT_MS}.`;
 }
 
 function pathEntries(env, platform) {

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { collectTransactionSnapshot, transactionArtifactKind } from '../evidence/transaction-inventory.js';
+import { CONVERSATION_FILE } from '../runtime/request-conversation.js';
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
@@ -345,7 +346,8 @@ export async function createNativeProposal({
   context,
   signal,
   validateCandidateImpl,
-  generateProjectImpl = generateMcuPeripheralProject
+  generateProjectImpl = generateMcuPeripheralProject,
+  conversationBytes
 } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
@@ -365,6 +367,9 @@ export async function createNativeProposal({
 
     const proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
     throwIfAborted(signal);
+    if (conversationBytes?.length) {
+      await writeFile(path.join(candidateDir, CONVERSATION_FILE), conversationBytes);
+    }
     const generatedSnapshot = await collectTransactionSnapshot({ projectDir: candidateDir });
     const candidateRequired = requiredFromArtifacts(generatedSnapshot.artifacts);
     const schematicRelative = firstArtifactPath(generatedSnapshot.artifacts, '.kicad_sch');

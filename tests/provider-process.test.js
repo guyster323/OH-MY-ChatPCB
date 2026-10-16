@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { runProviderProcess } from '../src/runtime/provider-process.js';
+import { buildProviderKillCommand, providerProcessCommand, runProviderProcess } from '../src/runtime/provider-process.js';
 import { PROMPT_FILE_PLACEHOLDER } from '../src/runtime/provider-registry.js';
 
 test('parses provider stdout into deltas and tool calls', async () => {
@@ -572,3 +573,373 @@ test('usePromptFile cleans up temp file on cancel', async () => {
   await assert.rejects(promise, /cancelled/);
   assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
 });
+
+test('Windows shim caret-escapes cmd metacharacters and double-escapes batch shims', () => {
+  const args = ['a&b', 'c^d', 'e%f', 'two words', 'say "hi"', '100% done', 'a|b', ''];
+  // cmd /d /s /c does not collapse %%. Match cross-spawn: caret-escape meta chars,
+  // and escape .cmd/.bat arguments twice because cmd re-parses batch arguments.
+  const doubleEscaped = '"grok.cmd ^^^"a^^^&b^^^" ^^^"c^^^^d^^^" ^^^"e^^^%f^^^" ^^^"two^^^ words^^^" ^^^"say^^^ \\^^^"hi\\^^^"^^^" ^^^"100^^^%^^^ done^^^" ^^^"a^^^|b^^^" ^^^"^^^""';
+  const singleEscaped = '"grok ^"a^&b^" ^"c^^d^" ^"e^%f^" ^"two^ words^" ^"say^ \\^"hi\\^"^" ^"100^%^ done^" ^"a^|b^" ^"^""';
+
+  const shim = providerProcessCommand('grok.cmd', args, 'win32');
+  assert.equal(shim.windowsShim, true);
+  assert.equal(shim.windowsVerbatimArguments, true);
+  assert.equal(shim.command, process.env.ComSpec ?? 'cmd.exe');
+  assert.deepEqual(shim.args.slice(0, 3), ['/d', '/s', '/c']);
+  assert.equal(shim.args[3], doubleEscaped);
+  assert.equal(shim.args[3].includes('%%'), false);
+
+  const batch = providerProcessCommand('grok.bat', args, 'win32');
+  assert.equal(batch.args[3], doubleEscaped.replace('grok.cmd', 'grok.bat'));
+
+  const extensionless = providerProcessCommand('grok', args, 'win32');
+  assert.equal(extensionless.windowsShim, true);
+  assert.equal(extensionless.args[3], singleEscaped);
+
+  const executable = providerProcessCommand('C:\\Tools\\grok.exe', ['a&b', '100%'], 'win32');
+  assert.equal(executable.windowsShim, false);
+  assert.equal(executable.windowsVerbatimArguments, undefined);
+  assert.equal(executable.command, 'C:\\Tools\\grok.exe');
+  assert.deepEqual(executable.args, ['a&b', '100%']);
+
+  const posix = providerProcessCommand('grok.cmd', ['a&b'], 'linux');
+  assert.equal(posix.windowsShim, false);
+  assert.deepEqual(posix.args, ['a&b']);
+});
+
+test('aborts during prompt write without spawning', async () => {
+  const before = (await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-'));
+  const controller = new AbortController();
+  let releaseWrite;
+  const writeGate = new Promise((resolve) => {
+    releaseWrite = resolve;
+  });
+  let entered;
+  const writeEntered = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let spawns = 0;
+
+  const promise = runProviderProcess({
+    command: process.execPath,
+    args: ['-e', 'process.exit(0)'],
+    input: 'abort during write',
+    usePromptFile: true,
+    signal: controller.signal,
+    timeoutMs: 5000,
+    writeFileImpl: async (file, data, options) => {
+      entered();
+      controller.abort();
+      await writeGate;
+      return writeFile(file, data, options);
+    },
+    spawnImpl: () => {
+      spawns += 1;
+      throw new Error('spawn should not be called');
+    }
+  });
+
+  await writeEntered;
+  releaseWrite();
+  await assert.rejects(promise, /cancelled/);
+  assert.equal(spawns, 0);
+  assert.equal((await readdir(tmpdir())).filter((name) => name.startsWith('chatpcb-prompt-')).length, before.length);
+});
+
+test('parses a recorded grok json-schema result into one schematic.generate tool call', async () => {
+  // Recorded from `grok --prompt-file --output-format json --json-schema` in a temp directory.
+  // Pretty-printed, with usage/cost fields and structuredOutput holding the tool call.
+  const recorded = `{
+  "text": "{\\"type\\":\\"tool.call\\",\\"payload\\":{\\"id\\":\\"sg1\\",\\"name\\":\\"schematic.generate\\",\\"args\\":{\\"prompt\\":\\"RP2040 board with USB-C power and an I2C connector.\\"}}}",
+  "stopReason": "end_turn",
+  "sessionId": "01a14236-498c-79d3-894e-653380daf41a",
+  "requestId": "f4a2e362-814f-48f7-aac8-57579278e92b",
+  "cwd": "/tmp/chatpcb-grok-schema-4Nk9",
+  "thought": "Preparing a ChatPCB tool call for schematic generation.",
+  "usage": {
+    "input_tokens": 12752,
+    "cache_read_input_tokens": 2304,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 417,
+    "reasoning_tokens": 370,
+    "total_tokens": 15473
+  },
+  "num_turns": 1,
+  "total_cost_usd": 0.00991372,
+  "total_cost_usd_ticks": 99137200,
+  "modelUsage": {
+    "grok-4.7-build": {
+      "inputTokens": 12752,
+      "outputTokens": 417,
+      "cacheReadInputTokens": 2304,
+      "cacheCreationInputTokens": 0,
+      "modelCalls": 1,
+      "costUSD": 0.00991372
+    }
+  },
+  "structuredOutput": {
+    "type": "tool.call",
+    "payload": {
+      "id": "sg1",
+      "name": "schematic.generate",
+      "args": {
+        "prompt": "RP2040 board with USB-C power and an I2C connector."
+      }
+    }
+  }
+}
+`;
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', `process.stdout.write(${JSON.stringify(recorded)})`],
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.deepEqual(transcript.events.map((event) => event.type), ['tool.call']);
+  assert.equal(transcript.events[0].payload.id, 'sg1');
+  assert.equal(transcript.events[0].payload.name, 'schematic.generate');
+  assert.match(transcript.events[0].payload.args.prompt, /RP2040/);
+});
+
+test('parses grok streaming-json text into a tool call and ignores grok tool_call events', async () => {
+  const toolCall = JSON.stringify({
+    type: 'tool.call',
+    payload: {
+      id: 'sg1',
+      name: 'schematic.generate',
+      args: { prompt: 'RP2040 board with USB-C power and an I2C connector.' }
+    }
+  });
+  const splitAt = toolCall.indexOf('schematic.generate');
+  const lines = [
+    { type: 'available_commands', data: [] },
+    { type: 'thought', data: 'Preparing a ChatPCB tool call for schematic generation.' },
+    { type: 'auto_compact_begin' },
+    { type: 'text', data: toolCall.slice(0, splitAt) },
+    { type: 'text', data: toolCall.slice(splitAt) },
+    { type: 'tool_call', toolCallId: 'call_1', title: 'Read', kind: 'read', status: 'completed', toolName: 'read_file' },
+    { type: 'tool_call_update', toolCallId: 'call_1', status: 'completed' },
+    { type: 'usage', messageId: 'resp_1', stopReason: 'end_turn', usage: { input_tokens: 10, output_tokens: 20 } },
+    { type: 'end', stopReason: 'end_turn', sessionId: '01a14236-498c-79d3-894e-653380daf41a' }
+  ];
+  const script = `for (const line of ${JSON.stringify(lines)}) console.log(JSON.stringify(line));`;
+  const transcript = await runProviderProcess({
+    command: process.execPath,
+    args: ['-e', script],
+    timeoutMs: 2000
+  });
+
+  assert.equal(transcript.exitCode, 0);
+  assert.deepEqual(transcript.events.map((event) => event.type), ['tool.call']);
+  assert.equal(transcript.events[0].payload.name, 'schematic.generate');
+  assert.equal(transcript.events[0].payload.id, 'sg1');
+});
+
+test('Windows shim kill command is taskkill /T /F with an args array', () => {
+  const spec = buildProviderKillCommand({ platform: 'win32', pid: 4242, windowsShim: true });
+
+  assert.equal(spec.command, 'taskkill');
+  assert.deepEqual(spec.args, ['/PID', '4242', '/T', '/F']);
+  assert.equal(Object.hasOwn(spec, 'shell'), false);
+
+  const executable = buildProviderKillCommand({ platform: 'win32', pid: 4242, windowsShim: false });
+  assert.equal(executable.command, undefined);
+  assert.equal(executable.directSignal, 'SIGTERM');
+
+  const posix = buildProviderKillCommand({ platform: 'linux', pid: 4242, windowsShim: true });
+  assert.equal(posix.command, undefined);
+  assert.equal(posix.group, true);
+  assert.equal(posix.signal, 'SIGTERM');
+  assert.equal(posix.escalateSignal, 'SIGKILL');
+});
+
+test('timeout kills the process group when the child and grandchild ignore SIGTERM', { skip: process.platform === 'win32' }, async () => {
+  await assertProcessTreeStopped({
+    timeoutMs: 2000,
+    killGraceMs: 250,
+    expectedError: /timed out/
+  });
+});
+
+test('cancel kills the process group when the child and grandchild ignore SIGTERM', { skip: process.platform === 'win32' }, async () => {
+  const controller = new AbortController();
+  await assertProcessTreeStopped({
+    timeoutMs: 10000,
+    killGraceMs: 250,
+    signal: controller.signal,
+    expectedError: /cancelled/,
+    onReady: () => controller.abort()
+  });
+});
+
+test('usePromptFile keeps the prompt file until the child exits after cancel', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-prompt-lifetime-'));
+  const marker = path.join(root, 'marker.json');
+  const scriptPath = path.join(root, 'hold-prompt.js');
+  await writeFile(scriptPath, promptHoldScript(), 'utf8');
+  const controller = new AbortController();
+  const promise = runProviderProcess({
+    command: process.execPath,
+    args: [scriptPath, marker, '--prompt-file', PROMPT_FILE_PLACEHOLDER],
+    input: 'keep this prompt until exit',
+    usePromptFile: true,
+    signal: controller.signal,
+    timeoutMs: 10000,
+    killGraceMs: 500
+  });
+  const captured = promise.then(
+    (value) => ({ ok: true, value }),
+    (failure) => ({ ok: false, error: failure })
+  );
+  let pid = null;
+
+  try {
+    const info = await waitForJson(marker);
+    pid = info.pid;
+    assert.equal(typeof info.promptPath, 'string');
+    assert.equal(existsSync(info.promptPath), true);
+    process.kill(info.pid, 0);
+
+    controller.abort();
+    assert.equal(existsSync(info.promptPath), true);
+
+    if (process.platform !== 'win32') {
+      await delay(80);
+      assert.equal(existsSync(info.promptPath), true);
+      process.kill(info.pid, 0);
+    }
+
+    const result = await captured;
+    assert.equal(result.ok, false);
+    assert.match(result.error.message, /cancelled/);
+    assert.equal(existsSync(info.promptPath), false);
+  } finally {
+    controller.abort();
+    if (pid) forceKillTree(pid);
+    await captured;
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+async function assertProcessTreeStopped({ timeoutMs, killGraceMs, signal, expectedError, onReady }) {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-proc-tree-'));
+  const pidFile = path.join(root, 'pids.json');
+  const scriptPath = path.join(root, 'tree.js');
+  await writeFile(scriptPath, processTreeScript(), 'utf8');
+  const promise = runProviderProcess({
+    command: process.execPath,
+    args: [scriptPath, pidFile],
+    timeoutMs,
+    killGraceMs,
+    signal
+  });
+  const captured = promise.then(
+    (value) => ({ ok: true, value }),
+    (failure) => ({ ok: false, error: failure })
+  );
+  let pids = null;
+
+  try {
+    pids = await waitForJson(pidFile);
+    assert.equal(typeof pids.parent, 'number');
+    assert.equal(typeof pids.child, 'number');
+    process.kill(pids.parent, 0);
+    process.kill(pids.child, 0);
+    if (onReady) onReady(pids);
+
+    const result = await captured;
+    assert.equal(result.ok, false);
+    assert.match(result.error.message, expectedError);
+    await assertPidGone(pids.parent);
+    await assertPidGone(pids.child);
+  } finally {
+    if (pids?.parent) forceKillTree(pids.parent);
+    if (pids?.child) forceKillPid(pids.child);
+    await captured;
+    await rm(root, { force: true, recursive: true });
+  }
+}
+
+function processTreeScript() {
+  return [
+    "const fs = require('fs');",
+    "const { spawn } = require('child_process');",
+    'const pidFile = process.argv[2];',
+    'const grandchild = [',
+    "  'process.on(\"SIGTERM\", () => {});',",
+    "  'process.on(\"SIGINT\", () => {});',",
+    "  'setInterval(() => {}, 1000);'",
+    "].join('');",
+    "process.on('SIGTERM', () => {});",
+    "process.on('SIGINT', () => {});",
+    "const child = spawn(process.execPath, ['-e', grandchild], { stdio: 'ignore' });",
+    'fs.writeFileSync(pidFile, JSON.stringify({ parent: process.pid, child: child.pid }));',
+    'setInterval(() => {}, 1000);',
+    ''
+  ].join('\n');
+}
+
+function promptHoldScript() {
+  return [
+    "const fs = require('fs');",
+    'const marker = process.argv[2];',
+    'const args = process.argv.slice(2);',
+    "const promptIndex = args.indexOf('--prompt-file');",
+    'const promptPath = args[promptIndex + 1];',
+    'if (!promptPath || !fs.existsSync(promptPath)) process.exit(2);',
+    "process.on('SIGTERM', () => {});",
+    "process.on('SIGINT', () => {});",
+    'fs.writeFileSync(marker, JSON.stringify({ promptPath, pid: process.pid }));',
+    'setInterval(() => {}, 1000);',
+    ''
+  ].join('\n');
+}
+
+async function waitForJson(filePath) {
+  const started = Date.now();
+  while (Date.now() - started < 4000) {
+    try {
+      return JSON.parse(await readFile(filePath, 'utf8'));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await delay(20);
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
+async function assertPidGone(pid) {
+  const started = Date.now();
+  while (Date.now() - started < 2000) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      assert.equal(error.code, 'ESRCH');
+      return;
+    }
+    await delay(25);
+  }
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+}
+
+function forceKillTree(pid) {
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // The process group has already exited.
+  }
+  forceKillPid(pid);
+}
+
+function forceKillPid(pid) {
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // The process has already exited.
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

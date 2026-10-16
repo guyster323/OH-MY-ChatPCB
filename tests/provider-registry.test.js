@@ -57,18 +57,31 @@ test('provider prompt constrains local agents to allowed tool-call JSON', () => 
   assert.match(prompt, /Do not emit tool\.result/);
 });
 
-test('grok provider uses plain output format and prompt-file with placeholder', () => {
+test('grok provider uses json schema output and a prompt-file placeholder', () => {
   const definition = getProviderDefinition('grok');
 
   assert.equal(definition.command, 'grok');
   assert.ok(definition.args.includes('--prompt-file'));
   assert.ok(definition.args.includes(PROMPT_FILE_PLACEHOLDER));
   assert.ok(definition.args.includes('--output-format'));
-  assert.ok(definition.args.includes('plain'));
+  assert.ok(definition.args.includes('json'));
+  assert.equal(definition.args.includes('plain'), false);
+  const schema = JSON.parse(definition.args[definition.args.indexOf('--json-schema') + 1]);
+  assert.equal(schema.properties.type.type, 'string');
+  assert.equal(schema.properties.payload.properties.args.type, 'object');
   assert.ok(definition.args.includes('--disable-web-search'));
   assert.ok(definition.args.includes('--permission-mode'));
   assert.ok(definition.args.includes('plan'));
   assert.equal(definition.usePromptFile, true);
+
+  const prompt = buildProviderPrompt({
+    provider: 'grok',
+    userMessage: 'RP2040 board with USB-C power.',
+    allowedTools: ['schematic.generate']
+  });
+  assert.match(prompt, /structured response/);
+  assert.match(prompt, /tool\.call/);
+  assert.match(prompt, /schematic\.generate/);
 });
 
 test('grok provider supports CHATPCB_GROK_MODEL environment variable', () => {
@@ -413,3 +426,74 @@ async function writeExecutable(filePath) {
   await writeFile(filePath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   await chmod(filePath, 0o755);
 }
+
+test('invalid timeout env falls back for provider list and status instead of throwing', async () => {
+  const grokEnv = {
+    PATH: '',
+    HOME: '/tmp/chatpcb-no-home',
+    USERPROFILE: '/tmp/chatpcb-no-home',
+    CHATPCB_GROK_TIMEOUT_MS: 'soon',
+    CHATPCB_PROVIDER_TIMEOUT_MS: '180000'
+  };
+  const listed = listProviderDefinitions(grokEnv);
+  const grok = listed.find((provider) => provider.id === 'grok');
+  const claude = listed.find((provider) => provider.id === 'claude');
+
+  assert.ok(grok.timeoutMs >= 300000);
+  assert.match(grok.warning, /Invalid CHATPCB_GROK_TIMEOUT_MS/);
+  assert.equal(claude.timeoutMs, 180000);
+  assert.equal(claude.warning, undefined);
+
+  const status = await checkProviderAvailability({
+    provider: 'grok',
+    env: grokEnv,
+    commandExistsImpl: async () => true
+  });
+  assert.equal(status.available, true);
+  assert.equal(status.status, 'available');
+  assert.ok(status.timeoutMs >= 300000);
+  assert.match(status.warning, /Invalid CHATPCB_GROK_TIMEOUT_MS/);
+
+  const globalEnv = {
+    PATH: '',
+    HOME: '/tmp/chatpcb-no-home',
+    USERPROFILE: '/tmp/chatpcb-no-home',
+    CHATPCB_CODEX_TIMEOUT_MS: '90000',
+    CHATPCB_PROVIDER_TIMEOUT_MS: '0'
+  };
+  const providers = listProviderDefinitions(globalEnv);
+  const codex = providers.find((provider) => provider.id === 'codex');
+  const copilot = providers.find((provider) => provider.id === 'copilot');
+  assert.equal(codex.timeoutMs, 90000);
+  assert.equal(codex.warning, undefined);
+  assert.equal(copilot.timeoutMs, 120000);
+  assert.match(copilot.warning, /Invalid CHATPCB_PROVIDER_TIMEOUT_MS/);
+
+  const missing = await checkProviderAvailability({
+    provider: 'codex',
+    env: {
+      PATH: '',
+      HOME: '/tmp/chatpcb-no-home',
+      USERPROFILE: '/tmp/chatpcb-no-home',
+      CHATPCB_PROVIDER_TIMEOUT_MS: '0'
+    },
+    platform: 'linux',
+    cwd: '/tmp'
+  });
+  assert.equal(missing.available, false);
+  assert.equal(missing.status, 'missing');
+  assert.equal(missing.timeoutMs, 120000);
+  assert.match(missing.warning, /Invalid CHATPCB_PROVIDER_TIMEOUT_MS/);
+
+  const blank = listProviderDefinitions({
+    CHATPCB_GROK_TIMEOUT_MS: '   ',
+    CHATPCB_PROVIDER_TIMEOUT_MS: ''
+  }).find((provider) => provider.id === 'grok');
+  assert.ok(blank.timeoutMs >= 300000);
+  assert.equal(blank.warning, undefined);
+
+  assert.throws(
+    () => getProviderDefinition('grok', grokEnv),
+    /Invalid CHATPCB_GROK_TIMEOUT_MS/
+  );
+});

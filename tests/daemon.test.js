@@ -30,6 +30,21 @@ async function kicadArtifacts(projectDir) {
   ));
 }
 
+async function listRelativeFiles(directory) {
+  const names = [];
+  const walk = async (current) => {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(absolute);
+      else names.push(path.relative(directory, absolute).split(path.sep).join('/'));
+    }
+  };
+  await walk(directory);
+  names.sort();
+  return names;
+}
+
 async function transactionServices(extra = {}) {
   const stateRoot = extra.stateRoot ?? await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-journal-'));
   return {
@@ -975,10 +990,70 @@ test('project.request falls back to a native preview when the provider only insp
     assert.equal(result.result.requiresApproval, true);
     assert.equal(result.result.applied, false);
     assert.equal(result.result.operation, 'generated');
+    assert.equal(result.result.providerFallback, 'built-in-draft');
     assert.ok(result.result.conversation.specRows.some((row) => row.label === 'MCU'));
     assert.equal((await kicadArtifacts(created.result.projectDir)).length, 0);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test('project.request journals a new conversation file and rollback restores the pre-request tree', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-conversation-rollback-'));
+  const services = await transactionServices({
+    ...providerOptions({ events: [createEnvelope('agent.delta', { text: 'No tool call.' })] }),
+    validateProjectImpl: passingErc
+  });
+  const progress = [];
+
+  try {
+    const before = await listRelativeFiles(root);
+    const result = await dispatchToolCall({
+      id: 'call_fallback_conversation_rollback',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir: root,
+        prompt: 'RP2040 board with USB-C power and I2C connector.'
+      }
+    }, { ...services, emit: (type, payload) => progress.push({ type, ...payload }) });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.result.providerFallback, 'built-in-draft');
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.applied, false);
+    assert.ok(result.result.changedFiles.includes('.chatpcb-conversation.json'));
+    assert.deepEqual(await listRelativeFiles(root), before);
+    await assert.rejects(() => access(path.join(root, '.chatpcb-conversation.json')), { code: 'ENOENT' });
+    assert.ok(progress.some((item) => (
+      item.fallback === 'built-in-draft'
+      && item.reason === 'provider-returned-no-tool-call'
+      && /no tool call/i.test(item.text ?? '')
+    )));
+
+    const approved = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir: root, approved: true, patchId: result.result.patchId }
+    }, services);
+    assert.equal(approved.ok, true);
+    assert.equal(approved.result.applied, true);
+    const conversation = await readFile(path.join(root, '.chatpcb-conversation.json'), 'utf8');
+    assert.match(conversation, /"status": "generate"/);
+    const created = approved.result.transaction.changes.find((change) => change.path === '.chatpcb-conversation.json');
+    assert.equal(created.operation, 'create');
+
+    const rolled = await dispatchToolCall({
+      name: 'project.transaction.rollback',
+      args: { projectDir: root, transactionId: approved.result.transaction.transactionId }
+    }, services);
+    assert.equal(rolled.ok, true);
+    assert.equal(rolled.result.rolledBack, true);
+    assert.deepEqual(await listRelativeFiles(root), before);
+    await assert.rejects(() => access(path.join(root, '.chatpcb-conversation.json')), { code: 'ENOENT' });
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
 

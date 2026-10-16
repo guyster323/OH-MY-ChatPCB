@@ -114,7 +114,8 @@ export async function createSchematicPatchPlan({
   validateBoardImpl = validateBoard,
   validateCandidateImpl,
   context,
-  signal
+  signal,
+  conversationBytes
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
@@ -122,6 +123,7 @@ export async function createSchematicPatchPlan({
     projectName,
     context,
     signal,
+    conversationBytes,
     validateCandidateImpl: validateCandidateImpl ?? createCandidateValidator({
       validateProjectImpl,
       validateBoardImpl

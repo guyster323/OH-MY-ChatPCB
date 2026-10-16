@@ -181,9 +181,9 @@ export CHATPCB_GROK_PATH="$HOME/.grok/bin/grok"
 $env:CHATPCB_GROK_PATH = "$env:USERPROFILE\.grok\bin\grok.exe"
 ```
 
-Grok is started with `--cwd <projectDir>`, `--prompt-file`, `--output-format plain`, `--disable-web-search`, and `--permission-mode plan`. `CHATPCB_GROK_MODEL`, when set, is passed as `--model` before `--prompt-file`.
+Grok is started with `--cwd <projectDir>`, `--prompt-file`, `--output-format json`, `--json-schema` (a ChatPCB `tool.call` object), `--disable-web-search`, and `--permission-mode plan`. `CHATPCB_GROK_MODEL`, when set, is passed as `--model` before `--prompt-file`.
 
-The Grok timeout defaults to 300000 ms. Codex, Claude Code, and Copilot stay at 120000 ms. Override either value with a positive integer number of milliseconds up to 2147483647. `CHATPCB_<PROVIDER>_TIMEOUT_MS` wins over `CHATPCB_PROVIDER_TIMEOUT_MS`. A blank value is ignored. Any other invalid value is rejected.
+The Grok timeout defaults to 300000 ms. Codex, Claude Code, and Copilot stay at 120000 ms. Override either value with a positive integer number of milliseconds up to 2147483647. `CHATPCB_<PROVIDER>_TIMEOUT_MS` wins over `CHATPCB_PROVIDER_TIMEOUT_MS`. A blank value is ignored. Any other invalid value is rejected when a provider is launched. `provider.list` and `provider.status` keep that provider's default timeout and include a `warning` instead of failing.
 
 ```bash
 export CHATPCB_PROVIDER_TIMEOUT_MS=300000

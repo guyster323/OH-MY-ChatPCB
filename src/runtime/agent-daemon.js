@@ -18,7 +18,7 @@ import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
-import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation } from './request-conversation.js';
+import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
 
 const PROVIDER_ALLOWED_TOOLS = ['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'validate.drc', 'simulate.spice'];
 
@@ -366,9 +366,10 @@ async function requestProject(call, ctx) {
   const awaitingInput = existingConversation?.status === 'awaiting-input';
   const shouldClarify = awaitingInput || !hasExistingSpec;
   const conversation = shouldClarify
-    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true })
+    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true, persist: false })
     : existingConversation;
   if (shouldClarify && conversation && !conversationWantsGenerate(conversation)) {
+    await saveCircuitConversation(projectDir, conversation);
     return {
       operation: 'clarify',
       requiresApproval: false,
@@ -407,6 +408,9 @@ async function requestProject(call, ctx) {
   const generatePrompt = hasSpec && !awaitingInput
     ? prompt
     : (conversation?.generatePrompt ?? prompt);
+  if (shouldClarify && conversation) {
+    ctx.pendingConversationBytes = Buffer.from(serializeCircuitConversation(conversation));
+  }
   try {
     const providerResult = await invokeProvider({
       ...call,
@@ -417,11 +421,19 @@ async function requestProject(call, ctx) {
       forceProjectDir: true
     });
     let preview = lastMutatingResult(providerResult.toolResults);
+    let usedBuiltinDraft = false;
     if (!preview) {
+      usedBuiltinDraft = true;
       emitProgress(ctx, {
         stage: 'preview',
         sprite: 'draft',
-        text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
+        fallback: 'built-in-draft',
+        reason: 'provider-returned-no-tool-call',
+        text: progressCopy(
+          prompt,
+          '공급자가 도구 호출을 반환하지 않아 내장 초안을 사용합니다.',
+          'The provider returned no tool call. Using the built-in draft.'
+        )
       });
       const generated = await previewNativeChange({
         projectDir,
@@ -447,9 +459,17 @@ async function requestProject(call, ctx) {
       ...preview,
       operation: hasSpec ? 'patched' : 'generated',
       providerEvents: providerResult.events,
-      conversation
+      conversation,
+      ...(usedBuiltinDraft ? { providerFallback: 'built-in-draft' } : {})
     };
   } catch (error) {
+    if (shouldClarify && conversation) {
+      try {
+        await saveCircuitConversation(projectDir, conversation);
+      } catch {
+        // Keep the provider error. The conversation is still on the thrown object.
+      }
+    }
     if (error?.code === 'PROJECT_BUSY') throw error;
     const wrapped = error instanceof Error ? error : new Error(String(error?.message ?? error));
     wrapped.code = error?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
@@ -681,7 +701,8 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       projectName,
       context,
       validateProjectImpl: ctx.validateProjectImpl,
-      validateBoardImpl: ctx.validateBoardImpl
+      validateBoardImpl: ctx.validateBoardImpl,
+      conversationBytes: ctx.pendingConversationBytes
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
