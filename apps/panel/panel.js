@@ -1612,42 +1612,45 @@ function showProjectBusy(callName, message) {
 
 window.setChatGptAuthState = setChatGptAuthState;
 
-window.__chatpcbTest = {
-  showPatch(state = {}) {
-    const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
-    activeProject = project;
-    activeProjectNameEl.textContent = project.displayName || '';
-    activeProjectDirectoryEl.textContent = project.projectDir || '';
-    if (activeProjectDirectoryEl) activeProjectDirectoryEl.title = project.projectDir || '';
-    activeProjectEl.hidden = false;
-    if (projectSetupEl) projectSetupEl.hidden = true;
-    setRequestBusy(false);
-    lastRequestResult = {
-      operation: state.operation || 'generated',
-      validation: state.validation ?? null,
-      candidateVerification: state.candidateVerification ?? null,
-      conversation: state.conversation || null
-    };
-    if (state.conversation) renderConversation({ ...lastRequestResult, ...state.conversation });
-    inspectionState = {
-      projectDir: project.projectDir,
-      requestId: 'test',
-      result: state.inspection ?? {
-        manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
-        validation: state.validation || null
-      }
-    };
-    if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
-    patchApprovalState = {
-      patchId: state.patchId ?? 'patch_test',
-      expiresAt: state.expiresAt ?? (Date.now() + 600000),
-      timeout: null
-    };
-    if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
-    renderPatchApproval();
-    syncWorkflow();
-  }
-};
+// A query string is not enough: only the test server sets this flag before the page loads.
+if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__CHATPCB_TEST_MODE__ === true) {
+  window.__chatpcbTest = {
+    showPatch(state = {}) {
+      const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
+      activeProject = project;
+      activeProjectNameEl.textContent = project.displayName || '';
+      activeProjectDirectoryEl.textContent = project.projectDir || '';
+      if (activeProjectDirectoryEl) activeProjectDirectoryEl.title = project.projectDir || '';
+      activeProjectEl.hidden = false;
+      if (projectSetupEl) projectSetupEl.hidden = true;
+      setRequestBusy(false);
+      lastRequestResult = {
+        operation: state.operation || 'generated',
+        validation: state.validation ?? null,
+        candidateVerification: state.candidateVerification ?? null,
+        conversation: state.conversation || null
+      };
+      if (state.conversation) renderConversation({ ...lastRequestResult, ...state.conversation });
+      inspectionState = {
+        projectDir: project.projectDir,
+        requestId: 'test',
+        result: state.inspection ?? {
+          manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
+          validation: state.validation || null
+        }
+      };
+      if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
+      patchApprovalState = {
+        patchId: state.patchId ?? 'patch_test',
+        expiresAt: state.expiresAt ?? (Date.now() + 600000),
+        timeout: null
+      };
+      if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+      renderPatchApproval();
+      syncWorkflow();
+    }
+  };
+}
 
 async function awaitStatus(statusPromise) {
   let timeout;

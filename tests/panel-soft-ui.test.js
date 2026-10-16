@@ -105,6 +105,7 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
   try {
     const context = await browser.newContext({ viewport: { width: 420, height: 800 } });
     await context.addInitScript(() => {
+      window.__CHATPCB_TEST_MODE__ = true;
       window.__sent = [];
       window.__sockets = [];
       class FakeSocket extends EventTarget {
@@ -133,7 +134,7 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (error) => errors.push(String(error)));
-        await page.goto(`http://127.0.0.1:${port}/index.html?theme=${theme}&lang=${lang}&auth=signedin`, {
+        await page.goto(`http://127.0.0.1:${port}/index.html?theme=${theme}&lang=${lang}&auth=signedin&chatpcbTest=1`, {
           waitUntil: 'domcontentloaded'
         });
         await page.evaluate(() => {

@@ -61,6 +61,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
   try {
     const page = await browser.newPage();
     await page.addInitScript(() => {
+      window.__CHATPCB_TEST_MODE__ = true;
       window.__sent = [];
       window.__sockets = [];
       class FakeSocket extends EventTarget {
@@ -83,7 +84,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
       FakeSocket.CLOSED = 3;
       window.WebSocket = FakeSocket;
     });
-    await page.goto(`http://127.0.0.1:${port}/index.html?lang=en`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`http://127.0.0.1:${port}/index.html?lang=en&chatpcbTest=1`, { waitUntil: 'domcontentloaded' });
 
     const passed = await showPatch(page, {
       validation: passedValidation,
