@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { resolveKicadCli, runCommand } from '../src/kicad/kicad-cli.js';
 
@@ -39,6 +42,49 @@ test('prefers current-user KiCad 10 install before older all-users installs on W
 
   assert.equal(found.path, 'C:/Users/test/AppData/Local/Programs/KiCad/10.0/bin/kicad-cli.exe');
   assert.equal(found.source, 'windows-user-install');
+});
+
+test('CHATPCB_KICAD_CLI_DISABLE reports unavailable without falling back to install paths', () => {
+  const found = resolveKicadCli({
+    explicitPath: '/usr/local/bin/kicad-cli',
+    env: {
+      CHATPCB_KICAD_CLI_DISABLE: '1',
+      KICAD_CLI_PATH: '/missing/kicad-cli',
+      PATH: '/usr/local/bin:/usr/bin'
+    },
+    platform: 'linux',
+    exists: () => true
+  });
+
+  assert.deepEqual(found, { path: null, source: 'unavailable' });
+});
+
+test('CHATPCB_KICAD_CLI_DISABLE warns once on stderr', () => {
+  const moduleUrl = pathToFileURL(path.resolve('src/kicad/kicad-cli.js')).href;
+  const script = `
+    import { resolveKicadCli } from ${JSON.stringify(moduleUrl)};
+    const options = {
+      env: { CHATPCB_KICAD_CLI_DISABLE: '1', PATH: '' },
+      platform: 'linux',
+      exists: () => true
+    };
+    const first = resolveKicadCli(options);
+    const second = resolveKicadCli(options);
+    if (first.path !== null || second.source !== 'unavailable' || second.path !== null) {
+      process.exit(2);
+    }
+  `;
+  const env = { ...process.env };
+  delete env.FORCE_COLOR;
+  delete env.NO_COLOR;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr.trim(), 'kicad-cli disabled by CHATPCB_KICAD_CLI_DISABLE');
 });
 
 test('returns unavailable when no absolute KiCad installation can be found', () => {
