@@ -1026,7 +1026,8 @@ function renderErcBox(erc, active) {
     return;
   }
   patchErcEl.hidden = false;
-  patchErcEl.classList.toggle('erc-pass', !erc.failed);
+  patchErcEl.classList.toggle('erc-pass', erc.passed === true);
+  patchErcEl.classList.toggle('erc-skip', erc.skipped === true);
   patchErcEl.replaceChildren();
   const head = document.createElement('div');
   head.className = 'erc-h';

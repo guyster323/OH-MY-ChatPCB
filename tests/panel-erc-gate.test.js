@@ -133,6 +133,10 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(skipped.whyText, en['patch.apply.skipped']);
     assert.equal(skipped.confirmHidden, true);
     assert.match(skipped.ercText, new RegExp(en['erc.skipped']));
+    assert.equal(skipped.ercClass.includes('erc-pass'), false);
+    assert.equal(skipped.ercClass.includes('erc-skip'), true);
+    assert.equal(skipped.ercIcon, '⚠');
+    assert.equal(skipped.ercColor, skipped.warnColor);
     assert.deepEqual(skipped.sent, []);
 
     const armed = await showPatch(page, {
@@ -346,6 +350,17 @@ function showPatch(page, state, click) {
       riskText: document.querySelector('#apply-without-erc-risk').textContent,
       ercText: document.querySelector('#patch-erc').textContent,
       ercRole: document.querySelector('#patch-erc').getAttribute('role'),
+      ercClass: document.querySelector('#patch-erc').className,
+      ercIcon: String(getComputedStyle(document.querySelector('#patch-erc'), '::after').content || '').replace(/^["']|["']$/g, ''),
+      ercColor: getComputedStyle(document.querySelector('#patch-erc')).color,
+      warnColor: (() => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--warn)';
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      })(),
       freshnessText: document.querySelector('#inspection-freshness')?.textContent ?? '',
       freshnessTitle: document.querySelector('#inspection-freshness')?.title ?? '',
       sent
