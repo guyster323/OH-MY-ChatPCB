@@ -475,6 +475,16 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 }
 .apply-without-erc-confirm p { margin: 0; font-size: var(--fs-xs); line-height: 1.45; }
 .apply-without-erc-confirm .row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.apply-without-erc-confirm #cancel-apply-without-erc {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.apply-without-erc-confirm #confirm-apply-without-erc {
+  background: var(--danger-bg);
+  border-color: transparent;
+  color: var(--danger);
+}
 .patch-approval-actions .btn, .patch-approval-actions button, .actions .btn { min-height: 32px; font-size: var(--fs-xs); }
 .erc {
   display: grid;

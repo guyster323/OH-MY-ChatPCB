@@ -168,6 +168,11 @@ document.addEventListener('click', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (applyWithoutErcConfirmEl && !applyWithoutErcConfirmEl.hidden) {
+    event.preventDefault();
+    cancelApplyWithoutErcConfirm();
+    return;
+  }
   const menu = document.querySelector('#tools-menu');
   if (!menu || menu.hidden) return;
   setToolsMenuOpen(false);
@@ -1178,7 +1183,7 @@ function revealApplyWithoutErcConfirm() {
   const erc = ercBlockState();
   if (erc.skipped !== true || erc.failed || erc.passed === true) return;
   applyWithoutErcConfirmEl.hidden = false;
-  confirmApplyWithoutErcButtonEl?.focus();
+  cancelApplyWithoutErcButtonEl?.focus();
 }
 
 function cancelApplyWithoutErcConfirm() {

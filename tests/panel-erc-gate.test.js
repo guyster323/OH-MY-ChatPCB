@@ -1,4 +1,4 @@
-/* global document, window */
+/* global document, getComputedStyle, window */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -156,6 +156,35 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.deepEqual(cancelled.sent, []);
     assert.equal(cancelled.confirmHidden, true);
 
+    await showPatch(page, {
+      validation: { ok: true, skipped: true, executed: false }
+    });
+    await page.locator('#approve-patch-without-erc').click();
+    const opened = await readApplyWithoutErcConfirm(page);
+    assert.equal(opened.hidden, false);
+    assert.equal(opened.role, 'alertdialog');
+    assert.equal(opened.describedBy, 'apply-without-erc-risk');
+    assert.equal(opened.activeId, 'cancel-apply-without-erc');
+    assert.equal(opened.confirmColor, opened.dangerColor);
+    assert.notEqual(opened.confirmBg, opened.accentBg);
+    assert.equal(opened.cancelBg, opened.accentBg);
+    assert.deepEqual(opened.sent, []);
+    await page.keyboard.press('Enter');
+    const afterEnter = await readApplyWithoutErcConfirm(page);
+    assert.deepEqual(afterEnter.sent, []);
+    assert.equal(afterEnter.sent.some((payload) => payload?.args?.approved === true), false);
+
+    await showPatch(page, {
+      validation: { ok: true, skipped: true, executed: false }
+    });
+    await page.locator('#approve-patch-without-erc').click();
+    assert.equal((await readApplyWithoutErcConfirm(page)).activeId, 'cancel-apply-without-erc');
+    await page.keyboard.press('Escape');
+    const afterEsc = await readApplyWithoutErcConfirm(page);
+    assert.equal(afterEsc.hidden, true);
+    assert.equal(afterEsc.activeId, 'approve-patch-without-erc');
+    assert.deepEqual(afterEsc.sent, []);
+
     const missing = await showPatch(page, {
       validation: {},
       inspection: {
@@ -262,6 +291,34 @@ test('panel apply follows the recorded ERC result', async (t) => {
     await new Promise((resolveClose) => server.close(resolveClose));
   }
 });
+
+function readApplyWithoutErcConfirm(page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector('#apply-without-erc-confirm');
+    const confirm = document.querySelector('#confirm-apply-without-erc');
+    const cancel = document.querySelector('#cancel-apply-without-erc');
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--danger)';
+    probe.style.background = 'var(--accent)';
+    document.body.append(probe);
+    const probeStyle = getComputedStyle(probe);
+    const dangerColor = probeStyle.color;
+    const accentBg = probeStyle.backgroundColor;
+    probe.remove();
+    return {
+      hidden: dialog.hidden,
+      role: dialog.getAttribute('role'),
+      describedBy: dialog.getAttribute('aria-describedby'),
+      activeId: document.activeElement?.id ?? '',
+      confirmColor: getComputedStyle(confirm).color,
+      confirmBg: getComputedStyle(confirm).backgroundColor,
+      cancelBg: getComputedStyle(cancel).backgroundColor,
+      dangerColor,
+      accentBg,
+      sent: window.__sent.map((raw) => JSON.parse(raw)).map((event) => event.payload)
+    };
+  });
+}
 
 function showPatch(page, state, click) {
   return page.evaluate(({ state: next, click: which }) => {
