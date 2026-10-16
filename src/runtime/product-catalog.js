@@ -679,7 +679,7 @@ export const PRODUCT_KINDS = [
         questionEn: 'What supply voltage should the LED use?',
         extract: (prompt) => {
           const parsed = parseDiscreteLedRequest(prompt);
-          return parsed ? `${parsed.supplyVolts}V` : null;
+          return parsed && Number.isFinite(parsed.supplyVolts) ? `${parsed.supplyVolts}V` : null;
         },
         examples: [
           example('5V', '5V', '5V', '특징: 5V 전원에 LED와 저항을 직렬로 연결.\n장점: USB·벤치 전원에서 바로 시험할 수 있습니다.\n단점: LED 전류는 저항으로 확인해야 합니다.', true)

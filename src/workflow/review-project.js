@@ -156,6 +156,11 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
         addFinding(findings.blockers, blocker.code, blocker.message);
       }
     }
+    for (const warning of spec.discrete?.reviewWarnings ?? []) {
+      if (warning?.code && warning?.message) {
+        addFinding(findings.warnings, warning.code, warning.message);
+      }
+    }
     if (!spec.discrete?.refused) {
       addFinding(
         findings.warnings,

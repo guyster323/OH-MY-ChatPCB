@@ -3391,7 +3391,7 @@ test('native schematic.generate of the same discrete LED prompt keeps LED, 330 o
       JSON.stringify(evidence)
     );
     assert.ok(
-      evidence.some((part) => String(part.libId ?? '').startsWith('Connector') && part.value === '+5V'),
+      evidence.some((part) => String(part.libId ?? '').startsWith('Connector') && part.value === 'Conn_01x02'),
       JSON.stringify(evidence)
     );
     assert.match(result.result.diff ?? '', /Device:LED/);

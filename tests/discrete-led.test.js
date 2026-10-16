@@ -56,7 +56,7 @@ test('canonical discrete LED prompt drafts an LED, 330 ohm resistor, 5V supply, 
   assert.equal(components(result, 'Device:R').length, 1);
   assert.equal(components(result, 'Device:R')[0].value, '330Ω');
   assert.equal(components(result, 'power:+5V')[0].value, '+5V');
-  assert.equal(components(result, 'Connector_Generic:Conn_01x02')[0].value, '+5V');
+  assert.equal(components(result, 'Connector_Generic:Conn_01x02')[0].value, 'Conn_01x02');
   assert.ok(result.spec.schematic.nets.some((net) => net.name === '+5V'));
   assert.ok(result.spec.partManifest.parts.length > 0);
   assert.equal(manifestParts(result, 'Device:LED').length, 1);
@@ -159,12 +159,12 @@ test('3.3V and 12V discrete LED supplies use KiCad power symbols and never +3.3V
   assert.equal(low.spec.power.rails[0].name, '+3V3');
   assert.equal(components(low, 'power:+3V3')[0].value, '+3V3');
   assert.equal(components(low, 'power:+3V3')[0].description, '+3V3');
-  assert.equal(components(low, 'Connector_Generic:Conn_01x02')[0].value, '+3V3');
+  assert.equal(components(low, 'Connector_Generic:Conn_01x02')[0].value, 'Conn_01x02');
   assert.ok(low.spec.schematic.nets.some((net) => net.name === '+3V3'));
   assert.equal(low.spec.schematic.nets.some((net) => net.name === '+3.3V'), false);
   assert.equal(manifestParts(low, 'power:+3V3')[0].value, '+3V3');
   assert.equal(manifestParts(low, 'power:+3V3')[0].role, 'supply');
-  assert.equal(manifestParts(low, 'Connector_Generic:Conn_01x02')[0].value, '+3V3');
+  assert.equal(manifestParts(low, 'Connector_Generic:Conn_01x02')[0].value, 'Conn_01x02');
   assert.match(low.schematic, /\(symbol "power:\+3V3"/);
   assert.match(low.schematic, /\(lib_id "power:\+3V3"\)/);
   assert.equal(components(low, 'Device:LED')[0].value, 'LED Red');
@@ -174,7 +174,7 @@ test('3.3V and 12V discrete LED supplies use KiCad power symbols and never +3.3V
   const high = await generateLed('LED and 330 ohm resistor at 12V');
   assert.equal(high.spec.discrete.supplyNet, '+12V');
   assert.equal(components(high, 'power:+12V')[0].value, '+12V');
-  assert.equal(components(high, 'Connector_Generic:Conn_01x02')[0].value, '+12V');
+  assert.equal(components(high, 'Connector_Generic:Conn_01x02')[0].value, 'Conn_01x02');
   assert.equal(components(high, 'Device:R')[0].value, '330Ω');
   assert.equal(manifestParts(high, 'power:+12V')[0].role, 'supply');
   assert.equal(manifestParts(high, 'power:+12V')[0].value, '+12V');
@@ -292,7 +292,7 @@ test('a 9V battery LED uses power:+9V and a battery connector', async () => {
   assert.equal(battery.spec.discrete.supplyNet, '+9V');
   assert.equal(battery.spec.discrete.supplyVolts, 9);
   assert.equal(components(battery, 'power:+9V')[0].value, '+9V');
-  assert.equal(components(battery, 'Connector_Generic:Conn_01x02')[0].value, '+9V');
+  assert.equal(components(battery, 'Connector_Generic:Conn_01x02')[0].value, 'Conn_01x02');
   assert.match(components(battery, 'Connector_Generic:Conn_01x02')[0].description, /battery/i);
   assert.equal(components(battery, 'Device:R')[0].value, '750Ω');
   assert.ok(components(battery, 'power:PWR_FLAG').length >= 2);
@@ -304,6 +304,39 @@ test('a 9V battery LED uses power:+9V and a battery connector', async () => {
 
   const monitor = await generateLed('battery monitor with an LED');
   assert.notEqual(monitor.spec.kind, 'discrete-led');
+});
+
+test('a nonstandard rail uses power:VCC when the library has no dedicated symbol', async () => {
+  const result = await generateLed('LED on 7.4V');
+  assert.equal(result.spec.discrete.supplyNet, '+7V4');
+  assert.equal(result.spec.discrete.supplyVolts, 7.4);
+  assert.equal(components(result, 'power:VCC').length, 1);
+  assert.equal(components(result, 'power:VCC')[0].value, '+7V4');
+  assert.equal(manifestParts(result, 'power:VCC')[0].role, 'supply');
+  assert.equal(components(result, 'Connector_Generic:Conn_01x02')[0].value, 'Conn_01x02');
+  assert.equal(components(result, 'Connector_Generic:Conn_01x02')[0].pinNets[1], '+7V4');
+  assert.equal(result.schematic.includes('(label "+7V4")'), false);
+  assert.equal(result.schematic.includes('power:+7.5V'), false);
+  assert.match(result.schematic, /power:VCC/);
+  assert.match(result.schematic, /\+7V4/);
+  assert.ok(components(result, 'power:PWR_FLAG').length >= 2);
+  assert.equal(result.review.findings.blockers.some((finding) => finding.code === 'discrete-led-high-voltage'), false);
+});
+
+test('low LED headroom warns once and a supply at Vf still drafts the placeholder', async () => {
+  const white = await generateLed('white LED on 3.3V');
+  assert.equal(components(white, 'Device:R')[0].value, '10Ω');
+  assert.equal(white.review.findings.warnings.filter((finding) => finding.code === 'discrete-led-headroom').length, 1);
+  assert.match(white.schematic, /headroom is only 0\.1V/);
+  assert.match(white.schematic, /below 68Ω/);
+  assert.equal(white.review.status, 'ready-for-prototype-review');
+
+  const blue = await generateLed('blue LED on 3V');
+  assert.equal(components(blue, 'Device:LED').length, 1);
+  assert.equal(components(blue, 'Device:R')[0].value, '1kΩ');
+  assert.equal(components(blue, 'power:VCC')[0].value, '+3V');
+  assert.ok(blue.review.findings.blockers.some((finding) => finding.code === 'discrete-led-below-vf'));
+  assert.equal(blue.review.status, 'blocked');
 });
 
 test('discrete LED power nets use PWR_FLAG and do not repeat the power name as a local label', async () => {
@@ -328,7 +361,7 @@ test('discrete LED power nets use PWR_FLAG and do not repeat the power name as a
 
 test('fixture power symbols match KiCad power_in pins and include +9V', async () => {
   const source = await readFile(path.resolve(import.meta.dirname, 'fixtures/kicad-libraries/symbols/power.kicad_sym'), 'utf8');
-  for (const name of ['+5V', '+3V3', '+12V', '+9V', 'GND']) {
+  for (const name of ['+5V', '+3V3', '+12V', '+9V', 'GND', 'VCC']) {
     const block = topLevelPowerSymbol(source, name);
     assert.match(block, /\(power global\)/, name);
     assert.match(block, /\(pin power_in /, name);
@@ -380,7 +413,8 @@ test('real KiCad ERC of a discrete LED schematic reports zero errors', { skip: r
     'white LED on 12V',
     'LED on 9V battery',
     'LED on 24V',
-    'blue LED on 3V'
+    'blue LED on 3V',
+    'LED on 7.4V'
   ];
   const restore = useRealSymbolLibrary();
   try {
@@ -402,6 +436,20 @@ test('real KiCad ERC of a discrete LED schematic reports zero errors', { skip: r
         assert.equal(validation.erc.byType?.power_pin_not_driven ?? 0, 0, prompt);
         assert.equal(validation.erc.byType?.same_local_global_label ?? 0, 0, prompt);
         assert.equal(validation.ok, true, prompt);
+        const schematicText = await readFile(generated.files.schematic, 'utf8');
+        if (prompt === 'LED on 24V') {
+          assert.match(schematicText, /power:\+24V/, prompt);
+        }
+        if (prompt === 'LED on 7.4V') {
+          assert.match(schematicText, /power:VCC/, prompt);
+          assert.match(schematicText, /\+7V4/, prompt);
+          assert.equal(schematicText.includes('power:+7.5V'), false, prompt);
+          assert.equal(schematicText.includes('(label "+7V4")'), false, prompt);
+        }
+        if (prompt === 'blue LED on 3V') {
+          assert.match(schematicText, /power:VCC/, prompt);
+          assert.equal(schematicText.includes('power:+3V0'), false, prompt);
+        }
       } finally {
         await rm(projectDir, { force: true, recursive: true });
       }

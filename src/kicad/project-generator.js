@@ -5,6 +5,14 @@ import path from 'node:path';
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
 import { resolveKicadCli } from './kicad-cli.js';
+import {
+  flatpakAppLibraryPaths,
+  flatpakLibraryRoots,
+  flatpakRuntimeLibraryCandidatePaths,
+  setFlatpakLibraryRootsForTests
+} from './flatpak.js';
+
+export { setFlatpakLibraryRootsForTests };
 
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
@@ -448,10 +456,19 @@ export function buildMcuSchematicAst(spec) {
   };
 }
 
-const DISCRETE_RAIL_SYMBOLS = new Set(['+3V3', '+5V', '+9V', '+12V']);
+function powerLibraryHasSymbol(name) {
+  if (!name || /["\\\r\n]/.test(name)) return false;
+  const libraryPath = officialSymbolLibraryPath('power');
+  if (!libraryPath) return false;
+  try {
+    return readFileSync(libraryPath, 'utf8').includes(`(symbol "${name}"`);
+  } catch {
+    return false;
+  }
+}
 
 function discreteSupplySymbol(supplyNet) {
-  if (DISCRETE_RAIL_SYMBOLS.has(supplyNet)) {
+  if (powerLibraryHasSymbol(supplyNet)) {
     return {
       ref: '#PWR01',
       libId: `power:${supplyNet}`,
@@ -460,10 +477,10 @@ function discreteSupplySymbol(supplyNet) {
     };
   }
   return {
-    ref: '#FLG1',
-    libId: 'power:PWR_FLAG',
-    value: 'PWR_FLAG',
-    explanation: `Power flag for the ${supplyNet} supply rail.`
+    ref: '#PWR01',
+    libId: 'power:VCC',
+    value: supplyNet,
+    explanation: `${supplyNet} supply uses power:VCC because the KiCad power library has no ${supplyNet} symbol. The symbol value is the global net name.`
   };
 }
 
@@ -503,7 +520,7 @@ function buildDiscreteLedSchematicAst(spec) {
   const battery = discrete.supplyKind === 'battery';
   const components = [
     component('J1', 'Connector_Generic:Conn_01x02', battery ? `9V battery connector for the ${supplyNet} LED circuit.` : `Power input for the ${supplyNet} LED circuit.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
-      value: supplyNet,
+      value: 'Conn_01x02',
       description: battery ? `${supplyNet} battery connector` : supplyNet,
       pins: [supplyNet, 'GND'],
       connectedPins: [supplyNet, 'GND'],
@@ -799,6 +816,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
     ? [
         `ChatPCB generated discrete LED draft: ${spec.title}`,
         ...(spec.discrete?.reviewNotes ?? []).map((note) => note.message),
+        ...(spec.discrete?.reviewWarnings ?? []).map((warning) => warning.message),
         'Review all symbols, footprints, net labels, and design rules before production.'
       ]
     : spec.boardProfile?.kind === 'isolated-dcdc'
@@ -1155,31 +1173,6 @@ function kicadLibraryCandidatePaths(libraryType) {
   return kicadInstallLibraryCandidatePaths(libraryType);
 }
 
-let flatpakLibraryRootOverride = null;
-
-// Tests point runtime discovery at a fake tree with the Flatpak layout.
-// Null restores /var/lib/flatpak and ~/.local/share/flatpak.
-export function setFlatpakLibraryRootsForTests(roots) {
-  const previous = flatpakLibraryRootOverride;
-  flatpakLibraryRootOverride = Array.isArray(roots) ? [...roots] : null;
-  return previous;
-}
-
-function flatpakLibraryRoots() {
-  if (Array.isArray(flatpakLibraryRootOverride)) {
-    return flatpakLibraryRootOverride;
-  }
-  if (process.platform !== 'linux') {
-    return [];
-  }
-
-  const roots = ['/var/lib/flatpak'];
-  if (typeof process.env.HOME === 'string' && process.env.HOME.length > 0) {
-    roots.push(path.join(process.env.HOME, '.local', 'share', 'flatpak'));
-  }
-  return roots.map((candidate) => underLibrarySearchRoot(candidate));
-}
-
 // Test-only. CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS is a filesystem root: system
 // paths and Flatpak roots are resolved under it. Unset keeps host paths.
 function librarySearchRoot() {
@@ -1203,51 +1196,6 @@ function underLibrarySearchRoot(candidate) {
   return path.join(root, path.relative(path.parse(resolved).root, resolved));
 }
 
-function flatpakRuntimeName(libraryType) {
-  if (libraryType === 'symbols') {
-    return 'org.kicad.KiCad.Library.Symbols';
-  }
-  if (libraryType === 'footprints') {
-    return 'org.kicad.KiCad.Library.Footprints';
-  }
-  return null;
-}
-
-function readFlatpakPathEntries(dir) {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-      .map((entry) => entry.name)
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-// KiCad Flatpak stores symbols and footprints in runtime extensions, not in the app tree.
-// <root>/runtime/org.kicad.KiCad.Library.<Kind>/<arch>/<branch>/active/files/<symbols|footprints>
-function flatpakRuntimeLibraryCandidatePaths(libraryType) {
-  const runtimeName = flatpakRuntimeName(libraryType);
-  if (!runtimeName) {
-    return [];
-  }
-
-  const candidates = [];
-  for (const root of flatpakLibraryRoots()) {
-    const runtimeRoot = path.join(root, 'runtime', runtimeName);
-    for (const arch of readFlatpakPathEntries(runtimeRoot)) {
-      const archDir = path.join(runtimeRoot, arch);
-      for (const branch of readFlatpakPathEntries(archDir)) {
-        const libraryDir = path.join(archDir, branch, 'active', 'files', libraryType);
-        if (existsSync(libraryDir)) {
-          candidates.push(libraryDir);
-        }
-      }
-    }
-  }
-  return candidates;
-}
-
 export function kicadInstallLibraryCandidatePaths(libraryType) {
   const kicadCliResult = resolveKicadCli();
   const kicadCliPath = kicadCliResult?.path;
@@ -1264,11 +1212,12 @@ export function kicadInstallLibraryCandidatePaths(libraryType) {
     ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
     ...(process.platform === 'linux' ? [
       `/usr/share/kicad/${libraryType}`,
-      `/usr/local/share/kicad/${libraryType}`,
-      `/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`,
-      `${process.env.HOME}/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`
-    ].filter(Boolean).map((candidate) => underLibrarySearchRoot(candidate)) : []),
-    ...flatpakRuntimeLibraryCandidatePaths(libraryType),
+      `/usr/local/share/kicad/${libraryType}`
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
+    ...flatpakAppLibraryPaths(libraryType, { mapPath: underLibrarySearchRoot }),
+    ...flatpakRuntimeLibraryCandidatePaths(libraryType, {
+      roots: flatpakLibraryRoots({ mapPath: underLibrarySearchRoot })
+    }),
     ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
       `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/${libraryType}`,
       `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/${libraryType}`
@@ -2048,6 +1997,8 @@ function officialPinDefinitionsFor(libId) {
     case 'power:+5V':
     case 'power:+9V':
     case 'power:+12V':
+    case 'power:VCC':
+    case 'power:+VDC':
       return [pinDef('1', 0, 0, 270)];
     case 'power:GND':
       return [pinDef('1', 0, 0, 90)];
@@ -2112,6 +2063,7 @@ function officialPinDefinitionsFor(libId) {
         pinDef('S1', -7.62, -22.86, 90)
       ];
     default:
+      if (libId.startsWith('power:+')) return [pinDef('1', 0, 0, 270)];
       return [];
   }
 }

@@ -120,7 +120,7 @@ function discretePartRole(component) {
   if (libId === 'Device:LED') return 'led';
   if (libId === 'Device:R') return 'resistor';
   if (libId === 'power:GND') return 'ground';
-  if (libId.startsWith('power:+') || libId === 'power:PWR_FLAG') return 'supply';
+  if (libId.startsWith('power:')) return 'supply';
   if (libId.startsWith('Connector')) return 'power-connector';
   return 'part';
 }
