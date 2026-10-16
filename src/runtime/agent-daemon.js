@@ -7,7 +7,7 @@ import { createEnvelope, parseEnvelope } from './envelope.js';
 import { runProviderProcess } from './provider-process.js';
 import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
-import { publicProposal } from '../workflow/native-proposal-source.js';
+import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
 import { createProjectMutexRegistry } from './project-mutex-registry.js';
@@ -341,7 +341,10 @@ async function invokeProvider(call, ctx) {
     });
     toolResults.push({
       id: event.payload.id,
-      ...(await dispatchToolCall(toolCall, ctx))
+      ...(await dispatchToolCall(toolCall, {
+        ...ctx,
+        designSource: proposalSource({ provider: definition.id, via: 'provider' })
+      }))
     });
   }
 
@@ -452,7 +455,10 @@ async function requestProject(call, ctx) {
         projectDir,
         prompt: generatePrompt,
         context: args.selection
-      }, ctx);
+      }, {
+        ...ctx,
+        designSource: proposalSource({ via: 'native-fallback' })
+      });
       if (!generated.ok) {
         const error = new Error(generated.error.message);
         error.code = generated.error.code;
@@ -758,7 +764,8 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       context,
       validateProjectImpl: ctx.validateProjectImpl,
       validateBoardImpl: ctx.validateBoardImpl,
-      conversationBytes: ctx.pendingConversationBytes
+      conversationBytes: ctx.pendingConversationBytes,
+      source: ctx.designSource ?? proposalSource()
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);

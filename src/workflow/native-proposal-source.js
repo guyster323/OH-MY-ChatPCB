@@ -11,7 +11,6 @@ import { reviewCircuitReadiness } from './review-project.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
 
-const SOURCE = { id: 'native', version: '1' };
 const WHAT = 'Regenerate the supported ChatPCB project artifact set from the requested circuit specification.';
 const RISKS = [
   'This NativeProposalSource performs full project regeneration rather than a surgical selection edit.',
@@ -279,10 +278,24 @@ function buildChanges(beforeSnapshot, afterSnapshot) {
   return changes;
 }
 
-function proposalIdFor({ baseTransactionDigest, context, changes }) {
+export function proposalSource(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const id = typeof source.id === 'string' && source.id.length > 0 ? source.id : 'native';
+  const version = typeof source.version === 'string' && source.version.length > 0 ? source.version : '1';
+  const namedProvider = typeof source.provider === 'string' && source.provider.length > 0 ? source.provider : null;
+  const via = source.via === 'provider' && namedProvider ? 'provider' : 'native-fallback';
+  return {
+    id,
+    version,
+    provider: via === 'provider' ? namedProvider : null,
+    via
+  };
+}
+
+function proposalIdFor({ baseTransactionDigest, context, changes, source }) {
   const payload = JSON.stringify({
     baseTransactionDigest,
-    source: SOURCE,
+    source,
     context: normalizeContext(context),
     afterHashes: changes.map((change) => ({ path: change.path, afterHash: change.afterHash }))
   });
@@ -347,13 +360,15 @@ export async function createNativeProposal({
   signal,
   validateCandidateImpl,
   generateProjectImpl = generateMcuPeripheralProject,
-  conversationBytes
+  conversationBytes,
+  source
 } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
   const resolvedProjectDir = assertSafeProjectDir(projectDir);
+  const designSource = proposalSource(source);
   const prompt = promptFrom(request);
   const beforeSnapshot = await collectTransactionSnapshot({ projectDir: resolvedProjectDir });
   const createdRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-native-proposal-'));
@@ -398,14 +413,15 @@ export async function createNativeProposal({
     const proposalId = proposalIdFor({
       baseTransactionDigest: beforeSnapshot.transactionDigest,
       context,
-      changes
+      changes,
+      source: designSource
     });
 
     return {
       tempDir,
       candidateRoot: candidateDir,
       candidateDir,
-      source: SOURCE,
+      source: designSource,
       why: WHY,
       what: WHAT,
       risks: RISKS,

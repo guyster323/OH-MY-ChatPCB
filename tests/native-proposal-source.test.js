@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-import { createNativeProposal, disposeNativeProposal, nativeProposalSource, publicProposal } from '../src/workflow/native-proposal-source.js';
+import { createNativeProposal, disposeNativeProposal, nativeProposalSource, proposalSource, publicProposal } from '../src/workflow/native-proposal-source.js';
 
 const RP2040_PROMPT = 'RP2040 board with USB-C power, I2C connector, reset button, and LED.';
 const STM32_PROMPT = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
@@ -63,6 +63,10 @@ test('structured native proposal preview is public, redacted, and leaves the liv
       assert.deepEqual(afterTree, beforeTree);
 
       const preview = publicProposal(plan);
+      assert.equal(plan.source.id, 'native');
+      assert.equal(plan.source.provider, null);
+      assert.equal(plan.source.via, 'native-fallback');
+      assert.deepEqual(preview.source, plan.source);
       assert.equal(typeof preview.why, 'string');
       assert.ok(preview.why.length > 0);
       assert.equal(preview.what, 'Regenerate the supported ChatPCB project artifact set from the requested circuit specification.');
@@ -276,6 +280,34 @@ test('deleting the last schematic stays fail-closed with required ERC', async ()
       const deleted = plan.changes.find((change) => change.path.endsWith('.kicad_sch') && change.operation === 'delete');
       assert.ok(deleted);
       assert.equal(plan.requiredValidation.erc, true);
+    } finally {
+      await disposeNativeProposal(plan);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('a provider-produced native proposal keeps source.id native and records source.provider', async () => {
+  const root = await createProject();
+  try {
+    const plan = await createNativeProposal({
+      projectDir: root,
+      request: { prompt: STM32_PROMPT },
+      validateCandidateImpl: passingCandidate,
+      source: { provider: 'grok', via: 'provider' }
+    });
+    try {
+      assert.equal(plan.source.id, 'native');
+      assert.equal(plan.source.version, '1');
+      assert.equal(plan.source.provider, 'grok');
+      assert.equal(plan.source.via, 'provider');
+      assert.equal(publicProposal(plan).source.provider, 'grok');
+      const fallback = proposalSource({ provider: 'grok', via: 'native-fallback' });
+      assert.equal(fallback.id, 'native');
+      assert.equal(fallback.provider, null);
+      assert.equal(fallback.via, 'native-fallback');
+      assert.equal(proposalSource().provider, null);
     } finally {
       await disposeNativeProposal(plan);
     }

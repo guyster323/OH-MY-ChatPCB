@@ -988,6 +988,9 @@ test('grok project.request uses a generate schema for a new project and a patch 
 
     assert.equal(created.ok, true);
     assert.equal(created.result.providerFallback, undefined);
+    assert.equal(created.result.source.id, 'native');
+    assert.equal(created.result.source.provider, getProviderDefinition('grok').id);
+    assert.equal(created.result.source.via, 'provider');
     const generateSchema = JSON.parse(captured[0].args[captured[0].args.indexOf('--json-schema') + 1]);
     assert.deepEqual(generateSchema.properties.payload.properties.name.enum, ['schematic.generate']);
     assert.equal(captured[0].args.includes('--permission-mode'), true);
@@ -1014,6 +1017,9 @@ test('grok project.request uses a generate schema for a new project and a patch 
     assert.equal(patched.ok, true);
     assert.equal(patched.result.providerFallback, undefined);
     assert.equal(patched.result.operation, 'patched');
+    assert.equal(patched.result.source.id, 'native');
+    assert.equal(patched.result.source.provider, getProviderDefinition('grok').id);
+    assert.equal(patched.result.source.via, 'provider');
     const patchSchema = JSON.parse(captured[1].args[captured[1].args.indexOf('--json-schema') + 1]);
     assert.deepEqual(patchSchema.properties.payload.properties.name.enum, ['schematic.patch']);
     assert.equal(patchSchema.properties.payload.properties.args.properties.projectName.type, 'string');
@@ -1071,6 +1077,9 @@ test('project.request falls back to a native preview when the provider only insp
     assert.equal(result.result.applied, false);
     assert.equal(result.result.operation, 'generated');
     assert.equal(result.result.providerFallback, 'built-in-draft');
+    assert.equal(result.result.source.id, 'native');
+    assert.equal(result.result.source.provider, null);
+    assert.equal(result.result.source.via, 'native-fallback');
     assert.ok(result.result.conversation.specRows.some((row) => row.label === 'MCU'));
     assert.equal((await kicadArtifacts(created.result.projectDir)).length, 0);
   } finally {
@@ -1100,6 +1109,9 @@ test('project.request journals a new conversation file and rollback restores the
 
     assert.equal(result.ok, true);
     assert.equal(result.result.providerFallback, 'built-in-draft');
+    assert.equal(result.result.source.id, 'native');
+    assert.equal(result.result.source.provider, null);
+    assert.equal(result.result.source.via, 'native-fallback');
     assert.equal(result.result.requiresApproval, true);
     assert.equal(result.result.applied, false);
     assert.ok(result.result.changedFiles.includes('.chatpcb-conversation.json'));
@@ -1117,6 +1129,9 @@ test('project.request journals a new conversation file and rollback restores the
     }, services);
     assert.equal(approved.ok, true);
     assert.equal(approved.result.applied, true);
+    assert.equal(approved.result.transaction.proposal.source.id, 'native');
+    assert.equal(approved.result.transaction.proposal.source.provider, null);
+    assert.equal(approved.result.transaction.proposal.source.via, 'native-fallback');
     const conversation = await readFile(path.join(root, '.chatpcb-conversation.json'), 'utf8');
     assert.match(conversation, /"status": "generate"/);
     const created = approved.result.transaction.changes.find((change) => change.path === '.chatpcb-conversation.json');
@@ -1206,6 +1221,9 @@ test('daemon returns a provider-emitted patch as a preview without writing until
     assert.equal(result.ok, true);
     assert.equal(result.result.requiresApproval, true);
     assert.equal(result.result.applied, false);
+    assert.equal(result.result.source.id, 'native');
+    assert.equal(result.result.source.provider, getProviderDefinition('codex').id);
+    assert.equal(result.result.source.via, 'provider');
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
 
     const approved = await dispatchToolCall(
@@ -1214,6 +1232,9 @@ test('daemon returns a provider-emitted patch as a preview without writing until
     );
     assert.equal(approved.ok, true);
     assert.equal(approved.result.applied, true);
+    assert.equal(approved.result.transaction.proposal.source.id, 'native');
+    assert.equal(approved.result.transaction.proposal.source.provider, getProviderDefinition('codex').id);
+    assert.equal(approved.result.transaction.proposal.source.via, 'provider');
   } finally {
     registry.disposeAll();
     await rm(root, { force: true, recursive: true });

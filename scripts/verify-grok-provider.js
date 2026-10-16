@@ -46,6 +46,9 @@ try {
 }
 
 const designSource = designSourceFrom(result.result) ?? designSourceFrom(spec);
+const sourceProvider = designSource && typeof designSource === 'object' ? designSource.provider ?? null : null;
+const sourceVia = designSource && typeof designSource === 'object' ? designSource.via ?? null : null;
+const sourceId = designSource && typeof designSource === 'object' ? designSource.id : designSource;
 
 const report = {
   projectDir,
@@ -57,6 +60,8 @@ const report = {
   providerFallback: result.result?.providerFallback ?? null,
   operation: result.result?.operation ?? null,
   designSource,
+  'source.provider': sourceProvider,
+  'source.via': sourceVia,
   specFile: specName,
   toolCalls
 };
@@ -64,8 +69,12 @@ const report = {
 console.log(JSON.stringify(report, null, 2));
 
 const mutating = toolCalls.some((call) => call.name === 'schematic.generate' || call.name === 'schematic.patch');
-const sourceId = designSource && typeof designSource === 'object' ? designSource.id : designSource;
-const failed = report.ok !== true || report.providerFallback != null || !mutating || sourceId === 'native';
+const failed = report.ok !== true
+  || report.providerFallback != null
+  || !mutating
+  || sourceId !== 'native'
+  || sourceProvider == null
+  || sourceVia !== 'provider';
 process.exit(failed ? 1 : 0);
 
 function designSourceFrom(value, depth = 0) {
