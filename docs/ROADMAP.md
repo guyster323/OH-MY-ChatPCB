@@ -1,5 +1,7 @@
 # OH-MY-ChatPCB Roadmap
 
+[← README](../README.md) · [Architecture](ARCHITECTURE.md) · [KiCad fork bootstrap](KICAD_FORK_BOOTSTRAP.md)
+
 OH-MY-ChatPCB는 evidence-gated KiCad agent runtime입니다.
 
 ## Product Goal
@@ -175,4 +177,8 @@ EEBench를 요구사항 → 설계 → 시뮬레이션 루프의 내부 품질 �
 
 ---
 
-**이전 계획과 세션 핸드오프 문서는 `docs/archive/`로 이동되었습니다.**
+**이전 계획과 세션 핸드오프 문서는 [docs/archive/](archive/)로 이동되었습니다.**
+
+[Session handoff](archive/handoff-next-session.md) · [KiCad 10 release-quality notes](archive/next-goal-kicad10-release-quality.md)
+
+[← README](../README.md) · [Architecture](ARCHITECTURE.md) · [KiCad fork bootstrap](KICAD_FORK_BOOTSTRAP.md)

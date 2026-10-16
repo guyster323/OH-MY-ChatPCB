@@ -1,5 +1,7 @@
 # ChatPCB Architecture
 
+[← README](../README.md) · [Roadmap](ROADMAP.md) · [KiCad fork bootstrap](KICAD_FORK_BOOTSTRAP.md)
+
 ## 개요
 
 OH-MY-ChatPCB는 로컬 우선(local-first), 증거 기반(evidence-gated) KiCad 에이전트 런타임으로, 사용자 소유 AI 제공자를 네이티브 KiCad 워크플로에 연결합니다.
@@ -271,8 +273,10 @@ OH-MY-ChatPCB/
 - 포트 41317이 7개 파일에 하드코딩
 - 프로토콜 메시지 타입이 중복 정의
 
-리팩토링 계획은 `ROADMAP.md` 참조.
+리팩토링 계획은 [Roadmap](ROADMAP.md) 참조.
 
 ---
 
-**자세한 설계 문서와 계획은 `docs/archive/`에 보관되어 있습니다.**
+**자세한 설계 문서와 계획은 [docs/archive/](archive/)에 보관되어 있습니다.**
+
+[← README](../README.md) · [Roadmap](ROADMAP.md) · [KiCad fork bootstrap](KICAD_FORK_BOOTSTRAP.md) · [Session handoff](archive/handoff-next-session.md)

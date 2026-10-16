@@ -1,5 +1,7 @@
 # KiCad Fork Bootstrap
 
+[← README](../README.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
+
 ## Target
 
 Create a KiCad 10.0.x fork branch that embeds ChatPCB as a right-side panel.
@@ -103,3 +105,5 @@ The first fork milestone has been directly verified with Computer Use when:
 ## Constraint
 
 Do not introduce custom top-level `chatpcb_*` nodes into KiCad files. Store draft metadata in `.chatpcb.json` and only put human-reviewable notes into KiCad schematic text until real symbol placement is implemented.
+
+[← README](../README.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md)
