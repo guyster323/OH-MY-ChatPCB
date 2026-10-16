@@ -9,7 +9,7 @@ import {
   verifyTokenExpiry
 } from '../auth/chatgpt-auth.js';
 import { validateProviderToolCall } from '../provider-process.js';
-import { PROVIDER_ALLOWED_TOOLS } from '../provider-registry.js';
+import { PROVIDER_ALLOWED_TOOLS } from '../../shared/constants.js';
 
 const RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 const MODELS_ENDPOINT = 'https://api.openai.com/v1/models';

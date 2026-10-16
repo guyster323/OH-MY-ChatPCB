@@ -4,7 +4,6 @@ const CONFLICT_POLL_MS = 1000;
 const CHATGPT_AUTH_POLL_MS = 2000;
 
 // i18n helper
-let i18nLocale = 'en';
 let i18nStrings = {};
 let i18nReady = false;
 let daemonConnectionState = 'connecting';
@@ -17,7 +16,6 @@ const DAEMON_CONNECTION_COPY = {
 };
 
 async function loadI18n(localeName = 'en') {
-  i18nLocale = localeName;
   try {
     const response = await fetch(`./locales/${localeName}.json`);
     if (response.ok) {
@@ -129,6 +127,7 @@ const PROGRESS_COPY = {
   ready: { title: '적용을 기다리고 있어요', sprite: 'preview' },
   apply: { title: '스키매틱에 넣는 중', sprite: 'apply' },
   done: { title: '완료', sprite: 'done' },
+  warn: { title: '주의가 필요해요', sprite: 'preview' },
   fail: { title: '이번엔 적용하지 못했어요', sprite: 'fail' }
 };
 const WORKFLOW_ORDER = [
@@ -443,6 +442,10 @@ function handleEnvelope(envelope) {
     applyChatGPTReopenResult(envelope.payload);
     return;
   }
+  if (!envelope.payload.ok && envelope.payload.error?.code === 'PROJECT_BUSY' && isProjectBusyCall(callName)) {
+    showProjectBusy(callName, envelope.payload.error?.message);
+    return;
+  }
 
   if (!envelope.payload.ok) {
     if (callName === 'schematic.generate') {
@@ -480,12 +483,25 @@ function handleEnvelope(envelope) {
           }
         }
       }
-      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? 'Tool call failed.' });
-      renderRequestStatus({
-        state: 'failed',
-        summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
-        technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
-      });
+      const errorCode = envelope.payload.error?.code;
+      const errorMessage = envelope.payload.error?.message ?? 'Tool call failed.';
+      const technicalDetail = envelope.payload.technicalDetail ?? errorMessage;
+
+      appendProgress({ stage: 'fail', text: errorMessage });
+
+      if (errorCode === 'PROVIDER_DISALLOWED_TOOL') {
+        renderRequestStatus({
+          state: 'failed',
+          summary: errorMessage,
+          technicalDetail
+        });
+      } else {
+        renderRequestStatus({
+          state: 'failed',
+          summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+          technicalDetail
+        });
+      }
     }
     if (callName === 'project.inspect') {
       if (inspectionState.requestId === id) renderInspectionFailure();
@@ -998,7 +1014,6 @@ function deriveWorkflow() {
 function syncWorkflow() {
   const { active, done, mode } = deriveWorkflow();
   const activeIndex = workflowIndex(active);
-  const layoutReviewIndex = workflowIndex('layout.review');
   const layoutUnlocked = done.has('circuit.review') || activeIndex >= workflowIndex('layout.concept');
   const fabUnlocked = done.has('layout.review') || workflowFlags.layoutReviewed;
 
@@ -1006,7 +1021,7 @@ function syncWorkflow() {
     const id = button.dataset.step;
     const index = workflowIndex(id);
     const lane = id.split('.')[0];
-    let state = 'idle';
+    let state;
     if (lane === 'fab' && !fabUnlocked) state = 'locked';
     else if (lane === 'layout' && !layoutUnlocked) state = 'locked';
     else if (done.has(id) && id !== active) state = 'done';
@@ -1378,6 +1393,37 @@ function stopConflictWatch() {
 function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
+}
+
+function isProjectBusyCall(callName) {
+  return callName === 'project.request'
+    || callName === 'schematic.generate'
+    || callName === 'schematic.patch'
+    || callName === 'schematic.patch.approve'
+    || callName === 'schematic.patch.cancel';
+}
+
+function showProjectBusy(callName, message) {
+  const summary = typeof message === 'string' && message.trim()
+    ? message.trim()
+    : '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+  if (callName === 'project.request') {
+    const requestProjectDir = activeRequestProjectDir;
+    pendingCalls.delete(activeRequestId);
+    activeRequestId = null;
+    activeRequestProjectDir = null;
+    setRequestBusy(false);
+    if (requestProjectDir !== activeProject?.projectDir) return;
+  } else if (callName === 'schematic.generate') {
+    setRequestBusy(Boolean(activeRequestId));
+    offerNativeDraft();
+  } else if (callName === 'schematic.patch.approve' || callName === 'schematic.patch' || callName === 'schematic.patch.cancel') {
+    // Keep the patch preview so Apply can be clicked again. A request that is still running keeps the composer locked.
+    setRequestBusy(Boolean(activeRequestId));
+    if (callName !== 'schematic.patch.cancel') renderPatchApproval();
+  }
+  appendProgress({ stage: 'fail', text: summary });
+  renderRequestStatus({ state: 'failed', summary });
 }
 
 async function awaitStatus(statusPromise) {

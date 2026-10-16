@@ -131,7 +131,7 @@ function runningUnderNodeTest() {
 
 function assertTestConfigNotInRealHome(dir) {
   if (!runningUnderNodeTest()) return;
-  let realHome = '';
+  let realHome;
   try {
     realHome = userInfo().homedir;
   } catch {
@@ -1074,7 +1074,7 @@ export async function verifyIdToken(idToken, expectedNonce, expectedClientId, op
   }
 
   const signingInput = `${headerB64}.${payloadB64}`;
-  let signatureOk = false;
+  let signatureOk;
   try {
     const key = createPublicKey({ key: jwk, format: 'jwk' });
     const verifier = createVerify('RSA-SHA256');
@@ -1082,7 +1082,7 @@ export async function verifyIdToken(idToken, expectedNonce, expectedClientId, op
     verifier.end();
     signatureOk = verifier.verify(key, Buffer.from(signatureB64, 'base64url'));
   } catch (error) {
-    throw new Error(`ID token signature verification failed: ${error.message}`);
+    throw new Error(`ID token signature verification failed: ${error.message}`, { cause: error });
   }
   if (!signatureOk) {
     throw new Error('ID token signature verification failed');
@@ -1427,7 +1427,7 @@ export function startAuthFlow({
     return withCredentialWrite(async () => {
       if (!attemptStillCurrent(serial)) return false;
       const credPath = getCredentialsPath(creds.client_id || 'default');
-      let previous = null;
+      let previous;
       try {
         previous = await readFile(credPath);
       } catch {
@@ -2199,7 +2199,12 @@ const OAUTH_ERROR_CODES = new Set([
   'temporarily_unavailable'
 ]);
 
+function isNumericStatus(value) {
+  return typeof value === 'string' && /^[0-9]+$/.test(value);
+}
+
 function isVisibleErrorCode(key, value) {
+  if (isNumericStatus(value) && (key === 'code' || key === 'status')) return true;
   return key === 'code' && OAUTH_ERROR_CODES.has(value);
 }
 
@@ -2215,7 +2220,8 @@ function isVisibleErrorCode(key, value) {
  * That covers JSON, single quotes, `name=value`, URL-encoded `name%3Dvalue`,
  * and unquoted `name: value` (the value ends at `&` or whitespace).
  * Error fields stay visible, including "code":"invalid_client",
- * "error":"invalid_grant", and error_description. A sess- key is masked
+ * "error":"invalid_grant", error_description, numeric codes such as
+ * code: 403, "status":401, and status=500. A sess- key is masked
  * when 8 or more token characters follow.
  */
 export function maskSecrets(text, accessToken) {

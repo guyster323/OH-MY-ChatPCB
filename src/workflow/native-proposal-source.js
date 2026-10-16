@@ -4,14 +4,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { collectTransactionSnapshot, transactionArtifactKind } from '../evidence/transaction-inventory.js';
+import { CONVERSATION_FILE } from '../runtime/request-conversation.js';
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
 
-const SOURCE_ID = 'native';
-const SOURCE_VERSION = '1';
 const WHAT = 'Regenerate the supported ChatPCB project artifact set from the requested circuit specification.';
 const RISKS = [
   'This NativeProposalSource performs full project regeneration rather than a surgical selection edit.',
@@ -281,8 +280,8 @@ function buildChanges(beforeSnapshot, afterSnapshot) {
 
 export function proposalSource(input) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  const id = typeof source.id === 'string' && source.id.length > 0 ? source.id : SOURCE_ID;
-  const version = typeof source.version === 'string' && source.version.length > 0 ? source.version : SOURCE_VERSION;
+  const id = typeof source.id === 'string' && source.id.length > 0 ? source.id : 'native';
+  const version = typeof source.version === 'string' && source.version.length > 0 ? source.version : '1';
   const namedProvider = typeof source.provider === 'string' && source.provider.length > 0 ? source.provider : null;
   const via = source.via === 'provider' && namedProvider ? 'provider' : 'native-fallback';
   return {
@@ -361,6 +360,7 @@ export async function createNativeProposal({
   signal,
   validateCandidateImpl,
   generateProjectImpl = generateMcuPeripheralProject,
+  conversationBytes,
   source
 } = {}) {
   if (!projectDir) {
@@ -382,6 +382,9 @@ export async function createNativeProposal({
 
     const proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
     throwIfAborted(signal);
+    if (conversationBytes?.length) {
+      await writeFile(path.join(candidateDir, CONVERSATION_FILE), conversationBytes);
+    }
     const generatedSnapshot = await collectTransactionSnapshot({ projectDir: candidateDir });
     const candidateRequired = requiredFromArtifacts(generatedSnapshot.artifacts);
     const schematicRelative = firstArtifactPath(generatedSnapshot.artifacts, '.kicad_sch');

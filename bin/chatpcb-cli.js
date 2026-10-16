@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 import { startDaemon } from '../src/runtime/agent-daemon.js';
+import { assertSupportedNodeVersion } from '../src/runtime/node-version.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { simulateProject } from '../src/workflow/simulate-project.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
 import { validateBoard } from '../src/workflow/validate-board.js';
 import { validateProject } from '../src/workflow/validate-project.js';
+
+try {
+  assertSupportedNodeVersion(process.versions.node);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 const command = process.argv[2];
 const flags = parseFlags(process.argv.slice(3));

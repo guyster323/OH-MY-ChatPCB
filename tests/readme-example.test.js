@@ -41,7 +41,7 @@ describe('README ESP32-S3 example', { concurrency: false }, () => {
       }
 
       // lib_symbols section should contain all required official symbols
-      const libSymbolsMatch = schematic.match(/\(lib_symbols([\s\S]*?)\n  \)/);
+      const libSymbolsMatch = schematic.match(/\(lib_symbols([\s\S]*?)\n {2}\)/);
       assert.ok(libSymbolsMatch, 'Should have lib_symbols section');
       const libSymbolsContent = libSymbolsMatch[1];
 
@@ -71,8 +71,7 @@ describe('README ESP32-S3 example', { concurrency: false }, () => {
       // Should not have dangling labels (labels without connected wires/pins)
       const labelCount = (schematic.match(/\(label "/g) || []).length;
       const wireCount = (schematic.match(/\(wire\b/g) || []).length;
-      const junctionCount = (schematic.match(/\(junction /g) || []).length;
-      
+
       assert.ok(labelCount > 0, 'Should have labels');
       assert.ok(wireCount > 0, 'Should have wires connecting labels');
       

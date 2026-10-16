@@ -114,6 +114,9 @@ test('prepare persists schema version 1 records atomically with base64 before by
     assert.equal(loaded.changes[0].beforeBytes.toString('utf8'), 'old');
     assert.equal(loaded.changes[0].beforeHash, 'old-hash');
     assert.equal(loaded.proposal.proposalId, 'sha256:test');
+    assert.equal(loaded.proposal.source.id, 'native');
+    assert.equal(loaded.proposal.source.provider, null);
+    assert.equal(loaded.proposal.source.via, 'native-fallback');
 
     const projectKey = await projectKeyFor(root);
     assert.equal(loaded.projectKey, projectKey);
@@ -152,6 +155,36 @@ test('journal directories are 0o700 and metadata is 0o600 where the platform sup
     assert.equal(rootStat.mode & 0o777, 0o700);
     assert.equal(dirStat.mode & 0o777, 0o700);
     assert.equal(fileStat.mode & 0o777, 0o600);
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('journal keeps a provider id only when the proposal source came from that provider', async () => {
+  const stateRoot = await mkdirTemp('chatpcb-journal-source-state-');
+  const root = await makeRoot('chatpcb-journal-source-project-');
+  try {
+    const journal = createTransactionJournal({ stateRoot, now: () => 1000 });
+    const produced = await prepareSample(journal, root, {
+      proposal: {
+        proposalId: 'sha256:grok',
+        source: { id: 'native', version: '1', provider: 'grok', via: 'provider' }
+      }
+    });
+    assert.equal(produced.proposal.source.id, 'native');
+    assert.equal(produced.proposal.source.provider, 'grok');
+    assert.equal(produced.proposal.source.via, 'provider');
+
+    const fallback = await prepareSample(journal, root, {
+      proposal: {
+        proposalId: 'sha256:fallback',
+        source: { id: 'native', version: '1', provider: 'grok', via: 'native-fallback' }
+      }
+    });
+    assert.equal(fallback.proposal.source.id, 'native');
+    assert.equal(fallback.proposal.source.provider, null);
+    assert.equal(fallback.proposal.source.via, 'native-fallback');
   } finally {
     await rm(stateRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
@@ -213,7 +246,10 @@ test('transition enforces the allowed state set and preserves immutable identity
     assert.equal(applied.afterTransactionDigest, 'after');
     assert.equal(applied.createdAt, 1000);
     assert.equal(applied.changes[0].beforeBase64, Buffer.from('old').toString('base64'));
-    assert.deepEqual(applied.proposal, sampleProposal());
+    assert.deepEqual(applied.proposal, {
+      proposalId: 'sha256:test',
+      source: { id: 'native', version: '1', provider: null, via: 'native-fallback' }
+    });
     await assert.rejects(
       journal.transition({
         transactionId: record.transactionId,

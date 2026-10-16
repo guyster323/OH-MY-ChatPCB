@@ -1,11 +1,13 @@
 import http from 'node:http';
-import { createHash } from 'node:crypto';
-import { readdir } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { cp, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
 import { createEnvelope, parseEnvelope } from './envelope.js';
 import { parseProviderMessage, runProviderProcess } from './provider-process.js';
-import { PROVIDER_ALLOWED_TOOLS, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, listProviderDefinitions } from './provider-registry.js';
+import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
 import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
@@ -17,10 +19,21 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { assertSafeProjectDir, createNamedProject } from '../workflow/project-workspace.js';
+import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
-import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation } from './request-conversation.js';
+import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
 import { createChatGPTAuthManager, maskSecrets } from './auth/chatgpt-auth.js';
+
+const knownChatPcbTools = new Set(KNOWN_CHATPCB_TOOLS);
+
+function computeAllowedToolsForContext({ allowGenerate = false, allowCreate = false } = {}) {
+  const tools = new Set(
+    PROVIDER_ALLOWED_TOOLS.filter((name) => name !== ToolName.SCHEMATIC_GENERATE && name !== ToolName.PROJECT_CREATE)
+  );
+  if (allowGenerate) tools.add(ToolName.SCHEMATIC_GENERATE);
+  if (allowCreate) tools.add(ToolName.PROJECT_CREATE);
+  return tools;
+}
 
 function emitProgress(ctx, payload) {
   if (typeof ctx?.emit !== 'function') return;
@@ -33,6 +46,53 @@ function emitProgress(ctx, payload) {
 
 function progressCopy(prompt, ko, en) {
   return /[가-힣]/.test(prompt ?? '') ? ko : en;
+}
+
+const PROJECT_BUSY_KO = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+const PROJECT_BUSY_EN = 'Another operation is using this project. Try again in a moment.';
+
+function projectBusyClientMessage(prompt) {
+  return progressCopy(prompt, PROJECT_BUSY_KO, PROJECT_BUSY_EN);
+}
+
+function projectBusyFailure(prompt) {
+  return failure('PROJECT_BUSY', projectBusyClientMessage(prompt));
+}
+
+// Set only after this request has acquired the project mutex. Nested preview
+// re-enters the same project; external apply/patch calls do not see the symbol.
+const projectLockHeld = Symbol('projectLockHeld');
+const RESTORE_STAGING_PREFIX = '.chatpcb-staging-';
+const RESTORE_BACKUP_PREFIX = '.chatpcb-backup-';
+
+function runWithProjectLock(ctx, projectDir, work) {
+  if (ctx?.[projectLockHeld] === true) return work();
+  if (!ctx?.projectMutexRegistry?.runExclusive) return work();
+  return ctx.projectMutexRegistry.runExclusive({ projectDir }, work);
+}
+
+function resolveSnapshotFs(ctx) {
+  const injected = ctx?.snapshotFs ?? {};
+  return {
+    cp: injected.cp ?? cp,
+    rename: injected.rename ?? rename,
+    rm: injected.rm ?? rm,
+    mkdtemp: injected.mkdtemp ?? mkdtemp
+  };
+}
+
+function providerDisallowedMessage(prompt, disallowedCalls) {
+  const names = [];
+  for (const call of disallowedCalls ?? []) {
+    if (typeof call?.name !== 'string' || call.name.length === 0 || names.includes(call.name)) continue;
+    names.push(call.name);
+  }
+  const tools = names.join(', ');
+  return progressCopy(
+    prompt,
+    `AI가 이 단계에서 쓸 수 없는 작업(${tools})을 시도해 요청을 마치지 못했어요. 파일은 바뀌지 않았어요. 다시 시도해 주세요.`,
+    `The AI attempted an operation (${tools}) that is not allowed at this stage. No files were changed. Please try again.`
+  );
 }
 
 function emitProviderEvent(ctx, event) {
@@ -88,6 +148,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     runCommandImpl,
     verifyAppliedProjectImpl
   };
+  if (dispatchOptions[projectLockHeld] === true) ctx[projectLockHeld] = true;
 
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
@@ -181,15 +242,26 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     case 'auth.chatgpt.signOut':
       return ok(await chatGptAuthManager(ctx).signOut());
 
-    case 'provider.invoke':
-      return ok(await invokeProvider(call, ctx));
+    case 'provider.invoke': {
+      const invocationId = call.args?.invocationId ?? call.id;
+      try {
+        return ok(await invokeProvider(call, ctx));
+      } finally {
+        releaseProviderInvocation(providerControllers, invocationId);
+      }
+    }
 
     case 'project.request':
       try {
         return ok(await requestProject(call, ctx));
       } catch (error) {
-        if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
-        return failure(error.code ?? 'PROVIDER_FAILED', error.message, { conversation: error.conversation });
+        if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call.args?.prompt);
+        const extra = { conversation: error.conversation };
+        if (error?.technicalDetail) extra.technicalDetail = error.technicalDetail;
+        const failed = failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
+        if (typeof error?.snapshotPath === 'string') failed.error.snapshotPath = error.snapshotPath;
+        if (typeof error?.backupPath === 'string') failed.error.backupPath = error.backupPath;
+        return failed;
       }
 
     case 'provider.cancel':
@@ -214,7 +286,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       return failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${call.name}`);
   }
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call?.args?.prompt);
     throw error;
   }
 }
@@ -255,7 +327,7 @@ async function dispatchSchematicPatch(args, ctx) {
   const plan = peeked.record.plan;
   try {
     await ensureReconciled(projectDir, ctx);
-    return ok(sanitizeApplyResult(await applySchematicPatch({
+    const applied = sanitizeApplyResult(await applySchematicPatch({
       projectDir,
       prompt: args.prompt,
       projectName: args.projectName,
@@ -268,9 +340,11 @@ async function dispatchSchematicPatch(args, ctx) {
       approvalRegistry: patchApprovalRegistry,
       mutexRegistry: projectMutexRegistry,
       journal: transactionJournal
-    })));
+    }));
+    if (applied?.reason?.code === 'PROJECT_BUSY') return projectBusyFailure(args.prompt);
+    return ok(applied);
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(args.prompt);
     throw error;
   } finally {
     const still = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
@@ -278,13 +352,30 @@ async function dispatchSchematicPatch(args, ctx) {
   }
 }
 
+function recoverParsedProviderFailure(error) {
+  if (error?.code !== 'UNKNOWN_TOOL' || !Array.isArray(error.parsedEvents)) return null;
+  return {
+    exitCode: Number.isInteger(error.providerExitCode) ? error.providerExitCode : 0,
+    stderr: typeof error.providerStderr === 'string' ? error.providerStderr : '',
+    events: error.parsedEvents
+  };
+}
+
+function providerDispatchContext(ctx, designSource) {
+  const dispatchCtx = { ...ctx, designSource };
+  if (ctx?.[projectLockHeld] === true) dispatchCtx[projectLockHeld] = true;
+  return dispatchCtx;
+}
+
 async function invokeProvider(call, ctx) {
   const {
     runProviderProcessImpl,
     checkProviderAvailabilityImpl,
+    getProviderDefinitionImpl = getProviderDefinition,
     providerControllers,
-    allowGenerate = true,
-    forceProjectDir = false
+    allowGenerate: allowGenerateFlag,
+    forceProjectDir = false,
+    projectExists = false
   } = ctx;
   const args = call.args ?? {};
   const invocationId = args.invocationId ?? call.id;
@@ -300,116 +391,170 @@ async function invokeProvider(call, ctx) {
     throw new Error('provider.invoke requires an invocation id.');
   }
 
-  const definition = getProviderDefinition(provider);
+  const definition = getProviderDefinitionImpl(provider);
   const availability = await checkProviderAvailabilityImpl({ provider });
+  // Cancel can land during availability, after the previous attempt kept its controller.
+  throwIfProviderCancelled(providerControllers, invocationId);
   if (!availability.available) {
     throw new Error(`${definition.label} is not available on this machine.`);
   }
 
+  const launchContext = await providerLaunchContext({
+    provider,
+    projectDir,
+    allowGenerate: allowGenerateFlag,
+    projectExists,
+    inspectionContext: ctx.inspectionContext,
+    inspectResult: ctx.inspectResult
+  });
+  const allowGenerate = provider === 'grok' ? launchContext.allowGenerate !== false : allowGenerateFlag !== false;
+  const contextAllowedTools = computeAllowedToolsForContext({
+    allowGenerate,
+    allowCreate: !forceProjectDir
+  });
+  const promptTools = provider === 'grok' ? grokMutatingToolNames(launchContext) : [...contextAllowedTools];
   const input = buildProviderPrompt({
     provider,
     userMessage: prompt,
     projectDir,
-    allowedTools: PROVIDER_ALLOWED_TOOLS
+    allowedTools: promptTools,
+    inspectionContext: launchContext.inspectionContext,
+    projectExists: provider === 'grok' ? launchContext.projectExists === true : projectExists === true
   });
-  const controller = new AbortController();
-  providerControllers.set(invocationId, controller);
-  let transcript;
 
+  let controller;
   try {
-    if (provider === 'chatgpt') {
-      emitProgress(ctx, {
-        stage: 'provider',
-        sprite: 'cli',
-        text: progressCopy(prompt, 'ChatGPT와 대화 중.', 'Talking to ChatGPT.')
-      });
-      let response;
-      try {
-        response = await callChatGPTResponses({
-          prompt: input,
-          signal: controller.signal,
-          model: args.model,
-          allowedTools: PROVIDER_ALLOWED_TOOLS
-        });
-      } catch (error) {
-        // stderr is what the daemon launcher appends to daemon.log.
-        console.error(maskSecrets(error?.message || 'ChatGPT request failed'));
-        throw error;
-      }
-      const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
-      for (const event of events) emitProviderEvent(ctx, event);
-      transcript = { exitCode: 0, events, stderr: '', tracePath: null };
+    throwIfProviderCancelled(providerControllers, invocationId);
+    const existing = providerControllers.get(invocationId);
+    // A reused id must not inherit an already-aborted controller from an earlier request.
+    if (existing && !existing.signal.aborted) {
+      controller = existing;
     } else {
-      const streamed = [];
-      emitProgress(ctx, {
-        stage: 'provider',
-        sprite: 'cli',
-        text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
-      });
-      transcript = await runProviderProcessImpl({
-        command: definition.command,
-        args: definition.args,
-        input,
-        allowedToolNames: PROVIDER_ALLOWED_TOOLS,
-        signal: controller.signal,
-        onEvent: (event) => {
-          streamed.push(event);
-          emitProviderEvent(ctx, event);
+      controller = new AbortController();
+      providerControllers.set(invocationId, controller);
+    }
+
+    emitProgress(ctx, {
+      stage: 'provider',
+      sprite: 'cli',
+      text: progressCopy(args.prompt, `${definition.label}와 대화 중.`, `Talking to ${definition.label}.`)
+    });
+    let alreadyStreamed = false;
+    let transcript;
+    try {
+      if (provider === 'chatgpt') {
+        let response;
+        try {
+          response = await callChatGPTResponses({
+            prompt: input,
+            signal: controller.signal,
+            model: args.model,
+            allowedTools: PROVIDER_ALLOWED_TOOLS
+          });
+        } catch (error) {
+          // stderr is what the daemon launcher appends to daemon.log.
+          console.error(maskSecrets(error?.message || 'ChatGPT request failed'));
+          throw error;
         }
-      });
-      if (streamed.length === 0) {
-        for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
+        const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
+        transcript = { exitCode: 0, events, stderr: '', tracePath: null };
+      } else {
+        transcript = await runProviderProcessImpl({
+          command: availability.resolvedPath || availability.command || definition.command,
+          args: buildProviderLaunchArgs(definition, launchContext),
+          input,
+          timeoutMs: definition.timeoutMs,
+          allowedToolNames: PROVIDER_ALLOWED_TOOLS,
+          signal: controller.signal,
+          providerId: definition.id,
+          usePromptFile: definition.usePromptFile === true,
+          onEvent: (event) => {
+            alreadyStreamed = true;
+            emitProviderEvent(ctx, event);
+          }
+        });
       }
+    } catch (error) {
+      // Unknown tool names reject the child transcript. Keep the parsed events
+      // so a known tool from the same process still reaches DISALLOWED_TOOL.
+      const recovered = recoverParsedProviderFailure(error);
+      if (!recovered) throw error;
+      transcript = recovered;
     }
-  } finally {
-    providerControllers.delete(invocationId);
-  }
-
-  if (transcript.exitCode !== 0) {
-    throw new Error(`${definition.label} exited with code ${transcript.exitCode}.`);
-  }
-
-  const toolResults = [];
-  for (const event of transcript.events) {
-    if (event.type !== 'tool.call') continue;
-
-    if (forceProjectDir && event.payload.name === 'project.create') {
-      throw new Error('project.create is not allowed inside project.request.');
+    throwIfProviderRunAborted(providerControllers, invocationId, controller);
+    if (!alreadyStreamed) {
+      for (const event of transcript.events ?? []) emitProviderEvent(ctx, event);
     }
-    if (!allowGenerate && event.payload.name === 'schematic.generate') {
-      throw new Error('schematic.generate is not allowed for an existing project.request; request a schematic.patch preview instead.');
+
+    if (transcript.exitCode !== 0) {
+      throw new Error(`${definition.label} exited with code ${transcript.exitCode}.`);
     }
-    if (!PROVIDER_ALLOWED_TOOLS.includes(event.payload.name)) {
+
+    const toolResults = [];
+    const disallowedCalls = [];
+    for (const event of transcript.events) {
+      throwIfProviderRunAborted(providerControllers, invocationId, controller);
+      if (event.type !== 'tool.call') continue;
+
+      if (!knownChatPcbTools.has(event.payload.name)) {
+        toolResults.push({
+          id: event.payload.id,
+          ...failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${event.payload.name}`)
+        });
+        continue;
+      }
+
+      let disallowedReason = null;
+      if (forceProjectDir && event.payload.name === 'project.create') {
+        disallowedReason = 'project.create is not allowed when a project already exists';
+      } else if (!allowGenerate && event.payload.name === 'schematic.generate') {
+        disallowedReason = 'schematic.generate is not allowed for an existing project; use schematic.patch instead';
+      } else if (!contextAllowedTools.has(event.payload.name)) {
+        disallowedReason = `${event.payload.name} is not in the allowed tool list`;
+      }
+
+      if (disallowedReason) {
+        disallowedCalls.push({ name: event.payload.name, reason: disallowedReason });
+        toolResults.push({
+          id: event.payload.id,
+          ...failure('DISALLOWED_TOOL', disallowedReason)
+        });
+        continue;
+      }
+
+      const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, {
+        analyzerAdapters: args.analyzerAdapters,
+        selection: args.selection,
+        prompt
+      });
       toolResults.push({
         id: event.payload.id,
-        ...failure('UNKNOWN_TOOL', `Unknown ChatPCB tool: ${event.payload.name}`)
+        ...(await dispatchToolCall(toolCall, providerDispatchContext(
+          ctx,
+          proposalSource({ provider: definition.id, via: 'provider' })
+        ))),
+        name: toolCall.name
       });
-      continue;
     }
-    const toolCall = withProjectContext(event.payload, projectDir, forceProjectDir, {
-      analyzerAdapters: args.analyzerAdapters,
-      selection: args.selection,
-      prompt
-    });
-    toolResults.push({
-      id: event.payload.id,
-      name: toolCall.name,
-      ...(await dispatchToolCall(toolCall, {
-        ...ctx,
-        designSource: proposalSource({ provider: definition.id, via: 'provider' })
-      }))
-    });
-  }
+    throwIfProviderRunAborted(providerControllers, invocationId, controller);
 
-  return {
-    providerInvocation: true,
-    invocationId,
-    provider,
-    events: transcript.events,
-    toolResults,
-    stderr: transcript.stderr,
-    tracePath: transcript.tracePath
-  };
+    return {
+      providerInvocation: true,
+      invocationId,
+      provider,
+      events: transcript.events,
+      toolResults,
+      disallowedCalls,
+      stderr: transcript.stderr,
+      tracePath: transcript.tracePath
+    };
+  } finally {
+    // project.request keeps the controller until the whole request finishes so
+    // cancel between attempts still finds it. Every other caller releases here.
+    if (!ctx.retainProviderController && controller && providerControllers.get(invocationId) === controller) {
+      providerControllers.delete(invocationId);
+    }
+  }
 }
 
 async function requestProject(call, ctx) {
@@ -434,9 +579,10 @@ async function requestProject(call, ctx) {
   const awaitingInput = existingConversation?.status === 'awaiting-input';
   const shouldClarify = awaitingInput || !hasExistingSpec;
   const conversation = shouldClarify
-    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true })
+    ? await continueCircuitConversation({ projectDir, prompt, spec, proMode: args.proMode === true, persist: false })
     : existingConversation;
   if (shouldClarify && conversation && !conversationWantsGenerate(conversation)) {
+    await saveCircuitConversation(projectDir, conversation);
     return {
       operation: 'clarify',
       requiresApproval: false,
@@ -475,65 +621,291 @@ async function requestProject(call, ctx) {
   const generatePrompt = hasSpec && !awaitingInput
     ? prompt
     : (conversation?.generatePrompt ?? prompt);
-  try {
-    const providerResult = await invokeProvider({
-      ...call,
-      args: { ...args, prompt: generatePrompt }
-    }, {
+  if (conversation) ctx.pendingConversation = conversation;
+  if (shouldClarify && conversation) {
+    ctx.pendingConversationBytes = Buffer.from(serializeCircuitConversation(conversation));
+  }
+  ctx.persistLiveConversation = args.provider === 'chatgpt';
+
+  const callerHolds = typeof ctx.projectMutexRegistry.callerHolds === 'function'
+    ? await ctx.projectMutexRegistry.callerHolds({ projectDir })
+    : false;
+  return ctx.projectMutexRegistry.runExclusive({ projectDir, reentrant: true }, async () => {
+    // Nested preview skips the lock only when this request acquired it.
+    // A caller that already holds the project still sees PROJECT_BUSY from preview.
+    if (!callerHolds) ctx[projectLockHeld] = true;
+    let providerResult;
+    let firstPreview;
+    let retryAttempted = false;
+    const invocationId = args.invocationId ?? call.id;
+    const provisionalPlans = [];
+    ctx.provisionalPlans = provisionalPlans;
+    const providerCtx = {
       ...ctx,
       allowGenerate: !hasSpec,
-      forceProjectDir: true
-    });
-    logChatGptRequestDecision(args.provider, providerResult);
-    let preview = lastMutatingResult(providerResult.toolResults);
-    if (!preview) {
-      emitProgress(ctx, {
-        stage: 'preview',
-        sprite: 'draft',
-        text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
-      });
-      const generated = await previewNativeChange({
-        projectDir,
-        prompt: generatePrompt,
-        context: args.selection
-      }, {
-        ...ctx,
-        designSource: proposalSource({ via: 'native-fallback' })
-      });
-      if (!generated.ok) {
-        const error = new Error(generated.error.message);
-        error.code = generated.error.code;
-        throw error;
-      }
-      preview = generated.result;
-    }
-
-    if (preview?.requiresApproval) {
-      emitProgress(ctx, {
-        stage: 'ready',
-        sprite: 'preview',
-        text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
-      });
-    }
-    if (conversation && preview?.source) {
-      conversation.lastSource = {
-        provider: preview.source.provider ?? null,
-        via: preview.source.via ?? null
-      };
-      await saveCircuitConversation(projectDir, conversation);
-    }
-    return {
-      ...preview,
-      operation: hasSpec ? 'patched' : 'generated',
-      providerEvents: providerResult.events,
-      conversation
+      forceProjectDir: true,
+      projectExists: hasSpec,
+      retainProviderController: true
     };
+    if (!callerHolds) providerCtx[projectLockHeld] = true;
+
+    let snapshot = null;
+    let keepSnapshot = false;
+    const fsOps = resolveSnapshotFs(ctx);
+    try {
+      snapshot = hasSpec ? await snapshotProject(projectDir, fsOps) : null;
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      providerResult = await invokeProvider({
+        ...call,
+        args: { ...args, prompt: generatePrompt }
+      }, providerCtx);
+
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      firstPreview = lastMutatingResult(providerResult.toolResults);
+
+      if (providerResult.disallowedCalls?.length > 0 && !retryAttempted && !firstPreview) {
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        retryAttempted = true;
+        const correctiveNote = hasSpec
+          ? 'The project already exists. Use schematic.patch (not project.create or schematic.generate) to modify it.'
+          : 'Use schematic.generate for new projects (not project.create inside project.request).';
+
+        providerResult = await invokeProvider({
+          ...call,
+          args: { ...args, prompt: `${generatePrompt}\n\nNote: ${correctiveNote}` }
+        }, providerCtx);
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      }
+
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
+      let usedBuiltinDraft = false;
+      if (!preview) {
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        usedBuiltinDraft = true;
+        emitProgress(ctx, {
+          stage: 'preview',
+          sprite: 'draft',
+          fallback: 'built-in-draft',
+          reason: 'provider-returned-no-tool-call',
+          text: progressCopy(
+            prompt,
+            '공급자가 도구 호출을 반환하지 않아 내장 초안을 사용합니다.',
+            'The provider returned no tool call. Using the built-in draft.'
+          )
+        });
+        const generated = await previewNativeChange({
+          projectDir,
+          prompt: generatePrompt,
+          context: args.selection
+        }, providerDispatchContext(ctx, proposalSource({ via: 'native-fallback' })));
+        if (!generated.ok) {
+          if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
+            const disallowedError = new Error(providerDisallowedMessage(prompt, providerResult.disallowedCalls));
+            disallowedError.code = 'PROVIDER_DISALLOWED_TOOL';
+            disallowedError.conversation = conversation;
+            disallowedError.technicalDetail = providerResult.disallowedCalls.map((dc) => `${dc.name}: ${dc.reason}`).join('; ');
+            throw disallowedError;
+          }
+          const error = new Error(generated.error.message);
+          error.code = generated.error.code;
+          throw error;
+        }
+        preview = generated.result;
+      }
+
+      throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      logChatGptRequestDecision(args.provider, providerResult);
+      if (conversation && preview?.source) {
+        conversation.lastSource = {
+          provider: preview.source.provider ?? null,
+          via: preview.source.via ?? null
+        };
+      }
+      if (preview?.requiresApproval) {
+        emitProgress(ctx, {
+          stage: 'ready',
+          sprite: 'preview',
+          text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
+        });
+      }
+      return {
+        ...preview,
+        operation: hasSpec ? 'patched' : 'generated',
+        providerEvents: providerResult.events,
+        conversation,
+        ...(usedBuiltinDraft ? { providerFallback: 'built-in-draft' } : {})
+      };
+    } catch (error) {
+      // PROJECT_BUSY means another transaction holds the project and may be writing.
+      let thrown = error;
+      if (snapshot && error?.code !== 'PROJECT_BUSY') {
+        try {
+          await restoreProjectSnapshot(snapshot, projectDir, fsOps, { ctx, prompt });
+        } catch (restoreError) {
+          keepSnapshot = true;
+          thrown = projectSnapshotRestoreError(error, restoreError, snapshot, conversation);
+        }
+      }
+      try {
+        await disposeProvisionalPlans(provisionalPlans, ctx.patchApprovalRegistry, projectDir);
+      } catch (disposeError) {
+        if (!thrown?.snapshotPath) throw disposeError;
+      }
+      if (shouldClarify && conversation) {
+        try {
+          await saveCircuitConversation(projectDir, conversation);
+        } catch {
+          // Keep the provider error. The conversation is still on the thrown object.
+        }
+      }
+      if (thrown?.code === 'PROJECT_BUSY') throw thrown;
+      if (thrown?.snapshotPath) throw thrown;
+      const wrapped = thrown instanceof Error ? thrown : new Error(String(thrown?.message ?? thrown));
+      wrapped.code = thrown?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
+      wrapped.conversation = conversation;
+      if (thrown?.technicalDetail) wrapped.technicalDetail = thrown.technicalDetail;
+      throw wrapped;
+    } finally {
+      if (snapshot?.root && !keepSnapshot) await fsOps.rm(snapshot.root, { force: true, recursive: true });
+      releaseProviderInvocation(ctx.providerControllers, invocationId);
+    }
+  });
+}
+
+async function snapshotProject(projectDir, fsOps = resolveSnapshotFs()) {
+  const root = await fsOps.mkdtemp(path.join(tmpdir(), 'chatpcb-project-snapshot-'));
+  try {
+    const copy = path.join(root, 'project');
+    await fsOps.cp(projectDir, copy, { recursive: true });
+    return { root, copy };
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') throw error;
-    const wrapped = error instanceof Error ? error : new Error(String(error?.message ?? error));
-    wrapped.code = error?.code ?? wrapped.code ?? 'PROVIDER_FAILED';
-    wrapped.conversation = conversation;
-    throw wrapped;
+    await fsOps.rm(root, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+function projectSnapshotRestoreError(original, restoreError, snapshot, conversation) {
+  const originalMessage = original instanceof Error ? original.message : String(original?.message ?? original);
+  let restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError?.message ?? restoreError);
+  const backupPath = typeof restoreError?.backupPath === 'string' ? restoreError.backupPath : undefined;
+  if (backupPath && !restoreMessage.includes(backupPath)) {
+    restoreMessage = `${restoreMessage} Original project remains at ${backupPath}.`;
+  }
+  const error = new Error(
+    `${originalMessage} Failed to restore the project snapshot: ${restoreMessage} Snapshot kept at ${snapshot.root}.`
+  );
+  error.code = original?.code ?? 'PROVIDER_FAILED';
+  error.snapshotPath = snapshot.root;
+  if (backupPath) error.backupPath = backupPath;
+  error.conversation = conversation ?? original?.conversation;
+  if (original?.technicalDetail) error.technicalDetail = original.technicalDetail;
+  error.cause = restoreError;
+  return error;
+}
+
+function restoreBackupCleanupWarning(prompt, backup, error) {
+  const detail = error instanceof Error ? error.message : String(error?.message ?? error);
+  const reason = detail ? ` (${detail})` : '';
+  return progressCopy(
+    prompt,
+    `프로젝트는 복원됐지만 백업 폴더를 지우지 못했어요${reason}. 직접 삭제해 주세요: ${backup}`,
+    `The project was restored, but the backup directory could not be removed${reason}. Delete it manually: ${backup}`
+  );
+}
+
+// Progress delivery must not turn a finished restore into a failure.
+function warnLeftoverRestoreBackup(ctx, prompt, backup, error) {
+  const text = restoreBackupCleanupWarning(prompt, backup, error);
+  try {
+    emitProgress(ctx, { stage: 'warn', sprite: 'preview', text });
+  } catch {
+    // The restore already finished. A progress listener must not roll it back.
+  }
+}
+
+// Copy onto a sibling, then swap directory names. A failed copy never deletes
+// the live project. A failed rename puts the original directory back. Once both
+// renames succeed, failing to delete the backup only warns and leaves the
+// restored project in place.
+async function restoreProjectSnapshot(snapshot, projectDir, fsOps = resolveSnapshotFs(), { ctx, prompt } = {}) {
+  const resolved = path.resolve(projectDir);
+  const parent = path.dirname(resolved);
+  const base = path.basename(resolved);
+  const token = randomUUID();
+  const staging = path.join(parent, `${RESTORE_STAGING_PREFIX}${base}-${token}`);
+  const backup = path.join(parent, `${RESTORE_BACKUP_PREFIX}${base}-${token}`);
+  const moved = { project: false, staging: false };
+
+  try {
+    await fsOps.cp(snapshot.copy, staging, { recursive: true });
+    await fsOps.rename(resolved, backup);
+    moved.project = true;
+    await fsOps.rename(staging, resolved);
+    moved.staging = true;
+  } catch (error) {
+    try {
+      await rollbackProjectRestore({ fsOps, projectDir: resolved, staging, backup, moved });
+    } catch (rollbackError) {
+      rollbackError.cause = error;
+      throw rollbackError;
+    }
+    throw error;
+  }
+
+  try {
+    await fsOps.rm(backup, { recursive: true, force: true });
+  } catch (error) {
+    warnLeftoverRestoreBackup(ctx, prompt, backup, error);
+  }
+}
+
+function projectRestoreBackupError(error, backup) {
+  const detail = error instanceof Error ? error.message : String(error?.message ?? error);
+  const wrapped = new Error(`${detail} Original project remains at ${backup}.`, { cause: error });
+  wrapped.backupPath = backup;
+  if (error?.code) wrapped.code = error.code;
+  return wrapped;
+}
+
+async function rollbackProjectRestore({ fsOps, projectDir, staging, backup, moved }) {
+  if (moved.staging && moved.project) {
+    try {
+      await fsOps.rename(projectDir, staging);
+    } catch (error) {
+      throw projectRestoreBackupError(error, backup);
+    }
+    try {
+      await fsOps.rename(backup, projectDir);
+    } catch (error) {
+      try {
+        await fsOps.rename(staging, projectDir);
+      } catch {
+        // The pre-restore directory is still at `backup`.
+      }
+      throw projectRestoreBackupError(error, backup);
+    }
+    await fsOps.rm(staging, { recursive: true, force: true }).catch(() => {});
+    return;
+  }
+  if (moved.project) {
+    try {
+      await fsOps.rename(backup, projectDir);
+      moved.project = false;
+    } catch (error) {
+      throw projectRestoreBackupError(error, backup);
+    }
+  }
+  await fsOps.rm(staging, { recursive: true, force: true }).catch(() => {});
+}
+
+async function disposeProvisionalPlans(plans, registry, projectDir) {
+  for (const plan of plans) {
+    const patchId = plan?.proposalId ?? plan?.patchId;
+    if (registry && patchId && projectDir) {
+      registry.consume({ patchId, projectDir });
+    }
+    await disposeSchematicPatchPlan(plan);
   }
 }
 
@@ -574,6 +946,49 @@ function chatGptAuthManager(ctx) {
   return ctx.chatgptAuthManager ?? createChatGPTAuthManager();
 }
 
+async function providerLaunchContext({
+  provider,
+  projectDir,
+  allowGenerate,
+  projectExists,
+  inspectionContext,
+  inspectResult
+}) {
+  if (provider !== 'grok') return { projectDir };
+
+  let exists = projectExists === true;
+  if (allowGenerate === false) exists = true;
+  else if (typeof allowGenerate !== 'boolean' && projectExists !== true && projectExists !== false && projectDir) {
+    try {
+      exists = await projectHasSpec(projectDir);
+    } catch {
+      exists = false;
+    }
+  }
+  const existing = allowGenerate === false || (allowGenerate !== true && exists);
+  const context = {
+    projectDir,
+    allowGenerate: !existing,
+    projectExists: existing
+  };
+  if (existing) {
+    context.inspectionContext = inspectionContext ?? await loadGrokInspectionContext(projectDir, inspectResult);
+  }
+  return context;
+}
+
+async function loadGrokInspectionContext(projectDir, inspectResult) {
+  let spec = null;
+  if (projectDir) {
+    try {
+      spec = await readChatPcbManifest(projectDir);
+    } catch {
+      spec = null;
+    }
+  }
+  return summarizeProjectInspection({ spec, inspection: inspectResult });
+}
+
 function guardToolProjectDir(call, allowedWorkspaceRoot) {
   const projectDir = call.args?.projectDir;
   if (typeof projectDir !== 'string' || projectDir.length === 0) {
@@ -581,6 +996,47 @@ function guardToolProjectDir(call, allowedWorkspaceRoot) {
   }
 
   assertSafeProjectDir(projectDir, { allowedWorkspaceRoot });
+}
+
+// provider.cancel removes the controller as soon as it aborts. The id stays
+// cancelled until the request finishes, so a retry cannot open a fresh controller.
+const cancelledProviderInvocations = new WeakMap();
+
+function cancelledProviderIds(providerControllers) {
+  if (!providerControllers) return null;
+  let ids = cancelledProviderInvocations.get(providerControllers);
+  if (!ids) {
+    ids = new Set();
+    cancelledProviderInvocations.set(providerControllers, ids);
+  }
+  return ids;
+}
+
+function providerInvocationWasCancelled(providerControllers, invocationId) {
+  if (!invocationId || !providerControllers) return false;
+  return cancelledProviderInvocations.get(providerControllers)?.has(invocationId) === true;
+}
+
+function throwIfProviderCancelled(providerControllers, invocationId) {
+  if (providerInvocationWasCancelled(providerControllers, invocationId)) {
+    throw providerCancelledError();
+  }
+}
+
+function throwIfProviderRunAborted(providerControllers, invocationId, controller) {
+  if (providerInvocationWasCancelled(providerControllers, invocationId) || controller?.signal.aborted) {
+    throw providerCancelledError();
+  }
+}
+
+function providerCancelledError() {
+  return new Error('Provider process cancelled.');
+}
+
+function releaseProviderInvocation(providerControllers, invocationId) {
+  if (!providerControllers || !invocationId) return;
+  providerControllers.delete(invocationId);
+  cancelledProviderInvocations.get(providerControllers)?.delete(invocationId);
 }
 
 function cancelProvider(args = {}, providerControllers) {
@@ -599,6 +1055,7 @@ function cancelProvider(args = {}, providerControllers) {
   }
 
   controller.abort();
+  cancelledProviderIds(providerControllers).add(invocationId);
   providerControllers.delete(invocationId);
   return {
     cancelled: true,
@@ -792,21 +1249,39 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
     sprite: 'draft',
     text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
   });
+  let conversationBytes = ctx.pendingConversationBytes;
+  if (ctx.pendingConversation && ctx.designSource) {
+    const source = proposalSource(ctx.designSource);
+    ctx.pendingConversation.lastSource = {
+      provider: source.provider ?? null,
+      via: source.via ?? null
+    };
+    conversationBytes = Buffer.from(serializeCircuitConversation(ctx.pendingConversation));
+    ctx.pendingConversationBytes = conversationBytes;
+    // ChatGPT shows lastSource before Apply. Write it before the proposal snapshot
+    // so the conversation artifact digest already includes those bytes.
+    if (ctx.persistLiveConversation === true) {
+      await saveCircuitConversation(projectDir, ctx.pendingConversation);
+    }
+  }
   let plan;
   try {
-    plan = await ctx.projectMutexRegistry.runExclusive({ projectDir }, () => createSchematicPatchPlan({
+    plan = await runWithProjectLock(ctx, projectDir, () => createSchematicPatchPlan({
       projectDir,
       prompt,
       projectName,
       context,
       validateProjectImpl: ctx.validateProjectImpl,
       validateBoardImpl: ctx.validateBoardImpl,
+      conversationBytes,
       source: ctx.designSource ?? proposalSource()
     }));
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(prompt);
     throw error;
   }
+
+  if (Array.isArray(ctx.provisionalPlans)) ctx.provisionalPlans.push(plan);
 
   const registration = ctx.patchApprovalRegistry.register({
     patchId: plan.proposalId,
@@ -841,9 +1316,7 @@ async function dispatchCopiedValidation(kind, call, ctx) {
 
 async function ensureReconciled(projectDir, ctx) {
   if (!projectDir || !ctx.transactionJournal) return;
-  const run = ctx.projectMutexRegistry?.runExclusive
-    ? (work) => ctx.projectMutexRegistry.runExclusive({ projectDir }, work)
-    : (work) => work();
+  const run = (work) => runWithProjectLock(ctx, projectDir, work);
   await run(async () => {
     const key = ctx.projectMutexRegistry?.canonicalKey
       ? await ctx.projectMutexRegistry.canonicalKey(projectDir)
@@ -867,7 +1340,7 @@ async function dispatchTransactionStatus(args, ctx) {
       transactions: records.map(publicTransaction)
     });
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure();
     throw error;
   }
 }
@@ -879,14 +1352,16 @@ async function dispatchTransactionRollback(args, ctx) {
   const projectDir = args.projectDir;
   try {
     await ensureReconciled(projectDir, ctx);
-    return ok(await rollbackProjectTransaction({
+    const rolled = await rollbackProjectTransaction({
       projectDir,
       transactionId: args.transactionId,
       mutexRegistry: ctx.projectMutexRegistry,
       journal: ctx.transactionJournal
-    }));
+    });
+    if (rolled?.reason?.code === 'PROJECT_BUSY') return projectBusyFailure();
+    return ok(rolled);
   } catch (error) {
-    if (error?.code === 'PROJECT_BUSY') return failure('PROJECT_BUSY', error.message);
+    if (error?.code === 'PROJECT_BUSY') return projectBusyFailure();
     throw error;
   }
 }
@@ -911,7 +1386,9 @@ function publicTransaction(record) {
 
 function publicSimulateResult(result) {
   if (!result || typeof result !== 'object') return result;
-  const { stdout, stderr, ...rest } = result;
+  const rest = { ...result };
+  delete rest.stdout;
+  delete rest.stderr;
   return rest;
 }
 

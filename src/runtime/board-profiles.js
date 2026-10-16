@@ -407,7 +407,8 @@ function withReleaseChecks(item) {
     };
   }
 
-  const { needsSimulationEvidence, ...productionPart } = item;
+  const productionPart = { ...item };
+  delete productionPart.needsSimulationEvidence;
   return {
     ...productionPart,
     releaseChecks

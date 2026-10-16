@@ -124,6 +124,7 @@ export async function createSchematicPatchPlan({
   validateCandidateImpl,
   context,
   signal,
+  conversationBytes,
   source
 } = {}) {
   return createNativeProposal({
@@ -132,6 +133,7 @@ export async function createSchematicPatchPlan({
     projectName,
     context,
     signal,
+    conversationBytes,
     source: proposalSource(source),
     validateCandidateImpl: validateCandidateImpl ?? createCandidateValidator({
       validateProjectImpl,

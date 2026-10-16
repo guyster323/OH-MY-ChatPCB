@@ -34,7 +34,7 @@ import {
 } from '../src/runtime/auth/chatgpt-auth.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { parseProviderMessage, validateProviderToolCall } from '../src/runtime/provider-process.js';
-import { PROVIDER_ALLOWED_TOOLS } from '../src/runtime/provider-registry.js';
+import { PROVIDER_ALLOWED_TOOLS } from '../src/shared/constants.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
 import { isolateHome } from './isolate-home.js';
 
@@ -1605,6 +1605,20 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       'error: invalid_grant',
       'error_description: client authentication failed',
       'code: invalid_client',
+      'code: 403',
+      'code:403',
+      '"code":403',
+      '"code": 403',
+      '"code":"403"',
+      'code=403',
+      'code%3D403',
+      '"status":401',
+      '"status": 401',
+      'status=500',
+      'status: 500',
+      'status:500',
+      '{"code":"invalid_client","error":"invalid_grant","status":401}',
+      'error=invalid_grant&code=403&status=500',
       'start_',
       'start_here smart_ prefixrt_ab',
       'rt_',
@@ -1631,6 +1645,12 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       'error_description=refresh_token%3D[REDACTED]'
     );
     assert.equal(maskSecrets('code: auth-code-value'), 'code: [REDACTED]');
+    assert.equal(maskSecrets('"code":"auth-code-value"'), '"code":"[REDACTED]"');
+    assert.equal(maskSecrets('code=auth-code-value'), 'code=[REDACTED]');
+    assert.equal(maskSecrets('code: 403 access_token: xyz'), 'code: 403 access_token: [REDACTED]');
+    assert.equal(maskSecrets('"status":401,"access_token":"xyz"'), '"status":401,"access_token":"[REDACTED]"');
+    assert.equal(maskSecrets('status=500&code=secret-value'), 'status=500&code=[REDACTED]');
+    assert.equal(maskSecrets('code: invalid_client access_token=xyz'), 'code: invalid_client access_token=[REDACTED]');
 
     const samples = [
       'access_token: xyz',
@@ -3741,7 +3761,7 @@ function assertSessionCleared(creds) {
 
 async function listCredentialFiles(dir) {
   const configDir = path.join(dir, 'chatpcb');
-  let names = [];
+  let names;
   try {
     names = await readdir(configDir);
   } catch {

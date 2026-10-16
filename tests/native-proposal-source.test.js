@@ -348,6 +348,34 @@ test('deleting the last schematic stays fail-closed with required ERC', async ()
   }
 });
 
+test('a provider-produced native proposal keeps source.id native and records source.provider', async () => {
+  const root = await createProject();
+  try {
+    const plan = await createNativeProposal({
+      projectDir: root,
+      request: { prompt: STM32_PROMPT },
+      validateCandidateImpl: passingCandidate,
+      source: { provider: 'grok', via: 'provider' }
+    });
+    try {
+      assert.equal(plan.source.id, 'native');
+      assert.equal(plan.source.version, '1');
+      assert.equal(plan.source.provider, 'grok');
+      assert.equal(plan.source.via, 'provider');
+      assert.equal(publicProposal(plan).source.provider, 'grok');
+      const fallback = proposalSource({ provider: 'grok', via: 'native-fallback' });
+      assert.equal(fallback.id, 'native');
+      assert.equal(fallback.provider, null);
+      assert.equal(fallback.via, 'native-fallback');
+      assert.equal(proposalSource().provider, null);
+    } finally {
+      await disposeNativeProposal(plan);
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('nativeProposalSource exposes the Copperhead-ready candidate boundary', async () => {
   const root = await createProject();
   try {

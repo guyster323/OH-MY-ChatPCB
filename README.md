@@ -10,7 +10,7 @@ The current implementation is the first runnable foundation of that plan:
 - `chatpcb-agentd` local daemon with `/health`, `/tool`, and `/ws`
 - WebView bundle under `apps/panel`, loaded by the KiCad `wxWebView` host
 - KiCad fork C++ host under `kicad-fork/chatpcb_panel`, wired into the schematic editor right pane
-- provider process bridge for local CLI agents such as Codex, Claude Code, and Copilot CLI
+- provider process bridge for local CLI agents such as Codex, Claude Code, Copilot CLI, and Grok Build
 
 ## Status
 
@@ -27,7 +27,7 @@ Implemented now:
 - Daemon startup now reports the actual bound port and rejects port collisions, so UI verification can reuse an already-running `chatpcb-agentd`
 - Daemon project-path guards that refuse home/Windows system directories and optional workspace-root confinement
 - Approval-gated `schematic.patch` preview/apply workflow with diff output, cancel handling, validation, and rollback
-- Provider registry and status checks for Codex CLI, Claude Code, and GitHub Copilot CLI
+- Provider registry and status checks for Codex CLI, Claude Code, GitHub Copilot CLI, and Grok Build
 - Strict local provider transcript parsing that accepts provider `tool.call` JSON only, redacts stderr secrets, and can write redacted trace files
 - Panel provider selector connected to daemon `provider.status`
 - Provider chat invocation from the panel, verified with an injected fake provider in `npm run verify:ui`
@@ -58,8 +58,10 @@ Not implemented yet:
 
 ## Quick Start
 
+Node.js 22 or newer is required. Install dependencies with `npm ci`.
+
 ```powershell
-npm install
+npm ci
 npm test
 npm run daemon
 npm run launch:kicad
@@ -77,10 +79,10 @@ Use this flow to create a named KiCad project from a Korean or English request.
 cd C:\path\to\OH-MY-ChatPCB
 ```
 
-2. Install dependencies and run the full local verification:
+2. Install dependencies and run the full local verification. Node.js 22 or newer is required. Installs use `npm ci`:
 
 ```powershell
-npm install
+npm ci
 npm test
 npm run verify:sample
 npm run verify:panel
@@ -155,6 +157,46 @@ codex exec -C C:\path\to\OH-MY-ChatPCB --dangerously-bypass-approvals-and-sandbo
 
 The expected Codex CLI result is a concise report that confirms the sample and browser UI verifications ran and identifies any user-facing gaps in the README. Do not commit provider credentials or Codex session data.
 
+## Grok Build setup
+
+ChatPCB can use an already-authenticated local [Grok Build](https://x.ai/docs/build/overview) CLI (`grok`) as a provider. Install the CLI, then sign in with `grok login`. On a machine without a browser, `grok login --device-code` works. `XAI_API_KEY` is accepted by the CLI as an alternative to logging in.
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok login
+```
+
+```powershell
+irm https://x.ai/cli/install.ps1 | iex
+grok login
+```
+
+The installer places `grok` in `~/.grok/bin` (`%USERPROFILE%\.grok\bin` on Windows). A shell startup file may add that directory to `PATH`, but ChatPCB does not start a login shell, so it will not see a `PATH` that exists only there. Resolution uses the daemon process `PATH` (including Windows `PATHEXT`), then `~/.grok/bin`, then `~/.local/bin`. `provider.status` returns that same absolute path as `resolvedPath` and `command`. The daemon spawns that path; it does not look the name up again.
+
+To select a binary yourself, set `CHATPCB_GROK_PATH` to an absolute path of an existing executable. A relative path, a missing file, or a file you cannot execute is reported missing and does not fall back to `PATH`.
+
+```bash
+export CHATPCB_GROK_PATH="$HOME/.grok/bin/grok"
+```
+
+```powershell
+$env:CHATPCB_GROK_PATH = "$env:USERPROFILE\.grok\bin\grok.exe"
+```
+
+Grok is started per request with `--cwd <projectDir>`, `--prompt-file`, `--output-format json`, `--json-schema`, `--disable-web-search`, and `--permission-mode plan`. The schema is a ChatPCB `tool.call` whose `name` enum is the one mutating tool for that context: `schematic.generate` when the project has no spec, and `schematic.patch` when it does. `schematic.generate` args require `prompt`. `schematic.patch` args require `prompt` and may include `projectName`. An existing project's spec and summary are included in the prompt, and grok is told not to explore files. `CHATPCB_GROK_MODEL`, when set, is passed as `--model` before `--prompt-file`.
+
+The Grok timeout defaults to 300000 ms. Codex, Claude Code, and Copilot stay at 120000 ms. Override either value with a positive integer number of milliseconds up to 2147483647. `CHATPCB_<PROVIDER>_TIMEOUT_MS` wins over `CHATPCB_PROVIDER_TIMEOUT_MS`. A blank value is ignored. Any other invalid value is rejected when a provider is launched. `provider.list` and `provider.status` keep that provider's default timeout and include a `warning` instead of failing.
+
+```bash
+export CHATPCB_PROVIDER_TIMEOUT_MS=300000
+export CHATPCB_GROK_TIMEOUT_MS=420000
+```
+
+```powershell
+$env:CHATPCB_PROVIDER_TIMEOUT_MS = "300000"
+$env:CHATPCB_GROK_TIMEOUT_MS = "420000"
+```
+
 ## Browser UI verification
 
 Run this command for the closest repeatable check to a user operating the current panel:
@@ -188,7 +230,7 @@ node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 
 The example prompt above creates a schematic-only project (no `.kicad_pcb`), so `drc` returns `skipped: true` with reason `NO_BOARD`. A PCB draft is created only for supported board profiles, for example `--prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator."`; run `drc` on such a project, or on a project where you created the board in KiCad yourself. Expect that board draft to fail DRC today: with KiCad 10.0.7 it reports `22` violations (`lib_footprint_mismatch` 21, `isolated_copper` 1) and `0` unconnected items, and `drc` exits with code `2`. These counts were measured with the bundled fixture footprints (`tests/fixtures/kicad-libraries`); with the full installed KiCad libraries the result can differ. The draft is a starting point, not a DRC-clean board.
 
-`validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; with KiCad 10.0.7 the CLI example above validates with `0` errors and `2` warnings (`isolated_pin_label`), while `npm run generate:sample` validates with `0` errors and `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
+`CHATPCB_KICAD_CLI_DISABLE=1` turns KiCad CLI discovery off. ChatPCB then prints `kicad-cli disabled by CHATPCB_KICAD_CLI_DISABLE` once on stderr and reports validation as unavailable. `validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; with KiCad 10.0.7 the CLI example above validates with `0` errors and `2` warnings (`isolated_pin_label`), while `npm run generate:sample` validates with `0` errors and `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
 
 ## Evidence and migration
 
@@ -200,7 +242,7 @@ Schema v1 manifests remain readable and inspect as `legacy-unverified`; they con
 
 Daemon JSON and provider tool calls cannot select the KiCad executable: request `kicadCliPath` fields are ignored. Configure `startDaemon({ dispatchOptions: { kicadCliPath: '/trusted/path/to/kicad-cli' } })` or the operator-owned `KICAD_CLI_PATH` environment instead. Local `inspect`, `validate`, and `drc` CLI commands retain `--kicad-cli` for trusted operator use.
 
-Inspection, ERC, and DRC reject projects reached through symbolic links/junctions, and links or special files anywhere in their tree, before running KiCad. Supply a canonical project path; linked ancestors are not followed. Version queries and inspect-time ERC/DRC operate in a checked disposable copy whose internally created temp root is canonicalized with `realpath` so OS temp aliases do not reject the copy; cleanup waits for all validators to settle. Schematic patch previews do the same for their candidate tree: the internally created patch temp root is canonicalized before candidate ERC, which excludes the original project from automatic PATH discovery. Automatic PATH lookup uses absolute directories and excludes both the process working directory and the original project tree, even when inspect or patch validation has changed cwd to a private copy. Trusted `--kicad-cli` / `explicitPath` and operator-owned `KICAD_CLI_PATH` still override discovery. A missing tool is reported unavailable. This protects the inspection boundary for untrusted project trees; the installed KiCad toolchain and server configuration remain trusted.
+Inspection, ERC, and DRC reject a project directory that is itself a symbolic link or junction, and they reject links or special files anywhere inside the project tree, before running KiCad. A symlink ancestor is allowed only when that same path is an ancestor of the OS temporary directory (for example macOS `/var` → `/private/var`) or of the canonical allowed workspace root. Every other symlink ancestor is rejected. Version queries and inspect-time ERC/DRC operate in a checked disposable copy whose internally created temp root is canonicalized with `realpath` so OS temp aliases do not reject the copy; cleanup waits for all validators to settle. Schematic patch previews do the same for their candidate tree: the internally created patch temp root is canonicalized before candidate ERC, which excludes the original project from automatic PATH discovery. Automatic PATH lookup uses absolute directories and excludes both the process working directory and the original project tree, even when inspect or patch validation has changed cwd to a private copy. Trusted `--kicad-cli` / `explicitPath` and operator-owned `KICAD_CLI_PATH` still override discovery. A missing tool is reported unavailable. This protects the inspection boundary for untrusted project trees; the installed KiCad toolchain and server configuration remain trusted.
 
 `chatpcb inspect --project <dir>` continues to print JSON. Its `result.inspection.facts` records saved-artifact structure: schematic components, labels, wires, junctions, no-connect markers, and nets; plus board nets, footprints, pads, segments, vias, summaries, and heuristic unrouted-net candidates. `result.inspection.analyzers` reports whether each analyzer was `complete`, `partial`, `skipped`, or `failed`, with typed diagnostics.
 
