@@ -232,6 +232,16 @@ node ./bin/chatpcb-cli.js daemon --host 127.0.0.1 --port 41317
 
 The example prompt above creates a schematic-only project (no `.kicad_pcb`), so `drc` returns `skipped: true` with reason `NO_BOARD`. A PCB draft is created only for supported board profiles, for example `--prompt "Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator."`; run `drc` on such a project, or on a project where you created the board in KiCad yourself. Expect that board draft to fail DRC today: with KiCad 10.0.7 it reports `22` violations (`lib_footprint_mismatch` 21, `isolated_copper` 1) and `0` unconnected items, and `drc` exits with code `2`. These counts were measured with the bundled fixture footprints (`tests/fixtures/kicad-libraries`); with the full installed KiCad libraries the result can differ. The draft is a starting point, not a DRC-clean board.
 
+### Discrete LED limits
+
+A prompt that only asks for an LED circuit, with no MCU, USB, sensor, or other board parts, drafts series LEDs instead of an MCU scaffold.
+
+- At most 8 LEDs. A larger request is capped at 8 and the review notes say so.
+- Supported colors are red, yellow, green, blue, and white. Korean aliases such as 빨간, 노란, 초록, 파란, and 하얀 are recognized. With no count, the draft places one LED per named color.
+- Series resistors assume 10mA, or the LED current named in the prompt (for example `20mA` or `20밀리암페어`), and a typical forward voltage (red 2V, yellow 2.1V, green 2.2V, blue 3V, white 3.2V), then round up to the next E24 value, unless the prompt gives a resistor. A stated forward voltage (`Vf 3V`, `Vf=2.1V`, or `순방향 전압`) is used instead of that color default for the resistor and the headroom check, and it is never treated as the supply. A requested current above 30mA stays a warning.
+- Supported rails are +3V3, +5V (the default), +9V (including a 9V battery connector), +12V, and GND. Supplies above 24V, any AC indication, several different supply voltages, and a supply that is not above the LED forward voltage are refused and no LED circuit is generated.
+- RGB, addressable, matrix, PWM, and LED-strip requests get an unsupported note. Those still draft a simple indicator LED. High-voltage, AC, ambiguous-supply, and below-forward-voltage requests do not.
+
 `CHATPCB_KICAD_CLI_DISABLE=1` turns KiCad CLI discovery off. ChatPCB then prints `kicad-cli disabled by CHATPCB_KICAD_CLI_DISABLE` once on stderr and reports validation as unavailable. `validate` returns `skipped: true` when KiCad CLI is unavailable and `ok: false` when the ERC JSON report contains `error` severity violations. Warning-only reports stay `ok: true` and include `erc.warningCount` plus `erc.byType`; with KiCad 10.0.7 the CLI example above validates with `0` errors and `2` warnings (`isolated_pin_label`), while `npm run generate:sample` validates with `0` errors and `0` warnings. `simulate` returns `skipped: true` when `ngspice` is unavailable.
 
 ## Evidence and migration

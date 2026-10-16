@@ -46,8 +46,15 @@ function candidateAllowsApply(plan, { allowSkippedErc = false } = {}) {
   return true;
 }
 
+function previewManifest(plan) {
+  const parts = plan.proposed?.spec?.partManifest?.parts;
+  if (!Array.isArray(parts) || parts.length === 0) return null;
+  return { parts };
+}
+
 function previewFrom(plan) {
   const preview = publicProposal(plan);
+  const manifest = previewManifest(plan);
   return {
     requiresApproval: true,
     approved: false,
@@ -61,6 +68,7 @@ function previewFrom(plan) {
     why: preview.why,
     what: preview.what,
     components: preview.components,
+    ...(manifest ? { manifest } : {}),
     nets: preview.nets,
     risks: preview.risks,
     verificationPlan: preview.verificationPlan,

@@ -3369,6 +3369,53 @@ test('transaction status reconcile waits behind the project mutex', async () => 
   }
 });
 
+const DISCRETE_LED_PROMPT = 'LED 하나와 330옴 저항을 5V에 연결하는 간단한 회로 만들어줘';
+
+test('native schematic.generate of the same discrete LED prompt keeps LED, 330 ohm, and 5V part evidence', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-native-led-'));
+  const services = await transactionServices({ validateProjectImpl: passingErc });
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  try {
+    const result = await dispatchToolCall({
+      name: 'schematic.generate',
+      args: { projectDir: root, prompt: DISCRETE_LED_PROMPT }
+    }, services);
+    assert.equal(result.ok, true, result.error?.message);
+    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.result.applied, false);
+    const components = result.result.components ?? [];
+    const manifestParts = result.result.manifest?.parts ?? [];
+    assert.ok(components.length > 0, 'preview parts list is empty');
+    assert.ok(manifestParts.length > 0, 'preview manifest has no part evidence');
+    const evidence = [...components, ...manifestParts];
+    assert.ok(evidence.some((part) => part.libId === 'Device:LED'), JSON.stringify(evidence));
+    assert.ok(
+      evidence.some((part) => part.libId === 'Device:R' && /330/.test(String(part.value ?? ''))),
+      JSON.stringify(evidence)
+    );
+    assert.ok(
+      evidence.some((part) => part.libId === 'power:+5V' && part.value === '+5V'),
+      JSON.stringify(evidence)
+    );
+    assert.ok(
+      evidence.some((part) => String(part.libId ?? '').startsWith('Connector') && part.value === 'Conn_01x02'),
+      JSON.stringify(evidence)
+    );
+    assert.match(result.result.diff ?? '', /Device:LED/);
+    assert.match(result.result.diff ?? '', /330/);
+    assert.match(result.result.diff ?? '', /partManifest/);
+    assert.ok(
+      !(result.result.review?.findings?.blockers ?? []).some((finding) => finding.code === 'mcu-part-missing'),
+      JSON.stringify(result.result.review?.findings?.blockers)
+    );
+    assert.ok(!evidence.some((part) => part.libId === 'ChatPCB:MCU_PLACEHOLDER'));
+  } finally {
+    restoreKicadLibraryEnv(previous);
+    services.patchApprovalRegistry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
 test('daemon ignores disallowed calls from real child process provider and retries with fallback', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-integration-disallowed-'));
 

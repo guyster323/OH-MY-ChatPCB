@@ -19,6 +19,37 @@ test('does not report release-ready when production evidence is still pending de
   assert.ok(review.residualRisks.some((risk) => /sourcing: Missing JLCPCB\/LCSC evidence/i.test(risk)));
 });
 
+test('ERC errors are blocked and are not ready for prototype review', () => {
+  const review = reviewCircuitReadiness({
+    spec: {
+      kind: 'discrete-led',
+      title: 'LED',
+      sourcePrompt: 'LED on 5V',
+      mcu: { family: 'Generic MCU', package: 'unspecified' },
+      interfaces: [],
+      peripherals: [{ kind: 'status-led' }],
+      power: { input: 'external', rails: [{ name: '+5V', voltage: 5, source: 'input' }] },
+      schematic: {
+        components: [{ ref: 'D1', libId: 'Device:LED', value: 'LED' }],
+        nets: [{ name: '+5V' }, { name: 'GND' }]
+      },
+      discrete: {
+        resistorValue: '330Ω',
+        reviewNotes: [{ code: 'discrete-led', message: 'Confirm the series resistor before release.' }]
+      }
+    },
+    validation: {
+      ok: false,
+      skipped: false,
+      erc: { errorCount: 2, warningCount: 2, byType: { power_pin_not_driven: 2, same_local_global_label: 2 } }
+    }
+  });
+
+  assert.equal(review.status, 'blocked');
+  assert.notEqual(review.status, 'ready-for-prototype-review');
+  assert.ok(review.findings.blockers.some((finding) => finding.code === 'erc-errors'));
+});
+
 test('reports release-ready only when ERC and all release evidence are complete', () => {
   const review = reviewCircuitReadiness({
     spec: releaseCandidateSpec({
