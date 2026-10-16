@@ -248,6 +248,22 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
   }
 }
 
+function recordedVerificationPatchIds(verification) {
+  if (!verification || typeof verification !== 'object') return [];
+  const erc = verification.erc && typeof verification.erc === 'object' ? verification.erc : null;
+  return [verification.patchId, erc?.patchId];
+}
+
+// A patch id on the ERC evidence is a different patch. The plan's own patchId
+// and proposalId are the approval identity, not a stale ERC binding.
+function candidateErcBindingStale(record, patchId) {
+  const ids = [
+    ...recordedVerificationPatchIds(record?.plan?.candidateVerification),
+    ...recordedVerificationPatchIds(record?.candidateVerification)
+  ];
+  return ids.some((id) => typeof id === 'string' && id.length > 0 && id !== patchId);
+}
+
 async function dispatchSchematicPatch(args, ctx) {
   const projectDir = args.projectDir;
   const {
@@ -283,9 +299,16 @@ async function dispatchSchematicPatch(args, ctx) {
   const plan = peeked.record.plan;
   // The registry record is the only ERC the approval may trust. Client fields
   // such as passed, validation, or ercResult on the request are ignored.
+  if (candidateErcBindingStale(peeked.record, args.patchId)) {
+    console.warn('patch.apply.blocked-stale');
+    return failure('ERC_BLOCKED', 'ERC_BLOCKED: patch.apply.blocked-stale');
+  }
   const recorded = normalizeRecordedErc(recordedErcSource(peeked.record));
   const decision = ercApprovalDecision(recorded, args.ercOverride);
-  if (!decision.allow) return failure('ERC_BLOCKED', decision.message);
+  if (!decision.allow) {
+    if (decision.reason === 'missing') console.warn('patch.apply.blocked-missing');
+    return failure('ERC_BLOCKED', decision.message);
+  }
 
   emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });
   try {

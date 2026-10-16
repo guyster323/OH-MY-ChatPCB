@@ -925,6 +925,19 @@ function applyBlockedReason(erc) {
   return { key: 'patch.apply.blocked-missing', text: t('patch.apply.blocked-missing') };
 }
 
+let warnedApplyBlockKey = null;
+
+function warnApplyBlock(key) {
+  const logged = key === 'patch.apply.blocked-stale' || key === 'patch.apply.blocked-missing';
+  if (!logged) {
+    warnedApplyBlockKey = null;
+    return;
+  }
+  if (warnedApplyBlockKey === key) return;
+  warnedApplyBlockKey = key;
+  console.warn(key);
+}
+
 function inspectionErcSource() {
   const inspection = inspectionState.result?.validation;
   if (!inspection || typeof inspection !== 'object') return null;
@@ -1086,6 +1099,7 @@ function renderPatchApproval() {
       applyWhyEl.dataset.reason = blocked.key;
       applyWhyEl.textContent = blocked.text;
     }
+    warnApplyBlock(blocked.key);
   } else {
     approvePatchButtonEl.removeAttribute('aria-disabled');
     approvePatchButtonEl.removeAttribute('aria-describedby');
@@ -1094,6 +1108,7 @@ function renderPatchApproval() {
       applyWhyEl.removeAttribute('data-reason');
       applyWhyEl.replaceChildren();
     }
+    warnApplyBlock(null);
   }
   renderErcBox(erc, active);
   renderCurrentFileErc(erc, active);
