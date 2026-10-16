@@ -600,6 +600,41 @@ test('runKicadCli drops flatpak KiCad directory env when KICAD_CLI_FLATPAK=1', {
   }
 });
 
+test('runKicadCli isolates each invocation in a private KICAD_CONFIG_HOME', {
+  skip: process.platform === 'win32' ? 'POSIX shell script' : false
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chatpcb-kicad-config-home-'));
+  const scriptPath = path.join(root, 'kicad-cli');
+  fs.writeFileSync(scriptPath, '#!/bin/sh\nprintf %s "${KICAD_CONFIG_HOME-unset}"\n', { mode: 0o755 });
+  try {
+    const env = {
+      KICAD_CLI_PATH: scriptPath,
+      PATH: process.env.PATH ?? ''
+    };
+    const [first, second] = await Promise.all([
+      runKicadCli(['--first'], { env }),
+      runKicadCli(['--second'], { env })
+    ]);
+    assert.equal(first.exitCode, 0, first.stderr);
+    assert.equal(second.exitCode, 0, second.stderr);
+    assert.match(first.stdout, /chatpcb-kicad-config-/);
+    assert.match(second.stdout, /chatpcb-kicad-config-/);
+    assert.notEqual(first.stdout, second.stdout);
+    assert.equal(fs.existsSync(first.stdout), false);
+    assert.equal(fs.existsSync(second.stdout), false);
+
+    const preserved = path.join(root, 'preserved-config');
+    fs.mkdirSync(preserved);
+    const kept = await runKicadCli([], {
+      env: { ...env, KICAD_CONFIG_HOME: preserved }
+    });
+    assert.equal(kept.stdout, preserved);
+    assert.equal(fs.existsSync(preserved), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('KiCad command timeout reports a typed failure after terminating the process', async () => {
   await assert.rejects(runCommand(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);'],
     { timeoutMs: 200 }), { code: 'KICAD_CLI_TIMEOUT' });

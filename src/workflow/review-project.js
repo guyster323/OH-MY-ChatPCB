@@ -144,7 +144,7 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
       for (const note of notes) {
         addFinding(findings.notes, note.code, note.message);
       }
-    } else {
+    } else if (!spec.discrete?.refused) {
       addFinding(
         findings.notes,
         'discrete-led',
@@ -162,10 +162,13 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
       }
     }
     if (!spec.discrete?.refused) {
+      const usesSpecifiedVf = Number.isFinite(spec.discrete?.specifiedVf);
       addFinding(
         findings.warnings,
         'discrete-led-draft',
-        'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.'
+        usesSpecifiedVf
+          ? 'Discrete LED drafts assume 10mA and use the specified forward voltage; confirm the resistor and supply before release.'
+          : 'Discrete LED drafts assume 10mA and a typical LED forward voltage; confirm the resistor and supply before release.'
       );
     }
   }
@@ -267,6 +270,9 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
     }
   }
 
+  // The same sentence must not appear twice. Blockers outrank warnings, and warnings outrank notes.
+  dedupeFindingMessages(findings);
+
   const status = statusFor(findings, validation);
 
   return {
@@ -282,6 +288,18 @@ function addFinding(target, code, message) {
   if (!target.some((finding) => finding.code === code)) {
     target.push({ code, message });
   }
+}
+
+function dedupeFindingMessages(findings) {
+  const seen = new Set();
+  const keepUnique = (items) => items.filter((item) => {
+    if (seen.has(item.message)) return false;
+    seen.add(item.message);
+    return true;
+  });
+  findings.blockers = keepUnique(findings.blockers);
+  findings.warnings = keepUnique(findings.warnings);
+  findings.notes = keepUnique(findings.notes);
 }
 
 function summarizeParts(parts) {

@@ -272,6 +272,15 @@ test('mains and supplies above 24V are refused instead of generating an LED circ
     );
     assert.equal(refused.review.status, 'blocked', prompt);
     assert.notEqual(refused.review.status, 'ready-for-prototype-review', prompt);
+    const messages = [
+      ...refused.review.findings.blockers,
+      ...refused.review.findings.warnings,
+      ...refused.review.findings.notes
+    ].map((finding) => finding.message);
+    assert.equal(new Set(messages).size, messages.length, `${prompt} ${JSON.stringify(messages)}`);
+    const blockerText = refused.review.findings.blockers.find((finding) => finding.code === 'discrete-led-high-voltage').message;
+    assert.equal(refused.schematic.split(blockerText).length - 1, 1, prompt);
+    assert.match(blockerText, /고전압/, prompt);
   }
 
   const allowed = await generateLed('LED on 24V');
@@ -342,6 +351,14 @@ test('low LED headroom warns once and a supply at Vf is refused without a placeh
   assert.ok(blue.review.findings.blockers.some((finding) => finding.code === 'discrete-led-below-vf'));
   assert.match(blue.review.findings.blockers.map((finding) => finding.message).join('\n'), /파란/);
   assert.equal(blue.review.status, 'blocked');
+  const blueMessages = [
+    ...blue.review.findings.blockers,
+    ...blue.review.findings.warnings,
+    ...blue.review.findings.notes
+  ].map((finding) => finding.message);
+  assert.equal(new Set(blueMessages).size, blueMessages.length, JSON.stringify(blueMessages));
+  const blueBlocker = blue.review.findings.blockers.find((finding) => finding.code === 'discrete-led-below-vf').message;
+  assert.equal(blue.schematic.split(blueBlocker).length - 1, 1);
 });
 
 test('AC, ambiguous supplies, and below-Vf LED prompts generate no placeholder circuit', async () => {
@@ -381,6 +398,43 @@ test('AC, ambiguous supplies, and below-Vf LED prompts generate no placeholder c
       assert.match(message, /공급 전압/, prompt);
     }
   }
+});
+
+test('a specified forward voltage replaces the color default for the resistor and headroom', async () => {
+  const specified = await generateLed('LED Vf 3V on 5V supply');
+  assert.equal(specified.spec.discrete.supplyVolts, 5);
+  assert.equal(specified.spec.discrete.supplyNet, '+5V');
+  assert.equal(components(specified, 'Device:R')[0].value, '200Ω');
+  assert.match(noteText(specified), /specified forward voltage of 3V/);
+  assert.match(noteText(specified), /지정한 순방향 전압 3V/);
+  assert.equal(noteText(specified).includes('typical Vf 2V'), false);
+
+  const equals = await generateLed('red LED Vf=2.1V on 3.3V');
+  assert.equal(equals.spec.discrete.supplyVolts, 3.3);
+  assert.notEqual(equals.spec.discrete.supplyVolts, 2.1);
+  assert.equal(components(equals, 'Device:LED')[0].value, 'LED Red');
+  assert.equal(components(equals, 'Device:R')[0].value, '120Ω');
+  assert.match(noteText(equals), /지정한 순방향 전압 2\.1V/);
+
+  const korean = await generateLed('LED 순방향 전압 3V, 전원 5V');
+  assert.equal(korean.spec.discrete.supplyVolts, 5);
+  assert.equal(korean.spec.discrete.supplyNet, '+5V');
+  assert.equal(components(korean, 'Device:R')[0].value, '200Ω');
+  assert.match(noteText(korean), /지정한 순방향 전압 3V/);
+
+  const onlyForward = await generateLed('LED Vf 3V');
+  assert.equal(onlyForward.spec.discrete.supplyVolts, 5);
+  assert.equal(onlyForward.spec.discrete.supplyAssumed, true);
+  assert.equal(components(onlyForward, 'Device:R')[0].value, '200Ω');
+
+  const eased = await generateLed('white LED Vf 2V on 3.3V');
+  assert.equal(components(eased, 'Device:R')[0].value, '130Ω');
+  assert.equal(eased.review.findings.warnings.some((finding) => finding.code === 'discrete-led-headroom'), false);
+
+  const unblocked = await generateLed('blue LED Vf 2V on 3V');
+  assert.equal(unblocked.spec.discrete.refused, false);
+  assert.equal(components(unblocked, 'Device:R')[0].value, '100Ω');
+  assert.equal(unblocked.review.findings.blockers.some((finding) => finding.code === 'discrete-led-below-vf'), false);
 });
 
 test('explicit 1R5 and 10 ohm LED resistors warn once', async () => {

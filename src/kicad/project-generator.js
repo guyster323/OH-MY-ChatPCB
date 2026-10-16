@@ -810,15 +810,27 @@ function adbms6830PinConnections() {
   return pins;
 }
 
+function uniqueSchematicText(lines) {
+  const seen = new Set();
+  const unique = [];
+  for (const line of lines) {
+    if (line == null || seen.has(line)) continue;
+    seen.add(line);
+    unique.push(line);
+  }
+  return unique;
+}
+
 export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchematicAst(spec) }) {
   const uuid = randomUUID();
   const notes = spec.kind === 'discrete-led'
-    ? [
+    ? uniqueSchematicText([
         `ChatPCB generated discrete LED draft: ${spec.title}`,
+        ...(spec.discrete?.reviewBlockers ?? []).map((blocker) => blocker.message),
         ...(spec.discrete?.reviewNotes ?? []).map((note) => note.message),
         ...(spec.discrete?.reviewWarnings ?? []).map((warning) => warning.message),
         'Review all symbols, footprints, net labels, and design rules before production.'
-      ]
+      ])
     : spec.boardProfile?.kind === 'isolated-dcdc'
     ? [
         `ChatPCB generated isolated DC-DC draft: ${spec.title}`,

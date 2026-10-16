@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-import { cliIsFlatpakKicad, isFlatpakPath, isKicadDirectoryEnv } from './flatpak.js';
+import { KICAD_FLATPAK_APP_ID, cliIsFlatpakKicad, isFlatpakPath, isKicadDirectoryEnv } from './flatpak.js';
 
 const WINDOWS_CANDIDATES = [
   'C:/Program Files/KiCad/10.0/bin/kicad-cli.exe',
@@ -134,11 +135,72 @@ export async function runKicadCli(args, options = {}) {
     error.code = 'ENOENT';
     throw error;
   }
-  return runCommand(resolved.path, args, {
-    cwd: options.cwd,
-    timeoutMs: options.timeoutMs ?? 120000,
-    env: kicadCliChildEnv(options.env ?? process.env, { flatpak: resolved.source === 'flatpak' })
-  }).then((result) => ({ ...result, command: resolved.path, source: resolved.source }));
+  const flatpak = resolved.source === 'flatpak';
+  const env = kicadCliChildEnv(options.env ?? process.env, { flatpak });
+  // Concurrent kicad-cli processes rewrite the shared kicad_common.json.
+  // Each invocation gets a private copy unless the caller already set a home.
+  const privateConfigHome = await assignPrivateKicadConfigHome(env, { flatpak });
+  try {
+    const result = await runCommand(resolved.path, args, {
+      cwd: options.cwd,
+      timeoutMs: options.timeoutMs ?? 120000,
+      env
+    });
+    return { ...result, command: resolved.path, source: resolved.source };
+  } finally {
+    if (privateConfigHome) {
+      await fs.promises.rm(privateConfigHome, { recursive: true, force: true });
+    }
+  }
+}
+
+function configHomeDirectory(env) {
+  for (const key of ['HOME', 'USERPROFILE']) {
+    const value = env[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+// Flatpak KiCad 10 keeps settings under its app config. ~/.config/kicad can be
+// a different major version, so a flatpak CLI does not copy that tree.
+function findKicadConfigSource(env, { flatpak }) {
+  const home = configHomeDirectory(env);
+  const candidates = [];
+  if (flatpak && home) {
+    candidates.push(path.join(home, '.var', 'app', KICAD_FLATPAK_APP_ID, 'config', 'kicad'));
+  }
+  if (typeof env.XDG_CONFIG_HOME === 'string' && env.XDG_CONFIG_HOME.trim()) {
+    candidates.push(path.join(env.XDG_CONFIG_HOME.trim(), 'kicad'));
+  }
+  if (typeof env.APPDATA === 'string' && env.APPDATA.trim()) {
+    candidates.push(path.join(env.APPDATA.trim(), 'kicad'));
+  }
+  if (!flatpak && home) {
+    candidates.push(path.join(home, '.config', 'kicad'));
+  }
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+// Returns the temp parent to delete, or null when the caller owns KICAD_CONFIG_HOME.
+// An empty private home turns on KiCad's default ERC checks, so copy the live config.
+async function assignPrivateKicadConfigHome(env, { flatpak }) {
+  if (typeof env.KICAD_CONFIG_HOME === 'string' && env.KICAD_CONFIG_HOME.trim()) return null;
+  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'chatpcb-kicad-config-'));
+  try {
+    const dest = path.join(parent, 'kicad');
+    const source = findKicadConfigSource(env, { flatpak });
+    if (source) {
+      await fs.promises.cp(source, dest, { recursive: true });
+    } else {
+      await fs.promises.mkdir(dest);
+    }
+    env.KICAD_CONFIG_HOME = dest;
+    return parent;
+  } catch (error) {
+    await fs.promises.rm(parent, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 // Flatpak hides /var/lib/flatpak even with --filesystem=host. Forwarding

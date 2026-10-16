@@ -442,6 +442,14 @@ function pickSupplyVolts(prompt, found) {
   return supplyCandidates(prompt, found)[0]?.volts ?? null;
 }
 
+// One labeled forward voltage replaces the color default for every channel.
+// Two different labeled values stay on the color defaults instead of guessing.
+function specifiedForwardVoltage(prompt) {
+  const labeled = classifySupplyVoltages(prompt, scanSupplyVoltages(prompt).tokens);
+  const volts = distinctSupplyVolts(labeled.filter((item) => item.forward && item.volts > 0));
+  return volts.length === 1 ? volts[0] : null;
+}
+
 const MAINS_SUPPLY = /상용\s*전원|교류\s*전원|\bmains\b|\bwall\s*outlet\b|\bline\s*voltage\b/i;
 const AC_SUPPLY = /교류|(?:^|[^A-Za-z])vac(?:[^A-Za-z]|$)|(?:^|[^A-Za-z])ac(?:[^A-Za-z]|$)/i;
 const MAX_DISCRETE_SUPPLY_VOLTS = 24;
@@ -452,7 +460,9 @@ function promptIndicatesAc(prompt) {
 
 function resolveDiscreteSupply(prompt) {
   const scan = scanSupplyVoltages(prompt);
-  const unsafe = scan.tokens.find((token) => token.volts > MAX_DISCRETE_SUPPLY_VOLTS);
+  const labeled = classifySupplyVoltages(prompt, scan.tokens);
+  // A labeled forward voltage is the LED Vf, never a high-voltage rail.
+  const unsafe = labeled.find((token) => !token.forward && token.volts > MAX_DISCRETE_SUPPLY_VOLTS);
   const mains = MAINS_SUPPLY.test(prompt);
   if (promptIndicatesAc(prompt) && !mains && !unsafe) {
     const volts = pickSupplyVolts(prompt, scan.tokens.filter((token) => token.volts > 0));
@@ -507,7 +517,10 @@ function resolveDiscreteSupply(prompt) {
 
 function highVoltageMessage(volts) {
   const detected = Number.isFinite(volts) ? ` Detected ${formatVolts(volts)}V.` : '';
-  return `Refusing to draft a mains or high-voltage LED circuit.${detected} The discrete LED generator only supports low-voltage rails up to 24V (+3V3, +5V, +9V, and +12V). No LED, resistor, or power symbol was generated.`;
+  return bilingualNote(
+    `Refusing to draft a mains or high-voltage LED circuit.${detected} The discrete LED generator only supports low-voltage rails up to 24V (+3V3, +5V, +9V, and +12V). No LED, resistor, or power symbol was generated.`,
+    '고전압은 거부합니다. 이산 LED 생성기는 24V 이하의 저전압만 지원하며, LED·저항·전원 기호는 생성하지 않았습니다.'
+  );
 }
 
 function acSupplyMessage(volts) {
@@ -541,9 +554,16 @@ const LED_COLOR_KO = {
   white: '하얀'
 };
 
-function belowForwardMessage(supplyVolts, color) {
-  const spec = color ?? LED_COLOR_SPECS[0];
+function belowForwardMessage(supplyVolts, color, specifiedVf) {
   const supply = formatVolts(supplyVolts);
+  if (Number.isFinite(specifiedVf)) {
+    const vf = formatVolts(specifiedVf);
+    return bilingualNote(
+      `Refusing to draft an LED circuit because the supply ${supply}V is not above the specified forward voltage of ${vf}V. A series current cannot be calculated. No LED, resistor, or power symbol was generated.`,
+      `공급 전압 ${supply}V가 지정한 순방향 전압 ${vf}V보다 높지 않아 회로를 만들지 않습니다. LED, 저항, 전원 기호는 생성하지 않았습니다.`
+    );
+  }
+  const spec = color ?? LED_COLOR_SPECS[0];
   const vf = formatVolts(spec.vf);
   const ko = LED_COLOR_KO[spec.id] ?? LED_COLOR_KO.red;
   return bilingualNote(
@@ -661,7 +681,7 @@ function roundUpE24(ohms) {
   return Math.round(pick * (10 ** exp));
 }
 
-function resistorFromSupply({ supplyVolts, vf, colorLabel, assumed }) {
+function resistorFromSupply({ supplyVolts, vf, colorLabel, assumed, specified = false }) {
   const rawOhms = (Math.round(supplyVolts * 1000) - Math.round(vf * 1000)) / TYPICAL_LED_CURRENT_MA;
   const resistanceOhms = roundUpE24(rawOhms);
   const resistorValue = formatOhms(resistanceOhms);
@@ -672,24 +692,33 @@ function resistorFromSupply({ supplyVolts, vf, colorLabel, assumed }) {
   const prefix = assumed
     ? `No LED color was given, so the draft assumes a typical red LED Vf of ${formatVolts(vf)}V. `
     : '';
+  const summary = specified
+    ? bilingualNote(
+      `Series resistor ${resistorValue} was calculated as ${formula}${rounding} using the specified forward voltage of ${formatVolts(vf)}V.`,
+      `지정한 순방향 전압 ${formatVolts(vf)}V로 직렬 저항 ${resistorValue}을 계산했습니다`
+    )
+    : `${prefix}Series resistor ${resistorValue} was calculated as ${formula}${rounding} for a ${colorLabel} LED (typical Vf ${formatVolts(vf)}V).`;
   return {
     vf,
     resistanceOhms,
     resistorValue,
-    summary: `${prefix}Series resistor ${resistorValue} was calculated as ${formula}${rounding} for a ${colorLabel} LED (typical Vf ${formatVolts(vf)}V).`
+    summary
   };
 }
 
-function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms }) {
+function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms, specifiedVf = null }) {
   const vfColor = color ?? LED_COLOR_SPECS[0];
-  const assumed = !color;
+  const specified = Number.isFinite(specifiedVf);
+  const assumed = !color && !specified;
+  const vf = specified ? specifiedVf : vfColor.vf;
   const calculation = resistorExplicit
     ? null
     : resistorFromSupply({
       supplyVolts,
-      vf: vfColor.vf,
+      vf,
       colorLabel: vfColor.prose,
-      assumed
+      assumed,
+      specified
     });
   const resistanceOhms = resistorExplicit ? explicitOhms : calculation.resistanceOhms;
   const resistorValue = formatOhms(resistanceOhms);
@@ -697,7 +726,7 @@ function channelForLed({ color, supplyVolts, resistorExplicit, explicitOhms }) {
     color: color ? { id: color.id, label: color.label, vf: color.vf } : null,
     assumedColor: assumed,
     ledValue: color ? `LED ${color.label}` : 'LED',
-    vf: vfColor.vf,
+    vf,
     resistanceOhms,
     resistorValue,
     calculation
@@ -716,32 +745,47 @@ function headroomWarning(channels, supplyVolts) {
   const low = usable.filter((channel) => headroomMillivolts(supplyVolts, channel.vf) < HEADROOM_WARN_MV);
   const tiny = usable.filter((channel) => channel.resistanceOhms < TINY_RESISTOR_OHMS);
   if (low.length === 0 && tiny.length === 0) return null;
-  const parts = [];
+  const english = [];
+  const korean = [];
   if (low.length > 0) {
     const worst = low.reduce((best, channel) => (
       headroomMillivolts(supplyVolts, channel.vf) < headroomMillivolts(supplyVolts, best.vf) ? channel : best
     ));
-    parts.push(`headroom is only ${formatVolts(headroomMillivolts(supplyVolts, worst.vf) / 1000)}V`);
+    const headroom = formatVolts(headroomMillivolts(supplyVolts, worst.vf) / 1000);
+    english.push(`headroom is only ${headroom}V`);
+    korean.push(`여유 전압이 ${headroom}V뿐입니다`);
   }
   if (tiny.length > 0) {
     const smallest = tiny.reduce((best, channel) => (
       channel.resistanceOhms < best.resistanceOhms ? channel : best
     ));
-    parts.push(`series resistor ${smallest.resistorValue} is below 68Ω`);
+    english.push(`series resistor ${smallest.resistorValue} is below 68Ω`);
+    korean.push(`직렬 저항 ${smallest.resistorValue}은 68Ω보다 작습니다`);
   }
   return {
     code: 'discrete-led-headroom',
-    message: `Warning: LED supply ${parts.join('; ')}. Confirm the LED current before release.`
+    message: bilingualNote(
+      `Warning: LED supply ${english.join('; ')}. Confirm the LED current before release.`,
+      korean.join(' ')
+    )
   };
 }
 
-function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels, supplyAssumed }) {
+function specifiedForwardNote(specifiedVf) {
+  if (!Number.isFinite(specifiedVf)) return '';
+  return ` ${bilingualNote(
+    `The specified forward voltage of ${formatVolts(specifiedVf)}V is used instead of the color default.`,
+    `지정한 순방향 전압 ${formatVolts(specifiedVf)}V를 색상 기본값 대신 사용합니다.`
+  )}`;
+}
+
+function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorValue, quantityCapped, requestedCount, count, calculation, unsupported, perColor, channels, supplyAssumed, specifiedVf }) {
   const notes = [];
   if (perColor && resistorExplicit) {
     const names = channels.map((channel) => channel.ledValue).join(', ');
     notes.push({
       code: 'discrete-led',
-      message: `Discrete LED draft keeps the requested series resistor ${resistorValue} for ${names}; confirm it for the LED forward voltage and current before release.`
+      message: `Discrete LED draft keeps the requested series resistor ${resistorValue} for ${names}; confirm it for the LED forward voltage and current before release.${specifiedForwardNote(specifiedVf)}`
     });
   } else if (perColor) {
     for (const channel of channels) {
@@ -755,7 +799,7 @@ function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorV
     const colorText = color ? ` for ${ledValue}` : '';
     notes.push({
       code: 'discrete-led',
-      message: `Discrete LED draft keeps the requested series resistor ${resistorValue}${colorText}; confirm it for the LED forward voltage and current before release.`
+      message: `Discrete LED draft keeps the requested series resistor ${resistorValue}${colorText}; confirm it for the LED forward voltage and current before release.${specifiedForwardNote(specifiedVf)}`
     });
   } else {
     notes.push({ code: 'discrete-led', message: calculation.summary });
@@ -784,7 +828,7 @@ function buildDiscreteReviewNotes({ color, ledValue, resistorExplicit, resistorV
   return notes;
 }
 
-function refuseDiscreteLed({ code, message, supplyVolts }) {
+function refuseDiscreteLed({ code, message, supplyVolts, supplyAssumed = false }) {
   return {
     count: 0,
     requestedCount: 0,
@@ -800,13 +844,13 @@ function refuseDiscreteLed({ code, message, supplyVolts }) {
     supplyVolts,
     supplyNet: null,
     supplyKind: null,
-    supplyAssumed: false,
+    supplyAssumed: supplyAssumed === true,
     channels: [],
     calculation: null,
     unsupported: [],
     reviewWarnings: [],
     reviewBlockers: [{ code, message }],
-    reviewNotes: [{ code, message }]
+    reviewNotes: []
   };
 }
 
@@ -817,6 +861,7 @@ export function parseDiscreteLedRequest(prompt) {
   if (supply.refused) return refuseDiscreteLed(supply);
   const supplyVolts = supply.supplyVolts;
   const supplyAssumed = supply.supplyAssumed === true;
+  const specifiedVf = specifiedForwardVoltage(text);
   const colors = findLedColors(text);
   const explicitCount = parseLedCount(text);
   const perColor = colors.length > 1 && (explicitCount == null || explicitCount === colors.length);
@@ -828,21 +873,23 @@ export function parseDiscreteLedRequest(prompt) {
     ? colors.slice(0, count)
     : Array.from({ length: count }, () => colors[0] ?? null);
   const undersuppliedIndex = channelColors.findIndex((color) => {
-    const vf = color?.vf ?? LED_COLOR_SPECS[0].vf;
+    const vf = Number.isFinite(specifiedVf) ? specifiedVf : (color?.vf ?? LED_COLOR_SPECS[0].vf);
     return headroomMillivolts(supplyVolts, vf) <= 0;
   });
   if (undersuppliedIndex >= 0) {
     return refuseDiscreteLed({
       code: 'discrete-led-below-vf',
       supplyVolts,
-      message: belowForwardMessage(supplyVolts, channelColors[undersuppliedIndex])
+      supplyAssumed,
+      message: belowForwardMessage(supplyVolts, channelColors[undersuppliedIndex], specifiedVf)
     });
   }
   const channels = channelColors.map((color) => channelForLed({
     color,
     supplyVolts,
     resistorExplicit,
-    explicitOhms
+    explicitOhms,
+    specifiedVf
   }));
   if (channels.some((channel) => !channel.resistorValue)) return null;
   const primary = channels[0];
@@ -872,7 +919,8 @@ export function parseDiscreteLedRequest(prompt) {
     channels,
     calculation: primary.calculation,
     unsupported,
-    supplyAssumed
+    supplyAssumed,
+    specifiedVf: Number.isFinite(specifiedVf) ? specifiedVf : null
   };
   const reviewNotes = buildDiscreteReviewNotes(parsed);
   const warning = headroomWarning(parsed.channels, supplyVolts);

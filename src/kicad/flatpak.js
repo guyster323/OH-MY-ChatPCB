@@ -61,6 +61,8 @@ export function setFlatpakLibraryRootsForTests(roots) {
 
 // Override roots are returned as given. Default roots go through mapPath so a
 // library-search root can relocate /var/lib/flatpak and the user Flatpak dir.
+// Default layouts are POSIX even when a caller injects platform 'linux' on
+// another host. path.join would emit backslashes there.
 export function flatpakLibraryRoots({
   mapPath = (candidate) => candidate,
   platform = process.platform,
@@ -75,7 +77,7 @@ export function flatpakLibraryRoots({
 
   const roots = ['/var/lib/flatpak'];
   const home = flatpakUserHome(env);
-  if (home) roots.push(path.join(home, '.local', 'share', 'flatpak'));
+  if (home) roots.push(path.posix.join(home, '.local', 'share', 'flatpak'));
   return roots.map((candidate) => mapPath(candidate));
 }
 
@@ -92,7 +94,7 @@ export function flatpakAppLibraryPaths(libraryType, {
   ];
   const home = flatpakUserHome(env);
   if (home) {
-    paths.push(path.join(
+    paths.push(path.posix.join(
       home,
       '.local',
       'share',
@@ -128,6 +130,8 @@ function readFlatpakPathEntries(dir, readdir) {
 }
 
 // <root>/runtime/org.kicad.KiCad.Library.<Kind>/<arch>/<branch>/active/files/<symbols|footprints>
+// Join with the host path module. Callers pass real directories, including
+// Windows temp trees from tests. Default install roots are only produced on linux.
 export function flatpakRuntimeLibraryCandidatePaths(libraryType, {
   roots = flatpakLibraryRoots(),
   exists = fs.existsSync,

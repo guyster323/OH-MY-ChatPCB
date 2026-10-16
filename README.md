@@ -238,7 +238,7 @@ A prompt that only asks for an LED circuit, with no MCU, USB, sensor, or other b
 
 - At most 8 LEDs. A larger request is capped at 8 and the review notes say so.
 - Supported colors are red, yellow, green, blue, and white. Korean aliases such as 빨간, 노란, 초록, 파란, and 하얀 are recognized. With no count, the draft places one LED per named color.
-- Series resistors assume 10mA and a typical forward voltage (red 2V, yellow 2.1V, green 2.2V, blue 3V, white 3.2V), then round up to the next E24 value, unless the prompt gives a resistor.
+- Series resistors assume 10mA and a typical forward voltage (red 2V, yellow 2.1V, green 2.2V, blue 3V, white 3.2V), then round up to the next E24 value, unless the prompt gives a resistor. A stated forward voltage (`Vf 3V`, `Vf=2.1V`, or `순방향 전압`) is used instead of that color default for the resistor and the headroom check, and it is never treated as the supply.
 - Supported rails are +3V3, +5V (the default), +9V (including a 9V battery connector), +12V, and GND. Supplies above 24V, any AC indication, several different supply voltages, and a supply that is not above the LED forward voltage are refused and no LED circuit is generated.
 - RGB, addressable, matrix, PWM, and LED-strip requests get an unsupported note. Those still draft a simple indicator LED. High-voltage, AC, ambiguous-supply, and below-forward-voltage requests do not.
 

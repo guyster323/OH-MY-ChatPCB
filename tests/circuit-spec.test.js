@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeCircuitSpec, parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
+import { applyDiscreteLedSpec, normalizeCircuitSpec, parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
+import { reviewCircuitReadiness } from '../src/workflow/review-project.js';
 
 test('normalizes MCU peripheral prompt into a bounded CircuitSpec', () => {
   const spec = normalizeCircuitSpec(
@@ -422,7 +423,7 @@ test('low LED headroom warns once and a supply at or below Vf blocks the draft',
   assert.match(blue.reviewBlockers[0].message, /파란/);
   assert.equal(blue.reviewBlockers[0].message.includes('Unsupported'), false);
   assert.equal(/placeholder/i.test(blue.reviewBlockers[0].message), false);
-  assert.match(blue.reviewNotes.map((note) => note.message).join('\n'), /not above/i);
+  assert.equal(blue.reviewNotes.some((note) => note.message === blue.reviewBlockers[0].message), false);
 
   const near = parseDiscreteLedRequest('red LED on 2.5V');
   assert.equal(near.resistorValue, '51Ω');
@@ -581,7 +582,8 @@ test('a supply that is not above the LED forward voltage is refused without a pl
     assert.equal(/placeholder/i.test(message), false, message);
     assert.equal(message.includes('Unsupported'), false, message);
     assert.equal(message.includes('1kΩ'), false, message);
-    assert.match(parsed.reviewNotes.map((note) => note.message).join('\n'), koColor, prompt);
+    assert.match(message, koColor, prompt);
+    assert.equal(parsed.reviewNotes.some((note) => note.message === message), false, prompt);
   }
 });
 
@@ -632,6 +634,111 @@ test('quantity cap and RGB substitution notes include Korean', () => {
   const wsNote = ws.reviewNotes.find((note) => note.code === 'discrete-led-unsupported-rgb');
   assert.match(wsNote.message, /WS2812|어드레서블/);
   assert.match(wsNote.message, /simple indicator LED/);
+});
+
+test('a specified forward voltage is used for the resistor and is never the supply', () => {
+  const cases = [
+    ['LED Vf 3V on 5V supply', 5, '+5V', false, '200Ω', '3'],
+    ['LED Vf=2.1V on 3.3V', 3.3, '+3V3', false, '120Ω', '2.1'],
+    ['LED 순방향 전압 3V, 전원 5V', 5, '+5V', false, '200Ω', '3'],
+    ['LED Vf 3V', 5, '+5V', true, '200Ω', '3'],
+    ['red LED Vf 3V on 5V', 5, '+5V', false, '200Ω', '3']
+  ];
+  for (const [prompt, volts, net, assumed, resistor, vf] of cases) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.ok(parsed, prompt);
+    assert.equal(parsed.refused, false, `${prompt} ${JSON.stringify(parsed.reviewBlockers)}`);
+    assert.equal(parsed.supplyVolts, volts, prompt);
+    assert.equal(parsed.supplyNet, net, prompt);
+    assert.equal(parsed.supplyAssumed, assumed, prompt);
+    assert.notEqual(parsed.supplyVolts, Number(vf), prompt);
+    assert.equal(parsed.resistorValue, resistor, prompt);
+    assert.equal(parsed.channels[0].vf, Number(vf), prompt);
+    const note = parsed.reviewNotes.map((item) => item.message).join('\n');
+    assert.match(note, new RegExp(`specified forward voltage of ${vf.replace('.', '\\.')}V`), prompt);
+    assert.match(note, new RegExp(`지정한 순방향 전압 ${vf.replace('.', '\\.')}V`), prompt);
+  }
+
+  const onlyForward = parseDiscreteLedRequest('LED Vf 12V');
+  assert.equal(onlyForward.supplyVolts, 5);
+  assert.equal(onlyForward.supplyAssumed, true);
+  assert.notEqual(onlyForward.supplyVolts, 12);
+  assert.equal(onlyForward.refused, true);
+  assert.equal(onlyForward.reviewBlockers[0].code, 'discrete-led-below-vf');
+  assert.match(onlyForward.reviewBlockers[0].message, /specified forward voltage of 12V/);
+  assert.match(onlyForward.reviewBlockers[0].message, /지정한 순방향 전압 12V/);
+
+  const highForward = parseDiscreteLedRequest('LED Vf 48V on 5V supply');
+  assert.equal(highForward.supplyVolts, 5);
+  assert.equal(highForward.reviewBlockers[0].code, 'discrete-led-below-vf');
+  assert.match(highForward.reviewBlockers[0].message, /specified forward voltage of 48V/);
+});
+
+test('a specified forward voltage drives the headroom check', () => {
+  const eased = parseDiscreteLedRequest('white LED Vf 2V on 3.3V');
+  assert.equal(eased.refused, false);
+  assert.equal(eased.supplyVolts, 3.3);
+  assert.equal(eased.resistorValue, '130Ω');
+  assert.equal(eased.reviewWarnings.length, 0);
+  assert.equal(eased.reviewBlockers.length, 0);
+
+  const stillTight = parseDiscreteLedRequest('white LED on 3.3V');
+  assert.equal(stillTight.reviewWarnings.length, 1);
+  assert.match(stillTight.reviewWarnings[0].message, /0\.1V/);
+
+  const unblocked = parseDiscreteLedRequest('blue LED Vf 2V on 3V');
+  assert.equal(unblocked.refused, false);
+  assert.equal(unblocked.resistorValue, '100Ω');
+  assert.equal(unblocked.reviewBlockers.length, 0);
+
+  const stillBlocked = parseDiscreteLedRequest('blue LED on 3V');
+  assert.equal(stillBlocked.refused, true);
+  assert.equal(stillBlocked.reviewBlockers[0].code, 'discrete-led-below-vf');
+
+  const specifiedBlock = parseDiscreteLedRequest('red LED Vf 5V on 5V supply');
+  assert.equal(specifiedBlock.supplyVolts, 5);
+  assert.equal(specifiedBlock.refused, true);
+  assert.equal(specifiedBlock.reviewBlockers[0].code, 'discrete-led-below-vf');
+  assert.match(specifiedBlock.reviewBlockers[0].message, /specified forward voltage of 5V/);
+  assert.match(specifiedBlock.reviewBlockers[0].message, /지정한 순방향 전압 5V/);
+  assert.equal(/typical red/i.test(specifiedBlock.reviewBlockers[0].message), false);
+});
+
+test('headroom, below-Vf, high-voltage, AC, and multiple-supply messages include Korean', () => {
+  const headroom = parseDiscreteLedRequest('white LED on 3.3V');
+  assert.match(headroom.reviewWarnings[0].message, /여유 전압/);
+  assert.match(headroom.reviewWarnings[0].message, /headroom is only 0\.1V/);
+
+  const below = parseDiscreteLedRequest('blue LED on 3V');
+  assert.match(below.reviewBlockers[0].message, /순방향/);
+  assert.match(below.reviewBlockers[0].message, /파란/);
+  assert.match(below.reviewBlockers[0].message, /not above/i);
+
+  const high = parseDiscreteLedRequest('LED at 48V');
+  assert.match(high.reviewBlockers[0].message, /고전압/);
+  assert.match(high.reviewBlockers[0].message, /24V/);
+
+  const ac = parseDiscreteLedRequest('LED 24 VAC');
+  assert.match(ac.reviewBlockers[0].message, /교류/);
+  assert.match(ac.reviewBlockers[0].message, /supply is AC/i);
+
+  const several = parseDiscreteLedRequest('LED 5V and 12V');
+  assert.match(several.reviewBlockers[0].message, /어떤 공급/);
+  assert.match(several.reviewBlockers[0].message, /which supply/i);
+});
+
+test('identical blocker, note, and warning sentences appear once in the review', () => {
+  const prompts = ['blue LED on 3V', 'LED at 48V', 'LED 24 VAC', 'LED 5V and 12V', 'white LED on 3.3V'];
+  for (const prompt of prompts) {
+    const spec = applyDiscreteLedSpec(normalizeCircuitSpec(prompt));
+    const review = reviewCircuitReadiness({ spec });
+    const messages = [
+      ...review.findings.blockers,
+      ...review.findings.warnings,
+      ...review.findings.notes
+    ].map((finding) => finding.message);
+    assert.equal(new Set(messages).size, messages.length, `${prompt} ${JSON.stringify(messages)}`);
+  }
 });
 
 test('normalizes USB data nets to KiCad-safe profile names', () => {
