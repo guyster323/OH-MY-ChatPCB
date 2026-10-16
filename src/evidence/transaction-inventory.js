@@ -19,6 +19,7 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 export function transactionArtifactKind(relativePath) {
   const normalized = relativePath.split(path.sep).join('/');
   if (normalized.endsWith('.chatpcb.json')) return 'chatpcb-manifest';
+  if (path.posix.basename(normalized) === '.chatpcb-conversation.json') return 'conversation';
   if (path.posix.basename(normalized) === 'sym-lib-table') return 'symbol-table';
   if (path.posix.basename(normalized) === 'fp-lib-table') return 'footprint-table';
   return TRANSACTION_EXTENSIONS.get(path.posix.extname(normalized)) ?? null;

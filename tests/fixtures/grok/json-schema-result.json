@@ -1,0 +1,39 @@
+{
+  "text": "{\"type\":\"tool.call\",\"payload\":{\"id\":\"sg1\",\"name\":\"schematic.generate\",\"args\":{\"prompt\":\"LED\"}}}",
+  "stopReason": "end_turn",
+  "sessionId": "01a14299-1520-7d11-aba9-b64055b990ea",
+  "requestId": "6a042a42-d81e-4d68-8b40-bd2a5731ab9a",
+  "cwd": "/tmp/chatpcb-grok-capture-70Tg",
+  "thought": "Preparing a structured tool.call for schematic.generate with ID \"sg1\" and prompt \"LED\".",
+  "usage": {
+    "input_tokens": 14176,
+    "cache_read_input_tokens": 1664,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 415,
+    "reasoning_tokens": 382,
+    "total_tokens": 16255
+  },
+  "num_turns": 1,
+  "total_cost_usd": 0.01076916,
+  "total_cost_usd_ticks": 107691600,
+  "modelUsage": {
+    "grok-4.7-build": {
+      "inputTokens": 14176,
+      "outputTokens": 415,
+      "cacheReadInputTokens": 1664,
+      "cacheCreationInputTokens": 0,
+      "modelCalls": 1,
+      "costUSD": 0.01076916
+    }
+  },
+  "structuredOutput": {
+    "type": "tool.call",
+    "payload": {
+      "id": "sg1",
+      "name": "schematic.generate",
+      "args": {
+        "prompt": "LED"
+      }
+    }
+  }
+}

@@ -17,7 +17,7 @@ export default [
     }
   },
   {
-    files: ['apps/panel/**/*.js', 'scripts/verify-panel-ui.js'],
+    files: ['apps/panel/**/*.js', 'scripts/verify-panel-ui.js', 'tests/panel-project-busy.test.js', 'tests/panel-ui-verifier.test.js'],
     languageOptions: {
       globals: {
         ...globals.browser

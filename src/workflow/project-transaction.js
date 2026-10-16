@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { collectTransactionInventory, transactionArtifactKind } from '../evidence/transaction-inventory.js';
 import { assertInspectionTree, copyInspectionTree } from './inspection-copy.js';
+import { proposalSource } from './native-proposal-source.js';
 import { assertSafeProjectDir, isInside } from './project-workspace.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
@@ -393,7 +394,10 @@ export async function applyProjectTransaction({
         beforeTransactionDigest: plan.baseTransactionDigest,
         afterTransactionDigest: plan.afterTransactionDigest,
         changes: plan.changes,
-        proposal: { proposalId: plan.proposalId, source: plan.source }
+        proposal: {
+          proposalId: plan.proposalId,
+          source: plan.source == null ? null : proposalSource(plan.source)
+        }
       });
       await journal.transition({ transactionId: journalRecord.transactionId, status: 'applying' });
 
