@@ -226,14 +226,6 @@ pre { overflow: auto; margin: 0; padding: 8px; border-radius: 6px; background: #
   margin-top: 8px;
 }
 .chatgpt-sign-in-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
-.chatgpt-logo-placeholder {
-  width: 18px;
-  height: 18px;
-  border: 1px dashed #fff;
-  font-size: 8px;
-  display: grid;
-  place-items: center;
-}
 .chatgpt-auth-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .chatgpt-auth-actions button { min-height: 32px; padding: 0 12px; }
 .chatgpt-secondary-btn {

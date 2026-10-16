@@ -1,9 +1,9 @@
 {
   "auth.chatgpt.button": "Continue with ChatGPT",
   "auth.chatgpt.intro.title": "Use ChatPCB with your ChatGPT plan",
-  "auth.chatgpt.intro.body": "You'll sign in in your system browser. Never enter your password in ChatPCB.",
-  "auth.chatgpt.waiting.title": "Finish signing in in your browser",
-  "auth.chatgpt.waiting.reopen": "Reopen sign-in link",
+  "auth.chatgpt.intro.body": "You'll sign in using your system browser. Never enter your password in ChatPCB.",
+  "auth.chatgpt.waiting.title": "Finish signing in using your browser",
+  "auth.chatgpt.waiting.reopen": "Open sign-in page again",
   "auth.chatgpt.waiting.copy": "Copy link",
   "auth.chatgpt.waiting.copied": "Link copied",
   "auth.chatgpt.cancel": "Cancel",
@@ -29,5 +29,7 @@
   "provider.status.chatgpt.waiting": "ChatGPT: waiting for browser",
   "provider.status.chatgpt.signed-in": "ChatGPT: connected ({plan})",
   "provider.status.chatgpt.not-eligible": "ChatGPT: not eligible",
-  "provider.status.chatgpt.usage-limited": "ChatGPT: limit reached"
+  "provider.status.chatgpt.usage-limited": "ChatGPT: limit reached",
+  "auth.chatgpt.opens-browser": "(opens in your browser)",
+  "auth.chatgpt.waiting.reopen-unavailable": "The sign-in page address isn't available. Cancel and try again."
 }

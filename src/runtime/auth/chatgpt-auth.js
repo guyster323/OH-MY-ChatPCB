@@ -360,8 +360,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS,
   let timer;
   try {
     return await new Promise((resolve, reject) => {
+      // Keep this timer referenced: it is cleared in finally, and an unref'd timer
+      // lets the process exit with the request still pending.
       timer = setTimeout(() => reject(timeoutError(label, ms)), ms);
-      if (typeof timer.unref === 'function') timer.unref();
       fetch(url, { ...options, signal }).then(resolve, (error) => {
         if (timeoutSignal.aborted) {
           reject(timeoutError(label, ms));

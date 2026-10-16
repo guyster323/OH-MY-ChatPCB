@@ -450,7 +450,7 @@ function handleEnvelope(envelope) {
     renderChatGPTAuth();
     return;
   }
-  if (callName === 'auth.chatgpt.start') {
+  if (callName === 'auth.chatgpt.start' || callName === 'auth.chatgpt.reopen') {
     const result = envelope.payload.result;
     chatgptAuthState = {
       ...chatgptAuthState,
@@ -1265,16 +1265,16 @@ function renderChatGPTAuth() {
       <h2 id="chatgpt-auth-title">${t('auth.chatgpt.intro.title')}</h2>
       <p>${t('auth.chatgpt.intro.body')}</p>
       <button class="chatgpt-sign-in-btn" onclick="startChatGPTSignIn()" lang="en">
-        <span class="chatgpt-logo-placeholder" aria-hidden="true">LOGO?</span>
         ${t('auth.chatgpt.button')}
       </button>
     `;
     setRequestBusy(true);
   } else if (state === 'waiting') {
     const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
+    // Always ask the daemon to open the system browser instead of a WebView link.
     const reopenLink = authHref
-      ? `<a href="${authHref}" target="_blank" rel="noopener noreferrer">${t('auth.chatgpt.waiting.reopen')}</a>`
-      : t('auth.chatgpt.waiting.reopen');
+      ? `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" onclick="reopenChatGPTSignIn()">${t('auth.chatgpt.waiting.reopen')}<span class="sr-only"> ${t('auth.chatgpt.opens-browser')}</span></button>`
+      : `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" disabled aria-describedby="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen')}</button> <span id="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen-unavailable')}</span>`;
     chatgptAuthCardEl.innerHTML = `
       <h2 id="chatgpt-auth-title" tabindex="-1">
         <span class="spinner" aria-hidden="true"></span>
@@ -1397,6 +1397,13 @@ window.startChatGPTSignIn = function() {
   const id = `auth_chatgpt_start_${Date.now()}`;
   pendingCalls.set(id, 'auth.chatgpt.start');
   sendToolCall({ id, name: 'auth.chatgpt.start', args: { locale } });
+};
+
+window.reopenChatGPTSignIn = function() {
+  if (!chatgptAuthState.attemptId) return;
+  const id = `auth_chatgpt_reopen_${Date.now()}`;
+  pendingCalls.set(id, 'auth.chatgpt.reopen');
+  sendToolCall({ id, name: 'auth.chatgpt.reopen', args: { attemptId: chatgptAuthState.attemptId } });
 };
 
 window.cancelChatGPTSignIn = function() {

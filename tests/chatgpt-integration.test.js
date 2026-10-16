@@ -942,8 +942,11 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
     const ko = JSON.parse(await readFile(new URL('../apps/panel/locales/ko.json', import.meta.url), 'utf8'));
     assert.equal(en['auth.chatgpt.button'], 'Continue with ChatGPT');
     assert.equal(ko['auth.chatgpt.button'], 'Continue with ChatGPT');
-    assert.equal(en['auth.chatgpt.waiting.reopen'], 'Reopen sign-in link');
-    assert.equal(ko['auth.chatgpt.waiting.reopen'], '로그인 링크 다시 열기');
+    assert.equal(en['auth.chatgpt.waiting.reopen'], 'Open sign-in page again');
+    assert.equal(ko['auth.chatgpt.waiting.reopen'], '로그인 페이지 다시 열기');
+    assert.equal(en['auth.chatgpt.opens-browser'], '(opens in your browser)');
+    assert.equal(ko['auth.chatgpt.opens-browser'], '(브라우저에서 열림)');
+    assert.equal(panel.includes('LOGO?'), false);
   });
 
   it('selects the most recently used account, then email', async () => {
