@@ -22,22 +22,34 @@ function findBrowserExecutable() {
 const panelRoot = path.resolve('apps/panel');
 const projectDir = '/tmp/chatpcb-panel-project';
 
-const browser = await chromium.launch({
-  headless: true,
-  // CHATPCB_BROWSER_PATH wins; otherwise use a system Chrome/Edge if present,
-  // else Playwright's bundled Chromium (npx playwright install chromium).
-  executablePath: findBrowserExecutable(),
-  args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-});
-const server = await startStaticServer(panelRoot);
+let browserPromise = null;
+let server = null;
+
+// Launch lazily so importing this file never fails; tests skip when no browser can start.
+async function getBrowser() {
+  browserPromise ??= chromium
+    .launch({
+      headless: true,
+      // CHATPCB_BROWSER_PATH wins; otherwise use a system Chrome/Edge if present,
+      // else Playwright's bundled Chromium (npx playwright install chromium).
+      executablePath: findBrowserExecutable(),
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    })
+    .catch((error) => ({ unavailable: error }));
+  const browser = await browserPromise;
+  return browser.unavailable ? null : browser;
+}
 
 test.after(async () => {
-  await browser.close();
-  await server.close();
+  const browser = browserPromise ? await browserPromise : null;
+  if (browser && !browser.unavailable) await browser.close();
+  if (server) await server.close();
 });
 
-test('stop button enables for the active request and reports a cancelled:false result', async () => {
-  const { page, pageErrors } = await openPanel();
+test('stop button enables for the active request and reports a cancelled:false result', async (t) => {
+  const opened = await openPanel(t);
+  if (!opened) return;
+  const { page, pageErrors } = opened;
   try {
     await createProject(page);
     assert.equal(await page.locator('#stop-request-button').isDisabled(), true);
@@ -111,8 +123,10 @@ test('stop button enables for the active request and reports a cancelled:false r
   }
 });
 
-test('rollback maps transactionId and status, confirms in the panel, and handles failure results', async () => {
-  const { page, pageErrors } = await openPanel();
+test('rollback maps transactionId and status, confirms in the panel, and handles failure results', async (t) => {
+  const opened = await openPanel(t);
+  if (!opened) return;
+  const { page, pageErrors } = opened;
   try {
     await createProject(page);
     const transactions = [1, 2, 3, 4, 5, 6].map((number) => ({
@@ -203,8 +217,10 @@ test('rollback maps transactionId and status, confirms in the panel, and handles
   }
 });
 
-test('patch preview shows ERC counts and apply refreshes the transaction list', async () => {
-  const { page, pageErrors } = await openPanel();
+test('patch preview shows ERC counts and apply refreshes the transaction list', async (t) => {
+  const opened = await openPanel(t);
+  if (!opened) return;
+  const { page, pageErrors } = opened;
   try {
     await createProject(page);
     await replyInspect(page);
@@ -310,7 +326,14 @@ function previewResult({ errorCount, warningCount, patchId = 'patch_erc' }) {
   };
 }
 
-async function openPanel() {
+async function openPanel(t) {
+  const browser = await getBrowser();
+  if (!browser) {
+    const reason = (await browserPromise).unavailable?.message?.split('\n')[0] ?? 'unknown error';
+    t.skip(`No Chromium browser available (${reason}). Set CHATPCB_BROWSER_PATH or run npx playwright install chromium.`);
+    return null;
+  }
+  server ??= await startStaticServer(panelRoot);
   const page = await browser.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
