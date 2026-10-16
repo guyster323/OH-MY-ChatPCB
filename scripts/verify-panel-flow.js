@@ -40,7 +40,8 @@ async function verifyPanelFlow() {
             args: { prompt }
           })
         ]
-      })
+      }),
+      ...fakeKicadValidationOptions()
     }
   });
 
@@ -113,6 +114,26 @@ async function verifyPanelFlow() {
     await daemon.close();
     await rm(workspaceRoot, { force: true, recursive: true });
   }
+}
+
+// CHATPCB_FAKE_KICAD_ERC is set by the panel-flow test. This script is about
+// the websocket project flow, so the fake stands in for candidate ERC and DRC.
+function fakeKicadValidationOptions() {
+  if (process.env.CHATPCB_FAKE_KICAD_ERC !== '1') return {};
+  return {
+    validateProjectImpl: async () => ({
+      ok: true,
+      skipped: false,
+      erc: { errorCount: 0, warningCount: 0, byType: {} }
+    }),
+    validateBoardImpl: async () => ({
+      ok: true,
+      skipped: false,
+      executed: true,
+      violations: [],
+      unconnectedItems: []
+    })
+  };
 }
 
 function sendToolCallOverWebSocket({ url, id, name, args }) {

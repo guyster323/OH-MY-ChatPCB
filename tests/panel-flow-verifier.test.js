@@ -40,7 +40,7 @@ test('panel user-flow verification script is exposed through npm', async () => {
 test('panel user-flow verifier completes the daemon websocket project request', async () => {
   const { stdout } = await execFileAsync(process.execPath, ['./scripts/verify-panel-flow.js'], {
     timeout: 60_000,
-    env: childEnvWithFixtureSymbols()
+    env: { ...childEnvWithFixtureSymbols(), CHATPCB_FAKE_KICAD_ERC: '1' }
   });
   const result = JSON.parse(stdout);
 

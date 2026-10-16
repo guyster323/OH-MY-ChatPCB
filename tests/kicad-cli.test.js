@@ -41,6 +41,21 @@ test('prefers current-user KiCad 10 install before older all-users installs on W
   assert.equal(found.source, 'windows-user-install');
 });
 
+test('CHATPCB_KICAD_CLI_DISABLE reports unavailable without falling back to install paths', () => {
+  const found = resolveKicadCli({
+    explicitPath: '/usr/local/bin/kicad-cli',
+    env: {
+      CHATPCB_KICAD_CLI_DISABLE: '1',
+      KICAD_CLI_PATH: '/missing/kicad-cli',
+      PATH: '/usr/local/bin:/usr/bin'
+    },
+    platform: 'linux',
+    exists: () => true
+  });
+
+  assert.deepEqual(found, { path: null, source: 'unavailable' });
+});
+
 test('returns unavailable when no absolute KiCad installation can be found', () => {
   const found = resolveKicadCli({
     env: {},

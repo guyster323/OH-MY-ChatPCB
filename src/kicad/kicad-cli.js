@@ -28,6 +28,12 @@ export function resolveKicadCli({
   exists = fs.existsSync,
   excludeProjectDir
 } = {}) {
+  // Test-only. A missing KICAD_CLI_PATH still falls through to install paths,
+  // so suites set this to prove nothing depends on a host kicad-cli.
+  if (env.CHATPCB_KICAD_CLI_DISABLE === '1') {
+    return { path: null, source: 'unavailable' };
+  }
+
   if (explicitPath && exists(explicitPath)) {
     return { path: explicitPath, source: 'explicit' };
   }
