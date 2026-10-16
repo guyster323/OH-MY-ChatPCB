@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ChatPCB</title>
     <link rel="stylesheet" href="./styles/tokens.css" />
-    <link rel="stylesheet" href="./styles.css?v=20261016-soft5" />
+    <link rel="stylesheet" href="./styles.css?v=20261016-soft6" />
   </head>
   <body>
     <main class="shell">
@@ -49,6 +49,12 @@
       </header>
 
       <div class="stage">
+      <section id="chatgpt-signin" class="card signin2" hidden>
+        <h2 data-i18n="auth.chatgpt.title">Use ChatPCB with your ChatGPT plan</h2>
+        <p data-i18n="auth.chatgpt.body">You'll sign in using your system browser. Never enter your password in ChatPCB.</p>
+        <button type="button" class="siwc-btn" data-format="continue-black" lang="en"><img src="assets/chatgpt-logo-white.svg" alt="" width="21" height="21" />Continue with ChatGPT</button>
+        <p data-i18n="auth.chatgpt.browser">(opens in your browser)</p>
+      </section>
       <section class="project-setup card" aria-labelledby="project-setup-title">
         <h2 id="project-setup-title" data-i18n="project.title">Start a project</h2>
         <form id="new-project-form" class="new-project-form">
@@ -187,6 +193,11 @@
       </section>
       </div>
       <form id="composer" class="composer dock">
+        <p id="chatgpt-plan" class="plan" hidden>
+          <span data-i18n="auth.chatgpt.using-plan">Using ChatGPT plan</span>
+          <span aria-hidden="true">·</span>
+          <a href="#" data-i18n="auth.chatgpt.manage-usage">Manage usage</a>
+        </p>
         <div class="row">
           <textarea id="prompt" rows="1" spellcheck="true" disabled aria-label="Circuit request" data-i18n-aria-label="composer.label" placeholder="Ask or reply…" data-i18n-placeholder="composer.placeholder"></textarea>
           <button type="submit" disabled data-i18n="composer.send">Send</button>
@@ -264,6 +275,6 @@
     </dialog>
 
     <script src="./i18n.js?v=20261016-soft1"></script>
-    <script src="./panel.js?v=20261016-soft5"></script>
+    <script src="./panel.js?v=20261016-soft6"></script>
   </body>
 </html>

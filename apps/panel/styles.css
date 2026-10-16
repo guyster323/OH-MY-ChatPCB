@@ -495,8 +495,25 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
 .dock .row, .composer .row { display: flex; gap: var(--sp-3); }
 .dock input, .dock textarea, .composer textarea { min-height: 36px; min-width: 0; width: auto; flex: 1; font-size: var(--fs-sm); }
 .dock .btn, .dock button, .composer button { min-height: 36px; }
-.plan { display: flex; gap: var(--sp-3); align-items: center; font-size: var(--fs-xs); color: var(--muted); }
+.plan { display: flex; gap: var(--sp-3); align-items: center; font-size: var(--fs-xs); color: var(--muted); margin: 0; }
 .plan a { color: var(--accent-text); font-weight: 600; min-height: 28px; min-width: 28px; display: inline-flex; align-items: center; }
+.siwc-btn {
+  height: 45px;
+  width: 242px;
+  max-width: 100%;
+  padding: 0 20px;
+  gap: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #000;
+  color: #fff;
+  font-family: "SIWC Inter", Inter, sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0;
+}
+.siwc-btn img { width: 21px; height: 21px; flex: none; display: block; }
 .tools { padding: var(--sp-2) var(--sp-4); }
 .tools summary { min-height: 28px; display: flex; align-items: center; cursor: pointer; font-size: var(--fs-sm); font-weight: 600; }
 .signin2 { display: grid; gap: var(--sp-3); justify-items: start; padding: var(--sp-4) var(--sp-5); }

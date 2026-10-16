@@ -100,6 +100,7 @@ const workflowCliEl = document.querySelector('#workflow-cli');
 connect();
 setConnectionStatus(connectionStatusKey);
 syncWorkflow();
+applyHostQueries();
 window.chatpcbI18n?.onChange(() => {
   setConnectionStatus(connectionStatusKey, statusEl?.dataset.state);
   syncWorkflow();
@@ -169,6 +170,26 @@ window.addEventListener('focus', () => refreshHostProjectStatus());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refreshHostProjectStatus();
 });
+
+function applyHostQueries() {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get('theme');
+  if ((theme === 'light' || theme === 'dark') && !document.documentElement.dataset.theme) {
+    document.documentElement.dataset.theme = theme;
+  }
+  const auth = params.get('auth');
+  if (auth === 'signedin' || auth === 'in' || auth === 'true') setChatGptAuthState({ signedIn: true });
+  else if (auth === 'signedout' || auth === 'out' || auth === 'false') setChatGptAuthState({ signedIn: false });
+}
+
+function setChatGptAuthState(state = {}) {
+  const signedIn = state?.signedIn;
+  const known = signedIn === true || signedIn === false;
+  const card = document.querySelector('#chatgpt-signin');
+  const plan = document.querySelector('#chatgpt-plan');
+  if (card) card.hidden = !(known && signedIn === false);
+  if (plan) plan.hidden = !(known && signedIn === true);
+}
 
 function setConnectionStatus(key, state) {
   connectionStatusKey = key;
@@ -1439,6 +1460,8 @@ function setRequestBusy(isBusy) {
   sendButtonEl.disabled = isBusy || !activeProject;
   promptEl.disabled = isBusy || !activeProject;
 }
+
+window.setChatGptAuthState = setChatGptAuthState;
 
 window.__chatpcbTest = {
   showPatch(state = {}) {
