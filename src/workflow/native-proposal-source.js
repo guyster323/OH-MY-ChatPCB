@@ -142,12 +142,42 @@ function artifactRecords(snapshot) {
   }));
 }
 
+function finiteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+// ERC passes only with a numeric error count of 0. DRC reports violation counts, not errorCount.
+function numericErrorCount(result) {
+  if (!result || typeof result !== 'object') return undefined;
+  const nested = result.erc;
+  if (nested && typeof nested === 'object') {
+    const nestedCount = finiteNumber(nested.errorCount);
+    if (nestedCount !== undefined) return nestedCount;
+  }
+  return finiteNumber(result.errorCount);
+}
+
+function hasDrcEvidence(result) {
+  if (!result || typeof result !== 'object') return false;
+  if (Array.isArray(result.violations) || Array.isArray(result.unconnectedItems)) return true;
+  return Boolean(result.drc && typeof result.drc === 'object');
+}
+
 function statusFor(result, required) {
-  const skipped = result == null || result.skipped === true || result.executed === false;
+  // null/undefined is missing evidence, not a skip. A skip can be overridden; missing cannot.
+  if (result == null) {
+    return { skipped: false, executed: false, status: 'missing', required: required === true };
+  }
+  const errorCount = numericErrorCount(result);
+  const explicitSkip = result.skipped === true || result.executed === false;
   let status = 'unverified';
-  if (!skipped && result.ok === true) status = 'passed';
-  else if (!skipped && result.ok === false) status = 'failed';
-  return { ...(result ?? { ok: true, skipped: true, executed: false }), status, required: required === true };
+  if (typeof errorCount === 'number' && errorCount > 0) status = 'failed';
+  else if (explicitSkip) status = 'unverified';
+  else if (result.ok === false) status = 'failed';
+  else if (result.ok === true && errorCount === 0) status = 'passed';
+  else if (result.ok === true && hasDrcEvidence(result)) status = 'passed';
+  else if (result.ok === true) status = 'missing';
+  return { ...result, status, required: required === true };
 }
 
 function isLegacyErcResult(result) {
@@ -172,8 +202,8 @@ function normalizeCandidateVerification(result, required) {
   const skipped = { ok: true, skipped: true, executed: false };
   if (result == null) {
     return {
-      erc: statusFor(skipped, required.erc),
-      drc: statusFor(skipped, required.drc)
+      erc: statusFor(null, required.erc),
+      drc: statusFor(null, required.drc)
     };
   }
   if (isLegacyErcResult(result)) {
@@ -182,9 +212,10 @@ function normalizeCandidateVerification(result, required) {
       drc: statusFor(skipped, required.drc)
     };
   }
+  // A missing erc/drc field is an absent verifier result. Do not invent a skip.
   return {
-    erc: statusFor(result.erc ?? skipped, required.erc),
-    drc: statusFor(result.drc ?? skipped, required.drc)
+    erc: statusFor(result.erc ?? null, required.erc),
+    drc: statusFor(result.drc ?? null, required.drc)
   };
 }
 

@@ -173,3 +173,98 @@ test('daemon schematic.patch approval is fail-closed on the recorded ERC result'
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test('null and unproven verifier results are not passed and stay ERC_BLOCKED', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-erc-unproven-'));
+  const registry = createPatchApprovalRegistry();
+  const base = 'STM32 board with USB-C power, 3.3V regulator, I2C connector, UART header, reset button, boot button, and LED.';
+  const nullErc = async () => null;
+  const undefinedErc = async () => undefined;
+  const okOnly = async () => ({ ok: true });
+  const proven = async () => ({ ok: true, errorCount: 0 });
+  const errors = async () => ({ ok: true, errorCount: 2 });
+
+  async function preview(prompt, validateProjectImpl) {
+    return dispatchToolCall(
+      { name: 'schematic.patch', args: { projectDir: root, prompt } },
+      services(registry, validateProjectImpl)
+    );
+  }
+
+  async function approve(patchId, validateProjectImpl, extra = {}) {
+    return dispatchToolCall(
+      {
+        name: 'schematic.patch',
+        args: {
+          projectDir: root,
+          approved: true,
+          patchId,
+          passed: true,
+          validation: { ok: true, status: 'passed', skipped: false, erc: { errorCount: 0 } },
+          ...extra
+        }
+      },
+      services(registry, validateProjectImpl)
+    );
+  }
+
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir: root,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    const specPath = generated.files.spec;
+    const before = await readFile(specPath, 'utf8');
+
+    const nullPreview = await preview(`${base} null verifier.`, nullErc);
+    assert.equal(nullPreview.ok, true, JSON.stringify(nullPreview));
+    assert.equal(nullPreview.result.candidateVerification.erc.status, 'missing');
+    assert.notEqual(nullPreview.result.candidateVerification.erc.skipped, true);
+    const nullApproved = await approve(nullPreview.result.patchId, nullErc, { ercOverride: 'skipped' });
+    assert.equal(nullApproved.ok, false);
+    assert.equal(nullApproved.error.code, 'ERC_BLOCKED');
+    assert.match(nullApproved.error.message, /no ERC result/i);
+    assert.equal(await readFile(specPath, 'utf8'), before);
+
+    const undefinedPreview = await preview(`${base} undefined verifier.`, undefinedErc);
+    assert.equal(undefinedPreview.result.candidateVerification.erc.status, 'missing');
+    assert.notEqual(undefinedPreview.result.candidateVerification.erc.skipped, true);
+    const undefinedApproved = await approve(undefinedPreview.result.patchId, undefinedErc, { ercOverride: 'skipped' });
+    assert.equal(undefinedApproved.ok, false);
+    assert.equal(undefinedApproved.error.code, 'ERC_BLOCKED');
+    assert.match(undefinedApproved.error.message, /no ERC result/i);
+
+    const okPreview = await preview(`${base} ok without a count.`, okOnly);
+    assert.notEqual(okPreview.result.candidateVerification.erc.status, 'passed');
+    const okApproved = await approve(okPreview.result.patchId, okOnly, { ercOverride: 'skipped' });
+    assert.equal(okApproved.ok, false);
+    assert.equal(okApproved.error.code, 'ERC_BLOCKED');
+    assert.equal(await readFile(specPath, 'utf8'), before);
+
+    const errorPreview = await preview(`${base} with a power LED.`, errors);
+    assert.equal(errorPreview.result.candidateVerification.erc.status, 'failed');
+    const errorApproved = await approve(errorPreview.result.patchId, errors, { ercOverride: 'skipped' });
+    assert.equal(errorApproved.ok, false);
+    assert.equal(errorApproved.error.code, 'ERC_BLOCKED');
+    assert.equal(await readFile(specPath, 'utf8'), before);
+
+    const skippedPreview = await preview(`${base} with a status LED.`, skippedErc);
+    assert.equal(skippedPreview.result.candidateVerification.erc.skipped, true);
+    assert.notEqual(skippedPreview.result.candidateVerification.erc.status, 'passed');
+    const skippedBlocked = await approve(skippedPreview.result.patchId, skippedErc);
+    assert.equal(skippedBlocked.ok, false);
+    assert.equal(skippedBlocked.error.code, 'ERC_BLOCKED');
+    const skippedApplied = await approve(skippedPreview.result.patchId, skippedErc, { ercOverride: 'skipped' });
+    assert.equal(skippedApplied.ok, true, JSON.stringify(skippedApplied));
+    assert.equal(skippedApplied.result.applied, true);
+
+    const provenPreview = await preview(`${base} with a boot LED.`, proven);
+    assert.equal(provenPreview.result.candidateVerification.erc.status, 'passed');
+    const provenApplied = await approve(provenPreview.result.patchId, proven);
+    assert.equal(provenApplied.ok, true, JSON.stringify(provenApplied));
+    assert.equal(provenApplied.result.applied, true);
+  } finally {
+    registry.disposeAll();
+    await rm(root, { force: true, recursive: true });
+  }
+});
