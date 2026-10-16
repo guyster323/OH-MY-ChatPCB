@@ -144,7 +144,7 @@ function assertTestConfigNotInRealHome(dir) {
   const insideHome = fromHome === '' || (fromHome !== '' && !fromHome.startsWith('..') && !isAbsolute(fromHome));
   if (!insideHome) return;
   const error = new Error(
-    `Refusing ChatPCB config directory ${resolvedDir} because it is inside the real home ${resolvedHome} while running under node --test. Set XDG_CONFIG_HOME or HOME to a temporary directory.`
+    `Refusing ChatPCB config directory ${resolvedDir} because it is inside the real home ${resolvedHome} while running under node --test. Point HOME at a temporary directory, APPDATA on Windows, or an absolute XDG_CONFIG_HOME on Linux.`
   );
   error.code = TEST_CONFIG_CODE;
   throw error;
@@ -158,18 +158,23 @@ function envPath(value) {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-// XDG_CONFIG_HOME wins on every OS when it is set, so tests can isolate
-// config with one variable. Otherwise Windows uses %APPDATA%\chatpcb (or
-// %USERPROFILE%\AppData\Roaming\chatpcb), macOS uses ~/Library/Application
-// Support/chatpcb, and every other platform uses ~/.config/chatpcb.
+// XDG Base Directory spec: a relative or empty XDG_CONFIG_HOME is invalid.
+function absoluteEnvPath(value) {
+  const candidate = envPath(value);
+  return candidate && isAbsolute(candidate) ? candidate : null;
+}
+
+// XDG_CONFIG_HOME applies only off macOS and Windows, and only when it is
+// absolute. Otherwise an existing macOS or Windows profile would silently
+// move to a different directory. Windows uses %APPDATA%\chatpcb, or
+// %USERPROFILE%\AppData\Roaming\chatpcb when APPDATA is unset. macOS uses
+// ~/Library/Application Support/chatpcb. Every other platform uses
+// $XDG_CONFIG_HOME/chatpcb or ~/.config/chatpcb.
 export function resolveChatGPTConfigDir({
   platform = process.platform,
   env = process.env,
   home
 } = {}) {
-  const xdg = envPath(env.XDG_CONFIG_HOME);
-  if (xdg) return join(xdg, 'chatpcb');
-
   const homeDir = () => home ?? homedir();
   if (platform === 'win32') {
     const appData = envPath(env.APPDATA);
@@ -178,6 +183,8 @@ export function resolveChatGPTConfigDir({
   if (platform === 'darwin') {
     return join(homeDir(), 'Library', 'Application Support', 'chatpcb');
   }
+  const xdg = absoluteEnvPath(env.XDG_CONFIG_HOME);
+  if (xdg) return join(xdg, 'chatpcb');
   return join(homeDir(), '.config', 'chatpcb');
 }
 

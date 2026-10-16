@@ -37,7 +37,7 @@ import { createEnvelope } from '../src/runtime/envelope.js';
 import { parseProviderMessage, validateProviderToolCall } from '../src/runtime/provider-process.js';
 import { PROVIDER_ALLOWED_TOOLS } from '../src/shared/constants.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
-import { isolateHome } from './isolate-home.js';
+import { applyIsolatedConfigEnv, isolateHome } from './isolate-home.js';
 
 const originalFetch = globalThis.fetch;
 const originalEnv = {
@@ -113,7 +113,21 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
 
   it('keeps ChatGPT config writes in the temporary home', async () => {
     const id = await getOrCreateHostId();
-    const hostPath = path.join(resolveChatGPTConfigDir(), 'chatgpt-host-id.txt');
+    const configDir = resolveChatGPTConfigDir();
+    const expected = resolveChatGPTConfigDir({
+      platform: process.platform,
+      home: homeIsolation.root,
+      env: {
+        HOME: process.env.HOME,
+        USERPROFILE: process.env.USERPROFILE,
+        APPDATA: process.env.APPDATA,
+        LOCALAPPDATA: process.env.LOCALAPPDATA,
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME
+      }
+    });
+    assert.equal(configDir, expected);
+    assert.equal(configPathInside(configDir, homeIsolation.root), true);
+    const hostPath = path.join(configDir, 'chatgpt-host-id.txt');
     assert.equal((await readFile(hostPath, 'utf8')).trim(), id);
     const realHome = userInfo().homedir;
     assert.equal(configPathInside(hostPath, realHome), false);
@@ -128,16 +142,18 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       APPDATA: process.env.APPDATA,
       LOCALAPPDATA: process.env.LOCALAPPDATA
     };
+    const expectedDir = (env, home) => resolveChatGPTConfigDir({
+      platform: process.platform,
+      home,
+      env
+    });
     try {
       process.env.HOME = realHome;
       process.env.USERPROFILE = realHome;
       delete process.env.XDG_CONFIG_HOME;
       delete process.env.APPDATA;
-      const nativeDir = resolveChatGPTConfigDir({
-        platform: process.platform,
-        home: realHome,
-        env: {}
-      });
+      delete process.env.LOCALAPPDATA;
+      const nativeDir = expectedDir({}, realHome);
       assert.equal(resolveChatGPTConfigDir(), nativeDir);
       assert.equal(configPathInside(nativeDir, realHome), true);
       await assert.rejects(loadCredentials(), (error) => {
@@ -148,27 +164,56 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         return true;
       });
 
-      // A sibling of the real home stays outside the profile on every OS,
-      // including Windows where the temp directory lives under the profile.
+      // Blank and relative XDG values stay on the native directory, so the
+      // guard still rejects the real home on every OS.
+      for (const xdg of ['', '  ', 'rel/cfg']) {
+        process.env.XDG_CONFIG_HOME = xdg;
+        const ignored = expectedDir({ XDG_CONFIG_HOME: xdg }, realHome);
+        assert.equal(ignored, nativeDir, JSON.stringify(xdg));
+        assert.equal(resolveChatGPTConfigDir(), nativeDir);
+        assert.equal(configPathInside(ignored, realHome), true);
+        await assert.rejects(
+          loadCredentials(),
+          (error) => error.code === 'CHATPCB_TEST_CONFIG_HOME'
+        );
+      }
+
+      // An absolute XDG path outside the profile overrides only where the
+      // resolver honors XDG. macOS and Windows keep the native directory
+      // inside the real home, and the guard still fires.
       const outsideXdg = `${realHome}-chatpcb-sibling`;
       process.env.XDG_CONFIG_HOME = outsideXdg;
-      const xdgDir = resolveChatGPTConfigDir({
-        platform: process.platform,
-        home: realHome,
-        env: { XDG_CONFIG_HOME: outsideXdg }
-      });
+      const xdgDir = expectedDir({ XDG_CONFIG_HOME: outsideXdg }, realHome);
       assert.equal(resolveChatGPTConfigDir(), xdgDir);
-      assert.equal(configPathInside(xdgDir, realHome), false);
-      assert.equal(await loadCredentials(), null);
+      if (process.platform === 'darwin' || process.platform === 'win32') {
+        assert.equal(xdgDir, nativeDir);
+        assert.equal(configPathInside(xdgDir, realHome), true);
+        await assert.rejects(
+          loadCredentials(),
+          (error) => error.code === 'CHATPCB_TEST_CONFIG_HOME'
+        );
+      } else {
+        assert.equal(path.isAbsolute(outsideXdg), true);
+        assert.equal(configPathInside(xdgDir, realHome), false);
+        assert.equal(await loadCredentials(), null);
+      }
 
       delete process.env.XDG_CONFIG_HOME;
+      let escapedHome = realHome;
       if (process.platform === 'win32') {
         process.env.APPDATA = `${realHome}-chatpcb-appdata`;
       } else {
-        process.env.HOME = `${realHome}-chatpcb-home`;
-        process.env.USERPROFILE = process.env.HOME;
+        escapedHome = `${realHome}-chatpcb-home`;
+        process.env.HOME = escapedHome;
+        process.env.USERPROFILE = escapedHome;
       }
-      const escaped = resolveChatGPTConfigDir();
+      const escaped = expectedDir({
+        HOME: process.env.HOME,
+        USERPROFILE: process.env.USERPROFILE,
+        APPDATA: process.env.APPDATA,
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME
+      }, escapedHome);
+      assert.equal(resolveChatGPTConfigDir(), escaped);
       assert.equal(configPathInside(escaped, realHome), false);
       assert.equal(await loadCredentials(), null);
     } finally {
@@ -978,12 +1023,13 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       const authModuleUrl = new URL('../src/runtime/auth/chatgpt-auth.js', import.meta.url).href;
       await writeFile(scriptPath, graceExitScript({ authModuleUrl, portStart }));
       const started = Date.now();
+      // Inherit the temporary home. macOS and Windows ignore XDG_CONFIG_HOME,
+      // so the child follows HOME and APPDATA rather than an XDG override.
       const child = spawn(process.execPath, [scriptPath], {
         env: {
           ...process.env,
           CHATPCB_CHATGPT_AUTH_TIMEOUT_MS: '50',
-          CHATPCB_CHATGPT_AUTH_GRACE_MS: '60000',
-          XDG_CONFIG_HOME: dir
+          CHATPCB_CHATGPT_AUTH_GRACE_MS: '60000'
         },
         stdio: ['ignore', 'pipe', 'pipe']
       });
@@ -3685,16 +3731,15 @@ function childClose(child, timeoutMs) {
   });
 }
 
-const CONFIG_ENV_KEYS = ['XDG_CONFIG_HOME', 'APPDATA', 'LOCALAPPDATA'];
+const CONFIG_ENV_KEYS = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'APPDATA', 'LOCALAPPDATA'];
 
-// dir is the temporary XDG_CONFIG_HOME. Credential files live in
-// resolveChatGPTConfigDir(), which follows that variable on every OS.
+// dir is a temporary home. Credential files live in resolveChatGPTConfigDir():
+// the native directory under HOME, USERPROFILE, and APPDATA. XDG_CONFIG_HOME
+// is set only on platforms that honor an absolute value.
 async function withConfig(fn) {
   const dir = await mkdtemp(path.join(tmpdir(), 'chatpcb-cgpt-'));
   const saved = new Map(CONFIG_ENV_KEYS.map((key) => [key, process.env[key]]));
-  process.env.XDG_CONFIG_HOME = dir;
-  process.env.APPDATA = path.join(dir, 'AppData', 'Roaming');
-  process.env.LOCALAPPDATA = path.join(dir, 'AppData', 'Local');
+  applyIsolatedConfigEnv(dir);
   try {
     return await fn(dir);
   } finally {
