@@ -15,12 +15,17 @@ import {
   renderSpiceFixture
 } from '../kicad/project-generator.js';
 import { reviewCircuitReadiness } from './review-project.js';
+import { assertInspectionTree } from './inspection-copy.js';
 
 export async function generateMcuPeripheralProject({ projectDir, prompt, projectName = 'chatpcb_mcu_peripheral' }) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
 
+  await mkdir(projectDir, { recursive: true });
+  // Same rule as inspection: links inside the project are rejected, ancestor
+  // aliases of the project root are not.
+  await assertInspectionTree(projectDir);
   const conversation = await loadCircuitConversation(projectDir).catch(() => null);
   const spec = applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation);
   const schematic = buildMcuSchematicAst(spec);
@@ -37,7 +42,6 @@ export async function generateMcuPeripheralProject({ projectDir, prompt, project
       : spec.boardProfile,
     schematic
   };
-  await mkdir(projectDir, { recursive: true });
 
   const files = {
     project: path.join(projectDir, `${baseName}.kicad_pro`),

@@ -32,6 +32,9 @@ jobs:
       
       - name: Run lint
         run: npm run lint
-      
+
+      # KiCad is not installed on CI runners. Tests use the bundled fixture
+      # libraries under tests/fixtures/kicad-libraries. kicad-cli is faked in
+      # unit tests, or skipped with a reason when a real binary would be required.
       - name: Run tests
         run: npm test

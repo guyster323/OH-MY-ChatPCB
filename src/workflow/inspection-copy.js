@@ -8,31 +8,11 @@ function unsafe(entry) {
   return error;
 }
 
-// Check every component: lstat(projectDir) alone misses an ancestor junction.
-async function assertUnlinkedAncestors(directory) {
-  let current = path.resolve(directory);
-  while (true) {
-    const info = await lstat(current);
-    if (info.isSymbolicLink() || !info.isDirectory()) throw unsafe(current);
-    const parent = path.dirname(current);
-    if (parent === current) return;
-    current = parent;
-  }
-}
-
-export async function assertInspectionTree(projectDir, { allowedWorkspaceRoot } = {}) {
-  const root = assertSafeProjectDir(projectDir);
-  await assertUnlinkedAncestors(root);
-  const actualRoot = assertSafeProjectDir(await realpath(root));
-  if (allowedWorkspaceRoot) {
-    const actualWorkspace = await realpath(allowedWorkspaceRoot);
-    if (actualRoot !== actualWorkspace && !isInside(actualWorkspace, actualRoot)) {
-      const error = new Error('Inspection project must remain inside the configured workspace.');
-      error.code = 'UNSAFE_PROJECT_DIR';
-      throw error;
-    }
-  }
-  const pending = [root];
+// Symlinks inside the project tree are rejected. Ancestors of the trusted
+// root are not: macOS os.tmpdir() is under /var, and /var is a symlink to
+// /private/var. realpath canonicalizes that root before the walk.
+async function assertUnlinkedProjectTree(canonicalRoot) {
+  const pending = [canonicalRoot];
   while (pending.length) {
     const directory = pending.pop();
     const info = await lstat(directory);
@@ -44,19 +24,41 @@ export async function assertInspectionTree(projectDir, { allowedWorkspaceRoot } 
       if (stat.isDirectory()) pending.push(entryPath);
     }
   }
+}
+
+export async function assertInspectionTree(projectDir, { allowedWorkspaceRoot } = {}) {
+  const root = assertSafeProjectDir(projectDir, allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {});
+  // The project directory entry itself must be a real directory. lstat does
+  // not follow the final component, so a symlinked project root is rejected
+  // without walking ancestors above the trusted root.
+  const rootInfo = await lstat(root);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw unsafe(root);
+
+  const canonicalRoot = await realpath(root);
+  const actualRoot = assertSafeProjectDir(canonicalRoot);
+  if (allowedWorkspaceRoot) {
+    const actualWorkspace = await realpath(allowedWorkspaceRoot);
+    if (actualRoot !== actualWorkspace && !isInside(actualWorkspace, actualRoot)) {
+      const error = new Error('Inspection project must remain inside the configured workspace.');
+      error.code = 'UNSAFE_PROJECT_DIR';
+      throw error;
+    }
+  }
+  await assertUnlinkedProjectTree(canonicalRoot);
   return root;
 }
 
 export async function copyInspectionTree(projectDir, destination) {
-  // User-supplied project paths are checked as given. Only the internally created
-  // destination parent is canonicalized so OS temp aliases do not reject the copy.
-  await assertInspectionTree(projectDir);
+  // Check the project tree, then copy from its canonical path so an ancestor
+  // alias (OS temp dir, macOS /var) is not re-resolved during the copy.
+  const checkedRoot = await assertInspectionTree(projectDir);
+  const canonicalSource = await realpath(checkedRoot);
   const resolvedDestination = path.resolve(destination);
   const canonicalParent = await realpath(path.dirname(resolvedDestination));
   const canonicalDestination = path.join(canonicalParent, path.basename(resolvedDestination));
   // Keep dereference false. A link introduced during copying is rejected below,
   // before any tool receives the copy. Regular files are copied, never hardlinked.
-  await cp(projectDir, canonicalDestination, { recursive: true, dereference: false, errorOnExist: true, force: false });
+  await cp(canonicalSource, canonicalDestination, { recursive: true, dereference: false, errorOnExist: true, force: false });
   await assertInspectionTree(canonicalDestination);
   return canonicalDestination;
 }

@@ -728,7 +728,6 @@ function deriveWorkflow() {
 function syncWorkflow() {
   const { active, done, mode } = deriveWorkflow();
   const activeIndex = workflowIndex(active);
-  const layoutReviewIndex = workflowIndex('layout.review');
   const layoutUnlocked = done.has('circuit.review') || activeIndex >= workflowIndex('layout.concept');
   const fabUnlocked = done.has('layout.review') || workflowFlags.layoutReviewed;
 

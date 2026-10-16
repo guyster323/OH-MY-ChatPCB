@@ -137,7 +137,8 @@ async function getKicadVersion({ projectDir, kicadCliPath, excludeProjectDir }) 
 
 function omitEphemeralReport(result, { projectDir, validationProjectDir }) {
   if (!result || typeof result !== 'object') return result;
-  const { report, ...stableResult } = result;
+  const stableResult = { ...result };
+  delete stableResult.report;
   return replaceEphemeralPaths(stableResult, { projectDir, validationProjectDir });
 }
 

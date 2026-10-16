@@ -293,7 +293,7 @@ const FAILURES = [
       return {
         fsImpl: {
           ...realFs(),
-          async rm(target, options) {
+          async rm(_target, _options) {
             const error = new Error('injected delete failure');
             error.code = 'EPERM';
             throw error;

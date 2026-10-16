@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -67,18 +68,42 @@ export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) 
   }
 
   const resolvedProjectDir = path.resolve(projectDir);
-  if (isProtectedPath(resolvedProjectDir)) {
+  const canonicalProjectDir = canonicalPath(resolvedProjectDir);
+  if (isProtectedPath(resolvedProjectDir) || isProtectedPath(canonicalProjectDir)) {
     throw typedError('UNSAFE_PROJECT_DIR', `Refusing to use protected path as a project directory: ${resolvedProjectDir}`);
   }
 
   if (allowedWorkspaceRoot) {
-    const resolvedWorkspaceRoot = path.resolve(allowedWorkspaceRoot);
-    if (resolvedProjectDir !== resolvedWorkspaceRoot && !isInside(resolvedWorkspaceRoot, resolvedProjectDir)) {
+    // Compare canonical paths so a symlink ancestor of the workspace (macOS
+    // /var -> /private/var, or an alias of the workspace root) is the same
+    // directory on both sides. A link that escapes the workspace still fails.
+    const canonicalWorkspaceRoot = canonicalPath(path.resolve(allowedWorkspaceRoot));
+    if (canonicalProjectDir !== canonicalWorkspaceRoot && !isInside(canonicalWorkspaceRoot, canonicalProjectDir)) {
       throw typedError('UNSAFE_PROJECT_DIR', 'Project directory must stay inside the allowed workspace root.');
     }
   }
 
   return resolvedProjectDir;
+}
+
+// realpath the longest existing prefix, then rejoin any missing tail.
+// Ancestors of the trusted root may be symlinks; callers apply link checks
+// only inside the project tree.
+function canonicalPath(candidate) {
+  const missing = [];
+  let current = candidate;
+  while (true) {
+    try {
+      const real = realpathSync(current);
+      return missing.reduceRight((dir, name) => path.join(dir, name), real);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return candidate;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 export async function readChatPcbManifest(projectDir) {

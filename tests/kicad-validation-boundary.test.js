@@ -10,8 +10,11 @@ import { validateProject } from '../src/workflow/validate-project.js';
 import { validateBoard } from '../src/workflow/validate-board.js';
 import { copyInspectionTree } from '../src/workflow/inspection-copy.js';
 import { applySchematicPatch } from '../src/workflow/schematic-patch.js';
+import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { assertSafeProjectDir } from '../src/workflow/project-workspace.js';
 import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 const clean = async () => ({ ok: true });
 test('ERC timeout is a validation failure, not a successful unavailable-tool skip', async () => {
@@ -71,7 +74,7 @@ test('provider validation aliases cannot override trusted KiCad configuration', 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-for (const kind of ['root', 'ancestor', 'child-directory', 'report-file']) {
+for (const kind of ['root', 'child-directory', 'report-file']) {
   test('inspection rejects ' + kind + ' links before toolchain or validation', async (t) => {
     const { root, projectDir } = await fixture();
     const outside = path.join(root, 'outside');
@@ -81,10 +84,10 @@ for (const kind of ['root', 'ancestor', 'child-directory', 'report-file']) {
     let inspected = projectDir;
     let linkPath;
     try {
-      if (kind === 'root' || kind === 'ancestor') {
+      if (kind === 'root') {
         linkPath = path.join(root, 'alias');
-        await symlink(kind === 'root' ? projectDir : root, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
-        inspected = kind === 'root' ? linkPath : path.join(linkPath, 'project');
+        await symlink(projectDir, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+        inspected = linkPath;
       } else {
         linkPath = path.join(projectDir, kind === 'report-file' ? 'chatpcb-erc.json' : 'library');
         await symlink(kind === 'report-file' ? marker : outside, linkPath,
@@ -204,7 +207,7 @@ test('inspection copy accepts OS temp aliases after canonicalizing the private r
   }
 });
 
-test('user-supplied project and ancestor links remain rejected after temp-root canonicalization', async (t) => {
+test('user-supplied project directory links remain rejected after temp-root canonicalization', async (t) => {
   const { root, projectDir } = await fixture();
   const alias = path.join(root, 'user-alias');
   try {
@@ -393,6 +396,79 @@ test('patch candidate ERC excludes the original project from KiCad discovery', a
     assert.notEqual(captured[0].projectDir, projectDir);
     assert.match(captured[0].projectDir, /chatpcb-native-proposal-/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('inspection and generation allow a symlink ancestor and still reject links inside the project', async (t) => {
+  const base = await mkdtemp(path.join(tmpdir(), 'chatpcb-alias-ancestor-'));
+  const real = path.join(base, 'real');
+  const alias = path.join(base, 'alias');
+  const outside = path.join(base, 'outside');
+  await mkdir(real);
+  await mkdir(outside);
+  const projectDir = path.join(alias, 'project');
+  const previousLibs = setKicadLibraryEnv({
+    symbols: FIXTURE_LIBS.symbols,
+    footprints: FIXTURE_LIBS.footprints
+  });
+  let linkInside;
+  try {
+    await symlink(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const generated = await generateMcuPeripheralProject({
+      projectDir,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    });
+    assert.match(generated.files.schematic, /\.kicad_sch$/);
+    assert.match(await readFile(path.join(real, 'project', 'chatpcb_mcu_peripheral.kicad_sch'), 'utf8'), /\(kicad_sch/);
+
+    const inspected = await inspectProject({
+      projectDir,
+      getKicadVersionImpl: async () => null,
+      validateProjectImpl: clean,
+      validateBoardImpl: clean
+    });
+    assert.equal(inspected.ok, true);
+
+    assert.equal(assertSafeProjectDir(projectDir, { allowedWorkspaceRoot: real }), path.resolve(projectDir));
+    const confined = await dispatchToolCall(
+      { name: 'project.inspect', args: { projectDir } },
+      {
+        allowedWorkspaceRoot: real,
+        inspectProjectImpl: async () => ({ ok: true, inspection: { projectDigest: 'aliased' } })
+      }
+    );
+    assert.equal(confined.ok, true);
+    assert.equal(confined.result.inspection.projectDigest, 'aliased');
+
+    const escape = path.join(real, 'escape');
+    await symlink(outside, escape, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => assertSafeProjectDir(escape, { allowedWorkspaceRoot: real }), { code: 'UNSAFE_PROJECT_DIR' });
+    await rm(escape, { force: true, recursive: true });
+
+    linkInside = path.join(projectDir, 'linked-library');
+    await symlink(outside, linkInside, process.platform === 'win32' ? 'junction' : 'dir');
+    let calls = 0;
+    const mustNotRun = async () => { calls += 1; return { ok: true }; };
+    await assert.rejects(inspectProject({
+      projectDir,
+      getKicadVersionImpl: mustNotRun,
+      validateProjectImpl: mustNotRun,
+      validateBoardImpl: mustNotRun
+    }), { code: 'UNSAFE_INSPECTION_LINK' });
+    await assert.rejects(validateProject({ projectDir }), { code: 'UNSAFE_INSPECTION_LINK' });
+    await assert.rejects(generateMcuPeripheralProject({
+      projectDir,
+      prompt: 'RP2040 board with USB-C power and I2C connector.'
+    }), { code: 'UNSAFE_INSPECTION_LINK' });
+    assert.equal(calls, 0);
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'ENOTSUP') t.skip('Symlink creation unavailable');
+    else throw error;
+  } finally {
+    restoreKicadLibraryEnv(previousLibs);
+    if (linkInside) await rm(linkInside, { force: true, recursive: true });
+    await rm(alias, { force: true, recursive: true });
+    await rm(base, { force: true, recursive: true });
+  }
 });
 
 test('patch preview works when the internal temp root is an OS alias', async (t) => {
