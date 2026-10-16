@@ -896,10 +896,13 @@ function ercSourceHasSignal(source) {
 // Apply follows only the candidate patch: candidateVerification.erc, or the
 // preview validation when that is the recorded candidate result. The open
 // file's inspection ERC must not block a patch that fixes those errors.
+// A result from a different patchId is ignored, so a stale pass cannot open Apply.
 function candidateErcSource() {
-  const requestErc = lastRequestResult?.candidateVerification?.erc;
+  const result = lastRequestResult;
+  if (!result || result.patchId !== patchApprovalState.patchId) return null;
+  const requestErc = result.candidateVerification?.erc;
   if (ercSourceHasSignal(requestErc)) return requestErc;
-  const requestValidation = lastRequestResult?.validation;
+  const requestValidation = result.validation;
   if (ercSourceHasSignal(requestValidation)) return requestValidation;
   return null;
 }
@@ -1898,8 +1901,9 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
       activeProjectEl.hidden = false;
       if (projectSetupEl) projectSetupEl.hidden = true;
       setRequestBusy(false);
-      lastRequestResult = {
+      lastRequestResult = state.staleRequest ?? {
         operation: state.operation || 'generated',
+        patchId: state.patchId ?? 'patch_test',
         validation: state.validation ?? null,
         candidateVerification: state.candidateVerification ?? null,
         conversation: state.conversation || null

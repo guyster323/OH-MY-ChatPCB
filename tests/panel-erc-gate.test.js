@@ -184,6 +184,40 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(missing.whyText, en['patch.apply.blocked-missing']);
     assert.deepEqual(missing.sent, []);
 
+    const candidateFailed = await showPatch(page, {
+      validation: passedValidation,
+      candidateVerification: {
+        erc: { ok: false, skipped: false, status: 'failed', erc: { errorCount: 2, warningCount: 0 } }
+      }
+    }, 'apply');
+    assert.equal(candidateFailed.ariaDisabled, 'true');
+    assert.equal(candidateFailed.overrideHidden, true);
+    assert.deepEqual(candidateFailed.sent, []);
+
+    const candidateMissing = await showPatch(page, {
+      validation: {},
+      candidateVerification: null
+    }, 'apply');
+    assert.equal(candidateMissing.ariaDisabled, 'true');
+    assert.equal(candidateMissing.overrideHidden, true);
+    assert.equal(candidateMissing.whyText, en['patch.apply.blocked-missing']);
+    assert.deepEqual(candidateMissing.sent, []);
+
+    const staleCandidate = await showPatch(page, {
+      patchId: 'patch-new',
+      validation: { ok: false, skipped: false, erc: { errorCount: 2 } },
+      staleRequest: {
+        patchId: 'patch-old',
+        validation: passedValidation,
+        candidateVerification: {
+          erc: { ok: true, skipped: false, status: 'passed', erc: { errorCount: 0, warningCount: 0 } }
+        }
+      }
+    }, 'apply');
+    assert.equal(staleCandidate.ariaDisabled, 'true');
+    assert.equal(staleCandidate.overrideHidden, true);
+    assert.deepEqual(staleCandidate.sent, []);
+
     const faked = await showPatch(page, { validation: { passed: true } }, 'apply');
     assert.equal(faked.ariaDisabled, null);
     assert.equal(faked.disabled, false);
