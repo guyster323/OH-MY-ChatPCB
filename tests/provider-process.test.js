@@ -811,6 +811,59 @@ test('Windows shim kill command is taskkill /T /F with an args array', () => {
   assert.equal(posix.escalateSignal, 'SIGKILL');
 });
 
+test('SIGTERM on the parent kills a grandchild after the provider leader has exited', { skip: process.platform === 'win32' }, async () => {
+  await assertLeaderlessGroupKilled('SIGTERM');
+});
+
+test('SIGHUP on the parent kills a grandchild after the provider leader has exited', { skip: process.platform === 'win32' }, async () => {
+  await assertLeaderlessGroupKilled('SIGHUP');
+});
+
+test('an extra SIGINT listener on the parent runs once', { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-sigint-once-'));
+  const providerScript = path.join(root, 'provider.cjs');
+  const parentScript = path.join(root, 'parent.mjs');
+  const pidFile = path.join(root, 'pid.json');
+  const countFile = path.join(root, 'count.txt');
+  await writeFile(providerScript, holdProviderScript(), 'utf8');
+  await writeFile(parentScript, sigintOnceParentScript(), 'utf8');
+
+  const parent = spawn(process.execPath, [parentScript, providerScript, pidFile, countFile], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stderr = '';
+  parent.stderr?.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  parent.stdout?.on('data', () => {});
+  let providerPid = null;
+
+  try {
+    const info = await waitForJson(pidFile);
+    providerPid = info.pid;
+    assert.equal(typeof providerPid, 'number');
+    process.kill(providerPid, 0);
+
+    const exited = waitForProcessExit(parent, 2000);
+    process.kill(parent.pid, 'SIGINT');
+    const result = await exited;
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+    assert.equal(await readFile(countFile, 'utf8'), '1');
+  } catch (error) {
+    error.message += `\nparent stderr: ${stderr}`;
+    throw error;
+  } finally {
+    try {
+      if (parent.exitCode === null && parent.signalCode === null) process.kill(parent.pid, 'SIGKILL');
+    } catch {
+      // The parent has already exited.
+    }
+    if (providerPid) forceKillTree(providerPid);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('SIGINT on the parent kills detached provider and grandchild processes', { skip: process.platform === 'win32' }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-sigint-orphan-'));
   const providerScript = path.join(root, 'provider.cjs');
@@ -964,6 +1017,121 @@ async function assertProcessTreeStopped({ timeoutMs, killGraceMs, signal, expect
     await captured;
     await rm(root, { force: true, recursive: true });
   }
+}
+
+async function assertLeaderlessGroupKilled(signal) {
+  const root = await mkdtemp(path.join(tmpdir(), `chatpcb-${signal.toLowerCase()}-orphan-`));
+  const providerScript = path.join(root, 'provider.cjs');
+  const parentScript = path.join(root, 'parent.mjs');
+  const pidFile = path.join(root, 'pids.json');
+  const readyFile = path.join(root, 'ready.json');
+  await writeFile(providerScript, exitingLeaderProviderScript(), 'utf8');
+  await writeFile(parentScript, exitingLeaderParentScript(), 'utf8');
+
+  // The signal has to hit the process that spawned the detached provider, not this test runner.
+  // The ready file is written only after that parent has observed the leader exit, so the group
+  // id would already have been dropped by the old leader-exit cleanup.
+  const parent = spawn(process.execPath, [parentScript, providerScript, pidFile, readyFile], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stderr = '';
+  parent.stderr?.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  parent.stdout?.on('data', () => {});
+  let pids = null;
+
+  try {
+    await waitForJson(readyFile);
+    pids = JSON.parse(await readFile(pidFile, 'utf8'));
+    assert.equal(typeof pids.provider, 'number');
+    assert.equal(typeof pids.grandchild, 'number');
+    assert.throws(() => process.kill(pids.provider, 0), { code: 'ESRCH' });
+    process.kill(pids.grandchild, 0);
+
+    const exited = waitForProcessExit(parent, 2000);
+    process.kill(parent.pid, signal);
+    const result = await exited;
+    assert.equal(result.code, null);
+    assert.equal(result.signal, signal);
+    await assertPidGone(pids.grandchild);
+  } catch (error) {
+    error.message += `\nparent stderr: ${stderr}`;
+    throw error;
+  } finally {
+    try {
+      if (parent.exitCode === null && parent.signalCode === null) process.kill(parent.pid, 'SIGKILL');
+    } catch {
+      // The parent has already exited.
+    }
+    if (pids?.provider) forceKillTree(pids.provider);
+    if (pids?.grandchild) forceKillPid(pids.grandchild);
+    await rm(root, { force: true, recursive: true });
+  }
+}
+
+function exitingLeaderParentScript() {
+  const moduleUrl = new URL('../src/runtime/provider-process.js', import.meta.url).href;
+  return [
+    `import { writeFileSync } from 'node:fs';`,
+    `import { runProviderProcess } from ${JSON.stringify(moduleUrl)};`,
+    'const [providerScript, pidFile, readyFile] = process.argv.slice(2);',
+    'await runProviderProcess({',
+    '  command: process.execPath,',
+    '  args: [providerScript, pidFile],',
+    '  timeoutMs: 30000',
+    '});',
+    "writeFileSync(readyFile, JSON.stringify({ ready: true }));",
+    'setInterval(() => {}, 1000);',
+    ''
+  ].join('\n');
+}
+
+function exitingLeaderProviderScript() {
+  return [
+    "const { spawn } = require('node:child_process');",
+    "const fs = require('node:fs');",
+    'const pidFile = process.argv[2];',
+    'const grandchild = [',
+    "  'process.on(\"SIGTERM\", () => {});',",
+    "  'process.on(\"SIGINT\", () => {});',",
+    "  'process.on(\"SIGHUP\", () => {});',",
+    "  'setInterval(() => {}, 1000);'",
+    "].join('');",
+    "const child = spawn(process.execPath, ['-e', grandchild], { stdio: 'ignore' });",
+    'fs.writeFileSync(pidFile, JSON.stringify({ provider: process.pid, grandchild: child.pid }));',
+    'process.exit(0);',
+    ''
+  ].join('\n');
+}
+
+function sigintOnceParentScript() {
+  const moduleUrl = new URL('../src/runtime/provider-process.js', import.meta.url).href;
+  return [
+    `import { writeFileSync } from 'node:fs';`,
+    `import { runProviderProcess } from ${JSON.stringify(moduleUrl)};`,
+    'const [providerScript, pidFile, countFile] = process.argv.slice(2);',
+    'let calls = 0;',
+    "process.on('SIGINT', () => {",
+    '  calls += 1;',
+    '  writeFileSync(countFile, String(calls));',
+    '});',
+    'await runProviderProcess({',
+    '  command: process.execPath,',
+    '  args: [providerScript, pidFile],',
+    '  timeoutMs: 30000',
+    '});',
+    ''
+  ].join('\n');
+}
+
+function holdProviderScript() {
+  return [
+    "const fs = require('node:fs');",
+    'fs.writeFileSync(process.argv[2], JSON.stringify({ pid: process.pid }));',
+    'setInterval(() => {}, 1000);',
+    ''
+  ].join('\n');
 }
 
 function sigintParentScript() {

@@ -9,8 +9,9 @@ import { PROMPT_FILE_PLACEHOLDER } from './provider-registry.js';
 
 const DEFAULT_ALLOWED_TOOL_NAMES = new Set(['schematic.generate', 'project.create', 'schematic.patch', 'project.inspect', 'validate.erc', 'simulate.spice']);
 const DEFAULT_KILL_GRACE_MS = 2000;
-// Detached children are their own process group, so SIGINT/SIGTERM sent to this
-// process does not reach them. The set holds group-leader pids still running.
+// Detached children are their own process group, so SIGINT/SIGTERM/SIGHUP sent
+// to this process does not reach them. The set holds group ids until the group
+// itself is gone, which can be after the leader has exited.
 const activeProviderGroups = new Set();
 let providerShutdownHandlersInstalled = false;
 
@@ -641,25 +642,43 @@ function terminateProviderProcess(child, { platform, windowsShim, killGraceMs })
 function trackProviderGroup(child) {
   const pid = child?.pid;
   if (!Number.isInteger(pid) || pid <= 0) return;
+  pruneDeadProviderGroups();
   activeProviderGroups.add(pid);
   child.once('exit', () => {
-    activeProviderGroups.delete(pid);
+    // The leader can exit while grandchildren still share its process group.
+    // processGroupAlive is kill(-pid, 0); drop the id only when that reports the group gone.
+    if (!processGroupAlive(pid)) activeProviderGroups.delete(pid);
   });
+}
+
+function pruneDeadProviderGroups() {
+  // Windows cannot probe a process group with kill(-pid, 0). Those pids are
+  // removed when the leader exits, because processGroupAlive is always false there.
+  if (process.platform === 'win32') return;
+  for (const pid of [...activeProviderGroups]) {
+    if (!processGroupAlive(pid)) activeProviderGroups.delete(pid);
+  }
 }
 
 function installProviderShutdownHandlers() {
   if (providerShutdownHandlersInstalled) return;
   providerShutdownHandlersInstalled = true;
 
-  for (const signal of ['SIGINT', 'SIGTERM']) {
+  const signals = ['SIGINT', 'SIGTERM'];
+  if (process.platform !== 'win32') signals.push('SIGHUP');
+
+  for (const signal of signals) {
     const onSignal = () => {
+      // listenerCount still includes this function. Re-raising while another
+      // listener remains delivers the signal again, so the host handler runs twice.
+      // Re-raise only when this was the only listener so the default action still
+      // terminates with the signal's exit status.
+      const onlyListener = process.listenerCount(signal) === 1;
       try {
         killActiveProviderGroups();
       } finally {
-        // Drop this listener and re-raise so the default action keeps the exit status
-        // and any other handlers still run.
         process.removeListener(signal, onSignal);
-        process.kill(process.pid, signal);
+        if (onlyListener) process.kill(process.pid, signal);
       }
     };
     process.on(signal, onSignal);
@@ -674,6 +693,7 @@ function killActiveProviderGroups() {
   for (const pid of [...activeProviderGroups]) {
     killProviderGroupNow(pid);
   }
+  pruneDeadProviderGroups();
 }
 
 function killProviderGroupNow(pid) {
@@ -692,8 +712,9 @@ function killProviderGroupNow(pid) {
 
   try {
     process.kill(-pid, 'SIGKILL');
-  } catch {
-    // ESRCH means the group is already gone.
+  } catch (error) {
+    if (error?.code === 'ESRCH') return;
+    // The group is not signalable. Shutdown still has to finish.
   }
 }
 
