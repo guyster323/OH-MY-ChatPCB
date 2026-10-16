@@ -949,11 +949,20 @@ function reviewStatusText(review) {
   return 'Blocked';
 }
 
+function findingText(finding) {
+  if (typeof finding?.message === 'string') return finding.message;
+  if (finding?.message && typeof finding.message === 'object') {
+    return finding.message.en || finding.message.ko || '';
+  }
+  if (typeof finding?.en === 'string') return finding.en;
+  return String(finding ?? '');
+}
+
 function renderFindingList(listEl, findings = []) {
   listEl.replaceChildren();
   for (const finding of findings) {
     const item = document.createElement('li');
-    item.textContent = finding.message ?? String(finding);
+    item.textContent = findingText(finding);
     listEl.append(item);
   }
   if (findings.length === 0) listEl.append(Object.assign(document.createElement('li'), { textContent: 'None' }));
