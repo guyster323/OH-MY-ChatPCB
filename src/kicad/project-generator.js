@@ -5,6 +5,14 @@ import path from 'node:path';
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
 import { resolveKicadCli } from './kicad-cli.js';
+import {
+  flatpakAppLibraryPaths,
+  flatpakLibraryRoots,
+  flatpakRuntimeLibraryCandidatePaths,
+  setFlatpakLibraryRootsForTests
+} from './flatpak.js';
+
+export { setFlatpakLibraryRootsForTests };
 
 const KICAD_COORDINATE_SCALE = 1;
 const BOARD_LOCAL_TRACE_MAX_MM = 8;
@@ -183,6 +191,9 @@ function boardPlacementFor(componentModel, index, profileMode) {
 }
 
 export function buildMcuSchematicAst(spec) {
+  if (spec.kind === 'discrete-led') {
+    return buildDiscreteLedSchematicAst(spec);
+  }
   if (spec.boardProfile?.kind === 'bms') {
     return buildBmsSchematicAst(spec);
   }
@@ -319,8 +330,8 @@ export function buildMcuSchematicAst(spec) {
 
   if (spec.peripherals.some((peripheral) => peripheral.kind === 'decoupling-network')) {
     components.push(
-      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU 3.3V pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
-      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Buck output 10uF capacitor on the 3.3V rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
+      component('C1', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Local 0.1uF decoupling capacitor near MCU +3V3 pins.', 'Capacitor_SMD:C_0603_1608Metric', { value: '100nF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
+      component('C2', profileMode ? 'Device:C' : 'ChatPCB:DECOUPLING_CAP', 'Buck output 10uF capacitor on the +3V3 rail.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['+3V3', 'GND'], connectedPins: ['+3V3', 'GND'], pinNets: profileMode ? { 1: '+3V3', 2: 'GND' } : undefined }),
       ...(profileMode
         ? [
             component('C3', 'Device:C', 'Buck input 10uF capacitor on VBUS.', 'Capacitor_SMD:C_0603_1608Metric', { value: '10uF', pins: ['VBUS', 'GND'], connectedPins: ['VBUS', 'GND'], pinNets: { 1: 'VBUS', 2: 'GND' } }),
@@ -441,6 +452,126 @@ export function buildMcuSchematicAst(spec) {
     nets: unique(['VBUS', '+3V3', 'GND', ...interfaceNetNames(spec), ...(spec.debug?.nets ?? []), 'RESET', 'BOOT', ...components.flatMap((item) => item.connectedPins ?? [])]).map((name) => ({
       name,
       explanation: explainNet(name)
+    }))
+  };
+}
+
+function powerLibraryHasSymbol(name) {
+  if (!name || /["\\\r\n]/.test(name)) return false;
+  const libraryPath = officialSymbolLibraryPath('power');
+  if (!libraryPath) return false;
+  try {
+    return readFileSync(libraryPath, 'utf8').includes(`(symbol "${name}"`);
+  } catch {
+    return false;
+  }
+}
+
+function discreteSupplySymbol(supplyNet) {
+  if (powerLibraryHasSymbol(supplyNet)) {
+    return {
+      ref: '#PWR01',
+      libId: `power:${supplyNet}`,
+      value: supplyNet,
+      explanation: `${supplyNet} power symbol for the discrete LED supply rail.`
+    };
+  }
+  return {
+    ref: '#PWR01',
+    libId: 'power:VCC',
+    value: supplyNet,
+    explanation: `${supplyNet} supply uses power:VCC because the KiCad power library has no ${supplyNet} symbol. The symbol value is the global net name.`
+  };
+}
+
+function discreteLedNetExplanation(name, supplyNet) {
+  if (name === 'GND') return 'Ground return for the LED cathode and the supply connector.';
+  if (name === supplyNet) return `${supplyNet} supply rail for the discrete LED circuit.`;
+  if (name === 'LED' || /^LED\d+$/.test(name)) {
+    return `${name} anode node between the series resistor and the LED.`;
+  }
+  return explainNet(name);
+}
+
+function discretePowerFlag(ref, netName, explanation) {
+  return component(ref, 'power:PWR_FLAG', explanation, '', {
+    value: 'PWR_FLAG',
+    pins: [netName],
+    connectedPins: [netName],
+    pinNets: { 1: netName }
+  });
+}
+
+function buildDiscreteLedSchematicAst(spec) {
+  const discrete = spec.discrete ?? {};
+  if (discrete.refused || !(discrete.count > 0)) {
+    return { components: [], nets: [] };
+  }
+  const supplyNet = discrete.supplyNet || '+5V';
+  const count = discrete.count;
+  const channels = Array.isArray(discrete.channels) && discrete.channels.length === count
+    ? discrete.channels
+    : Array.from({ length: count }, () => ({
+      ledValue: discrete.ledValue || 'LED',
+      resistorValue: discrete.resistorValue || '330Ω'
+    }));
+  const ledNets = Array.from({ length: count }, (_, index) => (count === 1 ? 'LED' : `LED${index + 1}`));
+  const supplySymbol = discreteSupplySymbol(supplyNet);
+  const battery = discrete.supplyKind === 'battery';
+  const components = [
+    component('J1', 'Connector_Generic:Conn_01x02', battery ? `9V battery connector for the ${supplyNet} LED circuit.` : `Power input for the ${supplyNet} LED circuit.`, 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical', {
+      value: 'Conn_01x02',
+      description: battery ? `${supplyNet} battery connector` : supplyNet,
+      pins: [supplyNet, 'GND'],
+      connectedPins: [supplyNet, 'GND'],
+      pinNets: { 1: supplyNet, 2: 'GND' }
+    })
+  ];
+  ledNets.forEach((ledNet, index) => {
+    const number = index + 1;
+    const channel = channels[index];
+    const resistorValue = channel.resistorValue;
+    const ledValue = channel.ledValue;
+    components.push(
+      component('R' + number, 'Device:R', `Series resistor ${resistorValue} between ${supplyNet} and ${ledNet}.`, 'Resistor_SMD:R_0603_1608Metric', {
+        value: resistorValue,
+        pins: [supplyNet, ledNet],
+        connectedPins: [supplyNet, ledNet],
+        pinNets: { 1: supplyNet, 2: ledNet }
+      }),
+      component('D' + number, 'Device:LED', `${ledValue}. Pin 1 is the cathode to GND and pin 2 is the anode.`, 'LED_SMD:LED_0603_1608Metric', {
+        value: ledValue,
+        description: ledValue,
+        pins: ['GND', ledNet],
+        connectedPins: ['GND', ledNet],
+        pinNets: { 1: 'GND', 2: ledNet }
+      })
+    );
+  });
+  components.push(
+    component('#PWR02', 'power:GND', 'Ground return for the LED cathode and the supply connector.', '', {
+      value: 'GND',
+      pins: ['GND'],
+      connectedPins: ['GND'],
+      pinNets: { 1: 'GND' }
+    }),
+    component(supplySymbol.ref, supplySymbol.libId, supplySymbol.explanation, '', {
+      value: supplySymbol.value,
+      description: supplySymbol.value,
+      pins: [supplyNet],
+      connectedPins: [supplyNet],
+      pinNets: { 1: supplyNet }
+    })
+  );
+  if (supplySymbol.libId !== 'power:PWR_FLAG') {
+    components.push(discretePowerFlag('#FLG1', supplyNet, `ERC power source marker for the ${supplyNet} discrete LED rail.`));
+  }
+  components.push(discretePowerFlag('#FLG2', 'GND', 'ERC power source marker for the discrete LED ground return.'));
+  return {
+    components,
+    nets: [supplyNet, ...ledNets, 'GND'].map((name) => ({
+      name,
+      explanation: discreteLedNetExplanation(name, supplyNet)
     }))
   };
 }
@@ -679,9 +810,35 @@ function adbms6830PinConnections() {
   return pins;
 }
 
+function findingMessage(item) {
+  if (!item) return '';
+  if (typeof item.message === 'string') return item.message;
+  if (typeof item.en === 'string') return item.en;
+  return '';
+}
+
+function uniqueSchematicText(lines) {
+  const seen = new Set();
+  const unique = [];
+  for (const line of lines) {
+    if (line == null || seen.has(line)) continue;
+    seen.add(line);
+    unique.push(line);
+  }
+  return unique;
+}
+
 export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchematicAst(spec) }) {
   const uuid = randomUUID();
-  const notes = spec.boardProfile?.kind === 'isolated-dcdc'
+  const notes = spec.kind === 'discrete-led'
+    ? uniqueSchematicText([
+        `ChatPCB generated discrete LED draft: ${spec.title}`,
+        ...(spec.discrete?.reviewBlockers ?? []).map((blocker) => findingMessage(blocker)),
+        ...(spec.discrete?.reviewNotes ?? []).map((note) => findingMessage(note)),
+        ...(spec.discrete?.reviewWarnings ?? []).map((warning) => findingMessage(warning)),
+        'Review all symbols, footprints, net labels, and design rules before production.'
+      ])
+    : spec.boardProfile?.kind === 'isolated-dcdc'
     ? [
         `ChatPCB generated isolated DC-DC draft: ${spec.title}`,
         `Input ${spec.boardProfile?.ratings?.vin ?? 'unspecified'} to output ${spec.boardProfile?.ratings?.vout ?? 'unspecified'}.`,
@@ -726,7 +883,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
   )
 ${renderLibSymbols(schematic.components.map((item) => item.libId))}
 ${notes.map((note, index) => renderText(note, 25.4, 25.4 + index * 7.62)).join('\n')}
-${schematic.components.map((item, index) => renderPlacedComponent(item, 38.1 + (index % SCHEMATIC_GRID_COLUMNS) * 38.1, 88.9 + Math.floor(index / SCHEMATIC_GRID_COLUMNS) * SCHEMATIC_GRID_ROW_SPACING_MM, baseName)).join('\n')}
+${renderPlacedComponents(schematic, baseName, spec.kind === 'discrete-led')}
   (sheet_instances
     (path "/"
       (page "1")
@@ -762,6 +919,41 @@ ${fixtureSymbols()
 }
 
 export function renderSpiceFixture(spec) {
+  if (spec.kind === 'discrete-led') {
+    if (spec.discrete?.refused || !(spec.discrete?.count > 0)) {
+      const message = findingMessage(spec.discrete?.reviewBlockers?.[0])
+        || findingMessage(spec.discrete?.reviewNotes?.[0])
+        || 'Discrete LED draft was not generated.';
+      return [
+        `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
+        `* ${message}`,
+        '.end',
+        ''
+      ].join('\n');
+    }
+    const volts = spec.discrete?.supplyVolts ?? 5;
+    const count = Math.max(1, spec.discrete?.count || 1);
+    const channels = Array.isArray(spec.discrete?.channels) && spec.discrete.channels.length === count
+      ? spec.discrete.channels
+      : null;
+    const lines = [
+      `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
+      '* Discrete LED and series resistor. Confirm LED current before release.',
+      `VSUP vsup 0 DC ${volts}`
+    ];
+    for (let index = 1; index <= count; index += 1) {
+      const channel = channels?.[index - 1];
+      const ohms = channel?.resistanceOhms ?? spec.discrete?.resistanceOhms ?? 330;
+      const vf = channel?.vf ?? spec.discrete?.color?.vf ?? spec.discrete?.calculation?.vf ?? 2;
+      const node = count === 1 ? 'led' : `led${index}`;
+      const model = count === 1 ? 'DLED' : `DLED${index}`;
+      lines.push(`RLED${index} vsup ${node} ${ohms}`);
+      lines.push(`DLED${index} ${node} 0 ${model}`);
+      lines.push(`.model ${model} D(Vfwd=${vf})`);
+    }
+    lines.push('.op', '.end', '');
+    return lines.join('\n');
+  }
   if (spec.boardProfile?.kind === 'isolated-dcdc') {
     return [
       `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
@@ -802,11 +994,12 @@ export function renderSpiceFixture(spec) {
   ].join('\n');
 }
 
-function component(ref, libId, explanation, footprint, { connectedPins, pinNets, pins, value } = {}) {
+function component(ref, libId, explanation, footprint, { connectedPins, pinNets, pins, value, description } = {}) {
   return {
     ref,
     libId,
     value: value ?? libId.split(':')[1],
+    description,
     footprint,
     explanation,
     pins,
@@ -851,8 +1044,14 @@ function explainNet(name) {
   switch (name) {
     case 'VBUS':
       return 'Primary 5V input rail.';
+    case '+5V':
+      return '+5V supply rail.';
+    case '+12V':
+      return '+12V supply rail.';
+    case 'LED':
+      return 'LED anode node between the series resistor and the LED.';
     case '+3V3':
-      return 'Regulated 3.3V rail for MCU and peripherals.';
+      return 'Regulated +3V3 rail for MCU and peripherals.';
     case 'GND':
       return 'Common return reference for generated circuitry.';
     case 'SCL':
@@ -993,31 +1192,6 @@ function kicadLibraryCandidatePaths(libraryType) {
   return kicadInstallLibraryCandidatePaths(libraryType);
 }
 
-let flatpakLibraryRootOverride = null;
-
-// Tests point runtime discovery at a fake tree with the Flatpak layout.
-// Null restores /var/lib/flatpak and ~/.local/share/flatpak.
-export function setFlatpakLibraryRootsForTests(roots) {
-  const previous = flatpakLibraryRootOverride;
-  flatpakLibraryRootOverride = Array.isArray(roots) ? [...roots] : null;
-  return previous;
-}
-
-function flatpakLibraryRoots() {
-  if (Array.isArray(flatpakLibraryRootOverride)) {
-    return flatpakLibraryRootOverride;
-  }
-  if (process.platform !== 'linux') {
-    return [];
-  }
-
-  const roots = ['/var/lib/flatpak'];
-  if (typeof process.env.HOME === 'string' && process.env.HOME.length > 0) {
-    roots.push(path.join(process.env.HOME, '.local', 'share', 'flatpak'));
-  }
-  return roots.map((candidate) => underLibrarySearchRoot(candidate));
-}
-
 // Test-only. CHATPCB_KICAD_LIBRARY_SEARCH_ROOTS is a filesystem root: system
 // paths and Flatpak roots are resolved under it. Unset keeps host paths.
 function librarySearchRoot() {
@@ -1041,51 +1215,6 @@ function underLibrarySearchRoot(candidate) {
   return path.join(root, path.relative(path.parse(resolved).root, resolved));
 }
 
-function flatpakRuntimeName(libraryType) {
-  if (libraryType === 'symbols') {
-    return 'org.kicad.KiCad.Library.Symbols';
-  }
-  if (libraryType === 'footprints') {
-    return 'org.kicad.KiCad.Library.Footprints';
-  }
-  return null;
-}
-
-function readFlatpakPathEntries(dir) {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-      .map((entry) => entry.name)
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-// KiCad Flatpak stores symbols and footprints in runtime extensions, not in the app tree.
-// <root>/runtime/org.kicad.KiCad.Library.<Kind>/<arch>/<branch>/active/files/<symbols|footprints>
-function flatpakRuntimeLibraryCandidatePaths(libraryType) {
-  const runtimeName = flatpakRuntimeName(libraryType);
-  if (!runtimeName) {
-    return [];
-  }
-
-  const candidates = [];
-  for (const root of flatpakLibraryRoots()) {
-    const runtimeRoot = path.join(root, 'runtime', runtimeName);
-    for (const arch of readFlatpakPathEntries(runtimeRoot)) {
-      const archDir = path.join(runtimeRoot, arch);
-      for (const branch of readFlatpakPathEntries(archDir)) {
-        const libraryDir = path.join(archDir, branch, 'active', 'files', libraryType);
-        if (existsSync(libraryDir)) {
-          candidates.push(libraryDir);
-        }
-      }
-    }
-  }
-  return candidates;
-}
-
 export function kicadInstallLibraryCandidatePaths(libraryType) {
   const kicadCliResult = resolveKicadCli();
   const kicadCliPath = kicadCliResult?.path;
@@ -1102,11 +1231,12 @@ export function kicadInstallLibraryCandidatePaths(libraryType) {
     ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
     ...(process.platform === 'linux' ? [
       `/usr/share/kicad/${libraryType}`,
-      `/usr/local/share/kicad/${libraryType}`,
-      `/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`,
-      `${process.env.HOME}/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/${libraryType}`
-    ].filter(Boolean).map((candidate) => underLibrarySearchRoot(candidate)) : []),
-    ...flatpakRuntimeLibraryCandidatePaths(libraryType),
+      `/usr/local/share/kicad/${libraryType}`
+    ].map((candidate) => underLibrarySearchRoot(candidate)) : []),
+    ...flatpakAppLibraryPaths(libraryType, { mapPath: underLibrarySearchRoot }),
+    ...flatpakRuntimeLibraryCandidatePaths(libraryType, {
+      roots: flatpakLibraryRoots({ mapPath: underLibrarySearchRoot })
+    }),
     ...(process.platform === 'win32' && process.env.LOCALAPPDATA ? [
       `${process.env.LOCALAPPDATA}/Programs/KiCad/10.0/share/kicad/${libraryType}`,
       `${process.env.LOCALAPPDATA}/Programs/KiCad/9.0/share/kicad/${libraryType}`
@@ -1755,23 +1885,66 @@ function renderLibPin(pinName, index) {
         )`;
 }
 
-function renderPlacedComponent(componentModel, x, y, baseName) {
+function globalPowerNetLibIds(schematic) {
+  const nets = new Map();
+  for (const item of schematic.components ?? []) {
+    if (typeof item.libId !== 'string' || !item.libId.startsWith('power:') || item.libId === 'power:PWR_FLAG') continue;
+    if (item.value) nets.set(item.value, item.libId);
+  }
+  return nets;
+}
+
+function renderPlacedComponents(schematic, baseName, joinGlobalPowerNets) {
+  const powerNets = joinGlobalPowerNets ? globalPowerNetLibIds(schematic) : null;
+  const powerRefs = { n: 10 };
+  return schematic.components.map((item, index) => renderPlacedComponent(
+    item,
+    38.1 + (index % SCHEMATIC_GRID_COLUMNS) * 38.1,
+    88.9 + Math.floor(index / SCHEMATIC_GRID_COLUMNS) * SCHEMATIC_GRID_ROW_SPACING_MM,
+    baseName,
+    powerNets,
+    powerRefs
+  )).join('\n');
+}
+
+function renderPlacedComponent(componentModel, x, y, baseName, powerNets = null, powerRefs = null) {
   const pins = componentModel.pins ?? symbolPinsFor(componentModel.libId);
   const pinSlots = pinDefinitionsFor(componentModel.libId, pins);
   const connectedPins = new Set(componentModel.connectedPins ?? pins);
+  const chunks = [renderSymbolInstance(componentModel, x, y, baseName)];
 
-  return [
-    renderSymbolInstance(componentModel, x, y, baseName),
-    ...pinSlots.flatMap((pinDef, index) => {
-      const netName = componentModel.pinNets?.[pinDef.number] ?? pins[index];
-      if (netName && connectedPins.has(netName)) {
-        return renderPinNetStub(netName, x, y, pinDef);
-      }
-
+  for (const [index, pinDef] of pinSlots.entries()) {
+    const netName = componentModel.pinNets?.[pinDef.number] ?? pins[index];
+    if (!netName || !connectedPins.has(netName)) {
       const point = pinConnectionPoint(x, y, pinDef);
-      return renderNoConnect(point.x, point.y);
-    })
-  ].join('\n');
+      chunks.push(renderNoConnect(point.x, point.y));
+      continue;
+    }
+
+    const powerLibId = powerNets?.get(netName);
+    if (powerLibId) {
+      // Power symbols are global labels. A local label of the same name is
+      // same_local_global_label, so every pin on the net — including the
+      // power symbol's own pin — meets another power symbol through a short
+      // wire. Leaving the grid symbol's pin bare is pin_not_connected.
+      const start = pinConnectionPoint(x, y, pinDef);
+      const end = powerSymbolPointFromPin(start);
+      const refNumber = powerRefs.n;
+      powerRefs.n += 1;
+      chunks.push(renderWire(start, end));
+      chunks.push(renderSymbolInstance({
+        ref: `#PWR${refNumber}`,
+        libId: powerLibId,
+        value: netName,
+        footprint: ''
+      }, end.x, end.y, baseName));
+      continue;
+    }
+
+    chunks.push(...renderPinNetStub(netName, x, y, pinDef));
+  }
+
+  return chunks.join('\n');
 }
 
 function renderSymbolInstance(componentModel, x, y, baseName) {
@@ -1795,7 +1968,10 @@ function renderSymbolInstance(componentModel, x, y, baseName) {
     (property "Footprint" "${escapeSchText(componentModel.footprint)}" (at ${sch(x)} ${sch(y + 12.70)} 0)
       (effects (font (size ${sch(1.27)} ${sch(1.27)})) hide)
     )
-    (instances
+${componentModel.description ? `    (property "Description" "${escapeSchText(componentModel.description)}" (at ${sch(x)} ${sch(y + 15.24)} 0)
+      (effects (font (size ${sch(1.27)} ${sch(1.27)})) hide)
+    )
+` : ''}    (instances
       (project "${escapeSchText(baseName)}"
         (path "/${uuid}"
           (reference "${escapeSchText(componentModel.ref)}")
@@ -1835,6 +2011,15 @@ function officialPinDefinitionsFor(libId) {
         pinDef('11', -2.54, -12.7, 90)
       ];
     case 'power:PWR_FLAG':
+      return [pinDef('1', 0, 0, 90)];
+    case 'power:+3V3':
+    case 'power:+5V':
+    case 'power:+9V':
+    case 'power:+12V':
+    case 'power:VCC':
+    case 'power:+VDC':
+      return [pinDef('1', 0, 0, 270)];
+    case 'power:GND':
       return [pinDef('1', 0, 0, 90)];
     case 'Switch:SW_Push':
       return [pinDef('1', -5.08, 0, 0), pinDef('2', 5.08, 0, 180)];
@@ -1897,6 +2082,7 @@ function officialPinDefinitionsFor(libId) {
         pinDef('S1', -7.62, -22.86, 90)
       ];
     default:
+      if (libId.startsWith('power:+')) return [pinDef('1', 0, 0, 270)];
       return [];
   }
 }
@@ -1943,6 +2129,16 @@ function symbolPinsFor(libId) {
       return ['VBUS', 'GND', '+3V3'];
     case 'power:PWR_FLAG':
       return ['VBUS'];
+    case 'power:+3V3':
+      return ['+3V3'];
+    case 'power:+5V':
+      return ['+5V'];
+    case 'power:+9V':
+      return ['+9V'];
+    case 'power:+12V':
+      return ['+12V'];
+    case 'power:GND':
+      return ['GND'];
     case 'ChatPCB:MCU_PLACEHOLDER':
     case 'ChatPCB:ESP32_S3_WROOM_1':
     case 'ChatPCB:STM32G0B1CBT6':
@@ -2020,6 +2216,19 @@ function pinConnectionPoint(symbolX, symbolY, pinDef) {
     y: symbolY - pinDef.y,
     rotation: pinDef.rotation
   };
+}
+
+function powerSymbolPointFromPin(pin) {
+  switch (pin.rotation) {
+    case 90:
+      return { x: pin.x, y: pin.y + 2.54 };
+    case 180:
+      return { x: pin.x + 2.54, y: pin.y };
+    case 270:
+      return { x: pin.x, y: pin.y - 2.54 };
+    default:
+      return { x: pin.x - 2.54, y: pin.y };
+  }
 }
 
 function renderPinNetStub(pinName, symbolX, symbolY, pinDef) {
