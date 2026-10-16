@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 export const soft = {
   font: '"Pretendard", "SUIT", Inter, "Segoe UI", system-ui, sans-serif',
   mono: 'ui-monospace, Consolas, monospace',
-  type: { xs: '12px', sm: '14px', md: '14px', lg: '16px', xl: '18px' },
+  type: { xs: '12px', sm: '14px', md: '14px', lg: '16px' },
   lh: '1.45',
-  space: [2, 4, 6, 8, 12, 16, 20],
+  space: [[2, 4], [3, 6], [4, 8], [5, 12]],
   radius: { sm: '10px', md: '14px', lg: '18px', pill: '999px' },
   target: '28px',
   shadow: {
@@ -34,7 +34,9 @@ export const soft = {
     warn: '#875400',
     warnBg: '#fdf1d9',
     focus: '#0b7566',
-    locked: '#545b78'
+    locked: '#545b78',
+    siwcBg: '#000',
+    siwcFg: '#fff'
   },
   dark: {
     bg: '#13151e',
@@ -55,7 +57,9 @@ export const soft = {
     warn: '#f0c062',
     warnBg: '#2a2111',
     focus: '#6fe0c6',
-    locked: '#a8aec5'
+    locked: '#a8aec5',
+    siwcBg: '#000',
+    siwcFg: '#fff'
   }
 };
 
@@ -69,7 +73,7 @@ function rootLines() {
     `--mono:${soft.mono};`,
     ...Object.entries(soft.type).map(([name, value]) => `--fs-${name}:${value};`),
     `--lh:${soft.lh};`,
-    ...soft.space.map((size, index) => `--sp-${index + 1}:${size}px;`),
+    ...soft.space.map(([step, size]) => `--sp-${step}:${size}px;`),
     ...Object.entries(soft.radius).map(([name, value]) => `--r-${name}:${value};`),
     `--target:${soft.target};`
   ];

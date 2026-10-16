@@ -85,6 +85,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
       window.WebSocket = FakeSocket;
     });
     await page.goto(`http://127.0.0.1:${port}/index.html?lang=en&chatpcbTest=1`, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => window.chatpcbI18n.ready);
 
     const passed = await showPatch(page, {
       validation: passedValidation,

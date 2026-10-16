@@ -38,6 +38,7 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
       window.CHATPCB_DAEMON_WS_URL = url;
     }, daemon.url);
     await page.goto(`${staticServer.url}/index.html`);
+    await page.evaluate(() => window.chatpcbI18n.ready);
     await page.getByText('Connected', { exact: true }).waitFor();
     await page.evaluate(() => {
       window.__busyCycle = 0;

@@ -96,6 +96,7 @@ test('panel test hook exists only in test mode and cannot pass ERC for the daemo
       window.WebSocket = FakeSocket;
     });
     await page.goto(`http://127.0.0.1:${port}/index.html?chatpcbTest=1`, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => window.chatpcbI18n.ready);
     const payload = await page.evaluate((dir) => {
       if (!window.__chatpcbTest?.showPatch) return null;
       window.__sent.length = 0;

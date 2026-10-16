@@ -26,15 +26,11 @@
     return interpolate(value, vars);
   }
 
-  function loadLocale(next) {
+  async function loadLocale(next) {
     if (cache[next]) return cache[next];
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', localeUrl(next), false);
-    xhr.send(null);
-    if (!((xhr.status === 200 || xhr.status === 0) && xhr.responseText)) {
-      throw new Error(`Unable to load locale ${next}`);
-    }
-    cache[next] = JSON.parse(xhr.responseText);
+    const response = await fetch(localeUrl(next));
+    if (!response.ok) throw new Error(`Unable to load locale ${next}`);
+    cache[next] = await response.json();
     return cache[next];
   }
 
@@ -59,11 +55,11 @@
     if (select && select.value !== lang) select.value = lang;
   }
 
-  function setLang(next) {
+  async function setLang(next) {
     const resolved = SUPPORTED.includes(next) ? next : 'en';
     lang = resolved;
     try {
-      dict = loadLocale(resolved);
+      dict = await loadLocale(resolved);
     } catch {
       dict = cache.en || {};
       lang = 'en';
@@ -83,22 +79,38 @@
     return SUPPORTED.includes(query) ? query : 'en';
   }
 
-  try {
-    cache.en = loadLocale('en');
-  } catch {
-    cache.en = {};
-  }
-  lang = initialLang();
-  dict = lang === 'en' ? cache.en : cache.en;
-  if (lang !== 'en') {
+  // Fetch yields before this resolves, so panel.js can register onChange first.
+  const ready = (async () => {
     try {
-      dict = loadLocale(lang);
+      cache.en = await loadLocale('en');
     } catch {
-      lang = 'en';
-      dict = cache.en;
+      cache.en = {};
     }
-  }
-  document.documentElement.lang = lang;
+    lang = initialLang();
+    dict = cache.en;
+    if (lang !== 'en') {
+      try {
+        dict = await loadLocale(lang);
+      } catch {
+        lang = 'en';
+        dict = cache.en;
+      }
+    }
+    if (document.readyState === 'loading') {
+      await new Promise((resolveReady) => document.addEventListener('DOMContentLoaded', resolveReady, { once: true }));
+    }
+    document.documentElement.lang = lang;
+    applyDom();
+    const select = document.querySelector('#lang');
+    if (select && select.dataset.i18nBound !== 'true') {
+      select.dataset.i18nBound = 'true';
+      select.value = lang;
+      select.addEventListener('change', () => { setLang(select.value); });
+    } else if (select && select.value !== lang) {
+      select.value = lang;
+    }
+    for (const listener of listeners) listener(lang);
+  })();
 
   window.t = t;
   window.chatpcbI18n = {
@@ -106,18 +118,7 @@
     setLang,
     onChange,
     applyDom,
-    getLang: () => lang
+    getLang: () => lang,
+    ready
   };
-
-  function boot() {
-    applyDom();
-    const select = document.querySelector('#lang');
-    if (!select || select.dataset.i18nBound === 'true') return;
-    select.dataset.i18nBound = 'true';
-    select.value = lang;
-    select.addEventListener('change', () => setLang(select.value));
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
 })();

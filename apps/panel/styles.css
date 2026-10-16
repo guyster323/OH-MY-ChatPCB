@@ -506,8 +506,8 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   gap: 12px;
   border: 0;
   border-radius: 12px;
-  background: #000;
-  color: #fff;
+  background: var(--siwc-bg);
+  color: var(--siwc-fg);
   font-family: "SIWC Inter", Inter, sans-serif;
   font-size: 15px;
   font-weight: 500;
