@@ -162,7 +162,7 @@ async function scanHeadlessShellCache({ env, platform, arch, exists, listDir }) 
   const checked = [];
   const root = browsersCacheDir(env);
   if (!root) return { path: null, checked };
-  let names = [];
+  let names;
   try {
     names = await listDir(root);
   } catch {
@@ -201,7 +201,7 @@ function shellRevision(name) {
 // or throws, scan chromium_headless_shell-* under PLAYWRIGHT_BROWSERS_PATH or the
 // per-OS ms-playwright cache. If both fail, return null.
 async function registryHeadlessShellPath({ env, platform, arch, exists, listDir, readRegistry }) {
-  let fromRegistry = null;
+  let fromRegistry;
   try {
     fromRegistry = readRegistry();
   } catch {
