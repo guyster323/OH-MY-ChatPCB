@@ -22,7 +22,9 @@ test('Phase 1 public development documents are present and actionable', async ()
 
   assert.match(readme, /User Test Guide/);
   assert.match(readme, /Codex CLI verification/);
-  assert.match(readme, /npm install/);
+  assert.match(readme, /Node\.js 22 or newer/);
+  assert.match(readme, /npm ci/);
+  assert.doesNotMatch(readme, /npm install/);
   assert.match(readme, /npm run launch:kicad/);
   assert.match(readme, /right-side ChatPCB panel/);
   assert.match(readme, /npm run verify:sample/);

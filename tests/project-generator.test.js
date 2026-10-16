@@ -710,7 +710,7 @@ function boardNoNetPadCenters(board, references) {
 }
 
 function boardFootprintBlock(board, ref) {
-  const starts = [...board.matchAll(/^  \(footprint\b/gm)].map((match) => match.index);
+  const starts = [...board.matchAll(/^ {2}\(footprint\b/gm)].map((match) => match.index);
   for (let index = 0; index < starts.length; index += 1) {
     const block = board.slice(starts[index], starts[index + 1]);
     if (block.includes(`(property "Reference" "${ref}"`)) {

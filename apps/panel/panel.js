@@ -728,7 +728,6 @@ function deriveWorkflow() {
 function syncWorkflow() {
   const { active, done, mode } = deriveWorkflow();
   const activeIndex = workflowIndex(active);
-  const layoutReviewIndex = workflowIndex('layout.review');
   const layoutUnlocked = done.has('circuit.review') || activeIndex >= workflowIndex('layout.concept');
   const fabUnlocked = done.has('layout.review') || workflowFlags.layoutReviewed;
 
@@ -736,7 +735,7 @@ function syncWorkflow() {
     const id = button.dataset.step;
     const index = workflowIndex(id);
     const lane = id.split('.')[0];
-    let state = 'idle';
+    let state;
     if (lane === 'fab' && !fabUnlocked) state = 'locked';
     else if (lane === 'layout' && !layoutUnlocked) state = 'locked';
     else if (done.has(id) && id !== active) state = 'done';

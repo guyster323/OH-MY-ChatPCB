@@ -1,3 +1,4 @@
+import { lstatSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -61,24 +62,89 @@ export function isInside(workspaceRoot, candidate) {
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
 }
 
-export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot } = {}) {
+export function assertSafeProjectDir(projectDir, { allowedWorkspaceRoot, fsImpl } = {}) {
   if (typeof projectDir !== 'string' || projectDir.trim().length === 0) {
     throw typedError('UNSAFE_PROJECT_DIR', 'Project directory is required.');
   }
 
   const resolvedProjectDir = path.resolve(projectDir);
-  if (isProtectedPath(resolvedProjectDir)) {
+  const canonicalProjectDir = canonicalPath(resolvedProjectDir, fsImpl);
+  if (isProtectedPath(resolvedProjectDir) || isProtectedPath(canonicalProjectDir)) {
     throw typedError('UNSAFE_PROJECT_DIR', `Refusing to use protected path as a project directory: ${resolvedProjectDir}`);
   }
 
   if (allowedWorkspaceRoot) {
-    const resolvedWorkspaceRoot = path.resolve(allowedWorkspaceRoot);
-    if (resolvedProjectDir !== resolvedWorkspaceRoot && !isInside(resolvedWorkspaceRoot, resolvedProjectDir)) {
+    // Compare canonical paths so a symlink ancestor of the workspace (macOS
+    // /var -> /private/var, or an alias of the workspace root) is the same
+    // directory on both sides. A link that escapes the workspace still fails.
+    const canonicalWorkspaceRoot = canonicalPath(path.resolve(allowedWorkspaceRoot), fsImpl);
+    if (canonicalProjectDir !== canonicalWorkspaceRoot && !isInside(canonicalWorkspaceRoot, canonicalProjectDir)) {
       throw typedError('UNSAFE_PROJECT_DIR', 'Project directory must stay inside the allowed workspace root.');
     }
   }
 
   return resolvedProjectDir;
+}
+
+// realpath the longest existing prefix, then rejoin a tail that does not exist
+// yet. A missing component that is already a symlink is dangling: rejoining it
+// lexically would let the target appear later and escape the workspace.
+// Ancestors that realpath can resolve may still be symlinks.
+// Windows realpath throws ENOENT, not ENOTDIR, when a parent component is a
+// file. A resolved ancestor with a missing tail is allowed only if that
+// ancestor is a directory. fsImpl.realpathSync, when set, replaces
+// fs.realpathSync so tests can simulate that ENOENT.
+function canonicalPath(candidate, fsImpl) {
+  const resolveRealpath = fsImpl?.realpathSync ?? realpathSync;
+  const missing = [];
+  let current = candidate;
+  while (true) {
+    let real;
+    try {
+      real = resolveRealpath(current);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw unsafeCanonicalError(error);
+      rejectIfDanglingSymlink(current);
+      const parent = path.dirname(current);
+      if (parent === current) return candidate;
+      missing.push(path.basename(current));
+      current = parent;
+      continue;
+    }
+    if (missing.length > 0) rejectIfNonDirectoryAncestor(real);
+    return missing.reduceRight((dir, name) => path.join(dir, name), real);
+  }
+}
+
+// Classify the resolved ancestor. lstat of the lexical path would treat a
+// symlink to a directory as a non-directory and reject a missing project.
+function rejectIfNonDirectoryAncestor(real) {
+  let info;
+  try {
+    info = lstatSync(real);
+  } catch (error) {
+    throw unsafeCanonicalError(error);
+  }
+  if (info.isDirectory()) return;
+  const cause = new Error('ENOTDIR: not a directory, lstat');
+  cause.code = 'ENOTDIR';
+  throw unsafeCanonicalError(cause);
+}
+
+function rejectIfDanglingSymlink(candidate) {
+  let info;
+  try {
+    info = lstatSync(candidate, { throwIfNoEntry: false });
+  } catch (error) {
+    throw unsafeCanonicalError(error);
+  }
+  if (info?.isSymbolicLink()) {
+    throw typedError('UNSAFE_PROJECT_DIR', 'Project directory must not contain a dangling symbolic link.');
+  }
+}
+
+function unsafeCanonicalError(error) {
+  return typedError('UNSAFE_PROJECT_DIR', 'Project directory cannot be resolved safely.', error);
 }
 
 export async function readChatPcbManifest(projectDir) {
@@ -120,8 +186,8 @@ function isProtectedPath(candidate) {
   return protectedPaths.has(candidate);
 }
 
-function typedError(code, message) {
-  const error = new Error(message);
+function typedError(code, message, cause) {
+  const error = cause === undefined ? new Error(message) : new Error(message, { cause });
   error.code = code;
   return error;
 }
