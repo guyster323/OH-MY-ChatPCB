@@ -29,6 +29,12 @@ const CLIENT_ID_ENV = 'CHATPCB_CHATGPT_CLIENT_ID';
 const MODEL_ENV = 'CHATPCB_CHATGPT_MODEL';
 const RESPONSES_TIMEOUT_ENV = 'CHATPCB_CHATGPT_RESPONSES_TIMEOUT_MS';
 const HOST_ID_FILE = 'chatgpt-host-id.txt';
+// RFC 4122 UUIDv4 URN. The URN and the hex digits are case-insensitive.
+const UUID_HOST_ID = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// RFC 9278: urn:ietf:params:oauth:jwk-thumbprint:<hash-alg>:<unpadded base64url>
+const JWK_THUMBPRINT_HOST_ID = /^urn:ietf:params:oauth:jwk-thumbprint:[a-z0-9]+(?:-[a-z0-9]+)*:[A-Za-z0-9_-]+$/;
+// did:key multibase base58btc (alphabet excludes 0, O, I, and l).
+const DID_KEY_HOST_ID = /^did:key:z[1-9A-HJ-NP-Za-km-z]+$/;
 // Bumped on sign-out, a completed sign-in, and when an issued client id is dropped.
 // Late provider saves capture the value at call start and refuse to write after it changes.
 let sessionGeneration = 0;
@@ -131,46 +137,91 @@ async function readTrimmedFile(path) {
 }
 
 /**
- * Stable opaque host id, generated once per machine and reused.
- * Format is `urn:uuid:<UUIDv4>`. The file is owner-only (0600) and published
- * with an atomic link so readers never observe a partial write.
+ * OpenAI accepts three ext_agent_host_id forms: a hyphenated UUIDv4 URN,
+ * an RFC 9278 JWK thumbprint URI, and a did:key base58btc identifier.
+ * Legacy `host_<hex>` values, blanks, and surrounding whitespace are rejected.
  */
-export async function getOrCreateHostId() {
-  const path = getHostIdPath();
-  const existing = await readTrimmedFile(path);
-  if (existing) {
-    await chmod(path, 0o600).catch(() => {});
-    return existing;
-  }
+export function isValidHostId(value) {
+  return typeof value === 'string'
+    && (UUID_HOST_ID.test(value)
+      || JWK_THUMBPRINT_HOST_ID.test(value)
+      || DID_KEY_HOST_ID.test(value));
+}
 
-  await mkdir(dirname(path), { recursive: true });
-  try {
-    const raw = await readFile(path, 'utf8');
-    if (!raw.trim()) await unlink(path);
-  } catch {
-    // Absent, which is the expected first-run state.
-  }
+function newUuidHostId() {
+  return `urn:uuid:${randomUUID()}`;
+}
 
-  const hostId = `urn:uuid:${randomUUID()}`;
-  const tempPath = `${path}.${process.pid}.tmp`;
+async function publishNewHostId(filePath) {
+  const hostId = newUuidHostId();
+  const tempPath = `${filePath}.${process.pid}.tmp`;
   await writeFile(tempPath, hostId, { mode: 0o600 });
   await chmod(tempPath, 0o600);
   try {
-    await link(tempPath, path);
+    await link(tempPath, filePath);
   } catch (error) {
     await unlink(tempPath).catch(() => {});
     if (error.code === 'EEXIST') {
-      const raced = await readTrimmedFile(path);
-      if (raced) {
-        await chmod(path, 0o600).catch(() => {});
+      const raced = await readTrimmedFile(filePath);
+      if (isValidHostId(raced)) {
+        await chmod(filePath, 0o600).catch(() => {});
         return raced;
       }
+      if (raced) return replaceInvalidHostId(filePath);
     }
     throw error;
   }
   await unlink(tempPath).catch(() => {});
-  await chmod(path, 0o600);
+  await chmod(filePath, 0o600);
   return hostId;
+}
+
+async function replaceInvalidHostId(filePath) {
+  const hostId = newUuidHostId();
+  const tempPath = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    await writeFile(tempPath, hostId, { mode: 0o600 });
+    await chmod(tempPath, 0o600);
+    const current = await readTrimmedFile(filePath);
+    if (isValidHostId(current)) {
+      await chmod(filePath, 0o600).catch(() => {});
+      return current;
+    }
+    await rename(tempPath, filePath);
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+  await chmod(filePath, 0o600);
+  return hostId;
+}
+
+/**
+ * Stable opaque host id, generated once per machine and reused.
+ * Generated ids are `urn:uuid:<UUIDv4>`. A stored id is kept only when
+ * {@link isValidHostId} accepts it; anything else is replaced.
+ * The file is owner-only (0600). A missing file is published with an atomic
+ * link so concurrent creators never observe a partial write. An invalid
+ * file is replaced with an atomic rename.
+ */
+export async function getOrCreateHostId() {
+  const filePath = getHostIdPath();
+  const existing = await readTrimmedFile(filePath);
+  if (isValidHostId(existing)) {
+    await chmod(filePath, 0o600).catch(() => {});
+    return existing;
+  }
+
+  await mkdir(dirname(filePath), { recursive: true });
+  if (existing) return replaceInvalidHostId(filePath);
+
+  try {
+    const raw = await readFile(filePath, 'utf8');
+    if (!raw.trim()) await unlink(filePath);
+  } catch {
+    // Absent, which is the expected first-run state.
+  }
+
+  return publishNewHostId(filePath);
 }
 
 function isReusableClientId(value) {

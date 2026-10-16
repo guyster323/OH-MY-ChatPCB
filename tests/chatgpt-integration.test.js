@@ -13,6 +13,8 @@ import { dispatchToolCall, startDaemon } from '../src/runtime/agent-daemon.js';
 import {
   clearJwksCache,
   createChatGPTAuthManager,
+  getOrCreateHostId,
+  isValidHostId,
   loadCredentials,
   openSystemBrowser,
   refreshAccessToken,
@@ -41,6 +43,7 @@ jwk.alg = 'RS256';
 jwk.use = 'sig';
 
 const ALLOWED_TOOLS = [...PROVIDER_ALLOWED_TOOLS];
+const HOST_ID_V4 = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 let portCursor = 28000;
 
 describe('ChatGPT integration', { concurrency: 1 }, () => {
@@ -121,7 +124,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         assert.equal(authUrl.searchParams.has('agent_name_hint'), false);
         assert.equal(authUrl.searchParams.get('code_challenge_method'), 'S256');
         assert.equal(authUrl.searchParams.get('scope'), PLAN_SCOPE);
-        assert.match(authUrl.searchParams.get('ext_agent_host_id'), /^urn:uuid:/);
+        assert.match(authUrl.searchParams.get('ext_agent_host_id'), HOST_ID_V4);
         assert.match(started.authUrl, /^https:\/\/auth\.openai\.com\//);
 
         const redirect = authUrl.searchParams.get('redirect_uri');
@@ -169,7 +172,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         const hostId = authUrl.searchParams.get('ext_agent_host_id');
         assert.equal(authUrl.searchParams.get('client_id'), 'dynamic_agent_client');
         assert.equal(authUrl.searchParams.get('agent_name_hint'), 'OH-MY-ChatPCB');
-        assert.match(hostId, /^urn:uuid:[0-9a-f-]{36}$/i);
+        assert.match(hostId, HOST_ID_V4);
         assert.equal(authUrl.searchParams.get('response_type'), 'code');
         assert.equal(authUrl.searchParams.get('code_challenge_method'), 'S256');
         assert.equal(authUrl.searchParams.get('scope'), PLAN_SCOPE);
@@ -275,7 +278,7 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
       try {
         const started = await first.startAuth();
         const hostId = new URL(started.authUrl).searchParams.get('ext_agent_host_id');
-        assert.match(hostId, /^urn:uuid:[0-9a-f-]{36}$/i);
+        assert.match(hostId, HOST_ID_V4);
         await first.cancelAll();
         const again = await second.startAuth();
         assert.equal(new URL(again.authUrl).searchParams.get('ext_agent_host_id'), hostId);
@@ -287,6 +290,87 @@ describe('ChatGPT integration', { concurrency: 1 }, () => {
         await second.cancelAll();
       }
     });
+  });
+
+  it('replaces a legacy host_ id with a stable urn:uuid', async () => {
+    await withConfig(async (dir) => {
+      const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+      await mkdir(path.dirname(hostPath), { recursive: true });
+      await writeFile(hostPath, 'host_fa1d4d58b406ac26b8f63419552b90f4', { mode: 0o600 });
+
+      const first = await getOrCreateHostId();
+      assert.match(first, HOST_ID_V4);
+      assert.notEqual(first, 'host_fa1d4d58b406ac26b8f63419552b90f4');
+      assert.equal(await readFile(hostPath, 'utf8'), first);
+      assert.equal((await stat(hostPath)).mode & 0o777, 0o600);
+      const names = await readdir(path.dirname(hostPath));
+      assert.equal(names.some((name) => name.endsWith('.tmp')), false);
+
+      assert.equal(await getOrCreateHostId(), first);
+      assert.equal(await readFile(hostPath, 'utf8'), first);
+    });
+  });
+
+  it('preserves a valid existing host id', async () => {
+    const values = [
+      'urn:uuid:123e4567-e89b-42d3-a456-426614174000',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-256:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+      'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+    ];
+    for (const existing of values) {
+      await withConfig(async (dir) => {
+        const hostPath = path.join(dir, 'chatpcb', 'chatgpt-host-id.txt');
+        await mkdir(path.dirname(hostPath), { recursive: true });
+        await writeFile(hostPath, existing, 'utf8');
+        assert.equal(await getOrCreateHostId(), existing);
+        assert.equal(await readFile(hostPath, 'utf8'), existing);
+        assert.equal(await getOrCreateHostId(), existing);
+      });
+    }
+  });
+
+  it('accepts only OpenAI host id formats', () => {
+    const valid = [
+      'urn:uuid:123e4567-e89b-42d3-a456-426614174000',
+      'urn:uuid:123E4567-E89B-42D3-A456-426614174000',
+      'URN:UUID:123e4567-e89b-42d3-a456-426614174000',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-256:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-384:dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-512:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9XsNzbLsXh8uDCcd-6MNwXF4W_7noWX',
+      'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+      'did:key:zDnaerx9CtbPJ1q36T5Ln5wYt3MQYeGRG5ehnPAmxcf5mDZpv'
+    ];
+    for (const value of valid) assert.equal(isValidHostId(value), true, value);
+
+    const invalid = [
+      '',
+      ' ',
+      '\n',
+      '\t',
+      'urn:uuid:123e4567-e89b-42d3-a456-426614174000 ',
+      ' urn:uuid:123e4567-e89b-42d3-a456-426614174000',
+      'urn:uuid:123e4567-e89b-42d3-a456-426614174000\n',
+      'host_fa1d4d58b406ac26b8f63419552b90f4',
+      'host_',
+      'urn:uuid:fa1d4d58b406ac26b8f63419552b90f4',
+      'urn:uuid:123e4567-e89b-12d3-a456-426614174000',
+      'urn:uuid:123e4567-e89b-42d3-c456-426614174000',
+      'urn:uuid:123e4567-e89b-42d3-a456-42661417400',
+      'urn:uuid:123e4567e89b42d3a456426614174000',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-256:',
+      'urn:ietf:params:oauth:jwk-thumbprint::NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+      'urn:ietf:params:oauth:jwk-thumbprint:SHA-256:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-256:not base64',
+      'urn:ietf:params:oauth:jwk-thumbprint:sha-256:abc+/=',
+      'did:key:z',
+      'did:key:z0OIl',
+      'did:key:u6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+      'did:web:example.com',
+      null,
+      undefined,
+      42
+    ];
+    for (const value of invalid) assert.equal(isValidHostId(value), false, String(value));
   });
 
   it('rejects a callback client id that differs from the selected registration', async () => {
