@@ -10,7 +10,14 @@ import { classifyExistingProjectRequest, resistorMilliSuffixMessage } from '../s
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 
-const SPEC = { sourcePrompt: 'existing' };
+const SPEC = {
+  sourcePrompt: 'existing',
+  schematic: {
+    components: [
+      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' }
+    ]
+  }
+};
 const STM32_USER_PROMPT = 'Prototype STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, reset button, and status LED.';
 const REWRITE_EXAMPLE = '상태 LED 저항을 바꿔 주세요. 유효한 저항값(예: 330Ω, 1kΩ)을 확인하세요.';
 

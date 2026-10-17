@@ -323,6 +323,31 @@ export function resistorTargetUnclearMessage(ohmsText) {
   return `${en}\n${ko}`;
 }
 
+export function resistorRefNotFoundMessage(ref) {
+  const en = `There is no part ${ref} in this project. Nothing was changed.`;
+  const ko = `이 프로젝트에는 ${ref} 부품이 없어요. 아무것도 바꾸지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
+// seriesRef is omitted when this project does not have an LED series resistor yet.
+export function resistorRefUnsupportedMessage(seriesRef) {
+  const ref = seriesRef ? String(seriesRef) : '';
+  const en = ref
+    ? `I can only change the LED resistor (${ref}) for now. Nothing was changed.`
+    : 'I can only change the LED resistor for now. Nothing was changed.';
+  const ko = ref
+    ? `지금은 LED 저항(${ref})만 바꿀 수 있어요. 아무것도 바꾸지 않았어요.`
+    : '지금은 LED 저항만 바꿀 수 있어요. 아무것도 바꾸지 않았어요.';
+  return `${en}\n${ko}`;
+}
+
+export function resistorRefAmbiguousMessage(refs) {
+  const list = (refs ?? []).map((ref) => String(ref)).filter((ref) => ref.length > 0);
+  const en = `I can change one resistor at a time. Which one: ${englishOhmChoice(list)}? Nothing was changed.`;
+  const ko = `한 번에 한 저항만 바꿀 수 있어요. ${koreanOhmChoice(list)} 중 어느 것을 바꿀까요? 아무것도 바꾸지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
 export function mixedRemovalAndEditMessage() {
   const en = 'Please ask for one change at a time: the removal or the resistor value. Nothing was changed.';
   const ko = '한 번에 한 가지만 요청해 주세요. 부품 빼기와 저항 값 바꾸기 중 하나만요. 아무것도 바꾸지 않았어요.';
@@ -392,8 +417,8 @@ function classifySeparateIntent(editText, intentText, spec) {
   if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  if (fromUser?.kind === 'invalid') return invalidResistor(fromUser);
-  if (fromUser) return { mode: 'merge', edit: fromUser };
+  const finishedUser = finishResistor(intentText, spec, fromUser);
+  if (finishedUser) return finishedUser;
   if (removal.kind === 'unclear') return unclearRemoval();
   if (isFullDesignPrompt(intentText)) return { mode: 'regenerate', prompt: intentText };
   if (isFullDesignPrompt(editText)) return { mode: 'regenerate' };
@@ -410,8 +435,8 @@ function classifyEditText(text, spec) {
   if (isMixedRemovalAndEdit(removal, resistor)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  if (resistor?.kind === 'invalid') return invalidResistor(resistor);
-  if (resistor) return { mode: 'merge', edit: resistor };
+  const finished = finishResistor(text, spec, resistor);
+  if (finished) return finished;
   if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
 }
@@ -459,6 +484,14 @@ function unclearRemoval() {
     code: 'REMOVAL_INTENT_UNCLEAR',
     message: removalIntentUnclearMessage()
   };
+}
+
+function finishResistor(text, spec, resistor) {
+  if (!resistor) return null;
+  if (resistor.kind === 'invalid') return invalidResistor(resistor);
+  const gated = resistorRefDecision(text, spec);
+  if (gated) return gated;
+  return { mode: 'merge', edit: resistor };
 }
 
 function invalidResistor(result) {
@@ -1448,6 +1481,56 @@ function componentRole(spec, ref) {
   return String(part?.role ?? '');
 }
 
+// The editable series resistor is the saved part, not whichever R-ref was typed.
+function isEditableLedSeriesResistor(spec, record) {
+  if (!record) return false;
+  const libId = String(record.libId ?? '');
+  const value = String(record.value ?? '');
+  const role = String(record.role || componentRole(spec, record.ref) || '');
+  return libId === 'ChatPCB:LED_RESISTOR'
+    || value === 'LED_RESISTOR'
+    || role === 'status-led-resistor';
+}
+
+function seriesResistorRef(spec) {
+  for (const component of schematicComponents(spec)) {
+    if (component?.ref && isEditableLedSeriesResistor(spec, component)) return String(component.ref);
+  }
+  const parts = spec?.boardProfile?.productionParts;
+  if (!Array.isArray(parts)) return null;
+  const part = parts.find((item) => item?.role === 'status-led-resistor' && item?.ref);
+  return part ? String(part.ref) : null;
+}
+
+function resistorRefDecision(text, spec) {
+  const refs = resistorReferenceTokens(text);
+  if (refs.length >= 2) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_REF_AMBIGUOUS',
+      message: resistorRefAmbiguousMessage(refs)
+    };
+  }
+  if (refs.length !== 1) return null;
+  const token = refs[0];
+  const record = refRecord(spec, token);
+  if (!record) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_REF_NOT_FOUND',
+      message: resistorRefNotFoundMessage(displayRef(spec, token))
+    };
+  }
+  if (!isEditableLedSeriesResistor(spec, record)) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_REF_UNSUPPORTED',
+      message: resistorRefUnsupportedMessage(seriesResistorRef(spec))
+    };
+  }
+  return null;
+}
+
 const DEDICATED_REMOVAL_ROLES = new Set([
   'status-led-resistor',
   'i2c-scl-pullup',
@@ -1769,8 +1852,21 @@ function resistorEdit(amount) {
 }
 
 function namedResistorRef(text) {
-  const match = /\b[Rr]\d+\b/.exec(text);
-  return match ? match[0].toUpperCase() : null;
+  return resistorReferenceTokens(text)[0] ?? null;
+}
+
+// R-references are R plus digits. NFKC folds fullwidth letters, and case does not matter.
+function resistorReferenceTokens(text) {
+  const normalized = String(text ?? '').normalize('NFKC');
+  const seen = new Set();
+  const refs = [];
+  for (const match of normalized.matchAll(/\bR\d+\b/giu)) {
+    const ref = match[0].toUpperCase();
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    refs.push(ref);
+  }
+  return refs;
 }
 
 // A resistor edit is read only from this text. Candidates go through
@@ -1778,11 +1874,12 @@ function namedResistorRef(text) {
 // without a transition marker ask which value. A token the parser rejects is invalid.
 function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
+  const namedRefs = resistorReferenceTokens(normalized);
   const pullupOnly = /pull-?up|풀업|\bcc\d\b/i.test(normalized) && !/led|상태|직렬/i.test(normalized);
-  if (pullupOnly) return null;
+  if (pullupOnly && namedRefs.length === 0) return null;
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
-  const named = namedResistorRef(normalized);
+  const named = namedRefs[0] ?? null;
   if (!aboutLed && !change && !named) return null;
 
   const tokens = scanResistorTokens(normalized);

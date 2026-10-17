@@ -8,6 +8,9 @@ import { tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
 import {
   applyExistingProjectEdit,
   classifyExistingProjectRequest,
+  resistorRefAmbiguousMessage,
+  resistorRefNotFoundMessage,
+  resistorRefUnsupportedMessage,
   resistorTargetUnclearMessage,
   resistorUnitlessMessage,
   resistorValueAmbiguousMessage
@@ -22,7 +25,12 @@ const PLUS_MINUS = '\u00B1';
 
 const SPEC = {
   mcu: { family: 'STM32' },
-  schematic: { components: [{ ref: 'R1', libId: 'Device:R', value: '1k' }] },
+  schematic: {
+    components: [
+      { ref: 'R1', libId: 'Device:R', value: '1k' },
+      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' }
+    ]
+  },
   peripherals: [
     { kind: 'status-led' },
     { kind: 'status-led-resistor', value: '330Ω' }
@@ -88,8 +96,8 @@ test('lowercase m is refused and uppercase M is mega', () => {
   for (const prompt of ['change R1 to 4m7', 'LED 저항 1m', 'change R1 to 4.7m ohm', 'change R1 to 4.7m']) {
     assertEdit(prompt, null, { hint: true });
   }
-  assertEdit('change R1 to 4M7', 4.7e6);
-  assertEdit('change R1 to 1M', 1e6);
+  assertEdit('change R3 to 4M7', 4.7e6);
+  assertEdit('change R3 to 1M', 1e6);
 });
 
 test('thousands separators are not resistor values', () => {
@@ -149,11 +157,11 @@ test('a leading sign on a resistor value is refused', () => {
 });
 
 test('a tolerance percent is not a sign on the resistor value', () => {
-  assertEdit('change R1 to 10kΩ ±5%', 10_000);
-  assertEdit('change R1 to 680Ω ± 5%', 680);
+  assertEdit('change R3 to 10kΩ ±5%', 10_000);
+  assertEdit('change R3 to 680Ω ± 5%', 680);
   assertEdit('LED resistor 10kΩ ±5%', 10_000);
   assertEdit('LED resistor 680Ω ± 5%', 680);
-  assertEdit('change R1 to 330Ω±5%', 330);
+  assertEdit('change R3 to 330Ω±5%', 330);
 });
 
 test('the edit entry keeps 1Ω and 10MΩ and refuses the outside', () => {
@@ -167,15 +175,15 @@ test('the edit entry keeps 1Ω and 10MΩ and refuses the outside', () => {
   ]) {
     assertEdit(prompt, null);
   }
-  assertEdit('change R1 to 1 ohm', 1);
-  assertEdit('change R1 to 10M', 1e7);
+  assertEdit('change R3 to 1 ohm', 1);
+  assertEdit('change R3 to 10M', 1e7);
 });
 
 test('a unitless number is ohms only when one clean resistor target is named', () => {
   const accepted = [
     ['LED 저항 330으로', 330, '330Ω'],
     ['change the LED resistor to 330', 330, '330Ω'],
-    ['change R1 to 470', 470, '470Ω'],
+    ['change R3 to 470', 470, '470Ω'],
     ['R3 330으로', 330, '330Ω'],
     ['LED resistor 4700', 4700, '4.7k'],
     ['LEDの抵抗を470に', 470, '470Ω'],
@@ -310,7 +318,7 @@ const SHARED_ROWS = [
     id: 'tolerance',
     token: '330Ω ±5%',
     parse: null,
-    editPrompt: 'change R1 to 330Ω ±5%',
+    editPrompt: 'change R3 to 330Ω ±5%',
     edit: { ohms: 330 },
     scanPrompt: '330Ω ±5%',
     scan: { unparseable: false, fault: null, resistance: [330] },
@@ -370,13 +378,13 @@ const SHARED_ROWS = [
     id: 'unitless-target',
     token: '470',
     parse: 470,
-    editPrompt: 'change R1 to 470',
+    editPrompt: 'change R3 to 470',
     edit: { ohms: 470 },
     scanPrompt: '470',
     scan: { unparseable: false, fault: null, resistance: [470] },
     discretePrompt: 'LED 5V 470',
     discrete: { refused: false, ohms: 470, explicit: true },
-    differs: 'The edit path accepts one clean unitless number only when a resistor target is named. The new-project path accepts bare 470 because it is an E24 value (#20). Applying the edit still writes the status-LED series resistor, not schematic R1.'
+    differs: 'The edit path accepts one clean unitless number only when a resistor target is named. The new-project path accepts bare 470 because it is an E24 value (#20). Applying the edit writes the status-LED series resistor R3.'
   },
   {
     id: 'two-unitless',
@@ -468,7 +476,7 @@ test('a unitless ohms edit still writes the status LED series resistor', () => {
       { kind: 'status-led-resistor', value: '330' }
     ]
   };
-  const decision = classifyExistingProjectRequest('change R1 to 470', spec);
+  const decision = classifyExistingProjectRequest('change R3 to 470', spec);
   assert.equal(decision.mode, 'merge');
   assert.equal(decision.edit?.ohms, 470);
   assert.equal(decision.edit?.label, '470Ω');
@@ -476,6 +484,142 @@ test('a unitless ohms edit still writes the status LED series resistor', () => {
   assert.equal(next.schematic.components.find((part) => part.ref === 'R1').value, '1k');
   assert.equal(next.schematic.components.find((part) => part.ref === 'R3').value, '470Ω');
   assert.equal(next.peripherals.find((part) => part.kind === 'status-led-resistor').value, '470');
+});
+
+function componentValue(spec, ref) {
+  return spec.schematic.components.find((part) => part.ref === ref)?.value;
+}
+
+test('a named resistor edit changes only the LED series resistor', () => {
+  const spec = {
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '1k' },
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' },
+        { ref: 'R4', libId: 'ChatPCB:I2C_PULLUP', value: '4.7k' }
+      ]
+    },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '330' }
+    ],
+    boardProfile: {
+      productionParts: [
+        { ref: 'R1', role: 'usb-c-cc1-pulldown', libId: 'Device:R', value: '1k' },
+        { ref: 'R3', role: 'status-led-resistor', libId: 'Device:R', value: '330Ω' },
+        { ref: 'R4', role: 'i2c-scl-pullup', libId: 'Device:R', value: '4.7k' }
+      ]
+    }
+  };
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  const rows = [
+    ['change R1 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['R1 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['저항 R1 470으로 바꿔줘', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change R1 to 1k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change R4 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change the I2C pull-up R4 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change r4 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change R9 to 470', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')],
+    ['change r9 to 470', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')]
+  ];
+  for (const [prompt, code, message] of rows) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, code, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R1'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '330Ω', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
+
+  const profile = {
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '5.1k' },
+        { ref: 'R3', libId: 'Device:R', value: '1k' },
+        { ref: 'R4', libId: 'Device:R', value: '4.7k' }
+      ]
+    },
+    boardProfile: {
+      productionParts: [
+        { ref: 'R1', role: 'usb-c-cc1-pulldown' },
+        { ref: 'R3', role: 'status-led-resistor' },
+        { ref: 'R4', role: 'i2c-scl-pullup' }
+      ]
+    },
+    peripherals: [{ kind: 'status-led-resistor', value: '1k' }]
+  };
+  const namedSeries = classifyExistingProjectRequest('change R3 to 470', profile);
+  assert.equal(namedSeries.mode, 'merge');
+  assert.equal(namedSeries.edit?.ohms, 470);
+  const pullup = classifyExistingProjectRequest('change R4 to 470', profile);
+  assert.equal(pullup.mode, 'refuse');
+  assert.equal(pullup.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(pullup.message, resistorRefUnsupportedMessage('R3'));
+  assert.equal(componentValue(profile, 'R1'), '5.1k');
+  assert.equal(componentValue(profile, 'R3'), '1k');
+  assert.equal(componentValue(profile, 'R4'), '4.7k');
+
+  const noSeries = {
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'D1', libId: 'Device:LED', value: 'LED' },
+        { ref: 'R1', libId: 'Device:R', value: '1k' }
+      ]
+    },
+    peripherals: [{ kind: 'status-led' }]
+  };
+  const missingR3 = classifyExistingProjectRequest('change R3 to 470', noSeries);
+  assert.equal(missingR3.mode, 'refuse');
+  assert.equal(missingR3.code, 'RESISTOR_REF_NOT_FOUND');
+  assert.equal(missingR3.message, resistorRefNotFoundMessage('R3'));
+  assert.equal(missingR3.edit, undefined);
+  const generic = classifyExistingProjectRequest('change the LED resistor to 470', noSeries);
+  assert.equal(generic.mode, 'merge');
+  assert.equal(generic.edit?.ohms, 470);
+  const genericKo = classifyExistingProjectRequest('LED 저항 470Ω으로', noSeries);
+  assert.equal(genericKo.mode, 'merge');
+  assert.equal(genericKo.edit?.ohms, 470);
+  const unnamedUnsupported = classifyExistingProjectRequest('change R1 to 470', noSeries);
+  assert.equal(unnamedUnsupported.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(unnamedUnsupported.message, resistorRefUnsupportedMessage(null));
+  assert.equal(componentValue(noSeries, 'R1'), '1k');
+
+  const fullwidth = classifyExistingProjectRequest('change \uFF32\uFF13 to 470', spec);
+  assert.equal(fullwidth.mode, 'merge');
+  assert.equal(fullwidth.edit?.ohms, 470);
+  const lower = classifyExistingProjectRequest('change r3 to 470', spec);
+  assert.equal(lower.mode, 'merge');
+  assert.equal(lower.edit?.ohms, 470);
+
+  const two = classifyExistingProjectRequest('change R1 and R3 to 470', spec);
+  assert.equal(two.mode, 'refuse');
+  assert.equal(two.code, 'RESISTOR_REF_AMBIGUOUS');
+  assert.equal(two.edit, undefined);
+  assert.equal(two.message, resistorRefAmbiguousMessage(['R1', 'R3']));
+  assert.equal(componentValue(spec, 'R1'), '1k');
+  assert.equal(componentValue(spec, 'R3'), '330Ω');
+  const twoMissing = classifyExistingProjectRequest('change R8 and R9 to 470', spec);
+  assert.equal(twoMissing.code, 'RESISTOR_REF_AMBIGUOUS');
+  assert.equal(twoMissing.message, resistorRefAmbiguousMessage(['R8', 'R9']));
+  const sameRef = classifyExistingProjectRequest('change R3 and r3 to 470', spec);
+  assert.equal(sameRef.mode, 'merge');
+  assert.equal(sameRef.edit?.ohms, 470);
+
+  const milli = classifyExistingProjectRequest('change R1 to 4m7', spec);
+  assert.equal(milli.code, 'RESISTOR_VALUE_INVALID');
+  assert.match(milli.message ?? '', /Use M for megaohms/);
+  const milliTwo = classifyExistingProjectRequest('change R1 and R3 to 4m7', spec);
+  assert.equal(milliTwo.code, 'RESISTOR_VALUE_INVALID');
+  assert.match(milliTwo.message ?? '', /Use M for megaohms/);
+  assert.equal(componentValue(spec, 'R3'), '330Ω');
 });
 
 test('three digits after one dot are ambiguous with or without a prefix', () => {
@@ -488,7 +632,7 @@ test('three digits after one dot are ambiguous with or without a prefix', () => 
 test('non-E-series labels round-trip through a form the parser accepts', () => {
   const refused = /^\d+\.\d{3}[kKmM]$/;
   for (const ohms of [1005, 2001, 1000500]) {
-    const decision = classifyExistingProjectRequest(`change R1 to ${ohms} ohm`, SPEC);
+    const decision = classifyExistingProjectRequest(`change R3 to ${ohms} ohm`, SPEC);
     const label = decision.edit?.label ?? null;
     assert.equal(decision.mode, 'merge', String(ohms));
     assert.equal(decision.edit?.ohms, ohms, label);
@@ -505,7 +649,7 @@ test('E96 labels from 1Ω through 9.76MΩ round-trip, and 10MΩ does too', () =>
     for (const code of E96) {
       rows += 1;
       const ohms = Number((code * 10 ** dec).toPrecision(3));
-      const prompt = `change R1 to ${ohms} ohm`;
+      const prompt = `change R3 to ${ohms} ohm`;
       const decision = classifyExistingProjectRequest(prompt, SPEC);
       const label = decision.edit?.label ?? null;
       const back = label == null ? null : asNumber(parseResistorOhms(label));
@@ -515,7 +659,7 @@ test('E96 labels from 1Ω through 9.76MΩ round-trip, and 10MΩ does too', () =>
     }
   }
   assert.equal(rows, 672);
-  const ten = classifyExistingProjectRequest('change R1 to 10M', SPEC);
+  const ten = classifyExistingProjectRequest('change R3 to 10M', SPEC);
   const tenBack = ten.edit?.label == null ? null : asNumber(parseResistorOhms(ten.edit.label));
   if (!close(tenBack, 1e7)) failures.push(`10M -> ${ten.edit?.label} -> ${tenBack}`);
   assert.deepEqual(failures, []);

@@ -13,7 +13,14 @@ import {
   removalRefUnsupportedMessage
 } from '../src/workflow/existing-project-edit.js';
 
-const SPEC = { sourcePrompt: 'existing' };
+const SPEC = {
+  sourcePrompt: 'existing',
+  schematic: {
+    components: [
+      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' }
+    ]
+  }
+};
 const REMOVAL_UNCLEAR_MESSAGE = [
   'Which part should I remove? Give its reference, like J2. Nothing was removed.',
   '어떤 부품을 뺄까요? 참조번호(예: J2)로 알려 주세요. 아무것도 빼지 않았어요.'
