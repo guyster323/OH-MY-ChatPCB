@@ -120,7 +120,9 @@ let inspectionState = { projectDir: null, requestId: null, result: null };
 let patchRejectionCode = null;
 let chatGptUiEnabled = false;
 let chatGptSignedIn = null;
-let patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null };
+let patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null, evidenceDigest: null };
+let removalConfirmArmed = false;
+let syncingRemoval = false;
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
@@ -206,6 +208,12 @@ cancelApplyRemoveButtonEl?.addEventListener('click', cancelRemovalConfirm);
 confirmApplyRemoveButtonEl?.addEventListener('click', confirmRemovalApply);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
 fixPatchButtonEl?.addEventListener('click', askChatpcbToFixErc);
+if (approvePatchButtonEl) {
+  new MutationObserver(() => {
+    if (syncingRemoval) return;
+    syncRemovalConfirm();
+  }).observe(approvePatchButtonEl, { attributes: true, attributeFilter: ['disabled', 'aria-disabled'] });
+}
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
@@ -461,6 +469,7 @@ function sendToolCall(payload) {
     renderRequestStatus({ state: 'failed', summaryKey: 'request.failed', technicalDetail: t('request.daemon-offline') });
     if (payload.name === 'project.request') setRequestBusy(false);
   }
+  syncRemovalConfirm();
 }
 
 function handleEnvelope(envelope) {
@@ -478,6 +487,7 @@ function handleEnvelope(envelope) {
   pendingCalls.delete(id);
 
   if (callName === 'auth.chatgpt.reopen') {
+    normalizeDaemonReply(envelope.payload.result, 'auth');
     applyChatGPTReopenResult(envelope.payload);
     return;
   }
@@ -562,7 +572,13 @@ function handleEnvelope(envelope) {
 
   if (callName === 'project.create') {
     activeProjectCreateId = null;
-    activateProject(envelope.payload.result);
+    const result = envelope.payload.result ?? {};
+    const verdict = normalizeDaemonReply(result, 'project-create');
+    if (!verdict.ok) {
+      renderRequestStatus({ state: 'failed', summaryKey: 'request.failed' });
+      return;
+    }
+    activateProject(result);
     return;
   }
   if (callName === 'project.request') {
@@ -571,22 +587,37 @@ function handleEnvelope(envelope) {
     activeRequestProjectDir = null;
     setRequestBusy(false);
     if (requestProjectDir !== activeProject?.projectDir) return;
-    renderProjectRequest(envelope.payload.result);
+    const result = envelope.payload.result ?? {};
+    const verdict = normalizeDaemonReply(result, 'project-request');
+    if (!verdict.ok) {
+      renderApplyFailure(verdict);
+      inspectActiveProject();
+      return;
+    }
+    renderProjectRequest(result);
     inspectActiveProject();
     return;
   }
   if (callName === 'schematic.generate') {
     setRequestBusy(false);
     const conversation = lastRequestResult?.conversation ?? lastRequestResult;
-    renderProjectRequest({
+    const result = {
       ...envelope.payload.result,
       conversation,
       operation: 'generated'
-    });
+    };
+    const verdict = normalizeDaemonReply(result, 'project-generate');
+    if (!verdict.ok) {
+      renderApplyFailure(verdict);
+      inspectActiveProject();
+      return;
+    }
+    renderProjectRequest(result);
     inspectActiveProject();
     return;
   }
   if (callName === 'project.inspect') {
+    normalizeDaemonReply(envelope.payload.result, 'inspect');
     if (inspectionState.projectDir === activeProject?.projectDir && inspectionState.requestId === id) renderInspection(envelope.payload.result);
     return;
   }
@@ -604,21 +635,34 @@ function handleEnvelope(envelope) {
       renderPatchApproval();
       return;
     }
+    const verdict = normalizeDaemonReply(result, 'patch-apply');
+    if (verdict.canceled) return;
+    if (!verdict.ok) {
+      const code = verdict.code;
+      if (code === 'PATCH_STALE' || code === 'PATCH_EXPIRED' || code === 'PATCH_APPROVAL_EXPIRED') {
+        clearPatchApproval(code === 'PATCH_STALE' ? 'patch.stale' : 'patch.expired');
+      }
+      renderApplyFailure(verdict);
+      inspectActiveProject();
+      return;
+    }
     const removedRefs = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
-    const succeeded = result.applied !== false;
     clearPatchApproval();
     renderProjectRequest({
       ...result,
-      operation: result.operation || (succeeded ? 'patched' : result.operation),
-      applied: result.applied === undefined ? true : result.applied,
-      fromPatchApprove: succeeded,
-      removedRefs: succeeded ? removedRefs : []
+      operation: result.operation || 'patched',
+      fromPatchApprove: true,
+      removedRefs
     });
     inspectActiveProject();
     return;
   }
-  if (callName === 'schematic.patch.cancel') return;
+  if (callName === 'schematic.patch.cancel') {
+    normalizeDaemonReply(envelope.payload.result, 'patch-apply');
+    return;
+  }
   if (callName === 'provider.status') {
+    normalizeDaemonReply(envelope.payload.result, 'status');
     const provider = envelope.payload.result;
     renderProviderStatus(provider);
     if (provider?.provider === 'chatgpt' && (provider.status === 'signed-in' || provider.status === 'signed-out')) {
@@ -637,11 +681,13 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'auth.chatgpt.status') {
+    normalizeDaemonReply(envelope.payload.result || {}, 'auth');
     applyChatGPTAuthStatus(envelope.payload.result || {});
     return;
   }
   if (callName === 'auth.chatgpt.start') {
     const result = envelope.payload.result || {};
+    normalizeDaemonReply(result, 'auth');
     chatgptAuthState = {
       ...chatgptAuthState,
       state: result.state || 'waiting',
@@ -657,6 +703,7 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'auth.chatgpt.cancel' || callName === 'auth.chatgpt.signOut') {
+    normalizeDaemonReply(envelope.payload.result || {}, 'auth');
     stopChatGPTAuthPolling();
     chatgptAuthState = { state: 'signed_out' };
     chatgptAuthKnown = true;
@@ -681,6 +728,73 @@ function joinSentences(left, right) {
   if (!tail) return head;
   if (/[.!?…。．]$/.test(head)) return `${head} ${tail}`;
   return `${head}. ${tail}`;
+}
+
+const PATCH_FAILURE_KEYS = {
+  PATCH_STALE: 'patch.apply.failed.PATCH_STALE',
+  PATCH_EXPIRED: 'patch.apply.failed.PATCH_EXPIRED',
+  PATCH_APPROVAL_EXPIRED: 'patch.apply.failed.PATCH_EXPIRED',
+  EXISTING_COMPONENTS_REMOVED: 'patch.apply.failed.EXISTING_COMPONENTS_REMOVED',
+  APPLIED_MISSING: 'patch.apply.failed.missing'
+};
+
+function isApprovalPreview(result) {
+  if (!result || typeof result !== 'object' || result.applied === true) return false;
+  if (result.requiresApproval === true && result.patchId) return true;
+  return Boolean(existingComponentsRemoved(result) && result.patchId);
+}
+
+function failureCodeOf(result) {
+  if (!result || typeof result !== 'object' || !Object.hasOwn(result, 'applied')) return 'APPLIED_MISSING';
+  const code = result.reason?.code;
+  if (typeof code === 'string' && code.length > 0) return code;
+  return 'APPLY_REJECTED';
+}
+
+function normalizeDaemonReply(result, kind) {
+  const value = result && typeof result === 'object' ? result : {};
+  if (kind === 'inspect' || kind === 'auth' || kind === 'status') return { ok: true, kind };
+  if (kind === 'project-create') {
+    const failed = value.rolledBack === true || value.ok === false || typeof value.projectDir !== 'string' || value.projectDir.length === 0;
+    return failed
+      ? { ok: false, kind, code: failureCodeOf(value) }
+      : { ok: true, kind };
+  }
+  if (kind === 'project-request' || kind === 'project-generate') {
+    if (isApprovalPreview(value) || value.operation === 'clarify') return { ok: true, kind, preview: isApprovalPreview(value) };
+    if (value.rolledBack === true) return { ok: false, kind, code: failureCodeOf(value) };
+    if (!Object.hasOwn(value, 'applied') || value.applied === true) return { ok: true, kind };
+    return { ok: false, kind, code: failureCodeOf(value) };
+  }
+  if (kind === 'patch-apply') {
+    if (value.canceled === true || value.cancelled === true) return { ok: true, kind, canceled: true };
+    if (value.applied === true) return { ok: true, kind };
+    return { ok: false, kind, code: failureCodeOf(value) };
+  }
+  return { ok: false, kind, code: 'APPLY_REJECTED' };
+}
+
+function requestOutcome(result) {
+  if (!result || typeof result !== 'object') return { ok: true, kind: 'inspect' };
+  if (result.fromPatchApprove === true) return normalizeDaemonReply(result, 'patch-apply');
+  if (typeof result.projectDir === 'string' && !result.operation && !result.patchId && !result.files) {
+    return normalizeDaemonReply(result, 'project-create');
+  }
+  if (result.approved === true && Object.hasOwn(result, 'applied') && !isApprovalPreview(result)) {
+    return normalizeDaemonReply(result, 'patch-apply');
+  }
+  if (result.operation || result.patchId || result.requiresApproval || result.files || Object.hasOwn(result, 'applied')) {
+    return normalizeDaemonReply(result, 'project-generate');
+  }
+  return { ok: true, kind: 'inspect' };
+}
+
+function renderApplyFailure(verdict) {
+  const code = verdict?.code || 'APPLY_REJECTED';
+  const reasonKey = PATCH_FAILURE_KEYS[code] || 'patch.apply.failed.unknown';
+  const summary = joinSentences(t(reasonKey, { code }), t('patch.apply.failed.recheck'));
+  renderRequestStatus({ state: 'failed', summary });
+  appendProgress({ stage: 'fail', text: summary });
 }
 
 function renderProviderStatus(provider) {
@@ -841,6 +955,11 @@ function renderConversation(result) {
 }
 
 function renderProjectRequest(result) {
+  const verdict = normalizeDaemonReply(result, result?.fromPatchApprove === true ? 'patch-apply' : 'project-generate');
+  if (result?.operation !== 'clarify' && !isApprovalPreview(result) && verdict.ok === false) {
+    renderApplyFailure(verdict);
+    return;
+  }
   renderConversation(result);
   if (result?.operation === 'clarify') {
     renderRequestStatus(result.nextQuestion
@@ -856,7 +975,6 @@ function renderProjectRequest(result) {
     renderReview(result.review);
     renderArtifacts(result.files);
     renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
-    presentRemovalConfirm();
     return;
   }
   if (result?.requiresApproval && result.patchId) {
@@ -894,7 +1012,7 @@ function renderProjectRequest(result) {
     : validationFailed
       ? t('request.validation-failed')
       : t(summaryKey, summaryVars);
-  if (!result.rolledBack) workflowFlags.circuitApplied = true;
+  if (!requestFailed && verdict.ok !== false) workflowFlags.circuitApplied = true;
   if (!requestFailed && result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
     workflowFlags.circuitReviewed = true;
   }
@@ -906,7 +1024,7 @@ function renderProjectRequest(result) {
   appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
 
   const projectFile = findProjectFile(result.files);
-  const successfulUpdate = result.applied === true || (!result.rolledBack && result.validation?.ok !== false);
+  const successfulUpdate = !requestFailed && verdict.ok !== false && (result.applied === true || !Object.hasOwn(result, 'applied'));
   if (!successfulUpdate) return;
   if (projectFile) {
     kiCadLinkCardEl.hidden = false;
@@ -924,9 +1042,12 @@ function inspectActiveProject() {
   const id = `project_inspect_${Date.now()}_${crypto.randomUUID()}`;
   inspectionState = { projectDir, requestId: id, result: null };
   inspectionCardEl.hidden = false;
+  const expectedDigest = patchApprovalState.evidenceDigest;
   renderInspection({});
   pendingCalls.set(id, 'project.inspect');
-  sendToolCall({ id, name: 'project.inspect', args: { projectDir } });
+  const args = { projectDir };
+  if (typeof expectedDigest === 'string' && expectedDigest.length > 0) args.expectedDigest = expectedDigest;
+  sendToolCall({ id, name: 'project.inspect', args });
 }
 
 const FRESHNESS_CODES = {
@@ -989,7 +1110,40 @@ function renderInspection(result = {}) {
   inspectionErcEl.textContent = renderInspectionValidation('ERC', erc);
   inspectionDrcEl.textContent = renderInspectionValidation('DRC', drc);
   inspectionState.result = result;
+  if (notePreviewDigest(result)) return;
   renderPatchApproval();
+}
+
+function notePreviewDigest(result) {
+  if (!patchApprovalState.patchId) return false;
+  const comparison = result?.evidenceDigest;
+  if (comparison && typeof comparison === 'object' && comparison.matches === false) {
+    releaseStaleApproval();
+    return true;
+  }
+  if (patchApprovalState.evidenceDigest == null) {
+    const projectDigest = result?.inspection?.projectDigest;
+    if (typeof projectDigest === 'string' && projectDigest.length > 0) {
+      patchApprovalState.evidenceDigest = projectDigest;
+    }
+  }
+  return false;
+}
+
+function releaseStaleApproval() {
+  const dialogWasOpen = Boolean(applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden);
+  removalConfirmArmed = false;
+  clearPatchApproval('patch.stale');
+  if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+  if (patchApprovalStatusEl) {
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = 'stale';
+    setPatchStatus('patch.stale');
+  }
+  if (dialogWasOpen) {
+    prepareDisabledApplyForFocus();
+    focusApplyButton();
+  }
 }
 
 function renderInspectionFailure() {
@@ -1015,11 +1169,14 @@ function renderInspectionValidation(label, result) {
 
 function setPatchApproval(preview) {
   clearPatchApproval();
+  const removedComponents = existingComponentsRemoved(preview);
+  removalConfirmArmed = Boolean(removedComponents?.length);
   patchApprovalState = {
     patchId: preview.patchId,
     expiresAt: preview.expiresAt,
     timeout: null,
-    removedComponents: existingComponentsRemoved(preview)
+    removedComponents,
+    evidenceDigest: null
   };
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
   const delay = Number(preview.expiresAt) - Date.now();
@@ -1034,7 +1191,8 @@ function setPatchApproval(preview) {
 
 function clearPatchApproval(messageKey = 'patch.idle') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
-  patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null };
+  removalConfirmArmed = false;
+  patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null, evidenceDigest: null };
   patchRejectionCode = null;
   fixPatchButtonEl?.classList.remove('btn-primary');
   document.querySelector('#patch-erc-details')?.remove();
@@ -1327,6 +1485,11 @@ function renderErcBox(erc, active) {
 }
 
 function renderPatchApproval() {
+  updatePatchApprovalCard();
+  syncRemovalConfirm();
+}
+
+function updatePatchApprovalCard() {
   const freshness = inspectionState.result?.manifest?.freshness?.status;
   const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
   const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
@@ -1442,11 +1605,13 @@ function confirmRemovalApply() {
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
   if (patchApplyBusy()) return;
   if (!applyGateOpen()) {
+    removalConfirmArmed = false;
     dismissRemovalConfirmForClosedGate();
     return;
   }
   const allowRemovedComponents = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
   if (allowRemovedComponents.length === 0) return;
+  removalConfirmArmed = false;
   hideRemovalConfirm();
   appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
   renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.summary' });
@@ -1468,6 +1633,7 @@ function confirmRemovalApply() {
 function approvePatch() {
   if (!applyGateOpen()) return;
   if (patchApprovalState.removedComponents?.length) {
+    removalConfirmArmed = true;
     presentRemovalConfirm();
     return;
   }
@@ -1498,14 +1664,15 @@ function cancelApplyWithoutErcConfirm() {
 }
 
 function approvePatchWithoutErc() {
+  if (patchApplyBusy()) return;
   if (!activeProject || !approveWithoutErcButtonEl || approveWithoutErcButtonEl.hidden || approveWithoutErcButtonEl.disabled) return;
   if (!applyWithoutErcConfirmEl || applyWithoutErcConfirmEl.hidden) return;
   if (!patchApprovalState.patchId) return;
   const erc = ercBlockState();
   if (erc.skipped !== true || erc.failed || erc.passed === true) return;
   hideApplyWithoutErcConfirm();
-  appendProgress({ stage: 'apply', text: t('request.apply-progress') });
-  renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
+  appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
+  renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.summary' });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId, ercOverride: 'skipped' } });
@@ -1531,8 +1698,10 @@ function deriveWorkflow() {
   const status = conversation?.status;
   const operation = lastRequestResult?.operation;
   const reviewStatus = reviewStatusEl?.dataset.status;
-  const validationFailed = lastRequestResult?.validation?.ok === false || lastRequestResult?.rolledBack === true;
+  const outcome = requestOutcome(lastRequestResult);
+  const validationFailed = outcome.ok === false || lastRequestResult?.validation?.ok === false || lastRequestResult?.rolledBack === true;
   const patchReady = Boolean(patchApprovalState.patchId);
+  const circuitApplied = workflowFlags.circuitApplied === true && outcome.ok !== false;
   let active = 'circuit.concept';
   const done = new Set();
 
@@ -1547,11 +1716,11 @@ function deriveWorkflow() {
     } else {
       active = 'circuit.concept';
     }
-  } else if (patchReady && !workflowFlags.circuitApplied) {
+  } else if (patchReady && !circuitApplied) {
     done.add('circuit.concept');
     done.add('circuit.parts');
     active = 'circuit.draft';
-  } else if (workflowFlags.circuitApplied) {
+  } else if (circuitApplied) {
     done.add('circuit.concept');
     done.add('circuit.parts');
     done.add('circuit.draft');
@@ -2253,14 +2422,28 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
       pendingCalls.clear();
       activeRequestId = null;
       activeRequestProjectDir = null;
+      const removedComponents = Array.isArray(state.removedComponents) ? state.removedComponents : null;
       lastRequestResult = state.staleRequest ?? {
         operation: state.operation || 'generated',
         patchId: state.patchId ?? 'patch_test',
         validation: state.validation ?? null,
         candidateVerification: state.candidateVerification ?? null,
-        conversation: state.conversation || null
+        conversation: state.conversation || null,
+        ...(removedComponents ? {
+          removedComponents,
+          reason: { code: 'EXISTING_COMPONENTS_REMOVED', removedComponents }
+        } : {})
       };
       if (state.conversation) renderConversation({ ...lastRequestResult, ...state.conversation });
+      patchRejectionCode = null;
+      removalConfirmArmed = Boolean(removedComponents?.length);
+      patchApprovalState = {
+        patchId: state.patchId ?? 'patch_test',
+        expiresAt: state.expiresAt ?? (Date.now() + 600000),
+        timeout: null,
+        removedComponents,
+        evidenceDigest: typeof state.evidenceDigest === 'string' ? state.evidenceDigest : null
+      };
       inspectionState = {
         projectDir: project.projectDir,
         requestId: 'test',
@@ -2269,16 +2452,35 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
           validation: state.validation || null
         }
       };
-      if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
-      patchRejectionCode = null;
-      patchApprovalState = {
-        patchId: state.patchId ?? 'patch_test',
-        expiresAt: state.expiresAt ?? (Date.now() + 600000),
-        timeout: null
-      };
       if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
-      renderPatchApproval();
+      if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
+      else renderPatchApproval();
       renderRequestStatus({ state: 'ready', summaryKey: 'request.preview-ready' });
+    },
+    setRecordedErc(erc) {
+      if (!lastRequestResult) return;
+      lastRequestResult = {
+        ...lastRequestResult,
+        patchId: patchApprovalState.patchId ?? lastRequestResult.patchId,
+        validation: erc,
+        candidateVerification: { erc }
+      };
+    },
+    focusApply() {
+      const button = approvePatchButtonEl;
+      const before = {
+        disabled: Boolean(button?.disabled),
+        ariaDisabled: button?.getAttribute('aria-disabled') ?? null
+      };
+      focusApplyButton();
+      return {
+        before,
+        after: {
+          disabled: Boolean(button?.disabled),
+          ariaDisabled: button?.getAttribute('aria-disabled') ?? null
+        },
+        activeId: document.activeElement?.id ?? ''
+      };
     }
   };
 }
@@ -2309,7 +2511,9 @@ function applyGateOpen() {
   const gate = patchApprovalGate();
   const evidenceOpen = Boolean(activeProject) && gate.active && gate.approvedEvidence;
   if (!evidenceOpen) {
-    if (approvePatchButtonEl) approvePatchButtonEl.disabled = true;
+    if (approvePatchButtonEl && !approvePatchButtonEl.disabled && approvePatchButtonEl.getAttribute('aria-disabled') !== 'true') {
+      approvePatchButtonEl.disabled = true;
+    }
     return false;
   }
   if (approvePatchButtonEl?.disabled) return false;
@@ -2433,6 +2637,7 @@ function presentRemovalConfirm() {
 
 function cancelRemovalConfirm() {
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  removalConfirmArmed = false;
   hideRemovalConfirm();
   focusApplyButton();
 }
@@ -2440,21 +2645,26 @@ function cancelRemovalConfirm() {
 function applyGateClosedStatus() {
   const gate = patchApprovalGate();
   if (!patchApprovalState.patchId || !gate.active) return { key: 'patch.expired', state: 'expired' };
-  if (gate.freshness === 'stale' || !gate.approvedEvidence) return { key: 'patch.stale', state: 'stale' };
+  if (gate.freshness === 'stale') return { key: 'patch.stale', state: 'stale' };
+  if (!gate.approvedEvidence) return { key: 'patch.apply.blocked-disabled', state: 'blocked' };
   if (ercBlockState().passed !== true) {
     return { key: applyBlockedReason(ercBlockState()).key, state: 'blocked' };
   }
+  if (patchApplyBusy()) return { key: 'request.project-busy', state: 'blocked' };
   return { key: 'patch.apply.blocked-disabled', state: 'blocked' };
 }
 
 function focusApplyButton() {
   const button = approvePatchButtonEl;
   if (!button) return;
-  if (button.disabled) {
-    button.disabled = false;
-    button.setAttribute('aria-disabled', 'true');
-  }
   button.focus();
+}
+
+function prepareDisabledApplyForFocus() {
+  const button = approvePatchButtonEl;
+  if (!button?.disabled) return;
+  button.disabled = false;
+  button.setAttribute('aria-disabled', 'true');
 }
 
 function dismissRemovalConfirmForClosedGate() {
@@ -2466,7 +2676,21 @@ function dismissRemovalConfirmForClosedGate() {
     patchApprovalStatusEl.dataset.state = reason.state;
     setPatchStatus(reason.key);
   }
+  prepareDisabledApplyForFocus();
   focusApplyButton();
+}
+
+function syncRemovalConfirm() {
+  if (syncingRemoval) return;
+  syncingRemoval = true;
+  try {
+    const open = Boolean(applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden);
+    const gate = applyGateOpen();
+    if (open && !gate) dismissRemovalConfirmForClosedGate();
+    else if (removalConfirmArmed && !open && gate && patchApprovalState.removedComponents?.length) presentRemovalConfirm();
+  } finally {
+    syncingRemoval = false;
+  }
 }
 
 // Daemon progress and patch-card text arrive in English (or as a code). Known

@@ -164,44 +164,84 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
           const status = typeof window.__inspectionFreshness === 'string' && window.__inspectionFreshness
             ? window.__inspectionFreshness
             : 'missing';
+          const projectDigest = typeof window.__inspectionDigest === 'string' && window.__inspectionDigest
+            ? window.__inspectionDigest
+            : 'abcdef123456';
+          const expectedDigest = call.args?.expectedDigest;
           result = {
             manifest: { freshness: { status, reason: status === 'missing' ? 'No manifest' : `Evidence is ${status}` } },
-            inspection: { projectDigest: 'abcdef123456', artifactCount: 0 }
+            inspection: { projectDigest, artifactCount: 0 }
           };
+          if (typeof expectedDigest === 'string' && expectedDigest.length > 0) {
+            result.evidenceDigest = { projectDigest, matches: expectedDigest === projectDigest };
+          }
+          if (window.__holdInspect === true) {
+            const socket = this;
+            const heldId = call.id;
+            const heldResult = result;
+            window.__heldInspect = {
+              emit(extra) {
+                const payload = { id: heldId, ok: true, result: extra || heldResult };
+                queueMicrotask(() => socket.emit('message', { data: JSON.stringify({ version: 1, id: `r_${heldId}`, type: 'tool.result', createdAt: new Date().toISOString(), payload }) }));
+              }
+            };
+            return;
+          }
         }
         if (config.approvalFlow && call.name === 'project.request') {
-          const expiresAt = Number.isFinite(window.__previewExpiresAt) ? window.__previewExpiresAt : Date.now() + 120000;
-          result = {
-            requiresApproval: true,
-            approved: false,
-            applied: false,
-            patchId: 'sha256:preview',
-            expiresAt,
-            operation: 'generated',
-            files: {},
-            conversation: { messages: [] },
-            candidateVerification: { erc: { ok: true, errorCount: 0 } }
-          };
-          if (window.__draftSource) result.source = window.__draftSource;
-          if (Array.isArray(window.__draftParts)) result.components = window.__draftParts;
-          // Removal previews set requiresApproval false and carry removedComponents.
-          if (window.__removalPreview && typeof window.__removalPreview === 'object') {
-            Object.assign(result, window.__removalPreview);
-          }
-          if (window.__candidateErc && typeof window.__candidateErc === 'object') {
-            result.candidateVerification = { erc: window.__candidateErc };
-          }
-        }
-        if (config.approvalFlow && call.name === 'schematic.patch' && call.args?.approved === true && window.__holdPatchResult === true) {
-          const socket = this;
-          const heldId = call.id;
-          window.__heldPatch = {
-            emit(extra = {}) {
-              const payload = { id: heldId, ok: true, result: extra };
-              queueMicrotask(() => socket.emit('message', { data: JSON.stringify({ version: 1, id: `r_${heldId}`, type: 'tool.result', createdAt: new Date().toISOString(), payload }) }));
+          const buildRequest = () => {
+            if (window.__requestResult && typeof window.__requestResult === 'object') return window.__requestResult;
+            const expiresAt = Number.isFinite(window.__previewExpiresAt) ? window.__previewExpiresAt : Date.now() + 120000;
+            const preview = {
+              requiresApproval: true,
+              approved: false,
+              applied: false,
+              patchId: 'sha256:preview',
+              expiresAt,
+              operation: 'generated',
+              files: {},
+              conversation: { messages: [] },
+              candidateVerification: { erc: { ok: true, errorCount: 0 } }
+            };
+            if (window.__draftSource) preview.source = window.__draftSource;
+            if (Array.isArray(window.__draftParts)) preview.components = window.__draftParts;
+            // Removal previews set requiresApproval false and carry removedComponents.
+            if (window.__removalPreview && typeof window.__removalPreview === 'object') {
+              Object.assign(preview, window.__removalPreview);
             }
+            if (window.__candidateErc && typeof window.__candidateErc === 'object') {
+              preview.candidateVerification = { erc: window.__candidateErc };
+            }
+            return preview;
           };
-          return;
+          if (window.__holdRequest === true) {
+            const socket = this;
+            const heldId = call.id;
+            window.__heldRequest = {
+              emit() {
+                const payload = { id: heldId, ok: true, result: buildRequest() };
+                queueMicrotask(() => socket.emit('message', { data: JSON.stringify({ version: 1, id: `r_${heldId}`, type: 'tool.result', createdAt: new Date().toISOString(), payload }) }));
+              }
+            };
+            return;
+          }
+          result = buildRequest();
+        }
+        if (config.approvalFlow && call.name === 'schematic.patch' && call.args?.approved === true) {
+          if (window.__holdPatchResult === true) {
+            const socket = this;
+            const heldId = call.id;
+            window.__heldPatch = {
+              emit(extra = {}) {
+                const payload = { id: heldId, ok: true, result: extra };
+                queueMicrotask(() => socket.emit('message', { data: JSON.stringify({ version: 1, id: `r_${heldId}`, type: 'tool.result', createdAt: new Date().toISOString(), payload }) }));
+              }
+            };
+            return;
+          }
+          result = window.__patchApplyResult && typeof window.__patchApplyResult === 'object'
+            ? window.__patchApplyResult
+            : { applied: true, operation: 'patched', validation: { ok: true } };
         }
         const payload = { id: call.id, ok, result };
         if (error) payload.error = error;
@@ -411,7 +451,7 @@ test('reopen shows the browser-open error when the result is ok:false', async (t
     const reopen = page.locator('#chatgpt-reopen-button');
     await reopen.waitFor();
     await reopen.click();
-    await assertBrowserOpenError(page, { title: '브라우저를 열 수 없습니다. 아래 링크를 사용하세요.', pageErrors });
+    await assertBrowserOpenError(page, { title: '브라우저를 열 수 없어요. 아래 링크를 사용하세요.', pageErrors });
   } finally {
     await context.close();
   }
@@ -656,14 +696,14 @@ test('approval copy is plain language in English and Korean', async () => {
   const en = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
   const ko = JSON.parse(await readFile(path.join(panelRoot, 'locales/ko.json'), 'utf8'));
   assert.equal(en['approval.no-manifest'], 'Parts list will be checked after you apply to the schematic.');
-  assert.equal(ko['approval.no-manifest'], '부품 목록은 스키매틱에 적용한 뒤 확인됩니다.');
+  assert.equal(ko['approval.no-manifest'], '부품 목록은 스키매틱에 적용한 뒤 확인돼요.');
   assert.equal(
     en['approval.no-manifest-detail'],
     'The patch is still matched to the current files before anything is written.'
   );
   assert.equal(
     ko['approval.no-manifest-detail'],
-    '파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인합니다.'
+    '파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인해요.'
   );
   for (const copy of [en, ko]) {
     assert.equal(copy['approval.no-manifest'].includes('manifest'), false);
@@ -1350,20 +1390,16 @@ test('stale, expired, or disabled removal preview does not open confirm or send 
   try {
     await page.evaluate(() => { window.__inspectionFreshness = 'stale'; });
     await sendRemovalPreview(page);
-    await page.waitForFunction(() => {
+    await page.waitForFunction((stale) => {
       const dialog = document.querySelector('#apply-remove-components-confirm');
       const button = document.querySelector('#approve-patch-button');
       const status = document.querySelector('#patch-approval-status');
-      return dialog && dialog.hidden === false
+      return dialog?.hidden === true
         && button?.disabled === true
-        && status?.dataset.state === 'stale';
-    });
+        && status?.dataset.state === 'stale'
+        && status?.textContent === stale;
+    }, en['patch.stale']);
     assert.deepEqual(await approvedApplyCalls(page), []);
-    await page.locator('#confirm-apply-remove-components').click();
-    await page.waitForFunction(() => (
-      document.querySelector('#apply-remove-components-confirm')?.hidden === true
-      && document.activeElement?.id === 'approve-patch-button'
-    ));
     assert.equal(await page.locator('#patch-approval-status').innerText(), en['patch.stale']);
     assert.deepEqual(await approvedApplyCalls(page), []);
     await page.locator('#approve-patch-button').dispatchEvent('click');
@@ -1408,11 +1444,14 @@ test('stale, expired, or disabled removal preview does not open confirm or send 
     assert.equal(await removalDialogHidden(page), true);
     assert.deepEqual(await approvedApplyCalls(page), []);
 
-    await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = false; });
+    await page.evaluate(() => {
+      const button = document.querySelector('#approve-patch-button');
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+    });
     await page.locator('#approve-patch-button').click();
     await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
     await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = true; });
-    await page.locator('#confirm-apply-remove-components').click();
     await page.waitForFunction(() => (
       document.querySelector('#apply-remove-components-confirm')?.hidden === true
       && document.activeElement?.id === 'approve-patch-button'
@@ -1497,7 +1536,7 @@ test('normal Apply is blocked when stale, expired, disabled, or busy, and sends 
     await page.locator('#approve-patch-button').dispatchEvent('click');
     assert.equal((await approvedApplyCalls(page)).length, 1);
 
-    await page.evaluate(() => { window.__heldPatch.emit({}); });
+    await page.evaluate(() => { window.__heldPatch.emit({ applied: true, operation: 'patched', validation: { ok: true } }); });
     await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.applied']);
     const progressText = await page.locator('#request-progress').innerText();
     const statusText = await page.locator('#request-status').innerText();
@@ -1505,6 +1544,185 @@ test('normal Apply is blocked when stale, expired, disabled, or busy, and sends 
     assert.equal(progressText.includes('Completed:'), false, progressText);
     assert.equal(statusText.includes('Generated project'), false, statusText);
     assert.equal(statusText.includes('Completed:'), false, statusText);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('daemon apply replies fail closed and a closed gate dismisses the removal dialog', async (t) => {
+  const opened = await openApprovalPanel(t, 'en-US');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  const { en, ko } = await removalConfirmCopy();
+  const cases = [
+    {
+      id: 'PATCH_STALE',
+      result: { applied: false, validation: { ok: true }, reason: { code: 'PATCH_STALE' } },
+      text: en['patch.apply.failed.PATCH_STALE']
+    },
+    {
+      id: 'EXISTING_COMPONENTS_REMOVED',
+      result: { applied: false, validation: { ok: true }, reason: { code: 'EXISTING_COMPONENTS_REMOVED' } },
+      text: en['patch.apply.failed.EXISTING_COMPONENTS_REMOVED']
+    },
+    {
+      id: 'PATCH_EXPIRED',
+      result: { applied: false, validation: { ok: true }, reason: { code: 'PATCH_EXPIRED' } },
+      text: en['patch.apply.failed.PATCH_EXPIRED']
+    },
+    {
+      id: 'NO_SUCH_CODE',
+      result: { applied: false, validation: { ok: true }, reason: { code: 'NO_SUCH_CODE' } },
+      text: en['patch.apply.failed.unknown'].replaceAll('{code}', 'NO_SUCH_CODE')
+    },
+    {
+      id: 'missing-applied',
+      result: { validation: { ok: true }, operation: 'patched' },
+      text: en['patch.apply.failed.missing']
+    }
+  ];
+  try {
+    assert.equal(await page.locator('#active-project').isVisible(), true);
+    const created = await page.locator('#request-status').innerText();
+    assert.equal(created.includes('Completed'), false);
+    assert.equal(created.includes(en['patch.apply.failed.missing']), false);
+    assert.equal(await page.locator('#request-status').getAttribute('data-state'), 'ready');
+
+    await page.evaluate(() => {
+      window.__hostMessages = [];
+      window.chatpcbHost = {
+        postMessage(message) { window.__hostMessages.push(message); },
+        send(message) { window.__hostMessages.push(message); },
+        getProjectStatus() { return { dirty: false, linkState: 'linked' }; }
+      };
+    });
+
+    for (const item of cases) {
+      await sendPlainPreview(page, `preview ${item.id}`);
+      await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
+      await page.evaluate((next) => { window.__patchApplyResult = next; }, item.result);
+      await page.locator('#approve-patch-button').click();
+      await page.waitForFunction((needle) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent?.includes(needle)
+      ), item.text);
+      const status = await page.locator('#request-status').innerText();
+      assert.equal(status.includes(item.text), true, status);
+      assert.equal(status.includes(en['patch.apply.failed.recheck']), true, status);
+      assert.equal(status.includes('Completed'), false, status);
+      assert.equal(status.includes('Generated project'), false, status);
+      assert.notEqual(await page.locator('[data-step="circuit.draft"]').getAttribute('data-state'), 'done');
+      const reloads = await page.evaluate(() => window.__hostMessages.filter((message) => message?.type === 'project.reload'));
+      assert.deepEqual(reloads, []);
+    }
+
+    await page.evaluate(() => { window.__patchApplyResult = null; });
+    await page.evaluate((next) => { window.__requestResult = next; }, {
+      applied: false,
+      validation: { ok: true },
+      operation: 'generated',
+      reason: { code: 'PATCH_STALE' }
+    });
+    await page.locator('#prompt').fill('request rejected');
+    await page.locator('#composer button[type="submit"]').click();
+    await page.waitForFunction((needle) => (
+      document.querySelector('#request-status')?.dataset.state === 'failed'
+      && document.querySelector('#request-status')?.textContent?.includes(needle)
+    ), en['patch.apply.failed.PATCH_STALE']);
+    const requestStatus = await page.locator('#request-status').innerText();
+    assert.equal(requestStatus.includes('Completed'), false, requestStatus);
+    assert.equal(requestStatus.includes('Generated project'), false, requestStatus);
+    assert.notEqual(await page.locator('[data-step="circuit.draft"]').getAttribute('data-state'), 'done');
+    await page.evaluate(() => { window.__requestResult = null; });
+
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+    await page.evaluate(() => { window.__holdRequest = true; });
+    await page.locator('#prompt').fill('another removal while the dialog is open');
+    await page.locator('#composer button[type="submit"]').click();
+    await page.waitForFunction((busy) => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.querySelector('#patch-approval-status')?.textContent === busy
+    ), en['request.project-busy']);
+    await page.evaluate(() => {
+      window.__holdRequest = false;
+      window.__heldRequest.emit();
+    });
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+    await page.locator('#cancel-apply-remove-components').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    const inspectsBeforeReload = await page.evaluate(() => window.__sent.filter((call) => call.name === 'project.inspect').length);
+    await page.evaluate(() => {
+      window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+    });
+    await page.waitForFunction((count) => (
+      window.__sent.filter((call) => call.name === 'project.inspect').length > count
+    ), inspectsBeforeReload);
+    assert.equal(await removalDialogHidden(page), true);
+
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+    await page.evaluate(() => { window.__inspectionDigest = 'ffffeeee1111'; });
+    await page.evaluate(() => {
+      window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+    });
+    await page.waitForFunction((stale) => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.querySelector('#patch-approval-status')?.textContent === stale
+    ), en['patch.stale']);
+    const digestInspect = await page.evaluate(() => window.__sent.filter((call) => call.name === 'project.inspect').at(-1));
+    assert.equal(digestInspect.args.expectedDigest, 'abcdef123456');
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await removalDialogHidden(page), true);
+
+    await page.evaluate(() => {
+      window.__inspectionDigest = 'abcdef123456';
+      window.__inspectionFreshness = 'missing';
+      window.__removalPreview = null;
+      window.__holdInspect = true;
+    });
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('#apply-remove-components-confirm');
+      const button = document.querySelector('#approve-patch-button');
+      return dialog?.hidden === true && (button?.disabled === true || button?.getAttribute('aria-disabled') === 'true');
+    });
+    const appliesBeforeClosedGate = (await approvedApplyCalls(page)).length;
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await removalDialogHidden(page), true);
+    assert.equal((await approvedApplyCalls(page)).length, appliesBeforeClosedGate);
+    await page.evaluate(() => {
+      window.__holdInspect = false;
+      window.__heldInspect.emit();
+    });
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+
+    assert.deepEqual(pageErrors, []);
+    assert.equal(ko['patch.apply.failed.PATCH_STALE'].includes('했어요'), true);
+  } finally {
+    await context.close();
+  }
+});
+
+test('Korean apply failures use the same reason codes', async (t) => {
+  const opened = await openApprovalPanel(t, 'ko-KR');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  const { ko } = await removalConfirmCopy();
+  try {
+    await sendPlainPreview(page, 'korean stale apply');
+    await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
+    await page.evaluate(() => {
+      window.__patchApplyResult = { applied: false, validation: { ok: true }, reason: { code: 'PATCH_STALE' } };
+    });
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction((needle) => document.querySelector('#request-status')?.textContent?.includes(needle), ko['patch.apply.failed.PATCH_STALE']);
+    const status = await page.locator('#request-status').innerText();
+    assert.equal(status.includes(ko['patch.apply.failed.recheck']), true, status);
+    assert.equal(status.includes('완료'), false, status);
+    assert.equal(status.includes('프로젝트를 생성했어요'), false, status);
+    assert.equal(await page.locator('#request-status').getAttribute('data-state'), 'failed');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
