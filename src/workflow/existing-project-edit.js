@@ -1383,10 +1383,13 @@ function removalDecision(text, spec) {
 // A candidate carries an ohm unit or an RKM/SI suffix. Package codes, wattage,
 // voltage, current, percent, bare numbers, and reference designators are not
 // values. The matched text is parsed only by parseResistorOhms.
-const RESISTOR_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{N}_.])(?:${[
+// A leading sign stays inside the token. Dropping it would read +10Ω as 10Ω.
+// The same is true of a comma: 4,7k must not be read as 7k.
+const RESISTOR_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{N}_.+,\u2212\u2013\u00B1-])(?:${[
   String.raw`\d+\s*/\s*\d+\s*[Ww](?![A-Za-z])`,
-  String.raw`[-−]\s*\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
+  String.raw`[+\-\u2212\u2013\uFF0D\u00B1]\s*(?:\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)|\d+[rRkKmM]\d+|\d+(?:\.\d+)?\s*meg|\d+(?:\.\d+)?\s*[rRkKmMuUnNpPfFgGtT]|\d+(?:\.\d+)?(?!\s*%))(?![A-Za-z])`,
   String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
+  String.raw`\d{1,3}(?:,\d+)+(?:\.\d+)?\s*(?:meg|[rRkKmM])(?:\s*(?:Ω|옴|ohms?))?(?![A-Za-z])`,
   String.raw`\d+(?:\.\d+)?[eE][+-]?\d+`,
   String.raw`\d+(?:\.\d+){2,}[A-Za-z]*`,
   String.raw`\d+\.(?!\d)\s*[A-Za-z]+`,

@@ -173,8 +173,8 @@ function trailingSupplyKind(prompt, end) {
   return null;
 }
 
-// Every resistor form goes through parseResistorOhms. A lone m is milli there
-// (4.7m is 0.0047Ω), the same reading as 4m7. Zero stays 0 so 0Ω is visible.
+// Every resistor form goes through parseResistorOhms. A lone m is refused
+// there (4m7 and 4.7m are not values). Zero stays 0 so 0Ω is visible.
 function resistorOhmsNumber(text) {
   const parsed = parseResistorOhms(text);
   if (parsed == null) return null;

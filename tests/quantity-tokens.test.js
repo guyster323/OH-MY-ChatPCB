@@ -41,13 +41,7 @@ test('resistor quantity tokens match parseResistorOhms', () => {
     ['0R', 0],
     ['0Ω', 0],
     ['0 ohm', 0],
-    ['0.5Ω', 0.5],
-    // A lone m is milli in the one parser. 4.7m used to be 4.7M here.
-    ['4m7', 0.0047],
-    ['2m2', 0.0022],
-    ['1m', 0.001],
-    ['4.7m', 0.0047],
-    ['4.7m ohm', 0.0047]
+    ['0.5Ω', 0.5]
   ];
 
   for (const [prompt, expected] of rows) {
@@ -59,6 +53,15 @@ test('resistor quantity tokens match parseResistorOhms', () => {
     assert.equal(parsed, expected, prompt);
     assert.equal(tokens[0].value, parsed, `${prompt} ${tokens[0].raw}`);
     assert.equal(tokens[0].value === 4_700_000, expected === 4_700_000, prompt);
+  }
+});
+
+test('a lone m is not a resistor value', () => {
+  for (const prompt of ['4m7', '2m2', '1m', '4.7m', '4.7m ohm']) {
+    assert.equal(parseResistorOhms(prompt), null, prompt);
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
+    assert.equal(scan.tokens.some((token) => token.value === 4_700_000), false, prompt);
   }
 });
 
@@ -78,7 +81,7 @@ test('an ambiguous thousands dot is not read as a resistor', () => {
   }
 });
 
-test('voltage and current milli stay milli when resistor m is milli', () => {
+test('voltage and current milli stay milli', () => {
   const millivolts = tokenizeQuantities('3300mV').tokens[0];
   assert.equal(millivolts.unit, 'mV');
   assert.equal(millivolts.value, 3.3);

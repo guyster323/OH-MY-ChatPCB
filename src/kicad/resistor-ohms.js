@@ -2,8 +2,8 @@
 // SPICE validation. parseResistorOhms stays a pure parser; callers apply this.
 export const LED_SERIES_RESISTOR_RANGE = Object.freeze({ min: 1, max: 10e6 });
 
-// Lone "m" parses as SPICE milli (4m7 is 0.0047Ω). "M" and "meg" are mega.
-// classifyResistorValue refuses a lone m instead of guessing megaohms.
+// A lone "m" is not a value (4m7, 4.7m). It is not mega. "M" and "meg" are mega.
+// classifyResistorValue asks for an uppercase M instead of guessing.
 // RKM writes the letter in place of the decimal point, so 4k7 is 4.7 kΩ.
 const RESISTOR_SCALE = {
   t: 1e12,
@@ -19,7 +19,7 @@ const RESISTOR_SCALE = {
 function resistorScale(suffix) {
   if (!suffix) return 1;
   if (/^meg$/i.test(suffix)) return 1e6;
-  if (suffix === 'm') return 1e-3;
+  if (suffix === 'm') return null;
   if (suffix === 'M') return 1e6;
   if (suffix.length !== 1) return null;
   return RESISTOR_SCALE[suffix.toLowerCase()] ?? null;
@@ -84,8 +84,8 @@ export function isLoneMilliResistorSuffix(value) {
   return /^\d+m\d+$/.test(text) || /^\d+(?:\.\d+)?\s*m$/.test(text);
 }
 
-// Shared by the edit path and SPICE. A lone m is refused even when the milli
-// reading would fall inside LED_SERIES_RESISTOR_RANGE (1000m would be 1Ω).
+// Shared by the edit path and SPICE. A lone m is refused with the M hint.
+// parseResistorOhms returns null for it, including 1000m.
 export function classifyResistorValue(value) {
   if (isLoneMilliResistorSuffix(value)) return { reason: 'milli' };
   const ohmsText = parseResistorOhms(value);
