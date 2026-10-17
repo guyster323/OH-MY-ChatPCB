@@ -1,12 +1,13 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { parseResistorOhms } from '../kicad/resistor-ohms.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
-const RESISTOR_AMOUNT_SOURCE = String.raw`(\d+(?:\.\d+)?)\s*(?:Ω|옴|ohms?)`;
+const INVALID_OHM_TOKEN = String.raw`(?<![\p{L}\p{N}_])[A-Za-z]+\s*(?:Ω|옴|ohms?)(?![\p{L}\p{N}_])`;
 
 // Coordinators are built before the table so the clause split can see them.
 // "하거나" contains 고, but that 고 is not a new clause.
@@ -50,8 +51,34 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: 'never', re: String.raw`\bnever\b` }),
     Object.freeze({ id: "n't", re: String.raw`n't\b` }),
     Object.freeze({ id: 'dont', re: String.raw`\bdont\b` }),
-    Object.freeze({ id: 'not', re: String.raw`\bnot\b` })
+    Object.freeze({ id: 'not', re: String.raw`\bnot\b` }),
+    Object.freeze({ id: 'no', re: String.raw`\bno\b` })
   ]),
+  // Korean verb-scope cues. A removal clause that contains one is not a delete.
+  // 남기/남겨/유지 are part-scope keeps, not verb-scope, and live below.
+  koreanBlockingCues: Object.freeze([
+    Object.freeze({ id: '필요 없', re: '필요\\s*없' }),
+    Object.freeze({ id: '면 안', re: '면\\s*안' }),
+    Object.freeze({ id: '하지 마', re: '하지\\s*마' }),
+    Object.freeze({ id: '지 마', re: '지\\s*마' }),
+    Object.freeze({ id: '금지', re: '금지' }),
+    Object.freeze({ id: '않', re: '(?<![가-힣])않' }),
+    Object.freeze({ id: '안', re: '(?<![가-힣])안' }),
+    Object.freeze({ id: '말', re: '(?<![가-힣])말' })
+  ]),
+  partScopeCues: Object.freeze([
+    Object.freeze({ id: 'rather-than', re: String.raw`\brather\s+than\b` }),
+    Object.freeze({ id: 'but-not', re: String.raw`\bbut\s+not\b` }),
+    Object.freeze({ id: 'without', re: String.raw`\bwithout\b` }),
+    Object.freeze({ id: 'instead', re: String.raw`\binstead\b` }),
+    Object.freeze({ id: 'except', re: String.raw`\bexcept\b` }),
+    Object.freeze({ id: 'keep', re: String.raw`\bkeep\b` }),
+    Object.freeze({ id: '남겨', re: '남겨' }),
+    Object.freeze({ id: '남기', re: '남기' }),
+    Object.freeze({ id: '유지', re: '유지' })
+  ]),
+  // Mapped to ASCII ' after NFKC. U+00B4's NFKC form is a space plus U+0301.
+  apostrophes: '\u2018\u2019\u201A\u201B\u2032\u2035\u02BC\u02BB\u0060\u00B4\uFF07\u02B9\u02CA\u02CB\uA78C\u055A\u0301',
   // Not removal verbs. They share one negation with a removal verb:
   // "do not change or remove", "삭제하거나 변경하지 마".
   coordinatedVerbs: Object.freeze([
@@ -62,9 +89,10 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
   ]),
   coordinators: DELETION_COORDINATORS,
   // After a Korean verb stem. A particle (은/는/을/를) may sit in between.
-  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|금지|말고|하지\s*않도록|안\s*함|안\s*해도|지(?:\s*는)?\s*[마말])`,
+  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|면\s*안|할\s*필요\s*없|금지|말고|하지\s*않도록|안\s*함|안\s*해도|지(?:\s*는)?\s*[마말])`,
   clauseSeparators: Object.freeze([
     Object.freeze({ id: 'and-then', re: String.raw`\band\s+then\b`, negatesLeft: false }),
+    Object.freeze({ id: 'and', re: String.raw`\band\b`, negatesLeft: false }),
     Object.freeze({ id: 'but', re: String.raw`\bbut\b`, negatesLeft: false }),
     Object.freeze({ id: 'semicolon', re: ';', negatesLeft: false }),
     Object.freeze({ id: 'go-naseo', re: String.raw`고\s*나서`, negatesLeft: false }),
@@ -92,6 +120,18 @@ function editError(message) {
   return error;
 }
 
+export function removalIntentUnclearMessage() {
+  const en = 'It is not clear which part to remove. State exactly which part to remove, for example "remove the I2C connector" or "remove the LED". Nothing was removed.';
+  const ko = '어떤 부품을 제거할지 명확하지 않습니다. 제거할 부품을 정확히 적어 주세요. 예: "I2C 커넥터 삭제" 또는 "LED 삭제". 아무것도 제거하지 않았습니다.';
+  return `${en}\n${ko}`;
+}
+
+export function resistorValueInvalidMessage() {
+  const en = 'The resistor value is not valid. State a value such as 680Ω or 4.7kΩ. Nothing was changed.';
+  const ko = '저항 값이 올바르지 않습니다. 680Ω 또는 4.7kΩ 같은 값을 적어 주세요. 아무것도 바꾸지 않았습니다.';
+  return `${en}\n${ko}`;
+}
+
 export function modifyRefusalMessage() {
   const en = 'The requested change could not be applied onto the existing design. Describe the change more specifically (name the part or reference and the value), or start a new project for a full redesign. The existing circuit was left unchanged.';
   const ko = '수정 사항을 적용할 수 없습니다. 바꿀 부품이나 참조 이름과 값을 구체적으로 적어 주세요. 전체를 다시 설계하려면 새 프로젝트를 시작하세요. 기존 회로는 바꾸지 않았습니다.';
@@ -101,11 +141,12 @@ export function modifyRefusalMessage() {
 // A prompt that names a new MCU board is a replacement design. A short edit is
 // merged onto the saved spec so a resistor change cannot rebuild the board.
 // userPrompt is the request text the client sent. When it differs from prompt,
-// prompt is a rewritten tool argument: it may name a resistor value, and it
-// must not decide removal. With no separate userPrompt, classification is the
-// previous single-prompt path. A client request that is not a removal or a
-// value edit still regenerates when either text is a full board description,
-// so a new project or a full regeneration keeps its preview.
+// prompt is a rewritten tool argument. Removal and the resistor value both
+// come from the client request. A number that appears only in the rewrite,
+// including an example such as 330Ω, is not a value. With no separate
+// userPrompt, classification is the single-prompt path. A client request that
+// is not a removal or a value edit still regenerates when either text is a
+// full board description, so a new project or a full regeneration keeps its preview.
 export function classifyExistingProjectRequest(prompt, existingSpec, userPrompt) {
   if (!existingSpec || typeof existingSpec !== 'object') return { mode: 'regenerate' };
   const editText = String(prompt ?? '');
@@ -114,49 +155,82 @@ export function classifyExistingProjectRequest(prompt, existingSpec, userPrompt)
   const separateIntent = hasUser && intentText.trim() !== editText.trim();
   if (!separateIntent) return classifyPrompt(editText);
 
-  const deletion = parseDeletion(intentText);
-  if (deletion) return { mode: 'merge', edit: deletion };
-  const fromTool = nonRemovalEdit(editText);
-  if (fromTool) return fromTool;
+  return classifySeparateIntent(editText, intentText);
+}
+
+function classifyPrompt(text) {
+  if (isFullDesignPrompt(text)) return { mode: 'regenerate' };
+  return classifyEditText(text);
+}
+
+function classifySeparateIntent(editText, intentText) {
+  const removal = removalDecision(intentText);
+  if (removal.kind === 'remove') return removalEdit(removal);
   const fromUser = nonRemovalEdit(intentText);
-  if (fromUser) return fromUser;
+  if (fromUser?.kind === 'invalid') return invalidResistor();
+  if (fromUser) return { mode: 'merge', edit: fromUser };
+  if (removal.kind === 'unclear') return unclearRemoval();
   if (isFullDesignPrompt(intentText)) return { mode: 'regenerate', prompt: intentText };
   if (isFullDesignPrompt(editText)) return { mode: 'regenerate' };
   return { mode: 'refuse' };
 }
 
-function classifyPrompt(text) {
-  if (isFullDesignPrompt(text)) return { mode: 'regenerate' };
-  const edit = parseExistingProjectEdit(text);
-  if (edit) return { mode: 'merge', edit };
+function classifyEditText(text) {
+  const removal = removalDecision(text);
+  if (removal.kind === 'remove') return removalEdit(removal);
+  const resistor = nonRemovalEdit(text);
+  if (resistor?.kind === 'invalid') return invalidResistor();
+  if (resistor) return { mode: 'merge', edit: resistor };
+  if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
+}
+
+function removalEdit(removal) {
+  return { mode: 'merge', edit: { kind: 'delete', targets: removal.targets } };
+}
+
+function unclearRemoval() {
+  return {
+    mode: 'refuse',
+    code: 'REMOVAL_INTENT_UNCLEAR',
+    message: removalIntentUnclearMessage()
+  };
+}
+
+function invalidResistor() {
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_VALUE_INVALID',
+    message: resistorValueInvalidMessage()
+  };
 }
 
 function nonRemovalEdit(text) {
   if (isFullDesignPrompt(text)) return null;
-  const resistor = parseResistorEdit(text);
-  if (resistor) return { mode: 'merge', edit: resistor };
-  return null;
+  return interpretResistor(text);
 }
 
 function isFullDesignPrompt(text) {
   return FULL_DESIGN_MCU.test(text) && FULL_DESIGN_BOARD.test(text) && !KEEP_REST.test(text);
 }
 
-function parseExistingProjectEdit(text) {
-  const deletion = parseDeletion(text);
-  if (deletion) return deletion;
-  return parseResistorEdit(text);
-}
-
 // Quoted spans are mentions, not commands, and are dropped before verbs are
 // matched. `"remove I2C" is not what I want` therefore has no removal verb.
 // Double quotes always count. A balanced '...' pair counts when it is not a
 // contraction such as don't or shouldn't.
+// NFKC runs first. U+00B4 decomposes to a space plus combining acute, so that
+// residue is folded back to an apostrophe before the other apostrophe-like
+// characters are mapped.
 function normalizeDeletionText(text) {
+  const apostrophes = [...DELETION_INTENT_VOCABULARY.apostrophes]
+    .filter((ch) => ch !== '\u0301')
+    .map((ch) => (/[-\\\]^]/.test(ch) ? `\\${ch}` : ch))
+    .join('');
   return String(text ?? '')
     .normalize('NFKC')
-    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/([A-Za-z])[ \u00A0]\u0301([A-Za-z])/gu, "$1'$2")
+    .replace(/([A-Za-z])\u0301([A-Za-z])/gu, "$1'$2")
+    .replace(new RegExp(`[${apostrophes}]`, 'gu'), "'")
     .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
     .replace(/\u00A0/g, ' ');
 }
@@ -256,21 +330,38 @@ function isParentheticalFragment(segment) {
 }
 
 function splitCommaClauses(text) {
-  const bits = text.split(',');
+  const bits = [];
+  let cursor = 0;
+  const parts = text.split(',');
+  for (let index = 0; index < parts.length; index += 1) {
+    bits.push({ text: parts[index], start: cursor });
+    cursor += parts[index].length + 1;
+  }
   const groups = [];
-  let pending = '';
+  let pending = null;
   for (let index = 0; index < bits.length; index += 1) {
     const bit = bits[index];
     const last = index === bits.length - 1;
-    if (!last && isParentheticalFragment(bit)) {
-      pending = pending ? `${pending},${bit}` : bit;
+    if (!last && isParentheticalFragment(bit.text)) {
+      pending = pending
+        ? { start: pending.start, text: `${pending.text},${bit.text}` }
+        : { start: bit.start, text: bit.text };
       continue;
     }
-    groups.push(pending ? `${pending},${bit}` : bit);
-    pending = '';
+    if (pending) {
+      groups.push({ start: pending.start, text: `${pending.text},${bit.text}` });
+      pending = null;
+    } else {
+      groups.push(bit);
+    }
   }
   if (pending) groups.push(pending);
-  return groups.map((group) => group.trim()).filter((group) => group.length > 0);
+  return groups
+    .map((group) => {
+      const lead = group.text.length - group.text.trimStart().length;
+      return { text: group.text.trim(), start: group.start + lead };
+    })
+    .filter((group) => group.text.length > 0);
 }
 
 function findSeparators(text) {
@@ -305,14 +396,18 @@ function splitClauses(text) {
   const separators = findSeparators(text);
   let start = 0;
   for (const sep of separators) {
-    pieces.push({ text: text.slice(start, sep.index), negatedBySeparator: sep.negatesLeft });
+    pieces.push({ text: text.slice(start, sep.index), start, negatedBySeparator: sep.negatesLeft });
     start = sep.index + sep.length;
   }
-  pieces.push({ text: text.slice(start), negatedBySeparator: false });
+  pieces.push({ text: text.slice(start), start, negatedBySeparator: false });
   const clauses = [];
   for (const piece of pieces) {
     for (const part of splitCommaClauses(piece.text)) {
-      clauses.push({ text: part, negatedBySeparator: piece.negatedBySeparator });
+      clauses.push({
+        text: part.text,
+        start: piece.start + part.start,
+        negatedBySeparator: piece.negatedBySeparator
+      });
     }
   }
   return clauses;
@@ -370,8 +465,15 @@ function explicitPart(text) {
   return null;
 }
 
-function chooseTarget(windowText, verbOffset) {
-  const mentions = findMentions(windowText);
+function chooseTarget(windowText, verbOffset, verb) {
+  let mentions = findMentions(windowText);
+  // English removal objects follow the verb. "keep I2C and remove the LED"
+  // must not bind remove to the earlier I2C.
+  if (verb?.lang === 'en') {
+    const verbEnd = verbOffset + verb.length;
+    const after = mentions.filter((item) => item.index >= verbEnd);
+    if (after.length > 0) mentions = after;
+  }
   const leds = mentions.filter((item) => item.id === 'led');
   const resistors = mentions.filter((item) => item.id === 'resistor');
   const ranked = [];
@@ -417,7 +519,8 @@ function koreanSuffixNegates(after) {
   return new RegExp(pattern, 'u').test(after);
 }
 
-// An even count stays a removal. "don't not remove I2C" is two markers.
+// Any negation in front of the verb blocks it. A second marker ("don't not")
+// stays blocked instead of flipping back to a removal.
 function englishNegationCount(prefix) {
   let rest = prefix;
   let count = 0;
@@ -456,13 +559,16 @@ function englishNegationCount(prefix) {
   return count;
 }
 
-function verbIsNegated(window, negatedBySeparator) {
+function verbPolarity(window, negatedBySeparator) {
+  if (negatedBySeparator) return 'blocked';
   if (window.verb.lang === 'ko') {
     const after = window.text.slice(window.verbOffset + window.verb.length);
-    if (koreanSuffixNegates(after)) return true;
-    return negatedBySeparator;
+    if (koreanSuffixNegates(after)) return 'blocked';
+  } else if (englishNegationCount(window.text.slice(0, window.verbOffset)) > 0) {
+    return 'blocked';
   }
-  return englishNegationCount(window.text.slice(0, window.verbOffset)) % 2 === 1;
+  if (hasVerbScopeCue(window.text)) return 'blocked';
+  return 'positive';
 }
 
 export function classifyDeletionIntents(text) {
@@ -478,10 +584,16 @@ export function classifyDeletionIntents(text) {
     }
     for (let index = 0; index < verbs.length; index += 1) {
       const window = verbWindow(clause.text, verbs, index);
-      const negated = verbIsNegated(window, clause.negatedBySeparator);
-      let target = chooseTarget(window.text, window.verbOffset);
+      const polarity = verbPolarity(window, clause.negatedBySeparator);
+      let target = chooseTarget(window.text, window.verbOffset, window.verb);
       if (target === 'pronoun') target = explicitPart(window.text) ?? previousExplicit;
-      intents.push({ verb: window.verb.id, target, negated });
+      intents.push({
+        verb: window.verb.id,
+        target,
+        negated: polarity !== 'positive',
+        polarity,
+        sourceIndex: clause.start + window.verb.index
+      });
     }
     const mentioned = explicitPart(clause.text);
     if (mentioned) previousExplicit = mentioned;
@@ -489,31 +601,212 @@ export function classifyDeletionIntents(text) {
   return intents;
 }
 
-function parseDeletion(text) {
-  const targets = [];
-  for (const intent of classifyDeletionIntents(text)) {
-    if (intent.negated || intent.target !== 'i2c' || targets.includes('i2c')) continue;
-    targets.push('i2c');
-  }
-  if (targets.length === 0) return null;
-  return { kind: 'delete', targets };
+function verbScopeCues() {
+  return [
+    ...DELETION_INTENT_VOCABULARY.negationMarkers,
+    ...DELETION_INTENT_VOCABULARY.koreanBlockingCues
+  ];
 }
 
-function resistorAmounts(text) {
-  const found = [];
-  const re = new RegExp(RESISTOR_AMOUNT_SOURCE, 'giu');
+function hasCue(text, cues) {
+  return cues.some((cue) => new RegExp(cue.re, 'iu').test(text));
+}
+
+function hasVerbScopeCue(text) {
+  return hasCue(text, verbScopeCues());
+}
+
+function hasPartScopeCue(text) {
+  return hasCue(text, DELETION_INTENT_VOCABULARY.partScopeCues);
+}
+
+function blockIntent(intent, flag) {
+  intent.polarity = 'blocked';
+  intent.negated = true;
+  if (flag) intent[flag] = true;
+}
+
+function splitSentencesWithIndex(text) {
+  const re = /(?<!\d)\.(?!\d)|[!?]/gu;
+  const sentences = [];
+  let start = 0;
   for (const match of text.matchAll(re)) {
-    const ohms = Number(match[1]);
-    if (!(ohms > 0)) continue;
-    found.push({ ohms, index: match.index, end: match.index + match[0].length });
+    const end = match.index + match[0].length;
+    sentences.push({
+      text: text.slice(start, end),
+      start,
+      end,
+      question: match[0] === '?'
+    });
+    start = end;
   }
-  return found;
+  if (start < text.length && text.slice(start).trim()) {
+    sentences.push({ text: text.slice(start), start, end: text.length, question: false });
+  }
+  return sentences;
+}
+
+function sentenceMentions(text, target) {
+  const mentions = findMentions(text);
+  if (mentions.some((item) => item.id === target)) return true;
+  if (target === 'led-resistor') {
+    return mentions.some((item) => item.id === 'led') && mentions.some((item) => item.id === 'resistor');
+  }
+  return false;
+}
+
+function applySentenceBlocks(intents, normalized) {
+  const sentences = splitSentencesWithIndex(normalized);
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive' || !intent.target) continue;
+    const sentence = sentences.find((item) => intent.sourceIndex >= item.start && intent.sourceIndex < item.end);
+    if (!sentence) continue;
+    if (sentence.question) {
+      blockIntent(intent, 'question');
+      continue;
+    }
+    if (hasVerbScopeCue(sentence.text) && sentenceMentions(sentence.text, intent.target)) {
+      blockIntent(intent);
+    }
+  }
+}
+
+function nearestMention(mentions, index, length) {
+  const center = index + length / 2;
+  return mentions.reduce((best, item) => {
+    if (!best) return item;
+    return Math.abs(item.index - center) < Math.abs(best.index - center) ? item : best;
+  }, null);
+}
+
+function resolveMentionId(mentions, mention) {
+  if (!mention) return null;
+  if (mention.id !== 'pronoun') return mention.id;
+  const prior = mentions.filter((item) => item.id !== 'pronoun' && item.index < mention.index).at(-1);
+  return prior ? prior.id : null;
+}
+
+function partsBlockedByKeep(text) {
+  const mentions = findMentions(text);
+  const blocked = new Set();
+  for (const cue of DELETION_INTENT_VOCABULARY.partScopeCues) {
+    const re = new RegExp(cue.re, 'giu');
+    for (const match of text.matchAll(re)) {
+      const nearest = nearestMention(mentions, match.index, match[0].length);
+      const id = resolveMentionId(mentions, nearest);
+      if (id) blocked.add(id);
+    }
+  }
+  return blocked;
+}
+
+function applyPartScope(intents, normalized) {
+  const blocked = partsBlockedByKeep(normalized);
+  for (const intent of intents) {
+    if (intent.polarity === 'positive' && blocked.has(intent.target)) {
+      blockIntent(intent, 'corrected');
+    }
+  }
+}
+
+function isCorrectionSentence(text) {
+  return /^\s*(?:no|nope|nah|wait|actually|sorry|아니|아니요|아닙니다)\b/iu.test(text);
+}
+
+function applyTrailingCorrection(intents, normalized) {
+  const sentences = splitSentencesWithIndex(normalized);
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive') continue;
+    const later = sentences.filter((item) => item.start > intent.sourceIndex);
+    if (later.some((item) => isCorrectionSentence(item.text))) blockIntent(intent, 'corrected');
+  }
+}
+
+function applyMultiTargetBlock(intents, normalized) {
+  const parts = [];
+  for (const intent of intents) {
+    if (intent.target !== 'i2c' && intent.target !== 'led' && intent.target !== 'led-resistor') continue;
+    if (!parts.includes(intent.target)) parts.push(intent.target);
+  }
+  if (parts.length < 2) return;
+  if (!hasVerbScopeCue(normalized) && !hasPartScopeCue(normalized)) return;
+  for (const intent of intents) {
+    if (intent.polarity === 'positive') blockIntent(intent, 'multi');
+  }
+}
+
+function removalIsUnclear(intents, actionable) {
+  if (actionable.length > 1) return true;
+  if (intents.some((intent) => intent.question || intent.corrected || intent.multi)) return true;
+  const known = intents.some((intent) => (
+    intent.target === 'i2c' || intent.target === 'led' || intent.target === 'led-resistor'
+  ));
+  if (!known) return false;
+  return actionable.length !== 1;
+}
+
+// Fail closed. A removal candidate exists only when one part is the clear
+// object of a removal verb and no negation, keep, question, correction, or
+// second candidate makes that reading unsafe.
+function removalDecision(text) {
+  const normalized = stripQuotedMentions(normalizeDeletionText(text));
+  const intents = classifyDeletionIntents(text);
+  applySentenceBlocks(intents, normalized);
+  applyPartScope(intents, normalized);
+  applyTrailingCorrection(intents, normalized);
+  applyMultiTargetBlock(intents, normalized);
+  const actionable = [];
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive') continue;
+    if (intent.target !== 'i2c' && intent.target !== 'led') continue;
+    if (!actionable.includes(intent.target)) actionable.push(intent.target);
+  }
+  if (actionable.length === 1 && !removalIsUnclear(intents, actionable)) {
+    return { kind: 'remove', targets: actionable };
+  }
+  if (removalIsUnclear(intents, actionable)) return { kind: 'unclear' };
+  return { kind: 'none' };
+}
+
+// Longest slice that parseResistorOhms accepts. A following ASCII letter or
+// digit means the slice is a prefix of an unparseable token ("10kk", "500mA",
+// "3.3V"), so it is not a value. Korean particles after Ω/옴 stay outside the
+// slice ("680Ω으로", "1kΩ으로").
+function scanResistorTokens(text) {
+  const normalized = String(text ?? '').normalize('NFKC');
+  const valid = [];
+  const startRe = /(?<![\p{L}\p{N}_])\d/gu;
+  let start = startRe.exec(normalized);
+  while (start) {
+    const index = start.index;
+    const window = normalized.slice(index, index + 48);
+    let chosen = null;
+    for (let len = window.length; len >= 1; len -= 1) {
+      const raw = window.slice(0, len).trimEnd();
+      if (!raw || /[,;]/.test(raw)) continue;
+      const parsed = parseResistorOhms(raw);
+      const ohms = parsed == null ? null : Number(parsed);
+      if (!(ohms > 0)) continue;
+      const end = index + raw.length;
+      const next = normalized[end] ?? '';
+      if (/[A-Za-z0-9.]/.test(next)) continue;
+      chosen = { ohms, index, end };
+      break;
+    }
+    if (chosen) {
+      valid.push(chosen);
+      startRe.lastIndex = chosen.end;
+    }
+    start = startRe.exec(normalized);
+  }
+  const invalid = [];
+  for (const match of normalized.matchAll(new RegExp(INVALID_OHM_TOKEN, 'giu'))) invalid.push(match[0]);
+  return { normalized, valid, invalid };
 }
 
 // Destination sits after "to" / "->" and before "으로" / "로".
 // With no marker, the last amount is the new value.
-function destinationOhms(text) {
-  const amounts = resistorAmounts(text);
+function destinationOhms(text, amounts) {
   if (amounts.length === 0) return null;
   let chosen = null;
   const consider = (markerIndex, amount) => {
@@ -535,14 +828,22 @@ function destinationOhms(text) {
   return amounts[amounts.length - 1].ohms;
 }
 
-function parseResistorEdit(text) {
-  const ohms = destinationOhms(text);
-  if (ohms == null) return null;
-  const aboutLed = /led|저항|resistor|\bstatus\b/i.test(text);
-  const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(text);
+// A resistor edit is read only from this text. An unparseable value, or a
+// change that names the LED resistor and gives no value, is invalid. Example
+// numbers in some other sentence are not a fallback.
+function interpretResistor(text) {
+  const scanned = scanResistorTokens(text);
+  const normalized = scanned.normalized;
+  const pullupOnly = /pull-?up|풀업|\bcc\d\b/i.test(normalized) && !/led|상태|직렬/i.test(normalized);
+  if (pullupOnly) return null;
+  const aboutLed = /led|저항|resistor|\bstatus\b/i.test(normalized);
+  const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   if (!aboutLed && !change) return null;
-  if (/pull-?up|풀업|\bcc\d\b/i.test(text) && !/led|상태|직렬/i.test(text)) return null;
-  return { kind: 'resistor', ohms, label: formatResistorLabel(ohms) };
+  const ohms = destinationOhms(normalized, scanned.valid);
+  if (ohms != null) return { kind: 'resistor', ohms, label: formatResistorLabel(ohms) };
+  const asked = aboutLed && /(?:으로|로(?!부터|서|써)|->|→|\bto\b|바꿔|변경)/u.test(normalized);
+  if (asked || scanned.invalid.length > 0) return { kind: 'invalid' };
+  return null;
 }
 
 function formatResistorLabel(ohms) {
@@ -592,6 +893,20 @@ function isStatusLedResistor(component) {
 }
 
 function applyDeletionToSpec(spec, targets) {
+  if (targets.includes('led')) {
+    spec.omitStatusLed = true;
+    spec.peripherals = (spec.peripherals ?? []).filter((peripheral) => (
+      peripheral?.kind !== 'status-led' && peripheral?.kind !== 'status-led-resistor'
+    ));
+    if (Array.isArray(spec.boardProfile?.productionParts)) {
+      spec.boardProfile = {
+        ...spec.boardProfile,
+        productionParts: spec.boardProfile.productionParts.filter((part) => (
+          part?.role !== 'status-led' && part?.role !== 'status-led-resistor'
+        ))
+      };
+    }
+  }
   if (!targets.includes('i2c')) return;
   spec.interfaces = (spec.interfaces ?? []).filter((iface) => iface?.kind !== 'i2c');
   spec.peripherals = (spec.peripherals ?? []).filter((peripheral) => peripheral?.kind !== 'i2c-pullups');

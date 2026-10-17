@@ -10,7 +10,9 @@ import {
   classifyExistingProjectRequest,
   modifyRefusalMessage,
   removalFinding,
-  removedComponents
+  removalIntentUnclearMessage,
+  removedComponents,
+  resistorValueInvalidMessage
 } from './existing-project-edit.js';
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
 import { assertSafeProjectDir, readChatPcbManifest } from './project-workspace.js';
@@ -408,6 +410,12 @@ export async function createNativeProposal({
     const decision = classifyExistingProjectRequest(prompt, existingSpec, userPromptFrom(request));
     let proposed;
     if (decision.mode === 'refuse') {
+      if (decision.code === 'REMOVAL_INTENT_UNCLEAR') {
+        throw coded('REMOVAL_INTENT_UNCLEAR', decision.message || removalIntentUnclearMessage());
+      }
+      if (decision.code === 'RESISTOR_VALUE_INVALID') {
+        throw coded('RESISTOR_VALUE_INVALID', decision.message || resistorValueInvalidMessage());
+      }
       throw coded('PROVIDER_NO_PATCH', modifyRefusalMessage());
     } else if (decision.mode === 'merge') {
       proposed = await applyMergedProjectEdit({

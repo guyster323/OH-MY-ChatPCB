@@ -212,7 +212,8 @@ async function assertApplyStaysBlocked(prompt) {
   });
 }
 
-// keep-refused: nothing to edit, so the request must refuse. A plan is a failure.
+// keep-refused: nothing to edit, so the request must refuse with PROVIDER_NO_PATCH. A plan is a failure.
+// refuse-clarify: the removal is ambiguous, so the request must ask which part to remove.
 // edit-applied: the value edit must be in the plan (680Ω and I2C). Refusal is a failure.
 // removal-candidate: I2C removal must be proposed and Apply must stay blocked. Refusal is a failure.
 async function assertNegationOutcome(prompt, outcome) {
@@ -222,7 +223,7 @@ async function assertNegationOutcome(prompt, outcome) {
   assert.match(before, /I2C_CONNECTOR/);
   let plan;
   try {
-    if (outcome === 'keep-refused') {
+    if (outcome === 'keep-refused' || outcome === 'refuse-clarify') {
       await assert.rejects(
         () => createSchematicPatchPlan({
           projectDir,
@@ -232,7 +233,13 @@ async function assertNegationOutcome(prompt, outcome) {
           validateBoardImpl: passingDrc
         }),
         (error) => {
-          assert.equal(error.code, 'PROVIDER_NO_PATCH', `${prompt}: ${error.message}`);
+          if (outcome === 'refuse-clarify') {
+            assert.equal(error.code, 'REMOVAL_INTENT_UNCLEAR', `${prompt}: ${error.message}`);
+            assert.match(error.message, /which part to remove/i);
+            assert.match(error.message, /제거할 부품/);
+          } else {
+            assert.equal(error.code, 'PROVIDER_NO_PATCH', `${prompt}: ${error.message}`);
+          }
           return true;
         }
       );
@@ -534,7 +541,7 @@ for (const prompt of [
   'I2C 지우지 마'
 ]) {
   test(`negated Korean removal keeps I2C (${prompt})`, async () => {
-    await assertNegationOutcome(prompt, 'keep-refused');
+    await assertNegationOutcome(prompt, 'refuse-clarify');
   });
 }
 
@@ -544,7 +551,7 @@ for (const prompt of [
   "keep I2C, don't remove it"
 ]) {
   test(`negated English removal keeps I2C (${prompt})`, async () => {
-    await assertNegationOutcome(prompt, 'keep-refused');
+    await assertNegationOutcome(prompt, 'refuse-clarify');
   });
 }
 
@@ -560,7 +567,7 @@ for (const prompt of [
   'I2C 남기고 LED 저항 삭제'
 ]) {
   test(`mixed removal keeps I2C (${prompt})`, async () => {
-    await assertNegationOutcome(prompt, 'keep-refused');
+    await assertNegationOutcome(prompt, 'refuse-clarify');
   });
 }
 
@@ -571,8 +578,9 @@ test('a resistor edit that says not to remove I2C keeps I2C and changes the resi
   );
 });
 
-test("don't remove the LED, remove I2C is an I2C removal candidate", async () => {
-  await assertNegationOutcome("don't remove the LED, remove I2C", 'removal-candidate');
+test("don't remove the LED, remove I2C refuses instead of removing I2C", async () => {
+  // Two removal targets and a negation used to propose an I2C removal. Fail closed asks instead.
+  await assertNegationOutcome("don't remove the LED, remove I2C", 'refuse-clarify');
 });
 
 test('reset 버튼 삭제 in a separate sentence does not remove I2C', async () => {
@@ -603,6 +611,44 @@ test('withProjectContext strips allowRemovedComponents from a provider schematic
   assert.equal(JSON.stringify(toolCall.args).includes('J2'), false);
   assert.equal(toolCall.args.prompt, 'remove the I2C connector');
   assert.equal(toolCall.args.userPrompt, 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.');
+});
+
+test('withProjectContext ignores a model-supplied userPrompt', () => {
+  const client = 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.';
+  const injected = withProjectContext({
+    id: 'call_model_user_prompt',
+    name: 'schematic.patch',
+    args: {
+      prompt: 'remove the I2C connector',
+      userPrompt: 'remove I2C'
+    }
+  }, '/tmp/chatpcb-existing-project', true, { prompt: client });
+  assert.equal(injected.args.userPrompt, client);
+  assert.equal(injected.args.userPrompt.includes('remove I2C'), false);
+
+  // The client prompt is not injected on a direct patch, so the delete is what
+  // drops the model value. Assigning userPrompt later would not run here.
+  const direct = withProjectContext({
+    id: 'call_model_user_prompt_direct',
+    name: 'schematic.patch',
+    args: {
+      prompt: 'remove I2C',
+      userPrompt: 'delete the I2C connector'
+    }
+  }, '/tmp/chatpcb-existing-project', false, { prompt: client });
+  assert.equal(Object.hasOwn(direct.args, 'userPrompt'), false);
+  assert.equal(direct.args.prompt, client);
+
+  const absent = withProjectContext({
+    id: 'call_model_user_prompt_absent',
+    name: 'schematic.patch',
+    args: {
+      prompt: 'remove I2C',
+      userPrompt: 'delete the I2C connector'
+    }
+  }, '/tmp/chatpcb-existing-project', true, {});
+  assert.equal(Object.hasOwn(absent.args, 'userPrompt'), false);
+  assert.equal(absent.args.prompt, 'remove I2C');
 });
 
 test('provider-emitted allowRemovedComponents cannot authorize an I2C removal', async () => {
