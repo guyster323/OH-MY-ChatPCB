@@ -174,6 +174,8 @@ function responseFor(call, calls) {
       ok: true,
       result: {
         requiresApproval: true,
+        approved: false,
+        applied: false,
         patchId: 'patch-1',
         expiresAt: Date.now() + 120000,
         files: {},

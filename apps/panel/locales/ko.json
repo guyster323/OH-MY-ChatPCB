@@ -15,6 +15,7 @@
   "workflow.locked.fab": "레이아웃 리뷰에서 DRC를 통과하면 열려요.",
   "workflow.caption.idle": "프로젝트를 만들면 회로 컨셉부터 시작해요.",
   "workflow.caption.failed": "생성에 실패했어요. 기술 상세를 확인하거나 다시 보내 주세요.",
+  "workflow.caption.apply-failed": "변경을 적용하지 못했어요",
   "patch.apply": "회로도에 적용",
   "patch.apply.blocked-erc": "적용하려면 ERC 오류 {count}개를 먼저 고쳐 주세요.",
   "patch.apply.blocked-missing": "이 패치의 ERC 결과가 없어요.",

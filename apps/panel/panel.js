@@ -125,6 +125,9 @@ let removalConfirmArmed = false;
 let syncingRemoval = false;
 let removalClosedForFocus = false;
 let approvalStatusFocusTimer = 0;
+let patchAreaFocusedEl = null;
+let patchFocusHold = false;
+let applyFailureCaption = false;
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
@@ -214,8 +217,20 @@ if (approvePatchButtonEl) {
   new MutationObserver(() => {
     if (syncingRemoval) return;
     syncRemovalConfirm();
+    reassertPatchApprovalFocus();
   }).observe(approvePatchButtonEl, { attributes: true, attributeFilter: ['disabled', 'aria-disabled'] });
 }
+document.addEventListener('focusin', (event) => {
+  const target = event.target;
+  if (!target || target === document.body || target === document.documentElement) return;
+  const inPatch = Boolean(patchApprovalCardEl?.contains(target) || applyRemoveConfirmEl?.contains(target));
+  if (inPatch) {
+    patchAreaFocusedEl = target;
+    return;
+  }
+  patchAreaFocusedEl = null;
+  patchFocusHold = false;
+});
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
@@ -638,7 +653,6 @@ function handleEnvelope(envelope) {
       return;
     }
     const verdict = normalizeDaemonReply(result, 'patch-apply');
-    if (verdict.canceled) return;
     if (!verdict.ok) {
       const code = verdict.code;
       if (code === 'PATCH_STALE' || code === 'PATCH_EXPIRED' || code === 'PATCH_APPROVAL_EXPIRED') {
@@ -746,56 +760,19 @@ function isApprovalPreview(result) {
   return Boolean(existingComponentsRemoved(result) && result.patchId);
 }
 
-function failureCodeOf(result) {
-  if (!result || typeof result !== 'object' || !Object.hasOwn(result, 'applied')) return 'APPLIED_MISSING';
-  const code = result.reason?.code;
-  if (typeof code === 'string' && code.length > 0) return code;
-  return 'APPLY_REJECTED';
-}
-
 function normalizeDaemonReply(result, kind) {
-  const value = result && typeof result === 'object' ? result : {};
-  if (kind === 'inspect' || kind === 'auth' || kind === 'status') return { ok: true, kind };
-  if (kind === 'project-create') {
-    const failed = value.rolledBack === true || value.ok === false || typeof value.projectDir !== 'string' || value.projectDir.length === 0;
-    return failed
-      ? { ok: false, kind, code: failureCodeOf(value) }
-      : { ok: true, kind };
-  }
-  if (kind === 'project-request' || kind === 'project-generate') {
-    if (isApprovalPreview(value) || value.operation === 'clarify') return { ok: true, kind, preview: isApprovalPreview(value) };
-    if (value.rolledBack === true) return { ok: false, kind, code: failureCodeOf(value) };
-    if (!Object.hasOwn(value, 'applied') || value.applied === true) return { ok: true, kind };
-    return { ok: false, kind, code: failureCodeOf(value) };
-  }
-  if (kind === 'patch-apply') {
-    if (value.canceled === true || value.cancelled === true) return { ok: true, kind, canceled: true };
-    if (value.applied === true) return { ok: true, kind };
-    return { ok: false, kind, code: failureCodeOf(value) };
-  }
-  return { ok: false, kind, code: 'APPLY_REJECTED' };
+  return globalThis.chatpcbNormalizeDaemonReply(result, kind);
 }
 
 function requestOutcome(result) {
-  if (!result || typeof result !== 'object') return { ok: true, kind: 'inspect' };
-  if (result.fromPatchApprove === true) return normalizeDaemonReply(result, 'patch-apply');
-  if (typeof result.projectDir === 'string' && !result.operation && !result.patchId && !result.files) {
-    return normalizeDaemonReply(result, 'project-create');
-  }
-  if (result.approved === true && Object.hasOwn(result, 'applied') && !isApprovalPreview(result)) {
-    return normalizeDaemonReply(result, 'patch-apply');
-  }
-  if (result.operation || result.patchId || result.requiresApproval || result.files || Object.hasOwn(result, 'applied')) {
-    return normalizeDaemonReply(result, 'project-generate');
-  }
-  return { ok: true, kind: 'inspect' };
+  return globalThis.chatpcbRequestOutcome(result);
 }
 
 function renderApplyFailure(verdict) {
   const code = verdict?.code || 'APPLY_REJECTED';
   const reasonKey = PATCH_FAILURE_KEYS[code] || 'patch.apply.failed.unknown';
   const summary = joinSentences(t(reasonKey), t('patch.apply.failed.recheck'));
-  renderRequestStatus({ state: 'failed', summary });
+  renderRequestStatus({ state: 'failed', summary, applyFailure: true });
   if (requestStatusEl) requestStatusEl.dataset.reasonCode = code;
   console.warn(code);
   appendProgress({ stage: 'fail', text: summary });
@@ -1020,7 +997,7 @@ function renderProjectRequest(result) {
     : validationFailed
       ? t('request.validation-failed')
       : t(summaryKey, summaryVars);
-  if (!requestFailed && verdict.ok !== false) workflowFlags.circuitApplied = true;
+  if (!requestFailed && verdict.ok === true) workflowFlags.circuitApplied = true;
   if (!requestFailed && result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
     workflowFlags.circuitReviewed = true;
   }
@@ -1032,7 +1009,7 @@ function renderProjectRequest(result) {
   appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
 
   const projectFile = findProjectFile(result.files);
-  const successfulUpdate = !requestFailed && verdict.ok !== false && (result.applied === true || !Object.hasOwn(result, 'applied'));
+  const successfulUpdate = !requestFailed && verdict.ok === true && result.applied === true;
   if (!successfulUpdate) return;
   if (projectFile) {
     kiCadLinkCardEl.hidden = false;
@@ -1147,6 +1124,7 @@ function releaseStaleApproval() {
   removalClosedForFocus = false;
   removalConfirmArmed = false;
   clearPatchApproval('patch.stale');
+  if (shouldFocus) patchFocusHold = true;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
   if (patchApprovalStatusEl) {
     patchApprovalStatusEl.hidden = false;
@@ -1177,6 +1155,13 @@ function renderInspectionValidation(label, result) {
     : t('inspection.drc-counts', { violations: summary.violationCount ?? 0, unconnected: summary.unconnectedCount ?? 0 });
 }
 
+function previewBaselineDigest(preview) {
+  for (const value of [preview?.projectDigest, preview?.beforeTransactionDigest, preview?.beforeProjectDigest]) {
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return null;
+}
+
 function setPatchApproval(preview) {
   clearPatchApproval();
   const removedComponents = existingComponentsRemoved(preview);
@@ -1186,7 +1171,7 @@ function setPatchApproval(preview) {
     expiresAt: preview.expiresAt,
     timeout: null,
     removedComponents,
-    evidenceDigest: null
+    evidenceDigest: previewBaselineDigest(preview)
   };
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
   const delay = Number(preview.expiresAt) - Date.now();
@@ -1201,6 +1186,7 @@ function setPatchApproval(preview) {
 
 function clearPatchApproval(messageKey = 'patch.idle') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
+  if (messageKey === 'patch.idle' || messageKey === 'patch.cancelled') patchFocusHold = false;
   removalConfirmArmed = false;
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null, evidenceDigest: null };
   patchRejectionCode = null;
@@ -1506,6 +1492,11 @@ function renderPatchApproval() {
 }
 
 function updatePatchApprovalCard() {
+  updatePatchApprovalDetails();
+  reassertPatchApprovalFocus();
+}
+
+function updatePatchApprovalDetails() {
   const freshness = inspectionState.result?.manifest?.freshness?.status;
   const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
   const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
@@ -1514,6 +1505,9 @@ function updatePatchApprovalCard() {
   const evidenceBlocked = !active || !approvedEvidence;
   const canApply = active && !evidenceBlocked && erc.passed === true && !patchRejectionCode;
   const canOverride = active && !evidenceBlocked && erc.skipped === true && !erc.failed && !erc.passed;
+  // Stale evidence keeps the native disabled attribute. Swapping it for
+  // aria-disabled lets a later inspect render disable the focused control and
+  // drop focus on the document body. Focus is moved to #patch-approval-status.
   approvePatchButtonEl.disabled = evidenceBlocked;
   cancelPatchButtonEl.disabled = !active;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = !active;
@@ -1724,7 +1718,7 @@ function deriveWorkflow() {
   const outcome = requestOutcome(lastRequestResult);
   const validationFailed = outcome.ok === false || lastRequestResult?.validation?.ok === false || lastRequestResult?.rolledBack === true;
   const patchReady = Boolean(patchApprovalState.patchId);
-  const circuitApplied = workflowFlags.circuitApplied === true && outcome.ok !== false;
+  const circuitApplied = workflowFlags.circuitApplied === true && outcome.ok === true;
   let active = 'circuit.concept';
   const done = new Set();
 
@@ -1961,8 +1955,9 @@ function syncWorkflow() {
   const copyWait = t(`workflow.copy.${active}.wait`);
   const copyRun = t(`workflow.copy.${active}.run`);
   if (workflowCaptionEl && active) {
+    const failedCaptionKey = applyFailureCaption ? 'workflow.caption.apply-failed' : 'workflow.caption.failed';
     workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
-      ? t('workflow.caption.failed')
+      ? t(failedCaptionKey)
       : (mode === 'run' ? copyRun : (mode === 'idle' ? t('workflow.caption.idle') : copyWait));
   }
   if (workflowCliEl) {
@@ -2007,7 +2002,8 @@ function publishRequestLive(text) {
   live.textContent = text;
 }
 
-function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '' }) {
+function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '', applyFailure = false }) {
+  applyFailureCaption = applyFailure === true;
   requestStatusEl.dataset.state = state;
   delete requestStatusEl.dataset.reasonCode;
   requestStatusEl.removeAttribute('data-i18n');
@@ -2655,6 +2651,7 @@ function hideRemovalConfirm() {
 }
 
 function presentRemovalConfirm() {
+  patchFocusHold = false;
   if (patchApplyBusy()) return;
   if (!applyGateOpen()) return;
   const parts = patchApprovalState.removedComponents;
@@ -2696,6 +2693,22 @@ function focusApplyButton() {
   const button = approvePatchButtonEl;
   if (!button) return;
   button.focus();
+}
+
+function reassertPatchApprovalFocus() {
+  if (patchApplyBusy()) return;
+  if (applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden) return;
+  if (!patchApprovalCardEl || patchApprovalCardEl.hidden) return;
+  const remembered = patchAreaFocusedEl;
+  if (!remembered && !patchFocusHold) return;
+  const active = document.activeElement;
+  const activeIsBody = !active || active === document.body || active === document.documentElement;
+  const rememberedDisabled = Boolean(remembered && remembered.isConnected && remembered.disabled === true);
+  const lostToBody = activeIsBody && (rememberedDisabled || patchFocusHold);
+  const stuckOnDisabled = rememberedDisabled && active === remembered;
+  if (!lostToBody && !stuckOnDisabled) return;
+  patchFocusHold = true;
+  focusPatchApprovalStatus();
 }
 
 function focusPatchApprovalStatus() {
@@ -2746,6 +2759,7 @@ function dismissRemovalConfirmForClosedGate() {
     return;
   }
   if (approvePatchButtonEl?.disabled) {
+    patchFocusHold = true;
     removalClosedForFocus = true;
     scheduleApprovalStatusFocus();
     return;

@@ -15,6 +15,7 @@
   "workflow.locked.fab": "Locked until Layout review passes DRC.",
   "workflow.caption.idle": "Create a project to start with the circuit concept.",
   "workflow.caption.failed": "Generation failed. Check the technical details or press Send again.",
+  "workflow.caption.apply-failed": "Couldn't apply the change",
   "patch.apply": "Apply to schematic",
   "patch.apply.blocked-erc": "Fix the {count} ERC errors before applying.",
   "patch.apply.blocked-missing": "ERC has not been recorded for this patch.",
