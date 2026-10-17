@@ -7,9 +7,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium } from 'playwright';
-
-import { chromeLaunchOptions, findChrome, isUiHeadless } from './lib/find-chrome.js';
+import { isUiHeadless } from './lib/find-chrome.js';
+import { launchPanelBrowser } from './lib/launch-panel-browser.js';
 import { startDaemon } from '../src/runtime/agent-daemon.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -43,14 +42,16 @@ async function main() {
     return;
   }
   const requestTimeoutMs = resolveVerifyUiTimeoutMs();
-  // Reject a headed headless-shell launch before the workspace, server, or daemon start.
-  const browserLaunch = await resolveBrowserLaunch();
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
-  const staticServer = await startStaticServer(panelRoot);
-  const daemon = await startUiDaemon();
-  const browser = await chromium.launch(browserLaunch);
+  // Reject a missing browser or a headed headless-shell before the workspace, server, or daemon start.
+  const browser = await launchVerifyUiBrowser();
+  let workspaceRoot;
+  let staticServer;
+  let daemon;
 
   try {
+    workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-ui-flow-'));
+    staticServer = await startStaticServer(panelRoot);
+    daemon = await startUiDaemon();
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -59,7 +60,8 @@ async function main() {
     }, `ws://127.0.0.1:${daemon.port}/ws`);
 
     await page.goto(`${staticServer.url}/index.html`);
-    await page.getByText('Daemon connected', { exact: true }).waitFor();
+    await page.evaluate(() => window.chatpcbI18n.ready);
+    await page.getByText('Connected', { exact: true }).waitFor();
     await expectSendDisabled(page);
 
     await page.getByLabel('Workspace root').fill(workspaceRoot);
@@ -126,7 +128,8 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#inspection-freshness')?.textContent === 'legacy-unverified');
     await page.getByLabel('Circuit request').fill(previewPrompt);
     await page.getByRole('button', { name: 'Send' }).click();
-    await page.waitForFunction(() => /legacy.*patch hash/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 30000 });
+    await page.waitForFunction(() => /saved by an older version/i.test(document.querySelector('#patch-approval-status')?.textContent ?? ''), null, { timeout: 30000 });
+    assert.equal(await page.locator('#patch-approval-status').getAttribute('data-state'), 'warning');
     assert.equal(await page.getByRole('button', { name: 'Approve' }).isDisabled(), false);
     await page.getByRole('button', { name: 'Cancel' }).click();
     inspectGeneratedProject = false;
@@ -139,7 +142,7 @@ async function main() {
 
     await page.getByLabel('Circuit request').fill(protocolFailurePrompt);
     await page.getByRole('button', { name: 'Send' }).click();
-    await page.getByRole('status', { name: 'Request status' }).filter({ hasText: '요청을 처리하지 못했습니다' }).waitFor();
+    await page.getByRole('status', { name: 'Request status' }).filter({ hasText: 'could not be completed' }).waitFor();
 
     const failure = await page.evaluate(() => ({
       summary: document.querySelector('#request-status')?.textContent,
@@ -165,7 +168,9 @@ async function main() {
     assert.doesNotMatch(failedZeroCountValidation.text ?? '', /\[object Object\]/);
 
     await assertValidationState(page, skippedValidationPrompt, 'skipped', /ERC skipped/);
+    await assertSkippedErcBlocked(page);
     await page.waitForFunction(() => /ERC skipped \[NO_SCHEMATIC\]: No schematic was available for ERC\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
+    await confirmApplyWithoutErc(page);
     await assertValidationState(page, unavailableValidationPrompt, 'unavailable', /ERC unavailable|ERC skipped/);
     await page.waitForFunction(() => /ERC skipped \[KICAD_CLI_UNAVAILABLE\]: KiCad CLI was not available\./.test(document.querySelector('#inspection-erc')?.textContent ?? ''));
 
@@ -180,7 +185,8 @@ async function main() {
       };
     }, `ws://127.0.0.1:${daemon.port}/ws`);
     await silentHostPage.goto(`${staticServer.url}/index.html`);
-    await silentHostPage.getByText('Daemon connected', { exact: true }).waitFor();
+    await silentHostPage.evaluate(() => window.chatpcbI18n.ready);
+    await silentHostPage.getByText('Connected', { exact: true }).waitFor();
     await silentHostPage.getByLabel('Workspace root').fill(workspaceRoot);
     await silentHostPage.getByLabel('Project name').fill('Silent host board');
     await silentHostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
@@ -214,7 +220,8 @@ async function main() {
       };
     }, `ws://127.0.0.1:${daemon.port}/ws`);
     await hostPage.goto(`${staticServer.url}/index.html`);
-    await hostPage.getByText('Daemon connected', { exact: true }).waitFor();
+    await hostPage.evaluate(() => window.chatpcbI18n.ready);
+    await hostPage.getByText('Connected', { exact: true }).waitFor();
     await hostPage.getByLabel('Workspace root').fill(workspaceRoot);
     await hostPage.getByLabel('Project name').fill('Host status board');
     await hostPage.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
@@ -310,7 +317,7 @@ async function main() {
 
     await hostPage.getByLabel('Circuit request').fill(rollbackPrompt);
     await hostPage.getByRole('button', { name: 'Send' }).click();
-    await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+    await hostPage.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.', null, { timeout: 120000 });
     await hostPage.waitForFunction(() => document.querySelector('#approve-patch-button') && !document.querySelector('#approve-patch-button').disabled);
     await hostPage.locator('#approve-patch-button').evaluate((button) => button.click());
     await hostPage.waitForFunction(() => document.querySelector('#request-status')?.dataset.state !== 'running', null, { timeout: 60000 });
@@ -371,11 +378,32 @@ async function main() {
 
     console.log(JSON.stringify({ ok: true, verified: 'named project Send-only request and separate status cards', browser: browser.browserType().name() }, null, 2));
   } finally {
-    await browser.close();
-    await daemon.close();
-    await staticServer.close();
-    await rm(workspaceRoot, { force: true, recursive: true });
+    await browser?.close();
+    await daemon?.close();
+    await staticServer?.close();
+    if (workspaceRoot) await rm(workspaceRoot, { force: true, recursive: true });
   }
+}
+
+// verify:ui stays fail-closed when Chrome is missing, including outside CI.
+export async function launchVerifyUiBrowser({
+  env = process.env,
+  findChrome,
+  launch,
+  headless = isUiHeadless(env),
+  args
+} = {}) {
+  return launchPanelBrowser({
+    skip(message) {
+      throw new Error(message);
+    }
+  }, {
+    env,
+    headless,
+    ...(findChrome ? { findChrome } : {}),
+    ...(launch ? { launch } : {}),
+    ...(args ? { args } : {})
+  });
 }
 
 async function revealProjectSetup(page) {
@@ -420,15 +448,72 @@ async function assertValidationState(page, request, expectedState, expectedText)
   const requestStatus = await page.locator('#request-status').textContent();
   if (
     requestStatus === 'Patch preview is ready for approval.'
+    || /Apply it to the schematic\?/.test(requestStatus ?? '')
     || /스키매틱에 적용/.test(requestStatus ?? '')
   ) {
-    await page.waitForFunction(() => document.querySelector('#patch-approval-status')?.textContent === 'Patch preview is ready for approval.');
+    // A skipped or failed ERC blocks approval. Do not wait for the ready sentence.
+    await page.waitForFunction(() => {
+      const status = document.querySelector('#patch-approval-status');
+      if (status?.dataset.state === 'blocked') return true;
+      return status?.textContent === 'Patch preview is ready for approval.';
+    });
   }
   await page.waitForFunction((state) => {
     const current = document.querySelector('#validation-status')?.dataset.state;
     return current === state || (state === 'unavailable' && current === 'skipped');
   }, expectedState);
   assert.match(await page.locator('#validation-status').textContent() ?? '', expectedText);
+}
+
+async function assertSkippedErcBlocked(page) {
+  const blocked = await page.evaluate(() => {
+    const card = document.querySelector('#patch-approval-card');
+    const needle = 'ERC was skipped';
+    let noticeCount = 0;
+    const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (!parent || parent.closest('[hidden]')) continue;
+      if ((walker.currentNode.textContent || '').includes(needle)) noticeCount += 1;
+    }
+    return {
+      state: document.querySelector('#patch-approval-status')?.dataset.state,
+      noticeCount,
+      why: document.querySelector('#apply-why')?.textContent ?? '',
+      whyHidden: document.querySelector('#apply-why')?.hidden ?? true,
+      ariaDisabled: document.querySelector('#approve-patch-button')?.getAttribute('aria-disabled'),
+      confirmHidden: document.querySelector('#apply-without-erc-confirm')?.hidden ?? true,
+      overrideHidden: document.querySelector('#approve-patch-without-erc')?.hidden ?? true
+    };
+  });
+  assert.equal(blocked.state, 'blocked');
+  assert.equal(blocked.noticeCount, 1);
+  assert.equal(blocked.whyHidden, false);
+  assert.match(blocked.why, /ERC was skipped/);
+  assert.equal(blocked.ariaDisabled, 'true');
+  assert.equal(blocked.confirmHidden, true);
+  assert.equal(blocked.overrideHidden, false);
+}
+
+async function confirmApplyWithoutErc(page) {
+  const override = page.locator('#approve-patch-without-erc');
+  await override.waitFor({ state: 'visible' });
+  await override.click();
+  await page.locator('#apply-without-erc-confirm').waitFor({ state: 'visible' });
+  assert.match(
+    await page.locator('#apply-without-erc-risk').textContent() ?? '',
+    /ERC did not run/
+  );
+  await page.locator('#confirm-apply-without-erc').click();
+  await page.waitForFunction(() => {
+    const state = document.querySelector('#request-status')?.dataset.state;
+    return state === 'completed' || state === 'failed';
+  }, null, { timeout: 120000 });
+  const outcome = await page.evaluate(() => ({
+    state: document.querySelector('#request-status')?.dataset.state,
+    text: document.querySelector('#request-status')?.textContent ?? ''
+  }));
+  assert.equal(outcome.state, 'completed', outcome.text);
 }
 
 async function startUiDaemon() {
@@ -540,14 +625,6 @@ async function fakeProviderTranscript({ input }) {
       })
     ]
   };
-}
-
-async function resolveBrowserLaunch() {
-  const found = await findChrome();
-  if (!found.path) {
-    throw new Error(found.reason);
-  }
-  return chromeLaunchOptions(found, { headless: isUiHeadless() });
 }
 
 async function startStaticServer(rootDir) {

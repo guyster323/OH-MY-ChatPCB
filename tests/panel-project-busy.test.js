@@ -6,19 +6,19 @@ import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 
-import { chromium } from 'playwright';
+import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 
 const panelRoot = path.resolve(import.meta.dirname, '../apps/panel');
+const panelLocale = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
 const projectDir = '/tmp/chatpcb-panel-secret-project-path';
 const englishBusy = 'Another operation is using this project. Try again in a moment.';
-const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
 
 test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable', async (t) => {
-  const browser = await launchPanelBrowser();
-  if (!browser) {
-    t.skip('no browser available');
-    return;
-  }
+  const browser = await launchPanelBrowser(t, {
+    args: ['--no-sandbox', '--disable-dev-shm-usage']
+  });
+  if (!browser) return;
 
   const calls = [];
   let daemon;
@@ -37,7 +37,8 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
       window.CHATPCB_DAEMON_WS_URL = url;
     }, daemon.url);
     await page.goto(`${staticServer.url}/index.html`);
-    await page.getByText('Daemon connected', { exact: true }).waitFor();
+    await page.evaluate(() => window.chatpcbI18n.ready);
+    await page.getByText('Connected', { exact: true }).waitFor();
     await page.evaluate(() => {
       window.__busyCycle = 0;
       window.__sawRunning = false;
@@ -70,16 +71,16 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
     await assertBusyState(page, koreanBusy);
 
     await sendPrompt(page, 'show draft');
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).waitFor();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).waitFor();
 
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).click();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).click();
     await waitForBusyCycle(page, 4);
     await assertBusyState(page, englishBusy);
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).waitFor();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Send' }).isEnabled(), true);
 
-    await page.getByRole('button', { name: '이 구성으로 초안 만들기' }).click();
-    await page.getByText('회로 초안이 준비됐어요. 스키매틱에 적용할까요?').waitFor();
+    await page.getByRole('button', { name: panelLocale['draft.create'] }).click();
+    await page.getByText(panelLocale['request.preview-ready']).waitFor();
     await page.waitForFunction(() => {
       const button = document.querySelector('#approve-patch-button');
       return button && button.disabled === false;
@@ -189,26 +190,6 @@ function responseFor(call, calls) {
 
 function busyMessage(prompt) {
   return /[가-힣]/.test(prompt ?? '') ? koreanBusy : englishBusy;
-}
-
-async function launchPanelBrowser() {
-  const options = {
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage']
-  };
-  const candidates = [process.env.CHATPCB_BROWSER_PATH, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].filter(Boolean);
-  for (const executablePath of candidates) {
-    try {
-      return await chromium.launch({ ...options, executablePath });
-    } catch {
-      // Try the next installed browser.
-    }
-  }
-  try {
-    return await chromium.launch(options);
-  } catch {
-    return null;
-  }
 }
 
 function isPeerDisconnect(error) {

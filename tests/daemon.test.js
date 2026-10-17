@@ -1364,7 +1364,8 @@ test('daemon keeps existing project artifacts when candidate ERC validation fail
       { name: 'schematic.patch', args: { projectDir: root, approved: true, patchId: result.result.patchId } },
       { patchApprovalRegistry: registry }
     );
-    assert.equal(approved.result.validation.erc.errorCount, 1);
+    assert.equal(approved.ok, false);
+    assert.equal(approved.error.code, 'ERC_BLOCKED');
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
   } finally {
     registry.disposeAll();
@@ -1966,7 +1967,7 @@ test('daemon PROJECT_BUSY responses hide the project path and follow the prompt 
     patchApprovalRegistry: registry
   });
   const english = 'Another operation is using this project. Try again in a moment.';
-  const korean = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+  const korean = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
   const assertHidden = (result) => {
     const encoded = JSON.stringify(result);
     assert.equal(encoded.includes(root), false);
@@ -1978,7 +1979,13 @@ test('daemon PROJECT_BUSY responses hide the project path and follow the prompt 
     registry.register({
       patchId: 'patch-busy',
       projectDir: root,
-      plan: { proposalId: 'patch-busy', changes: [] }
+      plan: {
+        proposalId: 'patch-busy',
+        changes: [],
+        candidateVerification: {
+          erc: { ok: true, skipped: false, executed: true, status: 'passed', erc: { errorCount: 0, warningCount: 0 } }
+        }
+      }
     });
 
     let release;

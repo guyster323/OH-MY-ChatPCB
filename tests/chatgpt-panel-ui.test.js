@@ -179,7 +179,8 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
             expiresAt,
             operation: 'generated',
             files: {},
-            conversation: { messages: [] }
+            conversation: { messages: [] },
+            candidateVerification: { erc: { ok: true, errorCount: 0 } }
           };
           if (window.__draftSource) result.source = window.__draftSource;
           if (Array.isArray(window.__draftParts)) result.components = window.__draftParts;
@@ -438,10 +439,10 @@ test('sign-out refreshes the chatgpt signed-in provider label', async (t) => {
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-in');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (plus)');
     const signOut = page.locator('#chatgpt-auth-card button', { hasText: /Sign out|sign-out/ });
     await signOut.click();
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-out');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
     const names = await page.evaluate(() => window.__sent.map((call) => call.name));
     const signOutAt = names.lastIndexOf('auth.chatgpt.signOut');
     const statusAt = names.lastIndexOf('provider.status');
@@ -518,9 +519,15 @@ test('login card waits for locale text and never shows raw i18n keys', async (t)
   if (!opened) return;
   const { page, context, pageErrors, releaseLocales } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
+    await page.waitForFunction(() => {
+      const text = document.querySelector('#connection-status')?.textContent ?? '';
+      return text.length > 0 && !text.includes('connection.') && !text.includes('auth.chatgpt.');
+    });
     const duringDelay = await page.locator('#chatgpt-auth-card').innerText();
+    const connectionDuring = await page.locator('#connection-status').innerText();
     assert.equal(duringDelay.includes('auth.chatgpt.'), false);
+    assert.equal(connectionDuring.includes('connection.'), false);
+    assert.equal(connectionDuring.includes('auth.chatgpt.'), false);
     assert.equal(await page.evaluate(() => window.__rawI18nSeen.length), 0);
     releaseLocales();
     await page.waitForFunction(() => document.querySelector('#chatgpt-auth-title')?.textContent === 'Use ChatPCB with your ChatGPT plan');
@@ -528,7 +535,7 @@ test('login card waits for locale text and never shows raw i18n keys', async (t)
     assert.equal(afterLoad.includes('auth.chatgpt.'), false);
     assert.match(afterLoad, /You'll sign in using your system browser/);
     assert.equal(await page.evaluate(() => window.__rawI18nSeen.length), 0);
-    assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
+    assert.equal(await page.locator('#connection-status').innerText(), 'Connected');
     assert.deepEqual(pageErrors, []);
   } finally {
     releaseLocales?.();
@@ -542,23 +549,23 @@ test('daemon connection label stays separate from ChatGPT sign-in status', async
   const { page, context, pageErrors } = opened;
   try {
     const connection = page.locator('#connection-status');
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === '데몬 연결됨');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === '연결됨');
     assert.equal(await connection.getAttribute('data-role'), 'daemon');
-    assert.equal(await connection.getAttribute('data-state'), 'open');
+    assert.equal(await connection.getAttribute('data-state'), 'ok');
     assert.equal(await connection.evaluate((node) => node.classList.contains('daemon-connection')), true);
     const before = await connection.innerText();
     assert.equal(before.includes('ChatGPT'), false);
     await page.waitForFunction(() => document.querySelector('#chatgpt-auth-title')?.textContent === 'ChatGPT에 연결됨');
     assert.notEqual(await page.locator('#chatgpt-auth-title').innerText(), before);
-    assert.equal(await page.locator('#provider-status').innerText(), 'chatgpt: signed-in');
+    assert.equal(await page.locator('#provider-status').innerText(), 'ChatGPT: 연결됨 (plus)');
     const signOut = page.locator('#chatgpt-auth-card button', { hasText: /로그아웃|Sign out/ });
     await signOut.click();
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-out');
-    assert.equal(await connection.innerText(), '데몬 연결됨');
-    assert.equal(await connection.getAttribute('data-state'), 'open');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: 로그인 필요');
+    assert.equal(await connection.innerText(), '연결됨');
+    assert.equal(await connection.getAttribute('data-state'), 'ok');
     await page.locator('.chatgpt-sign-in-btn').click();
     await page.waitForFunction(() => (document.querySelector('#chatgpt-auth-title')?.textContent ?? '').includes('브라우저에서 로그인을 마쳐 주세요'));
-    assert.equal(await connection.innerText(), '데몬 연결됨');
+    assert.equal(await connection.innerText(), '연결됨');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -605,7 +612,7 @@ test('missing manifest approval uses plain language on the card and in technical
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Connected');
     await page.locator('#project-name').fill('Sensor board');
     await page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
     await page.getByRole('status', { name: 'Active project' }).waitFor();
@@ -625,7 +632,7 @@ test('missing manifest approval uses plain language on the card and in technical
     );
     assert.equal((await detail.evaluate((node) => node.textContent)).includes('manifest'), false);
     assert.equal(await page.locator('#patch-approval-technical-details').isHidden(), false);
-    assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
+    assert.equal(await page.locator('#connection-status').innerText(), 'Connected');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -642,7 +649,7 @@ test('draft card shows the generator source and profile parts', async (t) => {
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Connected');
     await page.evaluate(() => {
       window.__draftSource = { provider: 'chatgpt', via: 'provider' };
       window.__draftParts = [
@@ -680,7 +687,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-out');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
     const before = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     await page.evaluate(() => {
       window.__chatgptSignedIn = true;
@@ -694,7 +701,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
         })
       });
     });
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-in');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (plus)');
     const afterSignIn = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     assert.ok(afterSignIn > before);
     await page.evaluate(() => {
@@ -709,7 +716,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
         })
       });
     });
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'chatgpt: signed-out');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
     const afterSignOut = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     assert.ok(afterSignOut > afterSignIn);
     assert.deepEqual(pageErrors, []);
@@ -735,7 +742,7 @@ test('sign-in does not change the selected provider', async (t) => {
   const { page, context, pageErrors } = opened;
   try {
     await page.selectOption('#provider', 'grok');
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'grok: signed-out');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'Provider status is unavailable.');
     const before = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     await emitChatGPTAuth(page, signedInAccount, 'auth_changed_keep');
     await page.waitForFunction((start) => (
@@ -919,13 +926,13 @@ async function openApprovalPanel(t, locale) {
     approvalFlow: true
   });
   if (!opened) return null;
-  const connected = locale.startsWith('ko') ? '데몬 연결됨' : 'Daemon connected';
+  const connected = locale.startsWith('ko') ? '연결됨' : 'Connected';
   await opened.page.waitForFunction((label) => (
     document.querySelector('#connection-status')?.textContent === label
   ), connected);
   await opened.page.locator('#project-name').fill('Sensor board');
-  await opened.page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
-  await opened.page.getByRole('status', { name: 'Active project' }).waitFor();
+  await opened.page.locator('#new-project-form button[type="submit"]').click();
+  await opened.page.locator('#active-project').waitFor();
   return opened;
 }
 
@@ -943,7 +950,7 @@ async function sendRemovalPreview(page, parts = REMOVED_PARTS) {
     };
   }, parts);
   await page.locator('#prompt').fill('Remove the I2C connector from this board');
-  await page.locator('#composer').getByRole('button', { name: 'Send' }).click();
+  await page.locator('#composer button[type="submit"]').click();
 }
 
 function approvedApplyCalls(page) {

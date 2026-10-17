@@ -2,156 +2,32 @@ const DAEMON_WS_URL = window.CHATPCB_DAEMON_WS_URL ?? 'ws://127.0.0.1:41317/ws';
 const HOST_STATUS_TIMEOUT_MS = 2000;
 const CONFLICT_POLL_MS = 1000;
 const CHATGPT_AUTH_POLL_MS = 2000;
-
-// i18n helper
-let i18nStrings = {};
-let i18nReady = false;
-let daemonConnectionState = 'connecting';
-
-const DAEMON_CONNECTION_COPY = {
-  connecting: { en: 'Connecting', ko: '연결 중' },
-  open: { en: 'Daemon connected', ko: '데몬 연결됨' },
-  closed: { en: 'Daemon disconnected', ko: '데몬 연결 끊김' },
-  error: { en: 'Daemon connection error', ko: '데몬 연결 오류' }
+const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
+const CHATGPT_SWITCH_OFFER_PREFIX = 'chatpcb.chatgpt-switch-offered';
+const CHATGPT_SWITCH_OFFER_HASH_HEX = 16;
+const DAEMON_TITLE_KEYS = {
+  'connection.connecting': 'connection.daemon.connecting',
+  'connection.connected': 'connection.daemon.open',
+  'connection.disconnected': 'connection.daemon.closed',
+  'connection.error': 'connection.daemon.error'
 };
-
-async function loadI18n(localeName = 'en') {
-  try {
-    const response = await fetch(`./locales/${localeName}.json`);
-    if (response.ok) {
-      i18nStrings = await response.json();
-    } else if (localeName !== 'en') {
-      await loadI18n('en');
-      return;
-    }
-  } catch {
-    // Fallback to English if locale fails to load
-    if (localeName !== 'en') {
-      await loadI18n('en');
-      return;
-    }
-  }
-  i18nReady = true;
-  renderDaemonConnection();
-  renderChatGPTAuth();
-  applyRemovalConfirmCopy();
-}
-
-function daemonConnectionLabel() {
-  const key = `connection.daemon.${daemonConnectionState}`;
-  if (i18nStrings[key]) return i18nStrings[key];
-  const copy = DAEMON_CONNECTION_COPY[daemonConnectionState] || DAEMON_CONNECTION_COPY.connecting;
-  return locale === 'ko' ? copy.ko : copy.en;
-}
-
-function renderDaemonConnection() {
-  if (!statusEl) return;
-  statusEl.textContent = daemonConnectionLabel();
-  statusEl.dataset.role = 'daemon';
-  statusEl.dataset.state = daemonConnectionState;
-  statusEl.classList.add('daemon-connection');
-}
-
-function setDaemonConnectionState(state) {
-  daemonConnectionState = state;
-  renderDaemonConnection();
-}
-
-function approvalNoManifestMessage() {
-  const translated = t('approval.no-manifest');
-  if (translated && translated !== 'approval.no-manifest') return translated;
-  return locale === 'ko'
-    ? '부품 목록은 스키매틱에 적용한 뒤 확인됩니다.'
-    : 'Parts list will be checked after you apply to the schematic.';
-}
-
-function approvalNoManifestDetail() {
-  const translated = t('approval.no-manifest-detail');
-  if (translated && translated !== 'approval.no-manifest-detail') return translated;
-  return locale === 'ko'
-    ? '파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인합니다.'
-    : 'The patch is still matched to the current files before anything is written.';
-}
-
-function t(key, replacements = {}) {
-  let text = i18nStrings[key] || key;
-  for (const [placeholder, value] of Object.entries(replacements)) {
-    text = text.replace(`{${placeholder}}`, value);
-  }
-  return text;
-}
-
-function formatChatGPTAuthExpiry(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  const tag = locale === 'ko' ? 'ko-KR' : 'en-US';
-  return new Intl.DateTimeFormat(tag, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(date);
-}
-
-// Detect locale from browser
-const browserLocale = navigator.language || navigator.userLanguage || 'en';
-const locale = browserLocale.startsWith('ko') ? 'ko' : 'en';
-loadI18n(locale);
-
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
-}
-
-// Only https URLs may be written into an auth href. The returned string is HTML-escaped.
-function chatgptAuthHref(value) {
-  if (typeof value !== 'string' || value.length === 0) return null;
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== 'https:') return null;
-  return escapeHtml(parsed.href);
-}
-
 const PROGRESS_COPY = {
-  conversation: { title: '요청을 읽고 있어요', sprite: 'think' },
-  provider: { title: 'CLI와 대화 중', sprite: 'cli' },
-  tool: { title: 'CLI가 도구를 호출했어요', sprite: 'tool' },
-  preview: { title: '회로 초안을 그리는 중', sprite: 'draft' },
-  ready: { title: '적용을 기다리고 있어요', sprite: 'preview' },
-  apply: { title: '스키매틱에 넣는 중', sprite: 'apply' },
-  done: { title: '완료', sprite: 'done' },
-  warn: { title: '주의가 필요해요', sprite: 'preview' },
-  fail: { title: '이번엔 적용하지 못했어요', sprite: 'fail' }
+  conversation: { titleKey: 'progress.conversation', sprite: 'think' },
+  provider: { titleKey: 'progress.provider', sprite: 'cli' },
+  tool: { titleKey: 'progress.tool', sprite: 'tool' },
+  preview: { titleKey: 'progress.preview', sprite: 'draft' },
+  ready: { titleKey: 'progress.ready', sprite: 'preview' },
+  apply: { titleKey: 'progress.apply', sprite: 'apply' },
+  done: { titleKey: 'progress.done', sprite: 'done' },
+  warn: { titleKey: 'progress.warn', sprite: 'preview' },
+  fail: { titleKey: 'progress.fail', sprite: 'fail' }
 };
 const WORKFLOW_ORDER = [
   'circuit.concept', 'circuit.parts', 'circuit.draft', 'circuit.edit', 'circuit.review',
   'layout.concept', 'layout.place-major', 'layout.place-rest', 'layout.route', 'layout.edit', 'layout.review',
   'fab.gerber', 'fab.bom', 'fab.submit'
 ];
-const WORKFLOW_COPY = {
-  'circuit.concept': { wait: 'Circuit 컨셉을 채팅으로 보내 주세요.', run: '회로 컨셉을 읽고 있어요.' },
-  'circuit.parts': { wait: '주요 부품을 고르거나 채팅으로 답하세요.', run: '주요 부품을 고르고 있어요.' },
-  'circuit.draft': { wait: '회로 초안이 준비됐어요. 적용을 누르면 작성 단계가 끝납니다.', run: '회로 초안을 그리고 있어요.' },
-  'circuit.edit': { wait: '고칠 회로 내용을 채팅으로 보내 주세요.', run: '회로를 수정하고 있어요.' },
-  'circuit.review': { wait: '회로 리뷰를 확인하고 다음으로 넘어가세요.', run: '회로 리뷰를 돌리고 있어요.' },
-  'layout.concept': { wait: '보드 크기, 형태, 층수를 알려 주세요.', run: '레이아웃 컨셉을 정리하고 있어요.' },
-  'layout.place-major': { wait: '주요 부품 배치를 채팅으로 지시해 주세요.', run: '주요 부품을 배치하고 있어요.' },
-  'layout.place-rest': { wait: '남은 부품 배치를 지시해 주세요.', run: '남은 부품을 배치하고 있어요.' },
-  'layout.route': { wait: '배선 규칙을 알려 주세요.', run: '배선을 긋고 있어요.' },
-  'layout.edit': { wait: '레이아웃에서 고칠 점을 보내 주세요.', run: '레이아웃을 수정하고 있어요.' },
-  'layout.review': { wait: '레이아웃 리뷰를 확인하세요. 끝나면 제품화로 갑니다.', run: '레이아웃 리뷰를 돌리고 있어요.' },
-  'fab.gerber': { wait: 'GERBER 등 JLCPCB 제출 산출물을 만들 차례입니다.', run: '제조 산출물을 만들고 있어요.' },
-  'fab.bom': { wait: 'BOM·조립 파일을 확인할 차례입니다.', run: 'BOM을 정리하고 있어요.' },
-  'fab.submit': { wait: 'JLCPCB 제출 패키지를 확인해 주세요.', run: '제출 패키지를 묶고 있어요.' }
-};
+const SVG_NS = 'http://www.w3.org/2000/svg';
 const PROGRESS_TO_STEP = {
   conversation: 'circuit.concept',
   provider: 'circuit.parts',
@@ -201,19 +77,27 @@ const inspectionArtifactCountEl = document.querySelector('#inspection-artifact-c
 const inspectionErcEl = document.querySelector('#inspection-erc');
 const inspectionDrcEl = document.querySelector('#inspection-drc');
 const patchApprovalCardEl = document.querySelector('#patch-approval-card');
+const patchApprovalTitleEl = document.querySelector('#patch-approval-title');
 const patchApprovalSourceEl = document.querySelector('#patch-approval-source');
 const patchApprovalPartsEl = document.querySelector('#patch-approval-parts');
 const patchApprovalStatusEl = document.querySelector('#patch-approval-status');
 const patchApprovalTechnicalDetailsEl = document.querySelector('#patch-approval-technical-details');
 const patchApprovalTechnicalDetailEl = document.querySelector('#patch-approval-technical-detail');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
-const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const applyRemoveConfirmEl = document.querySelector('#apply-remove-components-confirm');
 const applyRemoveTitleEl = document.querySelector('#apply-remove-components-title');
 const applyRemoveLeadEl = document.querySelector('#apply-remove-components-lead');
 const applyRemovePartsEl = document.querySelector('#apply-remove-components-parts');
 const cancelApplyRemoveButtonEl = document.querySelector('#cancel-apply-remove-components');
 const confirmApplyRemoveButtonEl = document.querySelector('#confirm-apply-remove-components');
+const approveWithoutErcButtonEl = document.querySelector('#approve-patch-without-erc');
+const applyWithoutErcConfirmEl = document.querySelector('#apply-without-erc-confirm');
+const confirmApplyWithoutErcButtonEl = document.querySelector('#confirm-apply-without-erc');
+const cancelApplyWithoutErcButtonEl = document.querySelector('#cancel-apply-without-erc');
+const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
+const fixPatchButtonEl = document.querySelector('#fix-patch-button');
+const applyWhyEl = document.querySelector('#apply-why');
+const patchErcEl = document.querySelector('#patch-erc');
 const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
 const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
@@ -233,33 +117,57 @@ let activeRequestProjectDir = null;
 let pendingHostStatus = null;
 let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
+let patchRejectionCode = null;
+let chatGptUiEnabled = false;
+let chatGptSignedIn = null;
 let patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null };
-let lastRequestResult = null;
-let lastProgressStage = null;
-let lastProgressText = '';
-let lastWorkflowActive = 'circuit.concept';
-let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutReviewed: false };
-const pendingCalls = new Map();
-const workflowCaptionEl = document.querySelector('#workflow-caption');
-const workflowCliEl = document.querySelector('#workflow-cli');
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
 let chatgptAuthExpiryTimer = null;
+let i18nReady = false;
 let switchOfferEpoch = 0;
 let activeSwitchOfferStorageKey = null;
 let activeSwitchIdentity = '';
 let anonymousSwitchOfferRecorded = false;
 const switchOfferRecordedKeys = new Set();
 const pageOnlySwitchIdentities = new Set();
-const PROVIDER_STORAGE_KEY = 'chatpcb.provider';
-const CHATGPT_SWITCH_OFFER_PREFIX = 'chatpcb.chatgpt-switch-offered';
-const CHATGPT_SWITCH_OFFER_HASH_HEX = 16;
+let lastRequestResult = null;
+let lastProgressStage = null;
+let lastProgressText = '';
+let lastWorkflowActive = 'circuit.concept';
+let workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutReviewed: false };
+let connectionStatusKey = 'connection.connecting';
+let requestStatusKey = 'request.idle';
+let lastProviderStatus = null;
+let requestStatusVars = null;
+const laneOpen = new Map();
+const pendingCalls = new Map();
+const workflowCaptionEl = document.querySelector('#workflow-caption');
+const workflowCliEl = document.querySelector('#workflow-cli');
 
 restoreProviderSelection();
-renderDaemonConnection();
 connect();
+setConnectionStatus(connectionStatusKey);
 syncWorkflow();
+applyHostQueries();
+window.chatpcbI18n?.onChange(() => {
+  i18nReady = true;
+  setConnectionStatus(connectionStatusKey, statusEl?.dataset.state);
+  syncWorkflow();
+  renderPatchApproval();
+  applyRemovalConfirmCopy();
+  renderChatGPTAuth();
+  if (requestStatusKey) requestStatusEl.textContent = t(requestStatusKey, requestStatusVars);
+  if (lastProviderStatus) renderProviderStatus(lastProviderStatus);
+  if (inspectionState.result) renderInspection(inspectionState.result);
+});
+window.chatpcbI18n?.ready?.then(() => {
+  i18nReady = true;
+  setConnectionStatus(connectionStatusKey, statusEl?.dataset.state);
+  applyRemovalConfirmCopy();
+  renderChatGPTAuth();
+});
 
 newProjectFormEl.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -273,6 +181,12 @@ formEl.addEventListener('submit', (event) => {
   event.preventDefault();
   sendProjectRequest();
 });
+document.querySelector('#pro-mode')?.addEventListener('click', () => {
+  const control = document.querySelector('#pro-mode');
+  if (control?.getAttribute('role') !== 'switch') return;
+  const checked = control.getAttribute('aria-checked') === 'true';
+  control.setAttribute('aria-checked', checked ? 'false' : 'true');
+});
 providerEl.addEventListener('change', () => {
   rememberProvider(providerEl.value);
   refreshProviderStatus();
@@ -284,39 +198,93 @@ chatgptSwitchOfferDismissEl?.addEventListener('click', dismissChatGPTSwitchOffer
 openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
-cancelPatchButtonEl.addEventListener('click', cancelPatch);
+approveWithoutErcButtonEl?.addEventListener('click', revealApplyWithoutErcConfirm);
+confirmApplyWithoutErcButtonEl?.addEventListener('click', approvePatchWithoutErc);
+cancelApplyWithoutErcButtonEl?.addEventListener('click', cancelApplyWithoutErcConfirm);
 cancelApplyRemoveButtonEl?.addEventListener('click', cancelRemovalConfirm);
 confirmApplyRemoveButtonEl?.addEventListener('click', confirmRemovalApply);
-document.addEventListener('keydown', (event) => {
-  if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    cancelRemovalConfirm();
-    return;
-  }
-  if (event.key !== 'Tab') return;
-  const buttons = [cancelApplyRemoveButtonEl, confirmApplyRemoveButtonEl].filter((button) => button);
-  if (buttons.length === 0) return;
-  event.preventDefault();
-  const index = buttons.indexOf(document.activeElement);
-  const direction = event.shiftKey ? -1 : 1;
-  const next = index < 0
-    ? (event.shiftKey ? buttons[buttons.length - 1] : buttons[0])
-    : buttons[(index + direction + buttons.length) % buttons.length];
-  next.focus();
-});
+cancelPatchButtonEl.addEventListener('click', cancelPatch);
+fixPatchButtonEl?.addEventListener('click', askChatpcbToFixErc);
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
     if (typeof dialog?.showModal === 'function') dialog.showModal();
+    setToolsMenuOpen(false);
   });
 }
+document.querySelector('#tools-menu-button')?.addEventListener('click', () => {
+  const button = document.querySelector('#tools-menu-button');
+  setToolsMenuOpen(button?.getAttribute('aria-expanded') !== 'true');
+});
+document.addEventListener('click', (event) => {
+  const menu = document.querySelector('#tools-menu');
+  if (!menu || menu.hidden) return;
+  if (event.target instanceof Element && event.target.closest('#tools-menu, #tools-menu-button')) return;
+  setToolsMenuOpen(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelRemovalConfirm();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const buttons = [cancelApplyRemoveButtonEl, confirmApplyRemoveButtonEl].filter((button) => button);
+    if (buttons.length === 0) return;
+    event.preventDefault();
+    const index = buttons.indexOf(document.activeElement);
+    const direction = event.shiftKey ? -1 : 1;
+    const next = index < 0
+      ? (event.shiftKey ? buttons[buttons.length - 1] : buttons[0])
+      : buttons[(index + direction + buttons.length) % buttons.length];
+    next.focus();
+    return;
+  }
+  if (event.key !== 'Escape') return;
+  if (applyWithoutErcConfirmEl && !applyWithoutErcConfirmEl.hidden) {
+    event.preventDefault();
+    cancelApplyWithoutErcConfirm();
+    return;
+  }
+  if (chatgptAuthState.state === 'waiting') {
+    event.preventDefault();
+    cancelChatGPTSignIn();
+    return;
+  }
+  const menu = document.querySelector('#tools-menu');
+  if (!menu || menu.hidden) return;
+  setToolsMenuOpen(false);
+  document.querySelector('#tools-menu-button')?.focus();
+});
 for (const button of document.querySelectorAll('.flow-btn')) {
   button.addEventListener('click', () => {
+    if (button.getAttribute('aria-disabled') === 'true' || button.dataset.state === 'locked') {
+      const reason = document.getElementById(button.getAttribute('aria-describedby') || '');
+      if (reason) {
+        reason.hidden = false;
+        reason.focus();
+      }
+      return;
+    }
     const dialog = document.getElementById(button.dataset.open);
     if (typeof dialog?.showModal === 'function') dialog.showModal();
-    const copy = WORKFLOW_COPY[button.dataset.step];
-    if (copy && promptEl && !promptEl.disabled) promptEl.placeholder = copy.wait;
+  });
+}
+for (const row of document.querySelectorAll('.lane-row')) {
+  row.addEventListener('click', () => {
+    const laneId = row.closest('.workflow-lane')?.dataset.lane;
+    if (!laneId) return;
+    if (row.getAttribute('aria-disabled') === 'true') {
+      const reason = document.getElementById(row.getAttribute('aria-describedby') || '');
+      if (reason) {
+        reason.hidden = false;
+        reason.focus();
+      }
+      return;
+    }
+    laneOpen.set(laneId, row.getAttribute('aria-expanded') !== 'true');
+    syncWorkflow();
   });
 }
 window.addEventListener('message', (event) => handleHostMessage(event.data));
@@ -325,23 +293,70 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refreshHostProjectStatus();
 });
 
+function applyHostQueries() {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get('theme');
+  if ((theme === 'light' || theme === 'dark') && !document.documentElement.dataset.theme) {
+    document.documentElement.dataset.theme = theme;
+  }
+  const auth = params.get('auth');
+  if (auth === 'signedin' || auth === 'in' || auth === 'true') setChatGptAuthState({ signedIn: true });
+  else if (auth === 'signedout' || auth === 'out' || auth === 'false') setChatGptAuthState({ signedIn: false });
+}
+
+function setChatGptShell(el, visible) {
+  if (!el) return;
+  const show = chatGptUiEnabled && visible;
+  el.hidden = !show;
+  if (show) el.removeAttribute('inert');
+  else el.setAttribute('inert', '');
+}
+
+function setChatGptAuthState(state = {}) {
+  if (state?.signedIn === true || state?.signedIn === false) chatGptSignedIn = state.signedIn;
+  const card = document.querySelector('#chatgpt-signin');
+  const plan = document.querySelector('#chatgpt-plan');
+  // Sign-in and plan stay out of the tab order until ChatGPT auth is wired up.
+  setChatGptShell(card, chatGptSignedIn === false);
+  setChatGptShell(plan, chatGptSignedIn === true);
+}
+
+function setConnectionStatus(key, state) {
+  connectionStatusKey = key;
+  if (statusEl) {
+    statusEl.dataset.i18n = key;
+    statusEl.dataset.role = 'daemon';
+    statusEl.classList.add('daemon-connection');
+    const label = t(key);
+    if (label !== key) statusEl.textContent = label;
+    const titleKey = DAEMON_TITLE_KEYS[key];
+    const title = titleKey ? t(titleKey) : '';
+    if (title && title !== titleKey) statusEl.title = title;
+  }
+  if (statusEl && state !== undefined) {
+    if (state) statusEl.dataset.state = state;
+    else delete statusEl.dataset.state;
+  }
+}
+
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
   window.__daemonSocket = socket;
   socket.addEventListener('open', () => {
-    setDaemonConnectionState('open');
+    setConnectionStatus('connection.connected', 'ok');
     clearPatchApproval();
     refreshProviderStatus();
     refreshChatGPTAuthStatus();
+    if (providerEl?.value !== 'chatgpt' && chatgptAuthCardEl) chatgptAuthCardEl.hidden = true;
     inspectActiveProject();
   });
   socket.addEventListener('message', (event) => handleEnvelope(JSON.parse(event.data)));
   socket.addEventListener('close', () => {
-    setDaemonConnectionState('closed');
+    setConnectionStatus('connection.disconnected', 'warn');
     setTimeout(connect, 1500);
   });
   socket.addEventListener('error', () => {
-    setDaemonConnectionState('error');
+    setConnectionStatus('connection.error', 'warn');
   });
 }
 
@@ -350,7 +365,7 @@ function createProject() {
   const projectName = projectNameEl.value.trim();
   if (!workspaceRoot || !projectName) return;
 
-  renderRequestStatus({ state: 'running', summary: 'Creating project…' });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.creating' });
   const id = `project_create_${Date.now()}`;
   activeProjectCreateId = id;
   pendingCalls.set(id, 'project.create');
@@ -359,12 +374,12 @@ function createProject() {
 
 async function sendProjectRequest() {
   if (!activeProject) {
-    renderRequestStatus({ state: 'failed', summary: 'Create a project before sending a circuit request.' });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.need-project' });
     return;
   }
   const prompt = promptEl.value.trim();
   if (!prompt) {
-    renderRequestStatus({ state: 'failed', summary: 'Circuit request is required.' });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.prompt-required' });
     return;
   }
   if (activeRequestId) return;
@@ -377,18 +392,12 @@ async function sendProjectRequest() {
     return;
   }
   if (status?.unavailable) {
-    renderRequestStatus({
-      state: 'failed',
-      summary: 'KiCad host is unavailable or not responding. Reopen the embedded panel or retry after KiCad is ready.'
-    });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.kicad-unavailable' });
     setRequestBusy(false);
     return;
   }
   if (status?.dirty && status.linkState !== 'unlinked') {
-    renderRequestStatus({
-      state: 'failed',
-      summary: 'KiCad changes need attention. Save or discard them in KiCad, then press Send again or I saved — recheck.'
-    });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.kicad-dirty' });
     showConflict();
     setRequestBusy(false);
     return;
@@ -396,8 +405,8 @@ async function sendProjectRequest() {
 
   hideConflict();
   lastProgressStage = 'conversation';
-  lastProgressText = 'Send 했어요. 데몬과 CLI 응답을 기다립니다.';
-  renderRequestStatus({ state: 'running', summary: 'Running request…' });
+  lastProgressText = t('progress.sent');
+  renderRequestStatus({ state: 'running', summaryKey: 'request.running' });
   clearProgress();
   appendProgress({ stage: 'conversation', text: lastProgressText });
   const id = `project_request_${Date.now()}`;
@@ -411,7 +420,7 @@ async function sendProjectRequest() {
       projectDir: requestProject.projectDir,
       prompt,
       provider: providerEl.value,
-      proMode: document.querySelector('#pro-mode')?.checked === true
+      proMode: document.querySelector('#pro-mode')?.getAttribute('aria-checked') === 'true'
     }
   });
 }
@@ -428,71 +437,6 @@ function refreshProviderStatusForAuth(previous, next) {
   refreshProviderStatus();
 }
 
-function restoreProviderSelection() {
-  const stored = readStoredProvider();
-  if (!stored || !providerEl) return;
-  const listed = [...providerEl.options].some((option) => option.value === stored);
-  if (listed) providerEl.value = stored;
-}
-
-function readStoredProvider() {
-  try {
-    return localStorage.getItem(PROVIDER_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function rememberProvider(provider) {
-  try {
-    localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
-  } catch {
-    // The select still works for this page when storage is blocked.
-  }
-}
-
-function accountSwitchIdentity(account) {
-  const sub = typeof account?.sub === 'string' ? account.sub.trim() : '';
-  if (sub) return sub;
-  const email = typeof account?.email === 'string' ? account.email.trim() : '';
-  return email;
-}
-
-async function shortSha256Hex(value) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  let hex = '';
-  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, '0');
-  return hex.slice(0, CHATGPT_SWITCH_OFFER_HASH_HEX);
-}
-
-function readStoredSwitchOffer(key) {
-  if (switchOfferRecordedKeys.has(key)) return true;
-  try {
-    return localStorage.getItem(key) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function rememberChatGPTSwitchOffered() {
-  if (activeSwitchOfferStorageKey) {
-    switchOfferRecordedKeys.add(activeSwitchOfferStorageKey);
-    try {
-      localStorage.setItem(activeSwitchOfferStorageKey, '1');
-    } catch {
-      // The choice still sticks for this page when storage is blocked.
-    }
-  } else if (activeSwitchIdentity) {
-    pageOnlySwitchIdentities.add(activeSwitchIdentity);
-  } else {
-    anonymousSwitchOfferRecorded = true;
-  }
-  if (chatgptSwitchOfferEl) {
-    chatgptSwitchOfferEl.hidden = true;
-    chatgptSwitchOfferEl.dataset.decision = 'hidden';
-  }
-}
-
 function sendToolCall(payload) {
   const envelope = {
     version: 1,
@@ -505,7 +449,7 @@ function sendToolCall(payload) {
     socket.send(JSON.stringify(envelope));
   } else {
     pendingCalls.delete(payload.id);
-    renderRequestStatus({ state: 'failed', summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.', technicalDetail: 'chatpcb-agentd is not connected.' });
+    renderRequestStatus({ state: 'failed', summaryKey: 'request.failed', technicalDetail: t('request.daemon-offline') });
     if (payload.name === 'project.request') setRequestBusy(false);
   }
 }
@@ -528,6 +472,7 @@ function handleEnvelope(envelope) {
     applyChatGPTReopenResult(envelope.payload);
     return;
   }
+
   if (!envelope.payload.ok && envelope.payload.error?.code === 'PROJECT_BUSY' && isProjectBusyCall(callName)) {
     showProjectBusy(callName, envelope.payload.error?.message);
     return;
@@ -536,10 +481,10 @@ function handleEnvelope(envelope) {
   if (!envelope.payload.ok) {
     if (callName === 'schematic.generate') {
       setRequestBusy(false);
-      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? 'Tool call failed.' });
+      appendProgress({ stage: 'fail', text: envelope.payload.error?.message ?? t('request.tool-failed') });
       renderRequestStatus({
         state: 'failed',
-        summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+        summaryKey: 'request.failed',
         technicalDetail: envelope.payload.error?.message ?? 'Tool call failed.'
       });
       return;
@@ -584,7 +529,7 @@ function handleEnvelope(envelope) {
       } else {
         renderRequestStatus({
           state: 'failed',
-          summary: '요청을 처리하지 못했습니다. 다시 시도하거나 기술 상세를 확인하세요.',
+          summaryKey: 'request.failed',
           technicalDetail
         });
       }
@@ -594,8 +539,14 @@ function handleEnvelope(envelope) {
       return;
     }
     if (callName === 'schematic.patch.approve' || callName === 'schematic.patch.cancel') {
+      const code = envelope.payload.error?.code;
+      if (callName === 'schematic.patch.approve' && notePatchRejection(code)) {
+        renderRequestStatus({ state: 'failed', summaryKey: 'patch.unverified.body' });
+        renderPatchApproval();
+        return;
+      }
       clearPatchApproval();
-      renderRequestStatus({ state: 'failed', summary: 'Patch approval could not be completed.', technicalDetail: envelope.payload.error?.message ?? 'Patch tool call failed.' });
+      renderRequestStatus({ state: 'failed', summaryKey: 'request.patch-failed', technicalDetail: envelope.payload.error?.message ?? t('request.patch-tool-failed') });
     }
     return;
   }
@@ -631,34 +582,49 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'schematic.patch.approve') {
+    const result = envelope.payload.result ?? {};
+    if (result.applied === false && notePatchRejection(result.reason?.code)) {
+      if (result.validation && lastRequestResult) {
+        lastRequestResult = {
+          ...lastRequestResult,
+          validation: result.validation,
+          candidateVerification: result.candidateVerification ?? lastRequestResult.candidateVerification ?? null
+        };
+      }
+      renderRequestStatus({ state: 'failed', summaryKey: 'patch.unverified.body' });
+      renderPatchApproval();
+      return;
+    }
     clearPatchApproval();
-    renderProjectRequest(envelope.payload.result);
+    renderProjectRequest(result);
     inspectActiveProject();
     return;
   }
   if (callName === 'schematic.patch.cancel') return;
   if (callName === 'provider.status') {
     const provider = envelope.payload.result;
-    providerStatusEl.textContent = `${provider.provider}: ${provider.status}`;
-    providerStatusEl.dataset.status = provider.status;
-    
-    // If this is chatgpt, also update auth state
-    if (provider.provider === 'chatgpt') {
-      chatgptAuthState = {
-        state: provider.status === 'signed-in' ? 'signed_in' : 'signed_out',
-        account: provider.account,
-        plan: provider.plan
-      };
-      chatgptAuthKnown = true;
-      renderChatGPTAuth();
+    renderProviderStatus(provider);
+    if (provider?.provider === 'chatgpt' && (provider.status === 'signed-in' || provider.status === 'signed-out')) {
+      const next = provider.status === 'signed-in' ? 'signed_in' : 'signed_out';
+      if (chatgptAuthState.state !== 'waiting') {
+        chatgptAuthState = {
+          ...chatgptAuthState,
+          state: next,
+          account: provider.account ?? chatgptAuthState.account,
+          plan: provider.plan ?? chatgptAuthState.plan
+        };
+        chatgptAuthKnown = true;
+        renderChatGPTAuth();
+      }
     }
+    return;
   }
   if (callName === 'auth.chatgpt.status') {
     applyChatGPTAuthStatus(envelope.payload.result || {});
     return;
   }
   if (callName === 'auth.chatgpt.start') {
-    const result = envelope.payload.result;
+    const result = envelope.payload.result || {};
     chatgptAuthState = {
       ...chatgptAuthState,
       state: result.state || 'waiting',
@@ -673,21 +639,36 @@ function handleEnvelope(envelope) {
     else stopChatGPTAuthPolling();
     return;
   }
-  if (callName === 'auth.chatgpt.cancel') {
+  if (callName === 'auth.chatgpt.cancel' || callName === 'auth.chatgpt.signOut') {
     stopChatGPTAuthPolling();
     chatgptAuthState = { state: 'signed_out' };
     chatgptAuthKnown = true;
     renderChatGPTAuth();
-    return;
+    if (callName === 'auth.chatgpt.signOut') {
+      updateLiveRegion({ state: 'signed_out' });
+      refreshProviderStatus();
+    }
   }
-  if (callName === 'auth.chatgpt.signOut') {
-    stopChatGPTAuthPolling();
-    chatgptAuthState = { state: 'signed_out' };
-    chatgptAuthKnown = true;
-    renderChatGPTAuth();
-    refreshProviderStatus();
-    return;
+}
+
+function renderProviderStatus(provider) {
+  if (!providerStatusEl || !provider) return;
+  lastProviderStatus = provider;
+  providerStatusEl.removeAttribute('data-i18n');
+  const vars = {};
+  if (provider.plan) vars.plan = provider.plan;
+  if (provider.account?.email) vars.email = provider.account.email;
+  const text = t(`provider.status.${provider.provider}.${provider.status}`, vars);
+  if (text.startsWith('provider.status.')) {
+    providerStatusEl.textContent = t('provider.status.fallback');
+  } else if (provider.status === 'missing') {
+    const next = t('provider.status.missing.next');
+    providerStatusEl.textContent = next.startsWith('provider.status.') ? text : [text, next].join(' ');
+  } else {
+    providerStatusEl.textContent = text;
   }
+  if (provider.status) providerStatusEl.dataset.status = provider.status;
+  else delete providerStatusEl.dataset.status;
 }
 
 function activateProject(project) {
@@ -700,7 +681,7 @@ function activateProject(project) {
   conversationCardEl.hidden = false;
   setRequestBusy(Boolean(activeRequestId));
   projectNameEl.value = '';
-  renderRequestStatus({ state: 'ready', summary: 'Project ready. Describe the circuit you want to create.' });
+  renderRequestStatus({ state: 'ready', summaryKey: 'request.project-ready' });
   inspectActiveProject();
   syncWorkflow();
 }
@@ -714,12 +695,14 @@ function resetProjectResults() {
   }
   artifactListEl.replaceChildren();
   reviewPanelEl.hidden = true;
-  reviewStatusEl.textContent = 'Pending';
+  reviewStatusEl.dataset.i18n = 'review.pending';
+  reviewStatusEl.textContent = t('review.pending');
   delete reviewStatusEl.dataset.status;
   for (const list of [reviewBlockersEl, reviewWarningsEl, reviewNotesEl, reviewFixesEl]) list.replaceChildren();
   validationStatusEl.dataset.state = 'idle';
-  validationStatusEl.textContent = 'Not run';
-  validationTimestampEl.textContent = '';
+  validationStatusEl.dataset.i18n = 'validation.idle';
+  validationStatusEl.textContent = t('validation.idle');
+  validationTimestampEl.replaceChildren();
   inspectionState = { projectDir: null, requestId: null, result: null };
   inspectionCardEl.hidden = true;
   renderInspection({});
@@ -730,15 +713,20 @@ function resetProjectResults() {
   clearProgress();
   kiCadLinkCardEl.hidden = true;
   kiCadLinkEl.dataset.state = 'available';
-  kiCadLinkEl.textContent = '';
+  kiCadLinkEl.replaceChildren();
   kiCadFallbackEl.hidden = true;
-  kiCadFallbackEl.textContent = '';
+  kiCadFallbackEl.replaceChildren();
   lastRequestResult = null;
   lastProgressStage = null;
   lastProgressText = '';
   lastWorkflowActive = 'circuit.concept';
   workflowFlags = { circuitApplied: false, circuitReviewed: false, layoutReviewed: false };
   syncWorkflow();
+}
+
+function scrollConversationToLatest() {
+  if (!conversationLogEl) return;
+  conversationLogEl.scrollTop = conversationLogEl.scrollHeight;
 }
 
 function renderConversation(result) {
@@ -782,7 +770,7 @@ function renderConversation(result) {
         if (row.reason) {
           const reason = document.createElement('span');
           reason.className = 'spec-reason';
-          reason.textContent = ` / ${row.reason}`;
+          reason.textContent = t('spec.reason', { reason: row.reason });
           detail.append(reason);
         }
         list.append(term, detail);
@@ -800,6 +788,8 @@ function renderConversation(result) {
     }
     conversationLogEl.append(item);
   }
+  // scrollIntoView would move the page and push the approval card below the fold.
+  scrollConversationToLatest();
   conversationOptionsEl.replaceChildren();
   for (const option of result.options ?? []) {
     const button = document.createElement('button');
@@ -821,10 +811,9 @@ function renderConversation(result) {
 function renderProjectRequest(result) {
   renderConversation(result);
   if (result?.operation === 'clarify') {
-    renderRequestStatus({
-      state: 'ready',
-      summary: result.nextQuestion ?? 'Reply in chat to continue. Missing capabilities are part of the product flow.'
-    });
+    renderRequestStatus(result.nextQuestion
+      ? { state: 'ready', summary: result.nextQuestion }
+      : { state: 'ready', summaryKey: 'request.clarify-fallback' });
     return;
   }
   // A removal preview is not an approval yet. Apply stays closed until the dialog confirms these refs.
@@ -840,8 +829,8 @@ function renderProjectRequest(result) {
   }
   if (result?.requiresApproval && result.patchId) {
     setPatchApproval(result);
-    appendProgress({ stage: 'ready', text: '미리보기가 끝났어요. 적용을 누르면 파일이 바뀝니다.' });
-    renderRequestStatus({ state: 'ready', summary: '회로 초안이 준비됐어요. 스키매틱에 적용할까요?' });
+    appendProgress({ stage: 'ready', text: t('request.preview-done') });
+    renderRequestStatus({ state: 'ready', summaryKey: 'request.preview-ready' });
     renderReview(result.review);
     renderArtifacts(result.files);
     renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
@@ -850,22 +839,28 @@ function renderProjectRequest(result) {
   renderReview(result.review);
   renderArtifacts(result.files);
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
-  const validationFailed = result.validation?.ok === false;
+  // A skipped candidate keeps validation.ok false. Once the daemon applied it, the request succeeded.
+  const validationFailed = result.applied !== true && result.validation?.ok === false;
   const requestFailed = result.rolledBack || validationFailed;
+  const completedDetail = result.operation === 'patched' ? t('request.completed-updated') : t('request.completed-generated');
   const summary = result.rolledBack
-    ? 'ERC validation failed; the previous project files were restored.'
+    ? t('request.rollback')
     : validationFailed
-      ? 'ERC validation failed. Review the validation details before continuing.'
-      : `Completed: ${result.operation === 'patched' ? 'Updated project.' : 'Generated project.'}`;
+      ? t('request.validation-failed')
+      : t('request.completed', { detail: completedDetail });
   if (!result.rolledBack) workflowFlags.circuitApplied = true;
   if (!requestFailed && result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
     workflowFlags.circuitReviewed = true;
   }
-  renderRequestStatus({ state: requestFailed ? 'failed' : 'completed', summary });
+  renderRequestStatus(result.rolledBack
+    ? { state: 'failed', summaryKey: 'request.rollback' }
+    : validationFailed
+      ? { state: 'failed', summaryKey: 'request.validation-failed' }
+      : { state: 'completed', summaryKey: 'request.completed', summaryVars: { detail: completedDetail } });
   appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
 
   const projectFile = findProjectFile(result.files);
-  const successfulUpdate = !result.rolledBack && result.validation?.ok !== false;
+  const successfulUpdate = result.applied === true || (!result.rolledBack && result.validation?.ok !== false);
   if (!successfulUpdate) return;
   if (projectFile) {
     kiCadLinkCardEl.hidden = false;
@@ -888,6 +883,45 @@ function inspectActiveProject() {
   sendToolCall({ id, name: 'project.inspect', args: { projectDir } });
 }
 
+const FRESHNESS_CODES = {
+  NO_MANIFEST: 'no-manifest',
+  LEGACY_SCHEMA: 'legacy',
+  NO_DIGEST: 'no-digest',
+  DIGEST_MISMATCH: 'mismatch',
+  MATCH: 'match',
+  INSPECTION_UNAVAILABLE: 'unavailable'
+};
+
+const FRESHNESS_REASONS = {
+  'No ChatPCB manifest exists.': 'no-manifest',
+  'Schema version 1 has no artifact-bound evidence.': 'legacy',
+  'Schema version 2 has no project digest.': 'no-digest',
+  'Evidence matches the saved project artifacts.': 'match',
+  'Evidence matches.': 'match',
+  'Inspection was unavailable.': 'unavailable',
+  'Legacy evidence.': 'legacy',
+  'Evidence no longer matches.': 'mismatch',
+  'No manifest yet.': 'no-manifest'
+};
+
+function freshnessTitleKey(freshness) {
+  const fromCode = FRESHNESS_CODES[freshness?.code];
+  if (fromCode) return fromCode;
+  const reason = typeof freshness?.reason === 'string' ? freshness.reason : '';
+  if (FRESHNESS_REASONS[reason]) return FRESHNESS_REASONS[reason];
+  if (reason.startsWith('Evidence digest ')) return 'mismatch';
+  if (freshness?.status === 'stale') return 'mismatch';
+  if (freshness?.status === 'current') return 'match';
+  if (freshness?.status === 'legacy-unverified') return 'legacy';
+  if (freshness?.status === 'missing') return 'no-manifest';
+  return 'unknown';
+}
+
+function freshnessTitle(freshness) {
+  const text = t(`inspection.freshness.${freshnessTitleKey(freshness)}`);
+  return text.startsWith('inspection.freshness.') ? t('inspection.freshness.unknown') : text;
+}
+
 function renderInspection(result = {}) {
   const freshness = result.manifest?.freshness ?? {};
   const status = ['current', 'stale', 'legacy-unverified', 'missing'].includes(freshness.status)
@@ -899,9 +933,13 @@ function renderInspection(result = {}) {
   const drc = result.validation?.drc;
   inspectionFreshnessEl.dataset.state = status;
   inspectionFreshnessEl.textContent = status;
-  inspectionFreshnessEl.title = freshness.reason ?? '';
-  inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : '—';
-  inspectionArtifactCountEl.textContent = `${Number.isInteger(artifactCount) ? artifactCount : 0} artifacts`;
+  inspectionDigestEl.removeAttribute('data-i18n');
+  inspectionArtifactCountEl.removeAttribute('data-i18n');
+  inspectionErcEl.removeAttribute('data-i18n');
+  inspectionDrcEl.removeAttribute('data-i18n');
+  inspectionFreshnessEl.title = freshnessTitle(freshness);
+  inspectionDigestEl.textContent = typeof digest === 'string' ? digest.slice(0, 12) : t('inspection.empty');
+  inspectionArtifactCountEl.textContent = t('inspection.artifacts', { count: Number.isInteger(artifactCount) ? artifactCount : 0 });
   inspectionErcEl.textContent = renderInspectionValidation('ERC', erc);
   inspectionDrcEl.textContent = renderInspectionValidation('DRC', drc);
   inspectionState.result = result;
@@ -910,56 +948,23 @@ function renderInspection(result = {}) {
 
 function renderInspectionFailure() {
   inspectionCardEl.hidden = false;
-  renderInspection({ manifest: { freshness: { status: 'missing', reason: 'Inspection was unavailable.' } } });
+  renderInspection({ manifest: { freshness: { status: 'missing', code: 'INSPECTION_UNAVAILABLE', reason: 'Inspection was unavailable.' } } });
 }
 
 function renderInspectionValidation(label, result) {
-  if (!result) return `${label} —`;
+  if (!result) return t('inspection.dash', { label });
   const reason = result.reason;
-  if (result.skipped) return `${label} skipped [${reason?.code ?? 'UNKNOWN'}]: ${reason?.message ?? 'No reason was provided.'}`;
-  if (result.ok === false && reason) return `${label} failed [${reason.code ?? 'UNKNOWN'}]: ${reason.message ?? 'No reason was provided.'}`;
+  const message = reason?.message ?? t('inspection.no-reason');
+  if (result.skipped) {
+    return t('inspection.erc-skipped', { label, code: reason?.code ?? 'UNKNOWN', message });
+  }
+  if (result.ok === false && reason) {
+    return t('inspection.erc-failed', { label, code: reason.code ?? 'UNKNOWN', message: reason.message ?? t('inspection.no-reason') });
+  }
   const summary = label === 'ERC' ? result.erc ?? result : result.drc ?? result;
   return label === 'ERC'
-    ? `ERC ${summary.errorCount ?? 0}/${summary.warningCount ?? 0}`
-    : `DRC ${summary.violationCount ?? 0}/${summary.unconnectedCount ?? 0}`;
-}
-
-function draftSourceLabel(source) {
-  if (!source) return '';
-  if (source.via === 'provider' && source.provider === 'chatgpt') return t('source.chatgpt');
-  if (source.via === 'native-fallback') return t('source.native');
-  return '';
-}
-
-function draftParts(preview) {
-  return Array.isArray(preview?.components) ? preview.components : [];
-}
-
-function renderDraftEvidence(preview) {
-  if (!patchApprovalSourceEl || !patchApprovalPartsEl) return;
-  const source = preview?.source ?? preview?.conversation?.lastSource ?? null;
-  const label = draftSourceLabel(source);
-  patchApprovalSourceEl.textContent = label;
-  patchApprovalSourceEl.hidden = label.length === 0;
-  const parts = draftParts(preview);
-  patchApprovalPartsEl.replaceChildren();
-  for (const part of parts) {
-    const item = document.createElement('li');
-    item.textContent = `${part.ref ?? ''} · ${part.value ?? ''} · ${part.libId ?? ''}`;
-    patchApprovalPartsEl.append(item);
-  }
-  patchApprovalPartsEl.hidden = parts.length === 0;
-}
-
-function clearDraftEvidence() {
-  if (patchApprovalSourceEl) {
-    patchApprovalSourceEl.textContent = '';
-    patchApprovalSourceEl.hidden = true;
-  }
-  if (patchApprovalPartsEl) {
-    patchApprovalPartsEl.replaceChildren();
-    patchApprovalPartsEl.hidden = true;
-  }
+    ? t('inspection.erc-counts', { errors: summary.errorCount ?? 0, warnings: summary.warningCount ?? 0 })
+    : t('inspection.drc-counts', { violations: summary.violationCount ?? 0, unconnected: summary.unconnectedCount ?? 0 });
 }
 
 function setPatchApproval(preview) {
@@ -974,155 +979,387 @@ function setPatchApproval(preview) {
   const delay = Number(preview.expiresAt) - Date.now();
   if (Number.isFinite(delay) && delay > 0) {
     patchApprovalState.timeout = setTimeout(() => {
-      clearPatchApproval('Patch preview expired.');
+      clearPatchApproval('patch.expired');
     }, delay);
   }
   renderPatchApproval();
   renderDraftEvidence(preview);
 }
 
-function setPatchApprovalTechnicalDetail(text) {
-  if (!patchApprovalTechnicalDetailsEl || !patchApprovalTechnicalDetailEl) return;
-  const detail = typeof text === 'string' ? text : '';
-  patchApprovalTechnicalDetailEl.textContent = detail;
-  patchApprovalTechnicalDetailsEl.hidden = detail.length === 0;
-}
-
-function clearPatchApproval(message = 'No patch preview active.') {
+function clearPatchApproval(messageKey = 'patch.idle') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
   patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null };
+  patchRejectionCode = null;
+  fixPatchButtonEl?.classList.remove('btn-primary');
+  document.querySelector('#patch-erc-details')?.remove();
+  if (patchApprovalStatusEl) patchApprovalStatusEl.hidden = false;
+  setPatchTitle('patch.title');
   patchApprovalStatusEl.dataset.state = 'idle';
-  patchApprovalStatusEl.textContent = message;
+  setPatchStatus(messageKey);
   clearDraftEvidence();
   setPatchApprovalTechnicalDetail('');
   hideRemovalConfirm();
   if (applyRemovePartsEl) applyRemovePartsEl.replaceChildren();
   approvePatchButtonEl.disabled = true;
+  approvePatchButtonEl.removeAttribute('aria-disabled');
+  approvePatchButtonEl.removeAttribute('aria-describedby');
+  if (approveWithoutErcButtonEl) {
+    approveWithoutErcButtonEl.hidden = true;
+    approveWithoutErcButtonEl.disabled = true;
+  }
+  hideApplyWithoutErcConfirm();
   cancelPatchButtonEl.disabled = true;
-  if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
+  if (applyWhyEl) {
+    applyWhyEl.hidden = true;
+    applyWhyEl.replaceChildren();
+  }
+  if (patchErcEl) {
+    patchErcEl.hidden = true;
+    patchErcEl.removeAttribute('role');
+    patchErcEl.replaceChildren();
+  }
+  if (patchApprovalCardEl) patchApprovalCardEl.hidden = messageKey === 'patch.idle';
 }
 
-function patchApprovalGate() {
+function setPatchStatus(key) {
+  patchApprovalStatusEl.dataset.i18n = key;
+  patchApprovalStatusEl.textContent = t(key);
+}
+
+function ercMessagesFrom(source) {
+  if (!source || typeof source !== 'object') return [];
+  const messages = [];
+  for (const list of [source.errors, source.violations, source.messages]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (typeof item === 'string' && item.trim()) {
+        messages.push(item.trim());
+        continue;
+      }
+      if (!item || typeof item !== 'object') continue;
+      if (item.severity && item.severity !== 'error') continue;
+      const text = item.message || item.description || item.text;
+      if (typeof text === 'string' && text.trim()) messages.push(text.trim());
+    }
+  }
+  return messages;
+}
+
+function collectErcMessages(source) {
+  if (!source || typeof source !== 'object') return [];
+  const erc = source.erc && typeof source.erc === 'object' ? source.erc : null;
+  const nested = erc?.erc && typeof erc.erc === 'object' ? erc.erc : null;
+  const messages = [...ercMessagesFrom(nested), ...ercMessagesFrom(erc), ...ercMessagesFrom(source)];
+  if (messages.length === 0) {
+    const reason = source.reason?.message || erc?.reason?.message || nested?.reason?.message;
+    if (typeof reason === 'string' && reason.trim()) messages.push(reason.trim());
+  }
+  return [...new Set(messages)];
+}
+
+function ercSourceHasSignal(source) {
+  if (!source || typeof source !== 'object') return false;
+  if (source.passed === true || source.skipped === true || source.ok === true || source.ok === false) return true;
+  if (typeof source.status === 'string') return true;
+  if (source.erc && typeof source.erc === 'object') return true;
+  return Number(source.errorCount) > 0;
+}
+
+// Apply follows only the candidate patch: candidateVerification.erc, or the
+// preview validation when that is the recorded candidate result. The open
+// file's inspection ERC must not block a patch that fixes those errors.
+// A result from a different patchId is ignored, so a stale pass cannot open Apply.
+function candidateErcStale() {
+  const expected = patchApprovalState.patchId;
+  const result = lastRequestResult;
+  if (!expected || !result || typeof result !== 'object') return false;
+  const verification = result.candidateVerification;
+  const erc = verification && typeof verification === 'object' ? verification.erc : null;
+  return [result.patchId, verification?.patchId, erc?.patchId]
+    .some((id) => typeof id === 'string' && id.length > 0 && id !== expected);
+}
+
+function candidateErcSource() {
+  const result = lastRequestResult;
+  if (!result || result.patchId !== patchApprovalState.patchId || candidateErcStale()) return null;
+  const requestErc = result.candidateVerification?.erc;
+  if (ercSourceHasSignal(requestErc)) return requestErc;
+  const requestValidation = result.validation;
+  if (ercSourceHasSignal(requestValidation)) return requestValidation;
+  return null;
+}
+
+function applyBlockedReason(erc) {
+  if (patchRejectionCode) return { key: 'patch.unverified.body', text: t('patch.unverified.body') };
+  if (candidateErcStale()) return { key: 'patch.apply.blocked-stale', text: t('patch.apply.blocked-stale') };
+  if (erc.failed) return { key: 'patch.apply.blocked-erc', text: t('patch.apply.blocked-erc', { count: erc.count }) };
+  if (erc.skipped) return { key: 'patch.apply.skipped', text: t('patch.apply.skipped') };
+  return { key: 'patch.apply.blocked-missing', text: t('patch.apply.blocked-missing') };
+}
+
+let warnedApplyBlockKey = null;
+
+function warnApplyBlock(key) {
+  const logged = key === 'patch.apply.blocked-stale' || key === 'patch.apply.blocked-missing';
+  if (!logged) {
+    warnedApplyBlockKey = null;
+    return;
+  }
+  if (warnedApplyBlockKey === key) return;
+  warnedApplyBlockKey = key;
+  console.warn(key);
+}
+
+function inspectionErcSource() {
+  const inspection = inspectionState.result?.validation;
+  if (!inspection || typeof inspection !== 'object') return null;
+  if (ercSourceHasSignal(inspection.erc)) return inspection.erc;
+  if (ercSourceHasSignal(inspection)) return inspection;
+  return null;
+}
+
+function classifyPanelErc(source) {
+  const verdict = globalThis.chatpcbErcVerdict(source);
+  const messages = verdict.failed || verdict.skipped ? collectErcMessages(source) : [];
+  return {
+    passed: verdict.passed === true,
+    skipped: verdict.skipped === true,
+    failed: verdict.failed === true,
+    missing: verdict.missing === true,
+    count: verdict.errorCount,
+    messages
+  };
+}
+
+function ercBlockState() {
+  return classifyPanelErc(candidateErcSource());
+}
+
+function renderCurrentFileErc(candidate, active) {
+  const info = document.querySelector('#patch-erc-info');
+  if (!info) return;
+  const current = classifyPanelErc(inspectionErcSource());
+  const show = Boolean(active) && candidate?.passed === true && current.failed === true;
+  info.hidden = !show;
+  info.removeAttribute('role');
+  if (!show) {
+    info.replaceChildren();
+    return;
+  }
+  const summary = document.createElement('p');
+  summary.textContent = t('erc.current-file', { count: current.count });
+  info.replaceChildren(summary);
+  if (!current.messages.length) return;
+  const list = document.createElement('ul');
+  for (const message of current.messages) {
+    const item = document.createElement('li');
+    item.textContent = message;
+    list.append(item);
+  }
+  info.append(list);
+}
+
+function notePatchRejection(code) {
+  if (code !== 'PATCH_CANDIDATE_UNVERIFIED' && code !== 'ERC_BLOCKED') return false;
+  patchRejectionCode = code;
+  return true;
+}
+
+function setPatchTitle(key) {
+  if (!patchApprovalTitleEl) return;
+  patchApprovalTitleEl.dataset.i18n = key;
+  patchApprovalTitleEl.textContent = t(key);
+}
+
+function revealErcDetails() {
+  const erc = ercBlockState();
+  const message = erc.messages.length ? erc.messages.join('\n') : t('patch.unverified.body');
+  renderValidation({
+    ok: false,
+    skipped: erc.skipped === true,
+    erc: { errorCount: erc.count, warningCount: 0, ok: false },
+    reason: { message }
+  });
+  const dialog = document.getElementById('erc-dialog');
+  if (typeof dialog?.showModal === 'function' && !dialog.open) dialog.showModal();
+}
+
+function placeErcDetailsButton(parent) {
+  if (!parent) return;
+  let button = document.querySelector('#patch-erc-details');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'patch-erc-details';
+    button.className = 'erc-details';
+    button.setAttribute('aria-controls', 'erc-dialog');
+    button.addEventListener('click', revealErcDetails);
+  }
+  button.textContent = t('patch.erc-details');
+  parent.append(button);
+}
+
+function renderErcBox(erc, active) {
+  if (!patchErcEl) return;
+  if (patchRejectionCode && !erc?.failed) {
+    patchErcEl.hidden = true;
+    patchErcEl.removeAttribute('role');
+    patchErcEl.replaceChildren();
+    return;
+  }
+  if (!active || !erc || (!erc.failed && !erc.passed && !erc.skipped)) {
+    patchErcEl.hidden = true;
+    patchErcEl.removeAttribute('role');
+    patchErcEl.replaceChildren();
+    return;
+  }
+  patchErcEl.hidden = false;
+  patchErcEl.classList.toggle('erc-pass', erc.passed === true);
+  patchErcEl.classList.toggle('erc-skip', erc.skipped === true);
+  patchErcEl.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'erc-h';
+  const title = document.createElement('span');
+  title.textContent = t('erc.title');
+  const summary = document.createElement('span');
+  summary.textContent = erc.failed
+    ? t('erc.errors', { count: erc.count })
+    : erc.skipped
+      ? t('erc.skipped')
+      : t('erc.passed');
+  head.append(title, summary);
+  if (erc.failed) placeErcDetailsButton(head);
+  patchErcEl.append(head);
+  if (!erc.failed) {
+    patchErcEl.removeAttribute('role');
+    return;
+  }
+  patchErcEl.setAttribute('role', 'alert');
+  const list = document.createElement('ul');
+  const items = erc.messages.length ? erc.messages : [t('patch.apply.blocked-erc', { count: erc.count })];
+  for (const message of items) {
+    const item = document.createElement('li');
+    item.textContent = message;
+    list.append(item);
+  }
+  patchErcEl.append(list);
+}
+
+function renderPatchApproval() {
   const freshness = inspectionState.result?.manifest?.freshness?.status;
   const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
   const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
   const active = Boolean(patchApprovalState.patchId) && unexpired;
-  return { freshness, approvedEvidence, active };
-}
-
-function patchApplyBusy() {
-  if (activeRequestId) return true;
-  for (const name of pendingCalls.values()) {
-    if (name === 'project.request'
-      || name === 'schematic.generate'
-      || name === 'schematic.patch'
-      || name === 'schematic.patch.approve'
-      || name === 'schematic.patch.cancel') return true;
+  const erc = ercBlockState();
+  const evidenceBlocked = !active || !approvedEvidence;
+  const canApply = active && !evidenceBlocked && erc.passed === true && !patchRejectionCode;
+  const canOverride = active && !evidenceBlocked && erc.skipped === true && !erc.failed && !erc.passed;
+  approvePatchButtonEl.disabled = evidenceBlocked;
+  cancelPatchButtonEl.disabled = !active;
+  if (patchApprovalCardEl) patchApprovalCardEl.hidden = !active;
+  if (approveWithoutErcButtonEl) {
+    approveWithoutErcButtonEl.hidden = !canOverride;
+    approveWithoutErcButtonEl.disabled = !canOverride;
   }
-  return false;
-}
-
-// Same decision the Apply button uses: disabled control, active project, patch id,
-// unexpired preview, approved evidence, and no in-flight project mutation.
-function applyGateOpen() {
-  const gate = patchApprovalGate();
-  const evidenceOpen = Boolean(activeProject) && gate.active && gate.approvedEvidence;
-  if (!evidenceOpen) {
-    if (approvePatchButtonEl) approvePatchButtonEl.disabled = true;
-    return false;
-  }
-  if (approvePatchButtonEl?.disabled) return false;
-  if (patchApplyBusy()) return false;
-  return true;
-}
-
-function renderPatchApproval() {
-  const gate = patchApprovalGate();
-  approvePatchButtonEl.disabled = !gate.active || !gate.approvedEvidence;
-  cancelPatchButtonEl.disabled = !gate.active;
-  if (patchApprovalCardEl) patchApprovalCardEl.hidden = !gate.active;
-  setPatchApprovalTechnicalDetail('');
-  if (gate.freshness === 'stale' && patchApprovalState.patchId) {
-    if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
-    patchApprovalStatusEl.dataset.state = 'stale';
-    patchApprovalStatusEl.textContent = 'Approval unavailable: stale evidence. Inspect the project again before approving.';
-    return;
-  }
-  if (!gate.active) return;
-  if (gate.freshness === 'legacy-unverified') {
-    patchApprovalStatusEl.dataset.state = 'warning';
-    patchApprovalStatusEl.textContent = 'Approval allowed with legacy-unverified evidence; exact patch hashes will still be verified.';
-    return;
-  }
-  if (gate.freshness === 'missing' || !gate.freshness) {
-    patchApprovalStatusEl.dataset.state = 'warning';
-    patchApprovalStatusEl.textContent = approvalNoManifestMessage();
-    setPatchApprovalTechnicalDetail(approvalNoManifestDetail());
-    return;
-  }
-  patchApprovalStatusEl.dataset.state = 'ready';
-  patchApprovalStatusEl.textContent = 'Patch preview is ready for approval.';
-}
-
-function existingComponentsRemoved(preview) {
-  if (!preview || preview.applied === true) return null;
-  const blockers = preview.review?.findings?.blockers ?? [];
-  const blocker = blockers.find((finding) => (
-    finding?.code === 'existing-components-removed'
-    || finding?.id === 'existing-components-removed'
-    || finding?.code === 'EXISTING_COMPONENTS_REMOVED'
-  ));
-  if (preview.reason?.code !== 'EXISTING_COMPONENTS_REMOVED' && !blocker) return null;
-  const listed = [preview.removedComponents, preview.reason?.removedComponents, blocker?.removedComponents]
-    .find((value) => Array.isArray(value) && value.length > 0) ?? [];
-  const parts = [];
-  for (const part of listed) {
-    if (!part || typeof part.ref !== 'string' || part.ref.length === 0) continue;
-    parts.push({
-      ref: part.ref,
-      value: part.value ?? '',
-      libId: part.libId ?? ''
-    });
-  }
-  return parts.length > 0 ? parts : null;
-}
-
-function applyRemovalConfirmCopy() {
-  if (applyRemoveTitleEl) applyRemoveTitleEl.textContent = t('patch.remove.title');
-  if (applyRemoveLeadEl) applyRemoveLeadEl.textContent = t('patch.remove.lead');
-  if (cancelApplyRemoveButtonEl) cancelApplyRemoveButtonEl.textContent = t('patch.remove.cancel');
-  if (confirmApplyRemoveButtonEl) confirmApplyRemoveButtonEl.textContent = t('patch.remove.confirm');
-}
-
-function hideRemovalConfirm() {
-  if (applyRemoveConfirmEl) applyRemoveConfirmEl.hidden = true;
-}
-
-function presentRemovalConfirm() {
-  if (!applyGateOpen()) return;
-  const parts = patchApprovalState.removedComponents;
-  if (!applyRemoveConfirmEl || !parts?.length) return;
-  applyRemovalConfirmCopy();
-  if (applyRemovePartsEl) {
-    applyRemovePartsEl.replaceChildren();
-    for (const part of parts) {
-      const item = document.createElement('li');
-      item.textContent = `${part.ref} · ${part.value ?? ''} · ${part.libId ?? ''}`;
-      applyRemovePartsEl.append(item);
+  hideApplyWithoutErcConfirm();
+  if (active && !evidenceBlocked && !canApply) {
+    const blocked = applyBlockedReason(erc);
+    approvePatchButtonEl.setAttribute('aria-disabled', 'true');
+    approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
+    if (applyWhyEl) {
+      applyWhyEl.hidden = false;
+      applyWhyEl.dataset.reason = blocked.key;
+      applyWhyEl.textContent = blocked.text;
     }
+    warnApplyBlock(blocked.key);
+  } else {
+    approvePatchButtonEl.removeAttribute('aria-disabled');
+    approvePatchButtonEl.removeAttribute('aria-describedby');
+    if (applyWhyEl) {
+      applyWhyEl.hidden = true;
+      applyWhyEl.removeAttribute('data-reason');
+      applyWhyEl.replaceChildren();
+    }
+    warnApplyBlock(null);
   }
-  applyRemoveConfirmEl.hidden = false;
-  cancelApplyRemoveButtonEl?.focus();
+  renderErcBox(erc, active);
+  renderCurrentFileErc(erc, active);
+  const showDetails = Boolean(active) && (erc.failed || patchRejectionCode != null);
+  if (showDetails && !document.querySelector('#patch-erc-details')) {
+    placeErcDetailsButton(document.querySelector('.patch-approval-actions'));
+  }
+  if (!showDetails) document.querySelector('#patch-erc-details')?.remove();
+  fixPatchButtonEl?.classList.toggle('btn-primary', showDetails && (erc.failed || patchRejectionCode != null));
+  scrollConversationToLatest();
+  setPatchApprovalTechnicalDetail('');
+  if (freshness === 'stale' && patchApprovalState.patchId) {
+    if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = 'stale';
+    setPatchTitle('patch.title');
+    setPatchStatus('patch.stale');
+    return;
+  }
+  if (!active) return;
+  if (freshness === 'legacy-unverified') {
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = 'warning';
+    setPatchTitle('patch.title');
+    setPatchStatus('patch.legacy');
+    return;
+  }
+  if (freshness === 'missing' || !freshness) {
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = 'warning';
+    setPatchTitle('patch.title');
+    showMissingManifestCopy();
+    return;
+  }
+  if (patchRejectionCode) {
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = 'blocked';
+    setPatchTitle('patch.unverified.title');
+    setPatchStatus('patch.unverified.body');
+    return;
+  }
+  if (!erc.passed) {
+    patchApprovalStatusEl.dataset.state = 'blocked';
+    setPatchTitle('patch.title');
+    if (erc.failed) {
+      // The ERC alert and apply reason already say why. Do not call this ready.
+      patchApprovalStatusEl.hidden = true;
+      setPatchStatus('patch.blocked');
+      return;
+    }
+    if (erc.skipped) {
+      // apply-why already says ERC was skipped. Keep that sentence once.
+      patchApprovalStatusEl.hidden = true;
+      setPatchStatus('patch.apply.skipped');
+      return;
+    }
+    patchApprovalStatusEl.hidden = false;
+    setPatchStatus(candidateErcStale() ? 'patch.apply.blocked-stale' : 'patch.apply.blocked-missing');
+    return;
+  }
+  patchApprovalStatusEl.hidden = false;
+  patchApprovalStatusEl.dataset.state = 'ready';
+  setPatchTitle('patch.title');
+  setPatchStatus('patch.ready');
 }
 
-function cancelRemovalConfirm() {
-  if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
-  hideRemovalConfirm();
-  approvePatchButtonEl?.focus();
+function askChatpcbToFixErc() {
+  if (!promptEl) return;
+  const erc = ercBlockState();
+  const detail = erc.messages.length
+    ? erc.messages.join('\n')
+    : t('patch.apply.blocked-erc', { count: erc.count });
+  promptEl.value = `${t('patch.fix')}\n${detail}`;
+  if (!promptEl.disabled) promptEl.focus();
 }
 
 function confirmRemovalApply() {
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  if (patchApplyBusy()) return;
   if (!applyGateOpen()) return;
   const allowRemovedComponents = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
   if (allowRemovedComponents.length === 0) return;
@@ -1149,11 +1386,44 @@ function approvePatch() {
     presentRemovalConfirm();
     return;
   }
-  appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
-  renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
+  if (approvePatchButtonEl.getAttribute('aria-disabled') === 'true' || ercBlockState().passed !== true) return;
+  appendProgress({ stage: 'apply', text: t('request.apply-progress') });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
+}
+
+function hideApplyWithoutErcConfirm() {
+  if (applyWithoutErcConfirmEl) applyWithoutErcConfirmEl.hidden = true;
+}
+
+function revealApplyWithoutErcConfirm() {
+  if (!activeProject || !approveWithoutErcButtonEl || approveWithoutErcButtonEl.hidden || approveWithoutErcButtonEl.disabled) return;
+  if (!patchApprovalState.patchId || !applyWithoutErcConfirmEl) return;
+  const erc = ercBlockState();
+  if (erc.skipped !== true || erc.failed || erc.passed === true) return;
+  applyWithoutErcConfirmEl.hidden = false;
+  cancelApplyWithoutErcButtonEl?.focus();
+}
+
+function cancelApplyWithoutErcConfirm() {
+  hideApplyWithoutErcConfirm();
+  approveWithoutErcButtonEl?.focus();
+}
+
+function approvePatchWithoutErc() {
+  if (!activeProject || !approveWithoutErcButtonEl || approveWithoutErcButtonEl.hidden || approveWithoutErcButtonEl.disabled) return;
+  if (!applyWithoutErcConfirmEl || applyWithoutErcConfirmEl.hidden) return;
+  if (!patchApprovalState.patchId) return;
+  const erc = ercBlockState();
+  if (erc.skipped !== true || erc.failed || erc.passed === true) return;
+  hideApplyWithoutErcConfirm();
+  appendProgress({ stage: 'apply', text: t('request.apply-progress') });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
+  const id = `patch_approve_${Date.now()}`;
+  pendingCalls.set(id, 'schematic.patch.approve');
+  sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId, ercOverride: 'skipped' } });
 }
 
 function cancelPatch() {
@@ -1161,7 +1431,7 @@ function cancelPatch() {
   const id = `patch_cancel_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.cancel');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, cancel: true, patchId: patchApprovalState.patchId } });
-  clearPatchApproval('Patch preview cancelled.');
+  clearPatchApproval('patch.cancelled');
 }
 
 function workflowIndex(id) {
@@ -1230,6 +1500,76 @@ function deriveWorkflow() {
   return { active, done, mode };
 }
 
+function t(key, vars) {
+  const translate = window.chatpcbI18n?.t;
+  return typeof translate === 'function' ? translate(key, vars) : key;
+}
+
+function renderStepIcon(svg, state) {
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const visual = state === 'done'
+    ? 'done'
+    : (state === 'locked' ? 'locked' : (state === 'wait' || state === 'run' ? 'current' : 'todo'));
+  if (visual === 'done') {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M2 6.5l2.5 2.5L10 3.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.8');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return;
+  }
+  if (visual === 'locked') {
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', '2.5');
+    rect.setAttribute('y', '5.5');
+    rect.setAttribute('width', '7');
+    rect.setAttribute('height', '5');
+    rect.setAttribute('rx', '1');
+    rect.setAttribute('fill', 'currentColor');
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M4 5.5V4a2 2 0 014 0v1.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.4');
+    svg.appendChild(rect);
+    svg.appendChild(path);
+    return;
+  }
+  const circle = document.createElementNS(SVG_NS, 'circle');
+  circle.setAttribute('cx', '6');
+  circle.setAttribute('cy', '6');
+  circle.setAttribute('r', '3.5');
+  if (visual === 'current') {
+    circle.setAttribute('fill', 'currentColor');
+  } else {
+    circle.setAttribute('fill', 'none');
+    circle.setAttribute('stroke', 'currentColor');
+    circle.setAttribute('stroke-width', '1.4');
+  }
+  svg.appendChild(circle);
+}
+
+function workflowStateKey(state) {
+  if (state === 'done') return 'done';
+  if (state === 'locked') return 'locked';
+  if (state === 'wait' || state === 'run') return 'current';
+  return 'pending';
+}
+
+function laneSummary(buttons, current) {
+  const total = buttons.length;
+  const doneCount = buttons.filter((button) => button.dataset.state === 'done').length;
+  let stateLabel = t('workflow.state.pending');
+  if (doneCount === 0 && !current) stateLabel = t('workflow.not-started');
+  else if (total > 0 && doneCount === total) stateLabel = t('workflow.state.done');
+  else if (current) stateLabel = t('workflow.state.current');
+  return t('workflow.summary', { done: doneCount, total, state: stateLabel });
+}
+
 function syncWorkflow() {
   const { active, done, mode } = deriveWorkflow();
   const activeIndex = workflowIndex(active);
@@ -1248,31 +1588,125 @@ function syncWorkflow() {
     else if (index < activeIndex) state = 'done';
     else state = 'idle';
     button.dataset.state = state;
+    button.dataset.s = state === 'done'
+      ? 'done'
+      : (state === 'locked' ? 'locked' : (state === 'wait' || state === 'run' ? 'current' : 'todo'));
+    const stepLabel = t(`workflow.step.${id}`);
+    const laneLabel = t(`workflow.lane.${lane}`);
+    const stateLabel = t(`workflow.state.${workflowStateKey(state)}`);
+    const labelEl = button.querySelector('.step-label');
+    if (labelEl) labelEl.textContent = stepLabel;
+    button.setAttribute('aria-label', t('workflow.step.aria', { lane: laneLabel, step: stepLabel, state: stateLabel }));
+    if (state === 'wait' || state === 'run') button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+    renderStepIcon(button.querySelector('.step-icon'), state);
   }
 
   for (const lane of document.querySelectorAll('.workflow-lane')) {
-    lane.dataset.active = String(active.startsWith(`${lane.dataset.lane}.`));
+    const laneId = lane.dataset.lane;
+    const current = Boolean(laneId && active.startsWith(`${laneId}.`));
+    lane.dataset.active = String(current);
+    if (current) laneOpen.delete(laneId);
+    const laneLabel = laneId ? t(`workflow.lane.${laneId}`) : '';
+    for (const el of lane.querySelectorAll('.lane-h, .lane-name')) el.textContent = laneLabel;
+    const buttons = [...lane.querySelectorAll('.flow-btn[data-step]')];
+    const lockedButtons = buttons.filter((button) => button.dataset.state === 'locked');
+    const allLocked = buttons.length > 0 && lockedButtons.length === buttons.length;
+    const reason = laneId ? document.getElementById(`lock-r-${laneId}`) : null;
+    const row = lane.querySelector('.lane-row');
+    const body = lane.querySelector('.lane-c');
+    const summary = row?.querySelector('.lane-sum');
+    const doneCount = buttons.filter((button) => button.dataset.state === 'done').length;
+    if (lockedButtons.length && reason) {
+      const reasonKey = laneId === 'fab' ? 'workflow.locked.fab' : 'workflow.locked.layout';
+      reason.hidden = false;
+      reason.textContent = t(reasonKey);
+      for (const button of lockedButtons) {
+        button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('aria-describedby', reason.id);
+      }
+      for (const button of buttons) {
+        if (button.dataset.state === 'locked') continue;
+        button.removeAttribute('aria-disabled');
+        button.removeAttribute('aria-describedby');
+      }
+    } else {
+      if (reason) {
+        reason.hidden = true;
+        reason.replaceChildren();
+      }
+      for (const button of buttons) {
+        button.removeAttribute('aria-disabled');
+        button.removeAttribute('aria-describedby');
+      }
+    }
+    if (allLocked && reason) {
+      lane.setAttribute('aria-disabled', 'true');
+      lane.setAttribute('aria-describedby', reason.id);
+    } else {
+      lane.removeAttribute('aria-disabled');
+      lane.removeAttribute('aria-describedby');
+    }
+    const expanded = !allLocked && (current || laneOpen.get(laneId) === true);
+    if (summary) {
+      summary.hidden = allLocked;
+      if (!allLocked) summary.textContent = laneSummary(buttons, current);
+    }
+    if (row) {
+      if (allLocked && reason) {
+        row.setAttribute('aria-disabled', 'true');
+        row.setAttribute('aria-describedby', reason.id);
+      } else {
+        row.removeAttribute('aria-disabled');
+        row.removeAttribute('aria-describedby');
+      }
+      row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      row.hidden = expanded && current;
+      const iconState = allLocked ? 'locked' : (doneCount === buttons.length && buttons.length ? 'done' : (current ? 'wait' : 'idle'));
+      renderStepIcon(row.querySelector('.lane-icon'), iconState);
+    }
+    if (body) body.hidden = !expanded;
+    const heading = lane.querySelector('.lane-h');
+    if (heading) heading.hidden = Boolean(row && !row.hidden);
   }
 
-  const copy = WORKFLOW_COPY[active];
-  if (workflowCaptionEl && copy) {
-    workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
-      ? '생성에 실패했습니다. 기술 상세를 확인하거나 다시 Send 하세요.'
-      : (mode === 'run' ? copy.run : (mode === 'idle' ? '프로젝트를 만들면 Circuit 컨셉부터 시작합니다.' : copy.wait));
+  const progressEl = document.querySelector('#workflow-progress');
+  if (progressEl && active) {
+    const stepIndex = WORKFLOW_ORDER.indexOf(active);
+    const lane = active.split('.')[0];
+    progressEl.textContent = t('workflow.progress', {
+      n: stepIndex < 0 ? 1 : stepIndex + 1,
+      total: WORKFLOW_ORDER.length,
+      label: `${t(`workflow.lane.${lane}`)} ${t(`workflow.step.${active}`)}`
+    });
   }
-  if (promptEl && copy && mode === 'wait' && !promptEl.disabled) {
-    promptEl.placeholder = copy.wait;
+
+  const copyWait = t(`workflow.copy.${active}.wait`);
+  const copyRun = t(`workflow.copy.${active}.run`);
+  if (workflowCaptionEl && active) {
+    workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
+      ? t('workflow.caption.failed')
+      : (mode === 'run' ? copyRun : (mode === 'idle' ? t('workflow.caption.idle') : copyWait));
   }
   if (workflowCliEl) {
     const showCli = mode === 'run' && lastProgressText;
     workflowCliEl.hidden = !showCli;
     workflowCliEl.textContent = showCli ? lastProgressText : '';
   }
+  scrollConversationToLatest();
 }
 
-function renderRequestStatus({ state, summary, technicalDetail = '' }) {
+function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '' }) {
   requestStatusEl.dataset.state = state;
-  requestStatusEl.textContent = summary;
+  requestStatusEl.removeAttribute('data-i18n');
+  if (summaryKey) {
+    requestStatusKey = summaryKey;
+    requestStatusVars = summaryVars ?? null;
+    requestStatusEl.textContent = t(summaryKey, summaryVars);
+  } else {
+    requestStatusKey = null;
+    requestStatusEl.textContent = summary;
+  }
   requestTechnicalDetailEl.textContent = technicalDetail;
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;
   syncWorkflow();
@@ -1317,7 +1751,9 @@ function appendProgress(payload = {}) {
   img.height = 32;
   const body = document.createElement('div');
   const title = document.createElement('strong');
-  title.textContent = copy.title;
+  const titleText = t(copy.titleKey);
+  title.dataset.i18n = copy.titleKey;
+  title.textContent = titleText;
   body.append(title);
   if (payload.text) {
     const text = document.createElement('p');
@@ -1331,7 +1767,7 @@ function appendProgress(payload = {}) {
   }
   item.scrollIntoView({ block: 'nearest' });
   lastProgressStage = stage;
-  lastProgressText = payload.text || copy.title;
+  lastProgressText = payload.text || titleText;
   syncWorkflow();
 }
 
@@ -1339,7 +1775,8 @@ function offerNativeDraft() {
   conversationOptionsEl.replaceChildren();
   const button = document.createElement('button');
   button.type = 'button';
-  button.textContent = '이 구성으로 초안 만들기';
+  button.dataset.i18n = 'draft.create';
+  button.textContent = t('draft.create');
   button.dataset.recommended = 'true';
   button.addEventListener('click', requestNativeDraft);
   conversationOptionsEl.append(button);
@@ -1349,8 +1786,8 @@ function requestNativeDraft() {
   if (!activeProject) return;
   setRequestBusy(true);
   conversationOptionsEl.replaceChildren();
-  renderRequestStatus({ state: 'running', summary: 'Running request…' });
-  appendProgress({ stage: 'preview', text: '로컬에서 회로 초안을 그리는 중.' });
+  renderRequestStatus({ state: 'running', summaryKey: 'request.running' });
+  appendProgress({ stage: 'preview', text: t('request.draft-progress') });
   const id = `schematic_generate_${Date.now()}`;
   pendingCalls.set(id, 'schematic.generate');
   sendToolCall({
@@ -1370,21 +1807,22 @@ function clearProgress() {
 }
 
 function renderValidation({ ok, erc, skipped, reason, completedAt, exitCode, stderr, formatUpgrade } = {}) {
+  validationStatusEl.removeAttribute('data-i18n');
   const resolvedReason = reason ?? erc?.reason;
   const skippedFlag = skipped === true || erc?.skipped === true;
   const reasonText = validationReason({ reason: resolvedReason, exitCode, stderr, formatUpgrade });
-  const counts = `${erc?.errorCount ?? 0} errors, ${erc?.warningCount ?? 0} warnings`;
+  const counts = t('validation.counts', { errors: erc?.errorCount ?? 0, warnings: erc?.warningCount ?? 0 });
 
   if (skippedFlag) {
     const unavailable = resolvedReason?.code === 'KICAD_CLI_UNAVAILABLE';
     validationStatusEl.dataset.state = unavailable ? 'unavailable' : 'skipped';
-    validationStatusEl.textContent = `${unavailable ? 'ERC unavailable' : 'ERC skipped'}: ${reasonText}`;
+    validationStatusEl.textContent = t(unavailable ? 'validation.unavailable' : 'validation.skipped', { reason: reasonText });
   } else if (ok === false) {
     validationStatusEl.dataset.state = 'failed';
-    validationStatusEl.textContent = `ERC failed: ${reasonText} (${counts} reported)`;
+    validationStatusEl.textContent = t('validation.failed', { reason: reasonText, counts });
   } else if (!erc) {
     validationStatusEl.dataset.state = 'unavailable';
-    validationStatusEl.textContent = `ERC unavailable: ${reasonText}`;
+    validationStatusEl.textContent = t('validation.unavailable', { reason: reasonText });
   } else {
     validationStatusEl.dataset.state = erc.errorCount === 0 ? 'passed' : 'failed';
     validationStatusEl.textContent = counts;
@@ -1397,22 +1835,24 @@ function validationReason({ reason, exitCode, stderr, formatUpgrade }) {
   if (typeof reason?.message === 'string' && reason.message.trim()) return reason.message.trim();
   if (typeof stderr === 'string' && stderr.trim()) return stderr.trim();
   if (typeof formatUpgrade?.stderr === 'string' && formatUpgrade.stderr.trim()) return formatUpgrade.stderr.trim();
-  if (Number.isInteger(exitCode) && exitCode !== 0) return `KiCad ERC exited with code ${exitCode}.`;
-  if (formatUpgrade?.ok === false) return `KiCad schematic format upgrade exited with code ${formatUpgrade.exitCode ?? 'unknown'}.`;
+  if (Number.isInteger(exitCode) && exitCode !== 0) return t('validation.exit', { code: exitCode });
+  if (formatUpgrade?.ok === false) return t('validation.upgrade', { code: formatUpgrade.exitCode ?? t('validation.unknown-code') });
   if (typeof reason?.code === 'string' && reason.code) return reason.code.replaceAll('_', ' ').toLowerCase();
-  return 'ERC validation did not complete successfully.';
+  return t('validation.incomplete');
 }
 
 function renderKiCadLink({ linkState, projectPath, dirty = false }) {
   kiCadLinkEl.dataset.state = linkState;
-  kiCadLinkEl.textContent = dirty ? `Unsaved KiCad changes: ${projectPath}` : `${linkState}: ${projectPath}`;
+  kiCadLinkEl.textContent = dirty
+    ? t('kicad.unsaved', { path: projectPath })
+    : t('kicad.link', { state: linkState, path: projectPath });
 }
 
 function renderArtifacts(files = {}) {
   artifactListEl.replaceChildren();
   for (const [kind, file] of Object.entries(files)) {
     const item = document.createElement('li');
-    item.textContent = `${kind}: ${file}`;
+    item.textContent = t('artifacts.item', { kind, file });
     artifactListEl.append(item);
   }
 }
@@ -1420,6 +1860,7 @@ function renderArtifacts(files = {}) {
 function renderReview(review) {
   if (!review) return;
   reviewPanelEl.hidden = false;
+  reviewStatusEl.removeAttribute('data-i18n');
   reviewStatusEl.textContent = reviewStatusText(review);
   reviewStatusEl.dataset.status = review.status;
   renderFindingList(reviewBlockersEl, review.findings?.blockers);
@@ -1430,9 +1871,9 @@ function renderReview(review) {
 
 function reviewStatusText(review) {
   if (review.statusLabel) return review.statusLabel;
-  if (review.status === 'ready-for-release') return 'Ready for release';
-  if (review.status === 'ready-for-prototype-review') return 'Ready for prototype review';
-  return 'Blocked';
+  if (review.status === 'ready-for-release') return t('review.ready-release');
+  if (review.status === 'ready-for-prototype-review') return t('review.ready-prototype');
+  return t('review.blocked');
 }
 
 function findingText(finding) {
@@ -1451,17 +1892,25 @@ function renderFindingList(listEl, findings = []) {
     item.textContent = findingText(finding);
     listEl.append(item);
   }
-  if (findings.length === 0) listEl.append(Object.assign(document.createElement('li'), { textContent: 'None' }));
+  if (findings.length === 0) {
+    const empty = document.createElement('li');
+    empty.textContent = t('review.none');
+    listEl.append(empty);
+  }
 }
 
 function renderFixList(listEl, fixes = []) {
   listEl.replaceChildren();
   for (const fix of fixes) {
     const item = document.createElement('li');
-    item.textContent = `${fix.title}: ${fix.summary}`;
+    item.textContent = t('review.fix', { title: fix.title, summary: fix.summary });
     listEl.append(item);
   }
-  if (fixes.length === 0) listEl.append(Object.assign(document.createElement('li'), { textContent: 'No fixes proposed' }));
+  if (fixes.length === 0) {
+    const empty = document.createElement('li');
+    empty.textContent = t('review.no-fixes');
+    listEl.append(empty);
+  }
 }
 
 function findProjectFile(files = {}) {
@@ -1483,7 +1932,7 @@ function findProjectFileFromList() {
 }
 
 function showKiCadFallback(projectFile) {
-  kiCadFallbackEl.textContent = `Open this .kicad_pro file from KiCad: ${projectFile}. The browser panel cannot reload KiCad.`;
+  kiCadFallbackEl.textContent = t('kicad.fallback', { file: projectFile });
   kiCadFallbackEl.hidden = false;
 }
 
@@ -1554,7 +2003,7 @@ function handleHostMessage(message) {
       hideConflict();
       renderKiCadLink({ linkState: 'unlinked', projectPath: findProjectFileFromList() ?? activeProject.projectDir });
     } else if (dirty || message.linkState === 'conflict') {
-      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
+      clearPatchApproval('patch.dirty');
       showConflict();
     } else {
       hideConflict();
@@ -1572,7 +2021,7 @@ function handleHostMessage(message) {
   }
   if (message.type === 'project.reload') {
     if (message.linkState === 'conflict') {
-      clearPatchApproval('Patch preview cleared because KiCad has unsaved changes; this is a dirty-project conflict, not stale evidence.');
+      clearPatchApproval('patch.dirty');
       showConflict();
       return;
     }
@@ -1586,9 +2035,23 @@ function handleHostMessage(message) {
   }
 }
 
+function setToolsMenuOpen(open) {
+  const button = document.querySelector('#tools-menu-button');
+  const menu = document.querySelector('#tools-menu');
+  if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (menu) menu.hidden = !open;
+}
+
+function syncToolsBadge() {
+  const button = document.querySelector('#tools-menu-button');
+  if (!button) return;
+  button.classList.toggle('has-badge', Boolean(conflictDockBtnEl && !conflictDockBtnEl.hidden));
+}
+
 function showConflict() {
   conflictCardEl.hidden = false;
   if (conflictDockBtnEl) conflictDockBtnEl.hidden = false;
+  syncToolsBadge();
   document.getElementById('conflict-dialog')?.showModal?.();
   renderKiCadLink({ linkState: 'conflict', projectPath: activeProject.projectDir, dirty: true });
   startConflictWatch();
@@ -1597,6 +2060,7 @@ function showConflict() {
 function hideConflict() {
   conflictCardEl.hidden = true;
   if (conflictDockBtnEl) conflictDockBtnEl.hidden = true;
+  syncToolsBadge();
   document.getElementById('conflict-dialog')?.close?.();
   stopConflictWatch();
 }
@@ -1634,7 +2098,7 @@ function isProjectBusyCall(callName) {
 function showProjectBusy(callName, message) {
   const summary = typeof message === 'string' && message.trim()
     ? message.trim()
-    : '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+    : t('request.project-busy');
   if (callName === 'project.request') {
     const requestProjectDir = activeRequestProjectDir;
     pendingCalls.delete(activeRequestId);
@@ -1654,27 +2118,329 @@ function showProjectBusy(callName, message) {
   renderRequestStatus({ state: 'failed', summary });
 }
 
-async function awaitStatus(statusPromise) {
-  let timeout;
-  try {
-    return await Promise.race([
-      Promise.resolve(statusPromise).catch(() => null),
-      new Promise((resolve) => { timeout = setTimeout(() => resolve(null), HOST_STATUS_TIMEOUT_MS); })
-    ]);
-  } finally {
-    clearTimeout(timeout);
+window.setChatGptAuthState = setChatGptAuthState;
+
+// A query string is not enough: only the test server sets this flag before the page loads.
+if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__CHATPCB_TEST_MODE__ === true) {
+  window.__chatpcbTest = {
+    showChatGptUi() {
+      chatGptUiEnabled = true;
+      setChatGptAuthState({});
+    },
+    showPatch(state = {}) {
+      const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
+      activeProject = project;
+      activeProjectNameEl.textContent = project.displayName || '';
+      activeProjectDirectoryEl.textContent = project.projectDir || '';
+      if (activeProjectDirectoryEl) activeProjectDirectoryEl.title = project.projectDir || '';
+      activeProjectEl.hidden = false;
+      if (projectSetupEl) projectSetupEl.hidden = true;
+      setRequestBusy(false);
+      lastRequestResult = state.staleRequest ?? {
+        operation: state.operation || 'generated',
+        patchId: state.patchId ?? 'patch_test',
+        validation: state.validation ?? null,
+        candidateVerification: state.candidateVerification ?? null,
+        conversation: state.conversation || null
+      };
+      if (state.conversation) renderConversation({ ...lastRequestResult, ...state.conversation });
+      inspectionState = {
+        projectDir: project.projectDir,
+        requestId: 'test',
+        result: state.inspection ?? {
+          manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
+          validation: state.validation || null
+        }
+      };
+      if (inspectionCardEl && state.inspection) renderInspection(inspectionState.result);
+      patchRejectionCode = null;
+      patchApprovalState = {
+        patchId: state.patchId ?? 'patch_test',
+        expiresAt: state.expiresAt ?? (Date.now() + 600000),
+        timeout: null
+      };
+      if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+      renderPatchApproval();
+      renderRequestStatus({ state: 'ready', summaryKey: 'request.preview-ready' });
+    }
+  };
+}
+
+function patchApprovalGate() {
+  const freshness = inspectionState.result?.manifest?.freshness?.status;
+  const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
+  const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
+  const active = Boolean(patchApprovalState.patchId) && unexpired;
+  return { freshness, approvedEvidence, active };
+}
+
+function patchApplyBusy() {
+  if (activeRequestId) return true;
+  for (const name of pendingCalls.values()) {
+    if (name === 'project.request'
+      || name === 'schematic.generate'
+      || name === 'schematic.patch'
+      || name === 'schematic.patch.approve'
+      || name === 'schematic.patch.cancel') return true;
+  }
+  return false;
+}
+
+// Same decision the Apply button uses, plus the ERC gate so a removal confirm cannot skip it.
+function applyGateOpen() {
+  const gate = patchApprovalGate();
+  const evidenceOpen = Boolean(activeProject) && gate.active && gate.approvedEvidence;
+  if (!evidenceOpen) {
+    if (approvePatchButtonEl) approvePatchButtonEl.disabled = true;
+    return false;
+  }
+  if (approvePatchButtonEl?.disabled) return false;
+  if (approvePatchButtonEl?.getAttribute('aria-disabled') === 'true') return false;
+  if (ercBlockState().passed !== true) return false;
+  return true;
+}
+
+function existingComponentsRemoved(preview) {
+  if (!preview || preview.applied === true) return null;
+  const blockers = preview.review?.findings?.blockers ?? [];
+  const blocker = blockers.find((finding) => (
+    finding?.code === 'existing-components-removed'
+    || finding?.id === 'existing-components-removed'
+    || finding?.code === 'EXISTING_COMPONENTS_REMOVED'
+  ));
+  if (preview.reason?.code !== 'EXISTING_COMPONENTS_REMOVED' && !blocker) return null;
+  const listed = [preview.removedComponents, preview.reason?.removedComponents, blocker?.removedComponents]
+    .find((value) => Array.isArray(value) && value.length > 0) ?? [];
+  const parts = [];
+  for (const part of listed) {
+    if (!part || typeof part.ref !== 'string' || part.ref.length === 0) continue;
+    parts.push({
+      ref: part.ref,
+      value: part.value ?? '',
+      libId: part.libId ?? ''
+    });
+  }
+  return parts.length > 0 ? parts : null;
+}
+
+function draftSourceLabel(source) {
+  if (!source) return '';
+  if (source.via === 'provider' && source.provider === 'chatgpt') return t('source.chatgpt');
+  if (source.via === 'native-fallback') return t('source.native');
+  return '';
+}
+
+function draftParts(preview) {
+  return Array.isArray(preview?.components) ? preview.components : [];
+}
+
+function partLine(part) {
+  return [part?.ref ?? '', part?.value ?? '', part?.libId ?? ''].join(' · ');
+}
+
+function renderDraftEvidence(preview) {
+  if (!patchApprovalSourceEl || !patchApprovalPartsEl) return;
+  const source = preview?.source ?? preview?.conversation?.lastSource ?? null;
+  const label = draftSourceLabel(source);
+  patchApprovalSourceEl.textContent = label;
+  patchApprovalSourceEl.hidden = label.length === 0;
+  const parts = draftParts(preview);
+  patchApprovalPartsEl.replaceChildren();
+  for (const part of parts) {
+    const item = document.createElement('li');
+    item.textContent = partLine(part);
+    patchApprovalPartsEl.append(item);
+  }
+  patchApprovalPartsEl.hidden = parts.length === 0;
+}
+
+function clearDraftEvidence() {
+  if (patchApprovalSourceEl) {
+    patchApprovalSourceEl.textContent = '';
+    patchApprovalSourceEl.hidden = true;
+  }
+  if (patchApprovalPartsEl) {
+    patchApprovalPartsEl.replaceChildren();
+    patchApprovalPartsEl.hidden = true;
   }
 }
 
-// ChatGPT Auth functions
-function updateChatGPTAuthVisibility() {
-  const isChatGPT = providerEl.value === 'chatgpt';
-  
-  if (isChatGPT) {
-    refreshChatGPTAuthStatus();
-  } else {
-    chatgptAuthCardEl.hidden = true;
+function setPatchApprovalTechnicalDetail(text) {
+  if (!patchApprovalTechnicalDetailsEl || !patchApprovalTechnicalDetailEl) return;
+  const detail = typeof text === 'string' ? text : '';
+  patchApprovalTechnicalDetailEl.textContent = detail;
+  patchApprovalTechnicalDetailsEl.hidden = detail.length === 0;
+}
+
+function showMissingManifestCopy() {
+  const plain = t('approval.no-manifest');
+  if (plain === 'approval.no-manifest') {
+    setPatchStatus('patch.missing-evidence');
+    return;
   }
+  setPatchStatus('approval.no-manifest');
+  const detail = t('approval.no-manifest-detail');
+  if (detail !== 'approval.no-manifest-detail') setPatchApprovalTechnicalDetail(detail);
+}
+
+function applyRemovalConfirmCopy() {
+  if (applyRemoveTitleEl) applyRemoveTitleEl.textContent = t('patch.remove.title');
+  if (applyRemoveLeadEl) applyRemoveLeadEl.textContent = t('patch.remove.lead');
+  if (cancelApplyRemoveButtonEl) cancelApplyRemoveButtonEl.textContent = t('patch.remove.cancel');
+  if (confirmApplyRemoveButtonEl) confirmApplyRemoveButtonEl.textContent = t('patch.remove.confirm');
+}
+
+function hideRemovalConfirm() {
+  if (applyRemoveConfirmEl) applyRemoveConfirmEl.hidden = true;
+}
+
+function presentRemovalConfirm() {
+  if (patchApplyBusy()) return;
+  if (!applyGateOpen()) return;
+  const parts = patchApprovalState.removedComponents;
+  if (!applyRemoveConfirmEl || !parts?.length) return;
+  applyRemovalConfirmCopy();
+  if (applyRemovePartsEl) {
+    applyRemovePartsEl.replaceChildren();
+    for (const part of parts) {
+      const item = document.createElement('li');
+      item.textContent = partLine(part);
+      applyRemovePartsEl.append(item);
+    }
+  }
+  applyRemoveConfirmEl.hidden = false;
+  cancelApplyRemoveButtonEl?.focus();
+}
+
+function cancelRemovalConfirm() {
+  if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  hideRemovalConfirm();
+  approvePatchButtonEl?.focus();
+}
+
+function restoreProviderSelection() {
+  const stored = readStoredProvider();
+  if (!stored || !providerEl) return;
+  const listed = [...providerEl.options].some((option) => option.value === stored);
+  if (listed) providerEl.value = stored;
+}
+
+function readStoredProvider() {
+  try {
+    return localStorage.getItem(PROVIDER_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberProvider(provider) {
+  try {
+    localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
+  } catch {
+    // The select still works for this page when storage is blocked.
+  }
+}
+
+function accountSwitchIdentity(account) {
+  const sub = typeof account?.sub === 'string' ? account.sub.trim() : '';
+  if (sub) return sub;
+  const email = typeof account?.email === 'string' ? account.email.trim() : '';
+  return email;
+}
+
+async function shortSha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  let hex = '';
+  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, '0');
+  return hex.slice(0, CHATGPT_SWITCH_OFFER_HASH_HEX);
+}
+
+function readStoredSwitchOffer(key) {
+  if (switchOfferRecordedKeys.has(key)) return true;
+  try {
+    return localStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function rememberChatGPTSwitchOffered() {
+  if (activeSwitchOfferStorageKey) {
+    switchOfferRecordedKeys.add(activeSwitchOfferStorageKey);
+    try {
+      localStorage.setItem(activeSwitchOfferStorageKey, '1');
+    } catch {
+      // The choice still sticks for this page when storage is blocked.
+    }
+  } else if (activeSwitchIdentity) {
+    pageOnlySwitchIdentities.add(activeSwitchIdentity);
+  } else {
+    anonymousSwitchOfferRecorded = true;
+  }
+  if (chatgptSwitchOfferEl) {
+    chatgptSwitchOfferEl.hidden = true;
+    chatgptSwitchOfferEl.dataset.decision = 'hidden';
+  }
+}
+
+async function syncChatGPTSwitchOffer() {
+  if (!chatgptSwitchOfferEl || !providerEl || !i18nReady || !chatgptAuthKnown) return;
+  const epoch = ++switchOfferEpoch;
+  const signedIn = chatgptAuthState.state === 'signed_in';
+  const identity = signedIn ? accountSwitchIdentity(chatgptAuthState.account) : '';
+  if (identity !== activeSwitchIdentity) {
+    chatgptSwitchOfferEl.hidden = true;
+    chatgptSwitchOfferEl.dataset.decision = 'pending';
+  }
+  let storageKey = null;
+  let already = false;
+  if (identity) {
+    try {
+      storageKey = `${CHATGPT_SWITCH_OFFER_PREFIX}.${await shortSha256Hex(identity)}`;
+    } catch {
+      storageKey = null;
+    }
+    if (epoch !== switchOfferEpoch) return;
+    already = storageKey ? readStoredSwitchOffer(storageKey) : pageOnlySwitchIdentities.has(identity);
+  } else if (signedIn) {
+    already = anonymousSwitchOfferRecorded;
+  }
+  if (epoch !== switchOfferEpoch) return;
+  activeSwitchOfferStorageKey = storageKey;
+  activeSwitchIdentity = identity;
+  const show = signedIn && providerEl.value !== 'chatgpt' && !already;
+  chatgptSwitchOfferEl.dataset.decision = show ? 'shown' : 'hidden';
+  if (!show) {
+    chatgptSwitchOfferEl.hidden = true;
+    return;
+  }
+  if (chatgptSwitchOfferTextEl) chatgptSwitchOfferTextEl.textContent = t('auth.chatgpt.switch-offer.prompt');
+  if (chatgptSwitchOfferAcceptEl) chatgptSwitchOfferAcceptEl.textContent = t('auth.chatgpt.switch-offer.accept');
+  if (chatgptSwitchOfferDismissEl) chatgptSwitchOfferDismissEl.textContent = t('auth.chatgpt.switch-offer.dismiss');
+  chatgptSwitchOfferEl.hidden = false;
+}
+
+function acceptChatGPTSwitchOffer() {
+  rememberChatGPTSwitchOffered();
+  if (!providerEl || providerEl.value === 'chatgpt') {
+    syncChatGPTSwitchOffer();
+    return;
+  }
+  providerEl.value = 'chatgpt';
+  providerEl.dispatchEvent(new Event('change'));
+}
+
+function dismissChatGPTSwitchOffer() {
+  rememberChatGPTSwitchOffered();
+  syncChatGPTSwitchOffer();
+}
+
+function updateChatGPTAuthVisibility() {
+  if (providerEl?.value === 'chatgpt') {
+    refreshChatGPTAuthStatus();
+    return;
+  }
+  if (chatgptAuthCardEl) chatgptAuthCardEl.hidden = true;
 }
 
 function refreshChatGPTAuthStatus() {
@@ -1794,223 +2560,265 @@ function handleChatGPTAuthChanged(payload) {
   refreshProviderStatusForAuth(previousAuthState, chatgptAuthState.state);
 }
 
-async function syncChatGPTSwitchOffer() {
-  if (!chatgptSwitchOfferEl || !providerEl || !i18nReady || !chatgptAuthKnown) return;
-  const epoch = ++switchOfferEpoch;
-  const signedIn = chatgptAuthState.state === 'signed_in';
-  const identity = signedIn ? accountSwitchIdentity(chatgptAuthState.account) : '';
-  if (identity !== activeSwitchIdentity) {
-    chatgptSwitchOfferEl.hidden = true;
-    chatgptSwitchOfferEl.dataset.decision = 'pending';
-  }
-  let storageKey = null;
-  let already = false;
-  if (identity) {
-    try {
-      storageKey = `${CHATGPT_SWITCH_OFFER_PREFIX}.${await shortSha256Hex(identity)}`;
-    } catch {
-      storageKey = null;
-    }
-    if (epoch !== switchOfferEpoch) return;
-    already = storageKey ? readStoredSwitchOffer(storageKey) : pageOnlySwitchIdentities.has(identity);
-  } else if (signedIn) {
-    already = anonymousSwitchOfferRecorded;
-  }
-  if (epoch !== switchOfferEpoch) return;
-  activeSwitchOfferStorageKey = storageKey;
-  activeSwitchIdentity = identity;
-  const show = signedIn && providerEl.value !== 'chatgpt' && !already;
-  chatgptSwitchOfferEl.dataset.decision = show ? 'shown' : 'hidden';
-  if (!show) {
-    chatgptSwitchOfferEl.hidden = true;
-    return;
-  }
-  if (chatgptSwitchOfferTextEl) chatgptSwitchOfferTextEl.textContent = t('auth.chatgpt.switch-offer.prompt');
-  if (chatgptSwitchOfferAcceptEl) chatgptSwitchOfferAcceptEl.textContent = t('auth.chatgpt.switch-offer.accept');
-  if (chatgptSwitchOfferDismissEl) chatgptSwitchOfferDismissEl.textContent = t('auth.chatgpt.switch-offer.dismiss');
-  chatgptSwitchOfferEl.hidden = false;
+function formatChatGPTAuthExpiry(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const tag = window.chatpcbI18n?.getLang?.() === 'ko' ? 'ko-KR' : 'en-US';
+  return new Intl.DateTimeFormat(tag, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
 }
 
-function acceptChatGPTSwitchOffer() {
-  rememberChatGPTSwitchOffered();
-  if (!providerEl || providerEl.value === 'chatgpt') {
-    syncChatGPTSwitchOffer();
-    return;
-  }
-  providerEl.value = 'chatgpt';
-  providerEl.dispatchEvent(new Event('change'));
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
 }
 
-function dismissChatGPTSwitchOffer() {
-  rememberChatGPTSwitchOffered();
-  syncChatGPTSwitchOffer();
+function chatgptAuthUrl(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  return parsed.href;
+}
+
+function chatgptAuthHref(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  return escapeHtml(parsed.href);
+}
+
+function chatGPTButton(className, label, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function chatGPTAuthErrorCopy(code) {
+  if (code === 'cancelled' || code === 'access_denied') {
+    return { titleKey: 'auth.chatgpt.error.cancelled', bodyKey: '', actions: 'retry' };
+  }
+  if (code === 'timeout') {
+    return { titleKey: 'auth.chatgpt.error.timeout', bodyKey: 'auth.chatgpt.error.timeout.body', actions: 'retry' };
+  }
+  if (code === 'open_failed') {
+    return { titleKey: 'auth.chatgpt.error.open-failed', bodyKey: '', actions: 'retry', link: true };
+  }
+  if (code === 'not_eligible') {
+    return {
+      titleKey: 'auth.chatgpt.error.not-eligible.title',
+      bodyKey: 'auth.chatgpt.error.not-eligible.body',
+      actions: 'account'
+    };
+  }
+  if (code === 'usage_limit') {
+    return {
+      titleKey: 'auth.chatgpt.error.usage-limit.title',
+      bodyKey: 'auth.chatgpt.error.usage-limit.body',
+      actions: 'provider'
+    };
+  }
+  return { titleKey: 'auth.chatgpt.error.route', bodyKey: '', actions: 'retry' };
+}
+
+function appendChatGPTAuthActions(parent, actions) {
+  const row = document.createElement('div');
+  row.className = 'chatgpt-auth-actions';
+  if (actions === 'account') {
+    row.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.switch-account'), startChatGPTSignIn));
+    row.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.switch-provider'), focusProviderSelect));
+  } else if (actions === 'provider') {
+    row.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.switch-provider'), focusProviderSelect));
+  } else {
+    row.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.retry'), startChatGPTSignIn));
+  }
+  parent.append(row);
 }
 
 function renderChatGPTAuth() {
   syncChatGPTSwitchOffer();
   if (!i18nReady || !chatgptAuthCardEl || !providerEl) return;
   const isChatGPT = providerEl.value === 'chatgpt';
-  
   if (!isChatGPT) {
     chatgptAuthCardEl.hidden = true;
+    if (!activeRequestId) setRequestBusy(false);
     return;
   }
 
   const state = chatgptAuthState.state;
   const code = chatgptAuthState.code;
-  
   chatgptAuthCardEl.hidden = false;
   chatgptAuthCardEl.className = 'chatgpt-auth-card';
-  
+  chatgptAuthCardEl.replaceChildren();
+
   if (state === 'signed_out' || !state) {
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title">${t('auth.chatgpt.intro.title')}</h2>
-      <p>${t('auth.chatgpt.intro.body')}</p>
-      <button class="chatgpt-sign-in-btn" onclick="startChatGPTSignIn()" lang="en">
-        ${t('auth.chatgpt.button')}
-      </button>
-    `;
+    const title = document.createElement('h2');
+    title.id = 'chatgpt-auth-title';
+    title.textContent = t('auth.chatgpt.intro.title');
+    const body = document.createElement('p');
+    body.textContent = t('auth.chatgpt.intro.body');
+    const button = chatGPTButton('chatgpt-sign-in-btn', t('auth.chatgpt.button'), startChatGPTSignIn);
+    button.lang = 'en';
+    chatgptAuthCardEl.append(title, body, button);
     setRequestBusy(true);
   } else if (state === 'waiting') {
-    const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
-    // Always ask the daemon to open the system browser instead of a WebView link.
-    const reopenLink = authHref
-      ? `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" onclick="reopenChatGPTSignIn()">${t('auth.chatgpt.waiting.reopen')}<span class="sr-only"> ${t('auth.chatgpt.opens-browser')}</span></button>`
-      : `<button type="button" class="chatgpt-secondary-btn" id="chatgpt-reopen-button" disabled aria-describedby="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen')}</button> <span id="chatgpt-reopen-reason">${t('auth.chatgpt.waiting.reopen-unavailable')}</span>`;
+    const title = document.createElement('h2');
+    title.id = 'chatgpt-auth-title';
+    title.tabIndex = -1;
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    title.append(spinner, document.createTextNode(t('auth.chatgpt.waiting.title')));
+    chatgptAuthCardEl.append(title);
     const expiryTime = formatChatGPTAuthExpiry(chatgptAuthState.expiresAt);
-    const expiryLine = expiryTime
-      ? `<p id="chatgpt-auth-expiry">${t('auth.chatgpt.waiting.expires', { time: escapeHtml(expiryTime) })}</p>`
-      : '';
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title" tabindex="-1">
-        <span class="spinner" aria-hidden="true"></span>
-        ${t('auth.chatgpt.waiting.title')}
-      </h2>
-      ${expiryLine}
-      <p>
-        ${reopenLink}
-        · 
-        <button class="chatgpt-secondary-btn" onclick="copyChatGPTLink()">${t('auth.chatgpt.waiting.copy')}</button>
-      </p>
-      <div class="chatgpt-auth-actions">
-        <button class="chatgpt-secondary-btn" onclick="cancelChatGPTSignIn()">${t('auth.chatgpt.cancel')}</button>
-      </div>
-    `;
+    if (expiryTime) {
+      const expiry = document.createElement('p');
+      expiry.id = 'chatgpt-auth-expiry';
+      expiry.textContent = t('auth.chatgpt.waiting.expires', { time: expiryTime });
+      chatgptAuthCardEl.append(expiry);
+    }
+    const href = chatgptAuthUrl(chatgptAuthState.authUrl);
+    const row = document.createElement('p');
+    const reopen = chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.waiting.reopen'), reopenChatGPTSignIn);
+    reopen.id = 'chatgpt-reopen-button';
+    if (href) {
+      const note = document.createElement('span');
+      note.className = 'sr-only';
+      note.textContent = t('auth.chatgpt.opens-browser');
+      reopen.append(document.createTextNode(' '), note);
+      const copy = chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.waiting.copy'), copyChatGPTLink);
+      row.append(reopen, document.createTextNode(' · '), copy);
+    } else {
+      reopen.disabled = true;
+      reopen.setAttribute('aria-describedby', 'chatgpt-reopen-reason');
+      const reason = document.createElement('span');
+      reason.id = 'chatgpt-reopen-reason';
+      reason.textContent = t('auth.chatgpt.waiting.reopen-unavailable');
+      row.append(reopen, document.createTextNode(' '), reason);
+    }
+    chatgptAuthCardEl.append(row);
+    const actions = document.createElement('div');
+    actions.className = 'chatgpt-auth-actions';
+    actions.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.cancel'), cancelChatGPTSignIn));
+    chatgptAuthCardEl.append(actions);
     setRequestBusy(true);
   } else if (state === 'signed_in') {
     const account = chatgptAuthState.account || {};
-    const plan = chatgptAuthState.plan;
-    const email = escapeHtml(account.email || 'Unknown');
-    const planText = plan ? escapeHtml(plan) : '';
-    const accountText = planText 
-      ? t('auth.chatgpt.signed-in.account', { email, plan: planText })
+    const email = typeof account.email === 'string' ? account.email : '';
+    const plan = chatgptAuthState.plan ? String(chatgptAuthState.plan) : '';
+    const title = document.createElement('h2');
+    title.id = 'chatgpt-auth-title';
+    title.tabIndex = -1;
+    title.textContent = t('auth.chatgpt.signed-in.title');
+    const accountLine = document.createElement('p');
+    accountLine.setAttribute('translate', 'no');
+    accountLine.textContent = plan
+      ? t('auth.chatgpt.signed-in.account', { email, plan })
       : email;
-    
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title" tabindex="-1">${t('auth.chatgpt.signed-in.title')}</h2>
-      <p translate="no">${accountText}</p>
-      <p>${t('auth.chatgpt.signed-in.usage')}</p>
-      <div class="chatgpt-auth-actions">
-        <button class="chatgpt-secondary-btn" onclick="signOutChatGPT()">${t('auth.chatgpt.sign-out')}</button>
-      </div>
-    `;
-    setRequestBusy(false);
+    const usage = document.createElement('p');
+    usage.textContent = t('auth.chatgpt.signed-in.usage');
+    const actions = document.createElement('div');
+    actions.className = 'chatgpt-auth-actions';
+    actions.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.sign-out'), signOutChatGPT));
+    chatgptAuthCardEl.append(title, accountLine, usage, actions);
+    if (!activeRequestId) setRequestBusy(false);
   } else if (state === 'error') {
     chatgptAuthCardEl.className = 'chatgpt-auth-card error';
-    
-    let title, body, actions;
-    
-    if (code === 'cancelled' || code === 'access_denied') {
-      title = t('auth.chatgpt.error.cancelled');
-      body = '';
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    } else if (code === 'timeout') {
-      title = t('auth.chatgpt.error.timeout');
-      body = t('auth.chatgpt.error.timeout.body');
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    } else if (code === 'open_failed') {
-      title = t('auth.chatgpt.error.open-failed');
-      const authHref = chatgptAuthHref(chatgptAuthState.authUrl);
-      body = authHref ? `<p><a href="${authHref}" target="_blank" rel="noopener noreferrer">${authHref}</a></p>` : '';
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
-    } else if (code === 'not_eligible') {
-      title = t('auth.chatgpt.error.not-eligible.title');
-      body = t('auth.chatgpt.error.not-eligible.body');
-      actions = `
-        <button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.switch-account')}</button>
-        <button class="chatgpt-secondary-btn" onclick="focusProviderSelect()">${t('auth.chatgpt.switch-provider')}</button>
-      `;
-    } else if (code === 'usage_limit') {
-      title = t('auth.chatgpt.error.usage-limit.title');
-      body = t('auth.chatgpt.error.usage-limit.body');
-      actions = `<button class="chatgpt-secondary-btn" onclick="focusProviderSelect()">${t('auth.chatgpt.switch-provider')}</button>`;
-    } else {
-      title = t('auth.chatgpt.error.route');
-      body = '';
-      actions = `<button class="chatgpt-secondary-btn" onclick="startChatGPTSignIn()">${t('auth.chatgpt.retry')}</button>`;
+    const copy = chatGPTAuthErrorCopy(code);
+    const title = document.createElement('h2');
+    title.id = 'chatgpt-auth-title';
+    title.tabIndex = -1;
+    title.textContent = t(copy.titleKey);
+    chatgptAuthCardEl.append(title);
+    if (copy.link) {
+      const safeHref = chatgptAuthHref(chatgptAuthState.authUrl);
+      const href = chatgptAuthUrl(chatgptAuthState.authUrl);
+      if (safeHref && href) {
+        const paragraph = document.createElement('p');
+        const link = document.createElement('a');
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = href;
+        paragraph.append(link);
+        chatgptAuthCardEl.append(paragraph);
+      }
+    } else if (copy.bodyKey) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = t(copy.bodyKey);
+      chatgptAuthCardEl.append(paragraph);
     }
-    
-    chatgptAuthCardEl.innerHTML = `
-      <h2 id="chatgpt-auth-title" tabindex="-1">${title}</h2>
-      ${body ? `<p>${body}</p>` : ''}
-      <div class="chatgpt-auth-actions">${actions}</div>
-    `;
+    appendChatGPTAuthActions(chatgptAuthCardEl, copy.actions);
     setRequestBusy(true);
   }
-  
-  // Focus management
+
   const titleEl = chatgptAuthCardEl.querySelector('h2[tabindex="-1"]');
   if (titleEl && state !== 'signed_out') {
-    setTimeout(() => titleEl.focus(), 100);
+    setTimeout(() => {
+      if (titleEl.isConnected) titleEl.focus();
+    }, 100);
   }
 }
 
 function updateLiveRegion(payload) {
-  if (!authLiveRegionEl) return;
-  
+  if (!authLiveRegionEl || !payload) return;
   const state = payload.state;
   const code = payload.code;
-  
   let message = '';
-  
   if (state === 'waiting') {
     const time = formatChatGPTAuthExpiry(payload.expiresAt);
     message = time
-      ? `${t('auth.chatgpt.waiting.title')} ${t('auth.chatgpt.waiting.expires', { time })}`
+      ? [t('auth.chatgpt.waiting.title'), t('auth.chatgpt.waiting.expires', { time })].join(' ')
       : t('auth.chatgpt.waiting.title');
   } else if (state === 'signed_in') {
-    const plan = payload.plan;
-    if (plan) {
-      message = `${t('auth.chatgpt.signed-in.title')}, ${plan}`;
-    } else {
-      message = t('auth.chatgpt.signed-in.title');
-    }
+    message = payload.plan
+      ? [t('auth.chatgpt.signed-in.title'), String(payload.plan)].join(' ')
+      : t('auth.chatgpt.signed-in.title');
   } else if (state === 'signed_out') {
-    message = t('auth.chatgpt.signed-out.title');
+    message = [t('auth.chatgpt.signed-out.title'), t('auth.chatgpt.signed-out.body')].join(' ');
   } else if (state === 'error' && code) {
     if (code === 'cancelled' || code === 'access_denied') message = t('auth.chatgpt.error.cancelled');
     else if (code === 'timeout') message = t('auth.chatgpt.error.timeout');
     else if (code === 'not_eligible') message = t('auth.chatgpt.error.not-eligible.title');
     else if (code === 'usage_limit') message = t('auth.chatgpt.error.usage-limit.title');
     else if (code === 'open_failed') message = t('auth.chatgpt.error.open-failed');
+    else message = t('auth.chatgpt.error.route');
   }
-  
-  if (message) {
-    // Clear and re-set to ensure re-announcement
-    authLiveRegionEl.textContent = '';
-    setTimeout(() => {
-      authLiveRegionEl.textContent = message;
-    }, 50);
-  }
+  if (!message) return;
+  authLiveRegionEl.textContent = '';
+  setTimeout(() => {
+    if (authLiveRegionEl) authLiveRegionEl.textContent = message;
+  }, 50);
 }
 
-window.startChatGPTSignIn = function() {
+function startChatGPTSignIn() {
   const id = `auth_chatgpt_start_${Date.now()}`;
   pendingCalls.set(id, 'auth.chatgpt.start');
+  const locale = window.chatpcbI18n?.getLang?.() || 'en';
   sendToolCall({ id, name: 'auth.chatgpt.start', args: { locale } });
-};
+}
 
-window.reopenChatGPTSignIn = function() {
+function reopenChatGPTSignIn() {
   if (!chatgptAuthState.attemptId) return;
   const id = `auth_chatgpt_reopen_${Date.now()}`;
   pendingCalls.set(id, 'auth.chatgpt.reopen');
@@ -2020,9 +2828,8 @@ window.reopenChatGPTSignIn = function() {
     pendingCalls.delete(id);
     showChatGPTSignInError(error);
   }
-};
+}
 
-// auth.chatgpt.reopen either throws or comes back as { ok: false, error } when the browser cannot be opened.
 function applyChatGPTReopenResult(payload) {
   try {
     const failure = reopenFailureFrom(payload);
@@ -2077,37 +2884,42 @@ function chatGPTSignInErrorCode(error) {
   return 'open_failed';
 }
 
-window.cancelChatGPTSignIn = function() {
+function cancelChatGPTSignIn() {
   if (!chatgptAuthState.attemptId) return;
   const id = `auth_chatgpt_cancel_${Date.now()}`;
   pendingCalls.set(id, 'auth.chatgpt.cancel');
   sendToolCall({ id, name: 'auth.chatgpt.cancel', args: { attemptId: chatgptAuthState.attemptId } });
-};
+}
 
-window.signOutChatGPT = function() {
+function signOutChatGPT() {
   const id = `auth_chatgpt_signout_${Date.now()}`;
   pendingCalls.set(id, 'auth.chatgpt.signOut');
   sendToolCall({ id, name: 'auth.chatgpt.signOut', args: {} });
-};
+}
 
-window.copyChatGPTLink = function() {
-  if (!chatgptAuthState.authUrl) return;
+function copyChatGPTLink() {
+  if (!chatgptAuthState.authUrl || !navigator.clipboard?.writeText) return;
   navigator.clipboard.writeText(chatgptAuthState.authUrl).then(() => {
-    updateLiveRegion({ state: 'info', code: 'copied' });
-    if (authLiveRegionEl) {
-      authLiveRegionEl.textContent = t('auth.chatgpt.waiting.copied');
-    }
+    if (!authLiveRegionEl) return;
+    authLiveRegionEl.textContent = '';
+    setTimeout(() => {
+      if (authLiveRegionEl) authLiveRegionEl.textContent = t('auth.chatgpt.waiting.copied');
+    }, 50);
   });
-};
+}
 
-window.focusProviderSelect = function() {
-  if (providerEl) providerEl.focus();
-};
+function focusProviderSelect() {
+  providerEl?.focus();
+}
 
-// Handle Escape key in waiting state
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && chatgptAuthState.state === 'waiting') {
-    window.cancelChatGPTSignIn();
+async function awaitStatus(statusPromise) {
+  let timeout;
+  try {
+    return await Promise.race([
+      Promise.resolve(statusPromise).catch(() => null),
+      new Promise((resolve) => { timeout = setTimeout(() => resolve(null), HOST_STATUS_TIMEOUT_MS); })
+    ]);
+  } finally {
+    clearTimeout(timeout);
   }
-});
-
+}
