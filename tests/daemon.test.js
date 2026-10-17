@@ -857,7 +857,7 @@ test('daemon confines provider-emitted project paths to the active project.reque
   }
 });
 
-test('daemon ignores disallowed provider-emitted project.create calls and falls back to native preview during project.request', async () => {
+test('daemon ignores disallowed provider-emitted project.create calls and refuses with PROVIDER_NO_PATCH during project.request', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-request-'));
   const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-outside-'));
 
@@ -951,7 +951,7 @@ test('daemon retries with corrective note when provider emits only disallowed ca
   }
 });
 
-test('daemon ignores disallowed schematic.generate on existing project and falls back', async () => {
+test('daemon ignores disallowed schematic.generate on existing project and refuses with PROVIDER_NO_PATCH', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-generate-disallowed-'));
 
   try {
@@ -1466,7 +1466,7 @@ test('daemon normalizes provider patch controls to an approval-gated preview', a
   }
 });
 
-test('daemon ignores disallowed provider calls with inspect and succeeds via fallback', async () => {
+test('daemon ignores disallowed provider calls with inspect and refuses with PROVIDER_NO_PATCH', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-exception-restore-'));
 
   try {
@@ -3413,7 +3413,7 @@ test('native schematic.generate of the same discrete LED prompt keeps LED, 330 o
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
-test('daemon ignores disallowed calls from real child process provider and retries with fallback', async () => {
+test('daemon ignores disallowed calls from real child process provider and refuses with PROVIDER_NO_PATCH', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-integration-disallowed-'));
 
   try {
