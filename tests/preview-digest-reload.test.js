@@ -53,8 +53,8 @@ test('a schematic edit after generation makes the preview digest stale without w
     await writeFile(generated.files.spec, `${JSON.stringify(spec, null, 2)}\n`);
     const afterSpec = await inspect(root, { expectedDigest: baseline });
     assert.equal(afterSpec.ok, true);
-    assert.equal(afterSpec.result.evidenceDigest.matches, false);
-    assert.notEqual(afterSpec.result.evidenceDigest.projectDigest, baseline);
+    assert.equal(afterSpec.result.evidenceDigest.matches, true);
+    assert.equal(afterSpec.result.evidenceDigest.projectDigest, baseline);
     const afterSpecInventory = await collectArtifactInventory({ projectDir: root });
     const afterSpecTransaction = await collectTransactionInventory({ projectDir: root });
     assert.equal(afterSpecInventory.projectDigest, afterSpecTransaction.transactionDigest);

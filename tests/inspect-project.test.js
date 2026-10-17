@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
+import { createEvidenceManifestV2 } from '../src/evidence/evidence-manifest.js';
 import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
 import { analyzeProject } from '../src/analyzer/project-analyzer.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -392,7 +393,7 @@ test('inspectProject discards selection context when evidence changes during ins
   }
 });
 
-test('inspectProject discards facts and selection context when a manifest edit changes the shared digest', async () => {
+test('inspectProject keeps facts and selection context when a manifest edit does not change the shared digest', async () => {
   const root = await makeProject();
   await writeFile(path.join(root, 'demo.kicad_sch'), schematicWithSelectionTargets(), 'utf8');
   let releaseValidation;
@@ -424,14 +425,56 @@ test('inspectProject discards facts and selection context when a manifest edit c
     releaseValidation();
 
     const result = await inspectionPromise;
-    assert.deepEqual(result.inspection.facts, []);
-    assert.deepEqual(result.context.facts, []);
+    assert.equal(result.inspection.facts.length > 0, true);
+    assert.equal(result.context.facts.length > 0, true);
     assert.deepEqual(result.context.findings, []);
-    assert.equal(result.context.diagnostics.some((diagnostic) => diagnostic.code === 'CONTEXT_INPUT_CHANGED'), true);
+    assert.equal(result.context.diagnostics.some((diagnostic) => diagnostic.code === 'CONTEXT_INPUT_CHANGED'), false);
     assert.equal(result.manifest.freshness.status, 'missing');
-    assert.equal(result.context.coverage.diagnostics.some((diagnostic) => diagnostic.code === 'SELECTION_CONNECTIVITY_UNPROVEN'), true);
+    assert.equal(result.context.coverage.diagnostics[0].code, 'SELECTION_CONNECTIVITY_UNPROVEN');
   } finally {
     releaseValidation?.();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('writing a v2 manifest keeps freshness current', async () => {
+  const root = await makeProject();
+  try {
+    const inventory = await collectArtifactInventory({ projectDir: root });
+    const manifest = createEvidenceManifestV2({ artifacts: inventory.artifacts });
+    await writeFile(path.join(root, 'demo.chatpcb.json'), `${JSON.stringify(manifest)}\n`, 'utf8');
+    const written = await inspect({
+      projectDir: root,
+      validateProjectImpl: cleanErc,
+      validateBoardImpl: cleanDrc
+    });
+    assert.equal(written.manifest.schemaVersion, 2);
+    assert.equal(written.manifest.freshness.status, 'current');
+    assert.equal(written.manifest.freshness.code, 'MATCH');
+    assert.equal(written.inspection.projectDigest, inventory.projectDigest);
+    assert.equal(
+      (await collectTransactionInventory({ projectDir: root })).transactionDigest,
+      inventory.projectDigest
+    );
+
+    await writeFile(path.join(root, 'demo.evidence.json'), '{"evidence":true}\n', 'utf8');
+    const withEvidenceFile = await inspect({
+      projectDir: root,
+      validateProjectImpl: cleanErc,
+      validateBoardImpl: cleanDrc
+    });
+    assert.equal(withEvidenceFile.manifest.freshness.status, 'current');
+    assert.equal(withEvidenceFile.inspection.projectDigest, inventory.projectDigest);
+
+    await writeFile(path.join(root, 'demo.kicad_sch'), '(kicad_sch changed)\n', 'utf8');
+    const stale = await inspect({
+      projectDir: root,
+      validateProjectImpl: cleanErc,
+      validateBoardImpl: cleanDrc
+    });
+    assert.equal(stale.manifest.freshness.status, 'stale');
+    assert.equal(stale.manifest.freshness.code, 'DIGEST_MISMATCH');
+  } finally {
     await rm(root, { force: true, recursive: true });
   }
 });

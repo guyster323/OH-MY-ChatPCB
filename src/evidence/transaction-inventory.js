@@ -2,12 +2,16 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { compareArtifactPaths, digestArtifactKind, digestOfArtifacts } from './digest-exclusions.js';
+import { compareArtifactPaths, digestArtifactKind, digestOfArtifacts, isExcludedFromDigest, isOwnRecordPath } from './digest-exclusions.js';
 import { assertInspectionTree } from '../workflow/inspection-copy.js';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export function transactionArtifactKind(relativePath) {
+  if (isOwnRecordPath(relativePath)) {
+    const base = String(relativePath ?? '').split(path.sep).join('/').split('/').at(-1) ?? '';
+    return base.toLowerCase().endsWith('.chatpcb.json') ? 'chatpcb-manifest' : null;
+  }
   return digestArtifactKind(relativePath);
 }
 
@@ -40,12 +44,15 @@ export async function collectTransactionSnapshot({ projectDir }) {
     });
   }
   files.sort(compareArtifactPaths);
-  const artifacts = files.map(({ path: artifactPath, kind, sha256: digest, size }) => ({
+  const tracked = files.map(({ path: artifactPath, kind, sha256: digest, size }) => ({
     path: artifactPath,
     kind,
     sha256: digest,
     size
   }));
+  // Manifest bytes stay on `files` for apply and rollback. Both freshness
+  // digests hash only `artifacts`, which omits ChatPCB's own records.
+  const artifacts = tracked.filter((item) => !isExcludedFromDigest(item.path));
   return {
     projectDir: root,
     transactionDigest: digestOfArtifacts(artifacts),
