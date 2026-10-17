@@ -151,6 +151,14 @@ const CONTRACT = [
   { prompt: 'LED 및 I2C 제거', outcome: 'refuse-clarify', ask: true, positive: ['i2c'], negated: [] },
   { prompt: 'remove LED & I2C', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: [] },
   { prompt: 'delete the LED and the I2C connector', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: [] },
+  // Articles and part-type words stay inside one list. Two targets ask.
+  { prompt: 'remove the I2C connector and the LED', outcome: 'refuse-clarify', ask: true, positive: ['i2c'], negated: [] },
+  { prompt: 'remove the I2C connector or the LED', outcome: 'refuse-clarify', ask: true, positive: ['i2c'], negated: [] },
+  { prompt: 'delete the LED and the I2C header', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: [] },
+  { prompt: 'I2C 커넥터와 LED를 삭제', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: [] },
+  { prompt: 'I2C 커넥터랑 상태 LED 지워줘', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: [] },
+  { prompt: 'remove that LED and also the I2C connector', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: [] },
+  { prompt: 'remove the I2C connector, LED, and resistor', outcome: 'refuse-clarify', ask: true, positive: ['i2c'], negated: [] },
   { prompt: 'remove not I2C but LED', outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
   { prompt: 'remove I2C? no, keep it', outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
   { prompt: 'remove I2C. actually keep it', outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
@@ -223,7 +231,55 @@ const CONTRACT = [
   { prompt: "there's no need to delete the I2C connector", outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
   { prompt: 'drop the I2C connector', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
   { prompt: 'I2C 빼줘', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
-
+  // r2/r3 sentences that were missing from this table. Locked to the current
+  // fail-closed result. A negation does not remove I2C. "get rid of I2C" and
+  // "I2C 없애줘" stay a plain refusal. "I2C 커넥터 지워줘" and "please delete I2C"
+  // are real deletes.
+  { prompt: "don\u2019t remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don\uFF07t remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "do not remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "Do Not Remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I2C 삭제하지 말아 주세요", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I2C 커넥터 지워줘", outcome: "removal-candidate:i2c", positive: ["i2c"], negated: [] },
+  { prompt: "please delete I2C", outcome: "removal-candidate:i2c", positive: ["i2c"], negated: [] },
+  { prompt: "get rid of I2C", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C 절대로 지우지 마세요", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I2C won't be removed", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C must not be removed", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "avoid removing I2C", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "stop removing I2C", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C 삭제는 하지 마", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "not remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don\u2032t remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don\u02B9t remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don\u055At remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don\uA78Ct remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "do\u200Bn't remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't remove I\u200B2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't remove I2\u200DC", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't remove I\u00B2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "DON'T REMOVE i2c", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't remove the i2c", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I really, truly do not, under any circumstances, want you to remove the I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I do not want, under any circumstances whatsoever and for no reason at all, that you would go ahead and remove the I2C connector", outcome: "refuse-clarify", ask: true, positive: ["i2c"], negated: [] },
+  { prompt: "I2C 지우지 말기를", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't delete I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't drop I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "don't get rid of I2C", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C 빼지 마", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I2C 없애지 마", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C 없애줘", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C를 지우지 않았으면 해", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "no I2C removal please", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "removal of I2C is not wanted", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "I2C \u2014 don't remove", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I2C: do NOT remove", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "remove I2C (not!)", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I2C 삭제하지마", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "Remove I2C. Actually, don't.", outcome: "refuse-clarify", ask: true, positive: ["i2c"], negated: [] },
+  { prompt: "I2C 삭제 하지마세요", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
+  { prompt: "I 2 C 삭제하지 마", outcome: "refuse-clarify", ask: false, positive: [], negated: [] },
+  { prompt: "keep it, don't remove I2C", outcome: "refuse-clarify", ask: true, positive: [], negated: ["i2c"] },
 ];
 
 function outcomeOf(decision) {
@@ -298,6 +354,36 @@ test('deletion intent contract is fail-closed', () => {
       assert.equal(decision.code, undefined, row.prompt);
     }
   }
+});
+
+// "jk flip-flop" / "jk-flip" is a part name, so it is not the retraction "jk".
+// A bare "jk" still takes the removal back. Other "not" hits, and a
+// parenthetical such as "remove I2C (jk flip-flop stays)", stay fail-closed.
+// That remaining over-blocking is a follow-up.
+test('a JK flip-flop part name is not the jk retraction', () => {
+  for (const prompt of ['remove the JK flip-flop', 'add a JK flip-flop later']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+
+  for (const prompt of ['remove I2C. jk', 'remove I2C jk']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'REMOVAL_INTENT_UNCLEAR', prompt);
+    assert.equal(removesI2c(decision), false, prompt);
+  }
+
+  for (const prompt of ['remove I2C. JK flip-flop', 'jk-flip stays, remove I2C']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(outcomeOf(decision), 'removal-candidate:i2c', prompt);
+    assert.deepEqual(decision.edit.targets, ['i2c'], prompt);
+  }
+
+  const parenthetical = classifyExistingProjectRequest('remove I2C (jk flip-flop stays)', SPEC);
+  assert.equal(parenthetical.code, 'REMOVAL_INTENT_UNCLEAR');
+  assert.equal(removesI2c(parenthetical), false);
 });
 
 // intentional fail-closed: asks instead of removing

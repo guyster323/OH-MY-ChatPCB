@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { LED_SERIES_RESISTOR_RANGE, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { classifyResistorValue } from '../kicad/resistor-ohms.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
@@ -86,7 +86,9 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
       // NFKC turns compatibility jamo ㄴ into choseong ᄂ, so both forms count.
       re: String.raw`(?<![\u1100-\u11FF\u3131-\u318E])(?:\u3134\u3134|\u1102\u1102)(?![\u1100-\u11FF\u3131-\u318E])`
     }),
-    Object.freeze({ id: 'jk', re: String.raw`\bjk\b` }),
+    // "jk flip-flop" / "jk-flip" names a part. A bare "jk" is still a retraction.
+    // Other "not" and "jk" hits stay fail-closed; that over-blocking is a follow-up.
+    Object.freeze({ id: 'jk', re: String.raw`\bjk\b(?!\s*-?\s*flip\b)` }),
     Object.freeze({ id: 'just-kidding', re: String.raw`\bjust\s+kidding\b` }),
     Object.freeze({ id: 'trailing-not', re: String.raw`(?:\.{3}|…)\s*not\b` }),
     Object.freeze({ id: 'nvm', re: String.raw`\bnvm\b` }),
@@ -147,10 +149,20 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: 'the', re: String.raw`\bthe\b` }),
     Object.freeze({ id: 'a', re: String.raw`\ba\b` }),
     Object.freeze({ id: 'an', re: String.raw`\ban\b` }),
-    Object.freeze({ id: 'both', re: String.raw`\bboth\b` })
+    Object.freeze({ id: 'both', re: String.raw`\bboth\b` }),
+    Object.freeze({ id: 'that', re: String.raw`\bthat\b` }),
+    Object.freeze({ id: 'this', re: String.raw`\bthis\b` }),
+    Object.freeze({ id: 'also', re: String.raw`\balso\b` })
+  ]),
+  // Nouns that name the same part ("the I2C connector", "상태 LED") and do not
+  // split a list. "상태" is the status adjective in "상태 LED".
+  targetListModifiers: Object.freeze([
+    Object.freeze({ id: 'en-noun', re: String.raw`\b(?:connector|header|resistor|part|component)\b` }),
+    Object.freeze({ id: 'ko-noun', re: '커넥터|헤더|저항|부품|상태' })
   ]),
   // One Korean particle between a part and the join ("LED를 그리고 I2C").
-  listParticles: '[은는이가을를]',
+  // 와/과/랑 are list joins, not particles. 도 is the also-particle.
+  listParticles: '[은는이가을를도]',
   // "삭제하고 I2C도": group 1 is the span before the also-particle 도.
   alsoAttachments: Object.freeze([
     Object.freeze({
@@ -249,19 +261,25 @@ export function removalRefUnsupportedMessage(ref) {
 
 export function resistorValueInvalidMessage() {
   const en = 'The resistor value is not valid. State a value such as 680Ω or 4.7kΩ. Nothing was changed.';
-  const ko = '저항 값이 올바르지 않습니다. 680Ω 또는 4.7kΩ 같은 값을 적어 주세요. 아무것도 바꾸지 않았습니다.';
+  const ko = '저항 값이 올바르지 않아요. 680Ω 또는 4.7kΩ 같은 값을 적어 주세요. 아무것도 바꾸지 않았어요.';
+  return `${en}\n${ko}`;
+}
+
+export function resistorMilliSuffixMessage() {
+  const en = 'Use M for megaohms, e.g. 4M7. Nothing was changed.';
+  const ko = '메가옴은 M을 써 주세요. 예: 4M7. 아무것도 바꾸지 않았어요.';
   return `${en}\n${ko}`;
 }
 
 export function resistorValueOutOfRangeMessage() {
   const en = 'The resistor value must be from 1Ω to 10MΩ. Nothing was changed.';
-  const ko = '1Ω~10MΩ 사이 값으로 알려 주세요. 아무것도 바꾸지 않았습니다.';
+  const ko = '1Ω~10MΩ 사이 값으로 알려 주세요. 아무것도 바꾸지 않았어요.';
   return `${en}\n${ko}`;
 }
 
 export function modifyRefusalMessage() {
   const en = 'The requested change could not be applied onto the existing design. Describe the change more specifically (name the part or reference and the value), or start a new project for a full redesign. The existing circuit was left unchanged.';
-  const ko = '수정 사항을 적용할 수 없습니다. 바꿀 부품이나 참조 이름과 값을 구체적으로 적어 주세요. 전체를 다시 설계하려면 새 프로젝트를 시작하세요. 기존 회로는 바꾸지 않았습니다.';
+  const ko = '수정 사항을 적용할 수 없어요. 바꿀 부품이나 참조 이름과 값을 구체적으로 적어 주세요. 전체를 다시 설계하려면 새 프로젝트를 시작하세요. 기존 회로는 바꾸지 않았어요.';
   return `${en}\n${ko}`;
 }
 
@@ -343,10 +361,15 @@ function unclearRemoval() {
 }
 
 function invalidResistor(reason) {
+  const message = reason === 'range'
+    ? resistorValueOutOfRangeMessage()
+    : reason === 'milli'
+      ? resistorMilliSuffixMessage()
+      : resistorValueInvalidMessage();
   return {
     mode: 'refuse',
     code: 'RESISTOR_VALUE_INVALID',
-    message: reason === 'range' ? resistorValueOutOfRangeMessage() : resistorValueInvalidMessage()
+    message
   };
 }
 
@@ -1016,9 +1039,15 @@ function listGapPattern() {
     .filter((item) => item.afterComma)
     .sort(byLength)
     .map((item) => item.re);
-  const fillers = vocab.targetListFillers.map((item) => item.re);
+  const skip = [
+    ...vocab.targetListFillers.map((item) => item.re),
+    ...vocab.targetListModifiers.map((item) => item.re),
+    vocab.listParticles
+  ].join('|');
+  // A modifier may sit on either side of the join ("connector and the",
+  // "커넥터와", "and also the") without breaking the list.
   return new RegExp(
-    `^(?:${vocab.listParticles}\\s*)?(?:,\\s*(?:${afterComma.join('|')})?|(?:${words.join('|')}))(?:\\s+(?:${fillers.join('|')}))*\\s*$`,
+    `^(?:(?:${skip})\\s*)*(?:,\\s*(?:${afterComma.join('|')})?|(?:${words.join('|')}))(?:\\s*(?:${skip}))*\\s*$`,
     'iu'
   );
 }
@@ -1144,6 +1173,7 @@ function residueBlankSources() {
     ...vocab.targets.map((item) => item.re),
     vocab.referenceDesignator,
     ...vocab.targetListFillers.map((item) => item.re),
+    ...vocab.targetListModifiers.map((item) => item.re),
     ...vocab.targetListJoins.map((item) => item.re),
     ...vocab.coordinators.filter((item) => item.id !== 'na').map((item) => item.re),
     ...vocab.correctionCues.map((item) => item.re),
@@ -1437,21 +1467,25 @@ function classifyResistorAttempts(tokens) {
   const valid = [];
   let malformed = false;
   let outOfRange = false;
+  let milli = false;
   for (const token of tokens) {
     if (!token.attempt) continue;
-    const ohmsText = parseResistorOhms(token.raw);
-    if (ohmsText == null) {
+    const result = classifyResistorValue(token.raw);
+    if (result.reason === 'milli') {
+      milli = true;
+      continue;
+    }
+    if (result.reason === 'invalid') {
       malformed = true;
       continue;
     }
-    const ohms = Number(ohmsText);
-    if (!(ohms >= LED_SERIES_RESISTOR_RANGE.min && ohms <= LED_SERIES_RESISTOR_RANGE.max)) {
+    if (result.reason === 'range') {
       outOfRange = true;
       continue;
     }
-    valid.push({ ohms, ohmsText, index: token.index, end: token.end });
+    valid.push({ ohms: result.ohms, ohmsText: result.ohmsText, index: token.index, end: token.end });
   }
-  return { valid, malformed, outOfRange };
+  return { valid, malformed, outOfRange, milli };
 }
 
 // "to" / "->" take the next value. "으로" / "로" take the value glued to them.
@@ -1498,6 +1532,7 @@ function interpretResistor(text) {
   promoteCoordinatedBareValues(tokens, normalized);
   dropLeadingDesignators(tokens);
   const parsed = classifyResistorAttempts(tokens);
+  if (parsed.milli) return { kind: 'invalid', reason: 'milli' };
   if (parsed.malformed) return { kind: 'invalid' };
   if (parsed.outOfRange) return { kind: 'invalid', reason: 'range' };
 
@@ -1756,7 +1791,7 @@ export function removalFinding(removed) {
   }));
   const listed = removedComponents.map(listedComponent).join(', ');
   const en = `Existing components were removed (${listed}). Apply stays closed until the client confirms this exact set.`;
-  const ko = `기존 부품이 빠졌습니다 (${listed}). 클라이언트가 이 목록을 그대로 확인하기 전에는 적용할 수 없습니다.`;
+  const ko = `기존 부품이 빠졌어요 (${listed}). 클라이언트가 이 목록을 그대로 확인하기 전에는 적용할 수 없어요.`;
   return {
     id: 'existing-components-removed',
     code: 'existing-components-removed',

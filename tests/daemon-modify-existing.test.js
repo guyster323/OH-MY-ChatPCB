@@ -399,7 +399,7 @@ test('modify on an applied project keeps I2C when ChatGPT only inspects', async 
       assert.match(liveAfter, /I2C_CONNECTOR/);
       assert.doesNotMatch(liveAfter, /680/);
       const message = `${result.error?.message ?? ''}`;
-      assert.match(message, /could not be applied|수정 사항을 적용할 수 없습니다/);
+      assert.match(message, /could not be applied|수정 사항을 적용할 수 없어요/);
     });
   } finally {
     fetchStub.restore();

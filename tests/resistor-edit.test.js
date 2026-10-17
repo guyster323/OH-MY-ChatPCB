@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { parseResistorOhms } from '../src/kicad/resistor-ohms.js';
 import { spiceResistorOhms } from '../src/kicad/project-generator.js';
-import { classifyExistingProjectRequest } from '../src/workflow/existing-project-edit.js';
+import { classifyExistingProjectRequest, resistorMilliSuffixMessage } from '../src/workflow/existing-project-edit.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 
@@ -96,7 +96,9 @@ test('an invalid user resistor value is not filled from the rewrite example', ()
   assert.equal(decision.edit, undefined);
   assert.match(decision.message, /680Ω/);
   assert.match(decision.message, /4\.7kΩ/);
-  assert.match(decision.message, /저항 값/);
+  assert.match(decision.message, /저항 값이 올바르지 않아요/);
+  assert.match(decision.message, /아무것도 바꾸지 않았어요/);
+  assert.equal(/않습니다|않았습니다/.test(decision.message), false);
 });
 
 test('a valid user resistor value wins over a different value in the rewrite', () => {
@@ -141,7 +143,9 @@ test('invalid resistor text previews no patch and leaves the schematic unchanged
           assert.equal(error.code, 'RESISTOR_VALUE_INVALID', userPrompt);
           assert.match(error.message, /680Ω/);
           assert.match(error.message, /4\.7kΩ/);
-          assert.match(error.message, /저항 값/);
+          assert.match(error.message, /저항 값이 올바르지 않아요/);
+          assert.match(error.message, /아무것도 바꾸지 않았어요/);
+          assert.equal(/않습니다|않았습니다/.test(error.message), false, userPrompt);
           return true;
         }
       );
@@ -209,7 +213,8 @@ test('lossless labels keep every significant digit of an E-series value', () => 
     ['LED resistor 680Ω', 680, '680Ω', '680'],
     ['LED resistor 1k', 1000, '1k', '1000'],
     ['LED resistor 4.7k', 4700, '4.7k', '4700'],
-    ['LED resistor 1.5Ω', 1.5, '1.5Ω', '1.5']
+    ['LED resistor 1.5Ω', 1.5, '1.5Ω', '1.5'],
+    ['LED resistor 1.5 ohm', 1.5, '1.5Ω', '1.5']
   ]) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
     assert.equal(decision.mode, 'merge', prompt);
@@ -320,6 +325,9 @@ test('mixed sentences keep only real resistor tokens', () => {
     'LED resistor 1.0.0k',
     'LED resistor 10kk',
     'LED resistor 1,000 ohm',
+    'LED resistor 1.000 ohm',
+    'LED resistor 4.700 ohm',
+    'LED resistor 1.000Ω',
     'LED resistor -10 ohm',
     'set R3 330Ω 680Ω'
   ]) {
@@ -347,8 +355,6 @@ test('explicit transition forms pick the destination value', () => {
 
 test('values outside 1Ω to 10MΩ are refused with the allowed range', () => {
   for (const prompt of [
-    'LED resistor 4m7',
-    'LED resistor 2m2',
     'LED resistor R47',
     'LED resistor 1p',
     'LED resistor 100f',
@@ -364,6 +370,8 @@ test('values outside 1Ω to 10MΩ are refused with the allowed range', () => {
     assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', prompt);
     assert.equal(decision.edit, undefined, prompt);
     assert.match(decision.message, /1Ω~10MΩ 사이 값으로 알려 주세요/, prompt);
+    assert.match(decision.message, /아무것도 바꾸지 않았어요/, prompt);
+    assert.equal(decision.message.includes('않았습니다'), false, prompt);
     assert.match(decision.message, /1Ω/, prompt);
     assert.match(decision.message, /10MΩ/, prompt);
   }
@@ -382,6 +390,41 @@ test('values outside 1Ω to 10MΩ are refused with the allowed range', () => {
   }
 });
 
+test('a lone m suffix asks for M instead of guessing megaohms', () => {
+  const milli = resistorMilliSuffixMessage();
+  for (const prompt of [
+    'LED resistor 4m7',
+    'LED resistor 1m',
+    'LED resistor 2m2',
+    'LED resistor 4.7m',
+    // 1000m would be 1Ω, inside the allowed window. The suffix is still refused.
+    'LED resistor 1000m'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, milli, prompt);
+    assert.match(decision.message, /Use M for megaohms, e\.g\. 4M7\./);
+    assert.match(decision.message, /메가옴은 M을 써 주세요\. 예: 4M7\./);
+    assert.equal(decision.message.includes('1Ω~10MΩ'), false, prompt);
+  }
+
+  for (const [prompt, ohms, label, ohmsText] of [
+    ['LED resistor 4M7', 4700000, '4.7M', '4700000'],
+    ['LED resistor 1M', 1000000, '1M', '1000000'],
+    ['status LED resistor 1meg', 1000000, '1M', '1000000'],
+    ['LED resistor 1MEG', 1000000, '1M', '1000000'],
+    ['LED resistor 1Meg', 1000000, '1M', '1000000']
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    assert.equal(decision.edit?.ohmsText, ohmsText, prompt);
+  }
+});
+
 test('SPICE validation and edit classification agree after the range check', () => {
   const rows = [
     ['R47', null],
@@ -390,7 +433,22 @@ test('SPICE validation and edit classification agree after the range check', () 
     ['1R5', '1.5'],
     ['2M2', '2200000'],
     ['1meg', '1000000'],
+    ['1MEG', '1000000'],
+    ['1Meg', '1000000'],
+    ['4M7', '4700000'],
     ['4m7', null],
+    ['1m', null],
+    ['2m2', null],
+    ['4.7m', null],
+    ['1000m', null],
+    ['1.000 ohm', null],
+    ['4.700 ohm', null],
+    ['1.000Ω', null],
+    ['1.5 ohm', '1.5'],
+    ['4.75k', '4750'],
+    ['4.99k', '4990'],
+    ['1.05M', '1050000'],
+    ['1.24k', '1240'],
     ['1p', null],
     ['1G', null],
     ['10kk', null],
