@@ -726,13 +726,24 @@ async function requestProject(call, ctx) {
     let keepSnapshot = false;
     const fsOps = resolveSnapshotFs(ctx);
     try {
-      if (hasSpec) {
-        const existingSpec = await readChatPcbManifest(projectDir);
-        const decision = classifyExistingProjectRequest(generatePrompt, existingSpec, prompt);
-        if (decision.mode === 'refuse' && decision.code) {
-          const refused = new Error(decision.message);
-          refused.code = decision.code;
-          throw refused;
+      // Guidance is only for a direct modify of an existing project. A conversation
+      // that is ready to generate is not one. An unreadable manifest is not a
+      // refusal either: fall through so a provider failure can still restore the
+      // project or roll the swap back.
+      if (hasSpec && !awaitingInput) {
+        let existingSpec = null;
+        try {
+          existingSpec = await readChatPcbManifest(projectDir);
+        } catch {
+          // CHATPCB_MANIFEST_INVALID and other read failures keep the prior path.
+        }
+        if (existingSpec) {
+          const decision = classifyExistingProjectRequest(generatePrompt, existingSpec, prompt);
+          if (decision.mode === 'refuse' && decision.code) {
+            const refused = new Error(decision.message);
+            refused.code = decision.code;
+            throw refused;
+          }
         }
       }
       snapshot = hasSpec ? await snapshotProject(projectDir, fsOps) : null;
