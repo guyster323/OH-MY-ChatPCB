@@ -21,7 +21,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { classifyExistingProjectRequest } from '../workflow/existing-project-edit.js';
+import { classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -261,7 +261,12 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call.args?.prompt);
         const extra = { conversation: error.conversation };
         if (error?.technicalDetail) extra.technicalDetail = error.technicalDetail;
-        const failed = failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
+        // A failed snapshot restore appends the kept path after the guidance line.
+        // Leave that whole message intact so the path is not dropped.
+        const message = typeof error?.snapshotPath === 'string'
+          ? error.message
+          : messageForLocale(error.message, call.args?.locale);
+        const failed = failure(error.code ?? 'PROVIDER_FAILED', message, extra);
         if (typeof error?.snapshotPath === 'string') failed.error.snapshotPath = error.snapshotPath;
         if (typeof error?.backupPath === 'string') failed.error.backupPath = error.backupPath;
         return failed;
@@ -1217,6 +1222,8 @@ export function withProjectContext(payload, projectDir, forceProjectDir = false,
   delete args.transactionId;
   delete args.proposalId;
   delete args.rollback;
+  // Panel language is not a model argument. The client locale stays on project.request.
+  delete args.locale;
 
   let name = payload.name;
   if (name === 'schematic.patch') {

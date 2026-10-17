@@ -335,6 +335,28 @@ export function modifyRefusalMessage() {
   return `${en}\n${ko}`;
 }
 
+const HANGUL = /[가-힣]/u;
+
+// Guidance is `${english}\n${korean}`. A known locale keeps one half.
+// A missing locale, an unknown tag, or any other message stays as written.
+export function messageForLocale(message, locale) {
+  if (typeof message !== 'string') return message;
+  const lang = clientLanguage(locale);
+  if (!lang) return message;
+  const splitAt = message.indexOf('\n');
+  if (splitAt <= 0 || message.indexOf('\n', splitAt + 1) !== -1) return message;
+  const en = message.slice(0, splitAt);
+  const ko = message.slice(splitAt + 1);
+  if (!en || !ko || HANGUL.test(en) || !HANGUL.test(ko)) return message;
+  return lang === 'ko' ? ko : en;
+}
+
+function clientLanguage(locale) {
+  if (typeof locale !== 'string') return null;
+  const primary = locale.trim().toLowerCase().replaceAll('_', '-').split('-')[0];
+  return primary === 'en' || primary === 'ko' ? primary : null;
+}
+
 // A prompt that names a new MCU board is a replacement design. A short edit is
 // merged onto the saved spec so a resistor change cannot rebuild the board.
 // userPrompt is the request text the client sent. When it differs from prompt,

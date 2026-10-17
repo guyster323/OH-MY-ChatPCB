@@ -12,7 +12,13 @@ import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-regis
 import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
-import { removalIntentUnclearMessage } from '../src/workflow/existing-project-edit.js';
+import {
+  mixedRemovalAndEditMessage,
+  modifyRefusalMessage,
+  removalIntentUnclearMessage,
+  removalNeedsVerbMessage,
+  resistorValueInvalidMessage
+} from '../src/workflow/existing-project-edit.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 import { isolateHome } from './isolate-home.js';
@@ -592,6 +598,25 @@ test('reset 버튼 삭제 in a separate sentence does not remove I2C', async () 
 
 test('casual Like an ESP32 board mention blocks Apply without an override', async () => {
   await assertApplyStaysBlocked('Like an ESP32 board, change the status LED resistor to 680 ohm on this STM32 board.');
+});
+
+test('withProjectContext strips locale from a model-issued tool call', () => {
+  const toolCall = withProjectContext({
+    id: 'call_model_locale',
+    name: 'schematic.patch',
+    args: {
+      prompt: 'remove the I2C connector',
+      locale: 'ko-KR',
+      approved: true
+    }
+  }, '/tmp/chatpcb-existing-project', true, {
+    prompt: 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.'
+  });
+
+  assert.equal(Object.hasOwn(toolCall.args, 'locale'), false);
+  assert.equal(JSON.stringify(toolCall.args).includes('locale'), false);
+  assert.equal(JSON.stringify(toolCall.args).includes('ko-KR'), false);
+  assert.equal(toolCall.args.userPrompt, 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.');
 });
 
 test('withProjectContext strips allowRemovedComponents from a provider schematic.patch', () => {
@@ -1266,6 +1291,165 @@ test('a value-only prompt and a bare reference never call the provider', async (
       assert.match(preview.error?.message ?? '', /Nothing was (?:changed|removed)/, prompt);
       assert.equal(await readFile(generated.files.schematic, 'utf8'), before, prompt);
     }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('project.request locale returns one language of a bilingual refusal', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  let called = false;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      called = true;
+      throw new Error('provider must not be called');
+    }
+  };
+  const rows = [
+    ['REMOVAL_INTENT_UNCLEAR', 'remove J2 but keep I2C', removalIntentUnclearMessage()],
+    ['REMOVAL_NEEDS_VERB', 'J2', removalNeedsVerbMessage('J2')],
+    ['RESISTOR_VALUE_INVALID', '-10 ohm', resistorValueInvalidMessage()],
+    ['MIXED_REMOVAL_AND_EDIT', 'remove I2C and set the LED resistor to 680 ohm', mixedRemovalAndEditMessage()]
+  ];
+  // Absent and unknown stay bilingual. Region tags use the language prefix.
+  const locales = [
+    ['en', 'en'],
+    ['en-US', 'en'],
+    ['ko', 'ko'],
+    ['ko-KR', 'ko'],
+    [undefined, 'both'],
+    ['ja', 'both']
+  ];
+  try {
+    for (const [code, prompt, full] of rows) {
+      const [en, ko, rest] = full.split('\n');
+      assert.equal(rest, undefined, code);
+      assert.match(ko, /[가-힣]/, code);
+      assert.doesNotMatch(en, /[가-힣]/, code);
+      for (const [locale, expectLang] of locales) {
+        const args = { provider: 'codex', projectDir, prompt };
+        if (locale !== undefined) args.locale = locale;
+        const preview = await dispatchToolCall({
+          id: `call_locale_${code}_${locale ?? 'absent'}`,
+          name: 'project.request',
+          args
+        }, { ...services, ...provider });
+        const label = `${code} ${locale ?? 'absent'}`;
+        assert.equal(called, false, label);
+        assert.equal(preview.ok, false, label);
+        assert.equal(preview.error?.code, code, `${label} ${preview.error?.message ?? ''}`);
+        const message = preview.error?.message ?? '';
+        if (expectLang === 'en') {
+          assert.equal(message, en, label);
+          assert.doesNotMatch(message, /[가-힣]/, label);
+        } else if (expectLang === 'ko') {
+          assert.equal(message, ko, label);
+          assert.equal(message.includes(en), false, label);
+          assert.match(message, /[가-힣]/, label);
+        } else {
+          assert.equal(message, full, label);
+          assert.match(message, /[가-힣]/, label);
+          assert.match(message, /Nothing was/, label);
+        }
+        assert.equal(await readFile(generated.files.schematic, 'utf8'), before, label);
+      }
+    }
+
+    const plain = await dispatchToolCall({
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, locale: 'en' }
+    }, { ...services, ...provider });
+    assert.equal(plain.ok, false);
+    assert.equal(plain.error?.message, 'project.request requires a prompt.');
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('coded native refusal uses the client locale and ignores a model locale', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  const [en, ko] = modifyRefusalMessage().split('\n');
+  const provider = (modelLocale) => ({
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => ({
+      exitCode: 0,
+      stderr: '',
+      events: [
+        createEnvelope('tool.call', {
+          id: 'call_model_locale_patch',
+          name: 'schematic.patch',
+          args: {
+            prompt: 'remove the I2C connector',
+            locale: modelLocale,
+            approved: true
+          }
+        })
+      ]
+    })
+  });
+  try {
+    const english = await dispatchToolCall({
+      id: 'call_client_locale_en',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir,
+        prompt: 'Keep the STM32 board unchanged.',
+        locale: 'en-US'
+      }
+    }, { ...services, ...provider('ko') });
+    assert.equal(english.ok, false, english.error?.message);
+    assert.equal(english.error?.code, 'PROVIDER_NO_PATCH');
+    assert.equal(english.error?.message, en);
+    assert.doesNotMatch(english.error?.message ?? '', /[가-힣]/);
+
+    const korean = await dispatchToolCall({
+      id: 'call_client_locale_ko',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir,
+        prompt: 'Keep the STM32 board unchanged.',
+        locale: 'ko-KR'
+      }
+    }, { ...services, ...provider('en') });
+    assert.equal(korean.ok, false, korean.error?.message);
+    assert.equal(korean.error?.code, 'PROVIDER_NO_PATCH');
+    assert.equal(korean.error?.message, ko);
+    assert.equal((korean.error?.message ?? '').includes(en), false);
+
+    const both = await dispatchToolCall({
+      id: 'call_client_locale_absent',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir,
+        prompt: 'Keep the STM32 board unchanged.'
+      }
+    }, { ...services, ...provider('ko') });
+    assert.equal(both.ok, false, both.error?.message);
+    assert.equal(both.error?.code, 'PROVIDER_NO_PATCH');
+    assert.equal(both.error?.message, modifyRefusalMessage());
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
