@@ -196,12 +196,67 @@ function statusLedResistorValue(spec) {
   return '1k';
 }
 
-function spiceResistorOhms(value) {
-  const text = String(value ?? '').trim();
-  const kilo = text.match(/^(\d+(?:\.\d+)?)\s*k/i);
-  if (kilo) return String(Math.round(Number(kilo[1]) * 1000));
-  const ohms = text.match(/^(\d+(?:\.\d+)?)/);
-  return ohms ? String(Math.round(Number(ohms[1]))) : '1000';
+// Lone "m" is SPICE milli. "M" and "meg" are mega. RKM writes that letter in
+// place of the decimal point, so 4k7 is 4.7 kΩ and 1R5 is 1.5 Ω.
+const SPICE_RESISTOR_SCALE = {
+  t: 1e12,
+  g: 1e9,
+  k: 1e3,
+  r: 1,
+  u: 1e-6,
+  n: 1e-9,
+  p: 1e-12,
+  f: 1e-15
+};
+
+function spiceResistorScale(suffix) {
+  if (!suffix) return 1;
+  if (/^meg$/i.test(suffix)) return 1e6;
+  if (suffix === 'm') return 1e-3;
+  if (suffix === 'M') return 1e6;
+  if (suffix.length !== 1) return null;
+  return SPICE_RESISTOR_SCALE[suffix.toLowerCase()] ?? null;
+}
+
+function spiceResistorNumber(whole, fraction, multiplier) {
+  const scale = 10 ** fraction.length;
+  return (Number(whole) * scale + Number(fraction || 0)) * multiplier / scale;
+}
+
+function formatSpiceOhms(ohms) {
+  if (!Number.isFinite(ohms) || ohms < 0) return '1000';
+  const rounded = Math.round(ohms);
+  if (Math.abs(ohms - rounded) <= 1e-9 * Math.max(1, Math.abs(ohms))) return String(rounded);
+  return Number(ohms.toPrecision(12)).toFixed(12).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+export function spiceResistorOhms(value) {
+  const text = String(value ?? '')
+    .trim()
+    .normalize('NFKC')
+    .replace(/(?:\s*(?:Ω|옴|ohms?))$/iu, '')
+    .trim();
+  if (!text) return '1000';
+
+  const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
+  if (rkm) {
+    const multiplier = spiceResistorScale(rkm[2]);
+    return multiplier == null ? '1000' : formatSpiceOhms(spiceResistorNumber(rkm[1], rkm[3], multiplier));
+  }
+
+  const leadingR = /^[rR](\d+)$/.exec(text);
+  if (leadingR) return formatSpiceOhms(spiceResistorNumber('0', leadingR[1], 1));
+
+  const suffixed = /^(\d+(?:\.\d+)?)(?:\s*([A-Za-z]+))?$/.exec(text);
+  if (suffixed) {
+    const multiplier = spiceResistorScale(suffixed[2] ?? '');
+    if (multiplier != null) {
+      const [whole, fraction = ''] = suffixed[1].split('.');
+      return formatSpiceOhms(spiceResistorNumber(whole, fraction, multiplier));
+    }
+  }
+
+  return '1000';
 }
 
 export function buildMcuSchematicAst(spec) {
