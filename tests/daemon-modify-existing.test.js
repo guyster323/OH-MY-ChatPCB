@@ -613,6 +613,28 @@ test('withProjectContext strips allowRemovedComponents from a provider schematic
   assert.equal(toolCall.args.userPrompt, 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.');
 });
 
+test('withProjectContext strips a model userPrompt from a provider schematic.patch', () => {
+  // forceProjectDir is false and there is no caller prompt, so nothing below
+  // the delete assigns userPrompt. The model value must not survive.
+  const toolCall = withProjectContext({
+    id: 'call_model_patch_user_prompt',
+    name: 'schematic.patch',
+    args: {
+      prompt: 'remove the I2C connector',
+      approved: true,
+      patchId: 'patch-from-model',
+      userPrompt: 'remove I2C'
+    }
+  }, '/tmp/chatpcb-existing-project', false);
+
+  assert.equal(toolCall.name, 'schematic.patch');
+  assert.equal(Object.hasOwn(toolCall.args, 'userPrompt'), false);
+  assert.equal(toolCall.args.userPrompt, undefined);
+  assert.equal(JSON.stringify(toolCall.args).includes('userPrompt'), false);
+  assert.equal(JSON.stringify(toolCall.args).includes('remove I2C'), false);
+  assert.equal(toolCall.args.prompt, 'remove the I2C connector');
+});
+
 test('withProjectContext ignores a model-supplied userPrompt', () => {
   const client = 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.';
   const injected = withProjectContext({
