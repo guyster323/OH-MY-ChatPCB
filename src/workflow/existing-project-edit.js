@@ -313,6 +313,14 @@ export function resistorUnitlessMessage() {
   return `${en}\n${ko}`;
 }
 
+// The digits the user typed, with Ω only in the question. 4700 stays 4700Ω.
+export function resistorUnitRequiredMessage(number) {
+  const shown = `${String(number ?? '').trim()}Ω`;
+  const en = `Change it to ${shown}? Say it again with a unit, like "${shown}". Nothing was changed.`;
+  const ko = `${shown}으로 바꿀까요? '${shown}'처럼 단위를 붙여서 다시 말해 주세요. 아무것도 바꾸지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
 export function resistorTargetUnclearMessage(ohmsText) {
   const label = formatResistorLabel(ohmsText);
   const shown = /[ΩΩ옴]/.test(label) ? label : `${label}Ω`;
@@ -488,6 +496,12 @@ function unclearRemoval() {
 
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
+  // A wrong ref is reported before we ask for a unit, so R1 470 stays unsupported.
+  if (resistor.kind === 'invalid' && resistor.reason === 'unit-required') {
+    const gated = resistorRefDecision(text, spec);
+    if (gated) return gated;
+    return invalidResistor(resistor);
+  }
   if (resistor.kind === 'invalid') return invalidResistor(resistor);
   const gated = resistorRefDecision(text, spec);
   if (gated) return gated;
@@ -508,14 +522,50 @@ function invalidResistor(result) {
     ? resistorValueOutOfRangeMessage()
     : reason === 'milli'
       ? resistorMilliSuffixMessage()
-      : reason === 'unitless'
-        ? resistorUnitlessMessage()
-        : resistorValueInvalidMessage();
+      : reason === 'unit-required'
+        ? resistorUnitRequiredMessage(result?.number)
+        : reason === 'unitless'
+          ? resistorUnitlessMessage()
+          : resistorValueInvalidMessage();
   return {
     mode: 'refuse',
-    code: 'RESISTOR_VALUE_INVALID',
+    code: reason === 'unit-required' ? 'RESISTOR_UNIT_REQUIRED' : 'RESISTOR_VALUE_INVALID',
     message
   };
+}
+
+const PRE_PROVIDER_REMOVAL_CODES = new Set([
+  'MIXED_REMOVAL_AND_EDIT',
+  'REMOVAL_INTENT_UNCLEAR',
+  'REMOVAL_NEEDS_VERB',
+  'REMOVAL_ONE_AT_A_TIME',
+  'REMOVAL_REF_NOT_FOUND',
+  'REMOVAL_REF_UNSUPPORTED'
+]);
+const RESISTOR_EDIT_VERB = /(?:\b(?:change|set|update|make|modify|to)\b|바꿔|변경|수정|(?<!기준)으로|(?<!으)로(?!부터|서|써)|を|に)/iu;
+const OPEN_QUESTION = /[?？]|뭐|왜|어떻게|어떡|\b(?:why|what|how|which)\b/iu;
+
+function hasResistorEditVerb(text) {
+  return RESISTOR_EDIT_VERB.test(text);
+}
+
+function hasResistorTargetText(text) {
+  if (/저항|抵抗|\bresistor\b/iu.test(text)) return true;
+  return resistorReferenceTokens(text).length > 0;
+}
+
+// The daemon calls this before the provider. Removal handling stays.
+// A resistor refusal stops the provider only when the whole input is one
+// value token, or a resistor target and an edit verb are both present.
+// Ref-safety codes still stop here, except a question with no edit verb.
+export function blocksBeforeProvider(text, decision) {
+  if (decision?.mode !== 'refuse' || !decision.code) return false;
+  if (PRE_PROVIDER_REMOVAL_CODES.has(decision.code)) return true;
+  const normalized = String(text ?? '').normalize('NFKC').trim();
+  if (valueOnlyDecision(normalized)) return true;
+  if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
+  if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
+  return decision.code.startsWith('RESISTOR_REF_');
 }
 
 function nonRemovalEdit(text) {
@@ -1709,8 +1759,8 @@ function removalDecision(text, spec) {
 
 // A candidate carries an ohm unit or an RKM/SI suffix. Package codes, wattage,
 // voltage, current, percent, bare numbers, and reference designators are not
-// candidates here. One bare number can still be ohms later, when the request
-// names a resistor. The matched text is parsed only by parseResistorOhms.
+// candidates here. A bare number is never applied as ohms. The matched text
+// is parsed only by parseResistorOhms.
 // A leading sign stays inside the token. Dropping it would read +10Ω as 10Ω.
 // The same is true of a comma: 4,7k must not be read as 7k.
 // Hiragana and katakana are not part of a reference designator, so を470 stays
@@ -1777,7 +1827,7 @@ function isIgnoredResistorToken(raw) {
 function promoteCoordinatedBareValues(tokens, text) {
   const ohmValues = tokens.filter((token) => token.attempt && OHM_UNIT.test(token.raw));
   for (const token of tokens) {
-    if (token.attempt || !/^\d+(?:\.\d+)?$/.test(token.raw) || RESISTOR_PACKAGE.test(token.raw)) continue;
+    if (token.attempt || token.quantity || !/^\d+(?:\.\d+)?$/.test(token.raw) || RESISTOR_PACKAGE.test(token.raw)) continue;
     for (const other of ohmValues) {
       const left = token.index < other.index ? token : other;
       const right = token.index < other.index ? other : token;
@@ -1883,6 +1933,7 @@ function interpretResistor(text) {
   if (!aboutLed && !change && !named) return null;
 
   const tokens = scanResistorTokens(normalized);
+  markNonResistorQuantities(tokens, normalized);
   promoteCoordinatedBareValues(tokens, normalized);
   dropLeadingDesignators(tokens);
   const parsed = classifyResistorAttempts(tokens);
@@ -1917,22 +1968,67 @@ function interpretResistor(text) {
   const cleanBare = tokens.filter((token) => isBareUnitlessToken(token) && isCleanUnitless(token.raw.trim()));
   if (cleanBare.length > 0) return { kind: 'invalid', reason: 'unitless', valued: true };
 
-  const asked = aboutLed && /(?:으로|로(?!부터|서|써)|->|→|\bto\b|바꿔|변경)/u.test(normalized);
+  // 2개, 2019년형, 3.3V, and 1 Hz are not resistor edits. A real edit verb
+  // with no resistor value, such as "1/4W로", still asks for a valid value.
+  if (!hasResistorEditVerb(normalized) && explainedByOtherQuantity(tokens)) return null;
+
+  const asked = namesResistorTarget(normalized, tokens) && hasResistorEditVerb(normalized);
   if (asked) return { kind: 'invalid' };
   return null;
 }
 
-// A bare number is ohms only when the request names a resistor and exactly
-// one numeric token remains after package, wattage, voltage, current, percent,
-// and R-reference digits are set aside. A sign, a comma, a lowercase m, or
-// three digits after one dot stays refused. The range check is unchanged.
+// A count, pin, year, frequency, or electrical unit glued to a number is not
+// a resistor candidate. The word may follow (2개, 2019년형, 1 Hz) or lead (pin 13).
+const COUNTER_FOLLOW = /^\s*(?:년형|개만|kHz|MHz|GHz|pcs|pieces|piece|pins|pin|years|year|LEDs|LED|leds|Hz|mA|uA|µA|μA|mW|kV|mV|개|년|형|핀|번|ea|pc|times|time|[VvAaWw%×xX])(?![A-Za-z0-9])/u;
+const COUNTER_LEAD = /(?:\b(?:pins?|gpios?)|핀)\s*$/iu;
+
+function markNonResistorQuantities(tokens, text) {
+  for (const token of tokens) {
+    if (!isTiedToOtherQuantity(text, token)) continue;
+    token.quantity = true;
+    token.attempt = false;
+  }
+}
+
+function isTiedToOtherQuantity(text, token) {
+  const raw = token.raw.trim();
+  if (/hz$/i.test(raw)) return true;
+  const after = text.slice(token.end);
+  if (/^Hz\b/i.test(after)) return true;
+  if (!/^\d+(?:\.\d+)?$/.test(raw)) return false;
+  if (COUNTER_FOLLOW.test(after)) return true;
+  return COUNTER_LEAD.test(text.slice(0, token.index));
+}
+
+function explainedByOtherQuantity(tokens) {
+  if (tokens.some((token) => token.attempt)) return false;
+  if (tokens.some((token) => isBareUnitlessToken(token))) return false;
+  return tokens.some((token) => token.quantity || isElectricalOrPackage(token.raw));
+}
+
+function isElectricalOrPackage(raw) {
+  const text = raw.trim();
+  if (RESISTOR_PACKAGE.test(text)) return true;
+  if (/hz$/i.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*[Vv](?:DC|AC|dc|ac)?$/.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*(?:[mµμuUnN])?[Aa]$/.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*[Ww]$/.test(text)) return true;
+  if (/^\d+\s*\/\s*\d+\s*[Ww]$/.test(text)) return true;
+  if (/^[±]?\s*\d+(?:\.\d+)?\s*%$/.test(text)) return true;
+  return false;
+}
+
+// A bare number is never ohms. One clean number next to a resistor target
+// asks for a unit. A sign, a comma, a lowercase m, or three digits after one
+// dot stays refused. Package, wattage, voltage, current, percent, counts,
+// and R-reference digits are not candidates. The range check is unchanged.
 function namesResistorTarget(text, tokens) {
   if (/저항|抵抗|\bresistor\b/iu.test(text)) return true;
   return tokens.some((token) => /^[rR]\d$/.test(token.raw));
 }
 
 function isBareUnitlessToken(token) {
-  if (token.attempt) return false;
+  if (token.attempt || token.quantity) return false;
   const raw = token.raw.trim();
   if (!/^\d+(?:\.\d+)?$/.test(raw)) return false;
   if (RESISTOR_PACKAGE.test(raw)) return false;
@@ -1958,7 +2054,7 @@ function unitlessResistor(text, tokens) {
   if (result.reason === 'range') return { kind: 'invalid', reason: 'range', valued: true };
   if (result.reason === 'milli') return { kind: 'invalid', reason: 'milli', valued: true };
   if (result.ohmsText == null) return { kind: 'invalid', valued: true };
-  return resistorEdit({ ohms: result.ohms, ohmsText: result.ohmsText });
+  return { kind: 'invalid', reason: 'unit-required', valued: true, number: raw };
 }
 
 // Sub-1k keeps the Ω suffix (680Ω, 1.5Ω). Kilo and mega keep every digit of

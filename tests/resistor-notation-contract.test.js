@@ -6,12 +6,12 @@ import { spiceResistorOhms } from '../src/kicad/project-generator.js';
 import { parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
 import { tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
 import {
-  applyExistingProjectEdit,
   classifyExistingProjectRequest,
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
   resistorTargetUnclearMessage,
+  resistorUnitRequiredMessage,
   resistorUnitlessMessage,
   resistorValueAmbiguousMessage
 } from '../src/workflow/existing-project-edit.js';
@@ -179,17 +179,40 @@ test('the edit entry keeps 1Ω and 10MΩ and refuses the outside', () => {
   assertEdit('change R3 to 10M', 1e7);
 });
 
-test('a unitless number is ohms only when one clean resistor target is named', () => {
-  const accepted = [
-    ['LED 저항 330으로', 330, '330Ω'],
-    ['change the LED resistor to 330', 330, '330Ω'],
-    ['change R3 to 470', 470, '470Ω'],
-    ['R3 330으로', 330, '330Ω'],
-    ['LED resistor 4700', 4700, '4.7k'],
-    ['LEDの抵抗を470に', 470, '470Ω'],
-    ['set R3 to 1000000', 1_000_000, '1M']
+test('a unitless number is never applied and one candidate asks for a unit', () => {
+  // Former F4 positives. A resistor target plus one bare number does not edit.
+  const unitRequired = [
+    ['LED 저항 330으로', '330'],
+    ['change the LED resistor to 330', '330'],
+    ['change R3 to 470', '470'],
+    ['R3 330으로', '330'],
+    ['LED resistor 4700', '4700'],
+    ['LEDの抵抗を470に', '470'],
+    ['set R3 to 1000000', '1000000']
   ];
-  for (const [prompt, ohms, label] of accepted) {
+  for (const [prompt, number] of unitRequired) {
+    const before = structuredClone(SPEC);
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_UNIT_REQUIRED', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, resistorUnitRequiredMessage(number), prompt);
+    assert.equal(
+      decision.message,
+      `Change it to ${number}Ω? Say it again with a unit, like "${number}Ω". Nothing was changed.\n${number}Ω으로 바꿀까요? '${number}Ω'처럼 단위를 붙여서 다시 말해 주세요. 아무것도 바꾸지 않았어요.`,
+      prompt
+    );
+    assert.deepEqual(SPEC, before, prompt);
+  }
+
+  const withUnit = [
+    ['LED 저항 330Ω으로', 330, '330Ω'],
+    ['LED resistor 4k7', 4700, '4.7k'],
+    ['LED 저항 1k', 1000, '1k'],
+    ['LED resistor 470R', 470, '470Ω'],
+    ['LED 저항 680옴', 680, '680Ω']
+  ];
+  for (const [prompt, ohms, label] of withUnit) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
     assert.equal(decision.mode, 'merge', prompt);
     assert.equal(decision.edit?.kind, 'resistor', prompt);
@@ -379,12 +402,12 @@ const SHARED_ROWS = [
     token: '470',
     parse: 470,
     editPrompt: 'change R3 to 470',
-    edit: { ohms: 470 },
+    edit: { code: 'RESISTOR_UNIT_REQUIRED', message: resistorUnitRequiredMessage('470') },
     scanPrompt: '470',
     scan: { unparseable: false, fault: null, resistance: [470] },
     discretePrompt: 'LED 5V 470',
     discrete: { refused: false, ohms: 470, explicit: true },
-    differs: 'The edit path accepts one clean unitless number only when a resistor target is named. The new-project path accepts bare 470 because it is an E24 value (#20). Applying the edit writes the status-LED series resistor R3.'
+    differs: 'A unitless number is never applied. One named resistor and one bare number return RESISTOR_UNIT_REQUIRED and change nothing. The new-project path still accepts bare 470 because it is an E24 value (#20).'
   },
   {
     id: 'two-unitless',
@@ -462,7 +485,7 @@ test('one resistor contract covers the parser, the edit path, and the new-projec
   for (const row of SHARED_ROWS) assertSharedRow(row);
 });
 
-test('a unitless ohms edit still writes the status LED series resistor', () => {
+test('a unitless resistor edit asks for a unit and leaves the series resistor', () => {
   const spec = {
     mcu: { family: 'STM32' },
     schematic: {
@@ -477,13 +500,64 @@ test('a unitless ohms edit still writes the status LED series resistor', () => {
     ]
   };
   const decision = classifyExistingProjectRequest('change R3 to 470', spec);
-  assert.equal(decision.mode, 'merge');
-  assert.equal(decision.edit?.ohms, 470);
-  assert.equal(decision.edit?.label, '470Ω');
-  const next = applyExistingProjectEdit(spec, decision.edit);
-  assert.equal(next.schematic.components.find((part) => part.ref === 'R1').value, '1k');
-  assert.equal(next.schematic.components.find((part) => part.ref === 'R3').value, '470Ω');
-  assert.equal(next.peripherals.find((part) => part.kind === 'status-led-resistor').value, '470');
+  assert.equal(decision.mode, 'refuse');
+  assert.equal(decision.code, 'RESISTOR_UNIT_REQUIRED');
+  assert.equal(decision.edit, undefined);
+  assert.equal(decision.message, resistorUnitRequiredMessage('470'));
+  assert.equal(spec.schematic.components.find((part) => part.ref === 'R1').value, '1k');
+  assert.equal(spec.schematic.components.find((part) => part.ref === 'R3').value, '330Ω');
+  assert.equal(spec.peripherals.find((part) => part.kind === 'status-led-resistor').value, '330');
+});
+
+test('a number followed by a counter or another unit is not a resistor edit', () => {
+  const prompts = [
+    'LED 저항 2개',
+    'LED 저항 1개만',
+    'R3 2개',
+    'LED 저항 2019년형',
+    'LED 저항 2019년',
+    'LED 저항 3형',
+    'LED 저항 5V',
+    'LED 저항 2mA',
+    'LED 저항 1 W',
+    'LED 저항 1%',
+    'LED 1 Hz',
+    'LED 1 kHz',
+    'LED blink 1Hz',
+    'add 2 LEDs',
+    'use 2 LEDs',
+    'LED 2개 추가',
+    'LED 4개 추가',
+    'status LED on pin 13',
+    'LED를 GPIO 4번에 연결',
+    'LED 핀 GPIO15로',
+    '2 pcs',
+    'LED 2 ea',
+    'LED 2x',
+    'LED 2×',
+    'LED resistor 2019 year'
+  ];
+  for (const prompt of prompts) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.notEqual(decision.mode, 'merge', prompt);
+    assert.notEqual(decision.code, 'RESISTOR_UNIT_REQUIRED', prompt);
+    assert.notEqual(decision.edit?.ohms, 2, prompt);
+    assert.notEqual(decision.edit?.ohms, 2019, prompt);
+    assert.notEqual(decision.edit?.label, '2Ω', prompt);
+    assert.notEqual(decision.edit?.label, '2k019', prompt);
+  }
+
+  const countAndValue = classifyExistingProjectRequest('LED 3개 저항 330', SPEC);
+  assert.equal(countAndValue.edit, undefined);
+  assert.notEqual(countAndValue.mode, 'merge');
+  if (countAndValue.code) {
+    assert.equal(countAndValue.code, 'RESISTOR_UNIT_REQUIRED');
+    assert.equal(countAndValue.message, resistorUnitRequiredMessage('330'));
+  }
+  const countAndValueKo = classifyExistingProjectRequest('LED 저항 330, LED 2개', SPEC);
+  assert.equal(countAndValueKo.edit, undefined);
+  assert.notEqual(countAndValueKo.mode, 'merge');
 });
 
 function componentValue(spec, ref) {
@@ -556,8 +630,10 @@ test('a named resistor edit changes only the LED series resistor', () => {
     peripherals: [{ kind: 'status-led-resistor', value: '1k' }]
   };
   const namedSeries = classifyExistingProjectRequest('change R3 to 470', profile);
-  assert.equal(namedSeries.mode, 'merge');
-  assert.equal(namedSeries.edit?.ohms, 470);
+  assert.equal(namedSeries.mode, 'refuse');
+  assert.equal(namedSeries.code, 'RESISTOR_UNIT_REQUIRED');
+  assert.equal(namedSeries.edit, undefined);
+  assert.equal(namedSeries.message, resistorUnitRequiredMessage('470'));
   const pullup = classifyExistingProjectRequest('change R4 to 470', profile);
   assert.equal(pullup.mode, 'refuse');
   assert.equal(pullup.code, 'RESISTOR_REF_UNSUPPORTED');
@@ -582,8 +658,10 @@ test('a named resistor edit changes only the LED series resistor', () => {
   assert.equal(missingR3.message, resistorRefNotFoundMessage('R3'));
   assert.equal(missingR3.edit, undefined);
   const generic = classifyExistingProjectRequest('change the LED resistor to 470', noSeries);
-  assert.equal(generic.mode, 'merge');
-  assert.equal(generic.edit?.ohms, 470);
+  assert.equal(generic.mode, 'refuse');
+  assert.equal(generic.code, 'RESISTOR_UNIT_REQUIRED');
+  assert.equal(generic.edit, undefined);
+  assert.equal(generic.message, resistorUnitRequiredMessage('470'));
   const genericKo = classifyExistingProjectRequest('LED 저항 470Ω으로', noSeries);
   assert.equal(genericKo.mode, 'merge');
   assert.equal(genericKo.edit?.ohms, 470);
@@ -593,11 +671,15 @@ test('a named resistor edit changes only the LED series resistor', () => {
   assert.equal(componentValue(noSeries, 'R1'), '1k');
 
   const fullwidth = classifyExistingProjectRequest('change \uFF32\uFF13 to 470', spec);
-  assert.equal(fullwidth.mode, 'merge');
-  assert.equal(fullwidth.edit?.ohms, 470);
+  assert.equal(fullwidth.mode, 'refuse');
+  assert.equal(fullwidth.code, 'RESISTOR_UNIT_REQUIRED');
+  assert.equal(fullwidth.edit, undefined);
+  assert.equal(fullwidth.message, resistorUnitRequiredMessage('470'));
   const lower = classifyExistingProjectRequest('change r3 to 470', spec);
-  assert.equal(lower.mode, 'merge');
-  assert.equal(lower.edit?.ohms, 470);
+  assert.equal(lower.mode, 'refuse');
+  assert.equal(lower.code, 'RESISTOR_UNIT_REQUIRED');
+  assert.equal(lower.edit, undefined);
+  assert.equal(lower.message, resistorUnitRequiredMessage('470'));
 
   const two = classifyExistingProjectRequest('change R1 and R3 to 470', spec);
   assert.equal(two.mode, 'refuse');
@@ -610,8 +692,10 @@ test('a named resistor edit changes only the LED series resistor', () => {
   assert.equal(twoMissing.code, 'RESISTOR_REF_AMBIGUOUS');
   assert.equal(twoMissing.message, resistorRefAmbiguousMessage(['R8', 'R9']));
   const sameRef = classifyExistingProjectRequest('change R3 and r3 to 470', spec);
-  assert.equal(sameRef.mode, 'merge');
-  assert.equal(sameRef.edit?.ohms, 470);
+  assert.equal(sameRef.mode, 'refuse');
+  assert.equal(sameRef.code, 'RESISTOR_UNIT_REQUIRED');
+  assert.equal(sameRef.edit, undefined);
+  assert.equal(sameRef.message, resistorUnitRequiredMessage('470'));
 
   const milli = classifyExistingProjectRequest('change R1 to 4m7', spec);
   assert.equal(milli.code, 'RESISTOR_VALUE_INVALID');
