@@ -156,6 +156,40 @@ function appliedTransaction(patchId = 'patch_test') {
   return { transactions: [{ proposal: { proposalId: patchId }, status: 'applied' }] };
 }
 
+function failedTransaction(status, patchId = 'patch_test') {
+  return { transactions: [{ proposal: { proposalId: patchId }, status }] };
+}
+
+async function installHost(page) {
+  await page.evaluate(() => {
+    window.__hostMessages = [];
+    window.chatpcbHost = {
+      postMessage(message) {
+        window.__hostMessages.push(JSON.parse(JSON.stringify(message)));
+      }
+    };
+  });
+}
+
+async function completionSnapshot(page) {
+  return page.evaluate(() => {
+    const status = document.querySelector('#request-status');
+    return {
+      text: status?.textContent ?? '',
+      state: status?.dataset.state ?? '',
+      reloads: (window.__hostMessages ?? []).filter((message) => message?.type === 'project.reload'),
+      validation: document.querySelector('#validation-status')?.dataset.state ?? '',
+      kicadHidden: document.querySelector('#kicad-link-card')?.hidden === true,
+      draft: document.querySelector('[data-step="circuit.draft"]')?.dataset.state ?? '',
+      review: document.querySelector('[data-step="circuit.review"]')?.dataset.state ?? ''
+    };
+  });
+}
+
+async function approveCallCount(page) {
+  return approveCalls(page).then((calls) => calls.length);
+}
+
 test('approve reconcile settles a lost reply, a closed socket, and a late reply', async (t) => {
   const browser = await launchPanelBrowser(t);
   if (!browser) return;
@@ -207,12 +241,14 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
         inspection: { projectDigest: 'digest-before' },
         evidenceDigest: { projectDigest: 'digest-before', matches: true }
       });
-      await absent.page.waitForFunction((needle) => (
+      await absent.page.waitForFunction((text) => (
         document.querySelector('#request-status')?.dataset.state === 'failed'
-        && document.querySelector('#request-status')?.textContent?.includes(needle)
-      ), en['patch.apply.failed.recheck'], { timeout: 3000 });
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
       const failed = await requestText(absent.page);
-      assert.equal(failed.includes(en['patch.apply.failed.unknown']), true, failed);
+      assert.equal(failed, en['patch.apply.unconfirmed'], failed);
+      assert.equal(failed.includes(en['patch.apply.failed.unknown']), false, failed);
+      assert.equal(failed.includes(en['patch.apply.failed.recheck']), false, failed);
       assert.equal(failed.includes(en['patch.apply.summary']), false, failed);
       assert.equal(failed.includes(en['patch.apply.applied']), false, failed);
       await absent.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
@@ -300,6 +336,214 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
       assert.deepEqual(late.pageErrors, []);
     } finally {
       await late.page.close();
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('reconcile applied reloads once, a missing record stays unconfirmed, and reconcile times out', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const appliedBody = { applied: true, operation: 'patched', validation: { ok: true }, patchId: 'patch_test' };
+
+  try {
+    const direct = await openPanel(browser, port);
+    let directShot;
+    try {
+      await showReady(direct.page, 5000);
+      await installHost(direct.page);
+      await clickApply(direct.page);
+      const approve = (await approveCalls(direct.page)).at(-1);
+      await emitResult(direct.page, approve.id, appliedBody);
+      await direct.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      directShot = await completionSnapshot(direct.page);
+      assert.equal(directShot.text, en['patch.apply.applied']);
+      assert.equal(directShot.state, 'completed');
+      assert.equal(directShot.reloads.length, 1, 'direct applied:true posts project.reload once');
+      assert.deepEqual(directShot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual(direct.pageErrors, []);
+    } finally {
+      await direct.page.close();
+    }
+
+    const reconciled = await openPanel(browser, port);
+    try {
+      await showReady(reconciled.page, 40);
+      await installHost(reconciled.page);
+      await clickApply(reconciled.page);
+      const statusCall = await waitForCall(reconciled.page, 'project.transaction.status');
+      await emitResult(reconciled.page, statusCall.id, appliedTransaction());
+      await reconciled.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      const shot = await completionSnapshot(reconciled.page);
+      assert.equal(shot.reloads.length, 1, 'reconcile applied posts project.reload once');
+      assert.deepEqual(shot, directShot);
+      await emitResult(reconciled.page, statusCall.id, appliedTransaction());
+      const approve = (await approveCalls(reconciled.page)).at(-1);
+      await emitResult(reconciled.page, approve.id, {
+        applied: false,
+        patchId: 'patch_test',
+        reason: { code: 'PATCH_STALE' },
+        validation: { ok: true }
+      });
+      await reconciled.page.waitForTimeout(50);
+      const again = await completionSnapshot(reconciled.page);
+      assert.deepEqual(again, shot);
+      assert.equal(again.text.includes(en['patch.apply.failed.PATCH_STALE']), false, again.text);
+      const sent = await approveCallCount(reconciled.page);
+      await reconciled.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
+      await reconciled.page.locator('#approve-patch-button').dispatchEvent('click');
+      assert.equal(await approveCallCount(reconciled.page), sent);
+      assert.deepEqual(reconciled.pageErrors, []);
+    } finally {
+      await reconciled.page.close();
+    }
+
+    const missing = await openPanel(browser, port);
+    try {
+      await showReady(missing.page, 40);
+      await installHost(missing.page);
+      await clickApply(missing.page);
+      const approve = (await approveCalls(missing.page)).at(-1);
+      const statusCall = await waitForCall(missing.page, 'project.transaction.status');
+      await emitResult(missing.page, statusCall.id, { transactions: [] });
+      const inspectCall = await waitForCall(missing.page, 'project.inspect');
+      assert.equal(inspectCall.args.expectedDigest, 'digest-before');
+      await emitResult(missing.page, inspectCall.id, {
+        manifest: { freshness: { status: 'current' } },
+        inspection: { projectDigest: 'digest-before' },
+        evidenceDigest: { projectDigest: 'digest-before', matches: true }
+      });
+      await missing.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
+      const unconfirmed = await requestText(missing.page);
+      assert.equal(await missing.page.locator('#request-status').getAttribute('data-state'), 'failed');
+      assert.equal(unconfirmed, en['patch.apply.unconfirmed'], unconfirmed);
+      assert.equal(unconfirmed.includes('KiCad'), true, unconfirmed);
+      assert.equal(unconfirmed.includes(en['patch.apply.failed.unknown']), false, unconfirmed);
+      assert.equal(unconfirmed.includes(en['patch.apply.failed.recheck']), false, unconfirmed);
+      assert.deepEqual(await completionSnapshot(missing.page).then((shot) => shot.reloads), []);
+      await emitResult(missing.page, approve.id, { ...appliedBody, patchId: 'patch_other' });
+      await missing.page.waitForTimeout(40);
+      assert.equal(await requestText(missing.page), en['patch.apply.unconfirmed']);
+      assert.deepEqual((await completionSnapshot(missing.page)).reloads, []);
+      await emitResult(missing.page, approve.id, appliedBody);
+      await missing.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      const corrected = await completionSnapshot(missing.page);
+      assert.deepEqual(corrected.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.equal(corrected.text, directShot.text);
+      assert.equal(corrected.state, directShot.state);
+      await emitResult(missing.page, approve.id, appliedBody);
+      await missing.page.waitForTimeout(40);
+      assert.deepEqual((await completionSnapshot(missing.page)).reloads, corrected.reloads);
+      const sent = await approveCallCount(missing.page);
+      await missing.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
+      await missing.page.locator('#approve-patch-button').dispatchEvent('click');
+      assert.equal(await missing.page.locator('#approve-patch-button').isDisabled(), true);
+      assert.equal(await approveCallCount(missing.page), sent);
+      assert.deepEqual(missing.pageErrors, []);
+    } finally {
+      await missing.page.close();
+    }
+
+    const rolledBack = await openPanel(browser, port);
+    try {
+      await showReady(rolledBack.page, 40);
+      await installHost(rolledBack.page);
+      await clickApply(rolledBack.page);
+      const approve = (await approveCalls(rolledBack.page)).at(-1);
+      const statusCall = await waitForCall(rolledBack.page, 'project.transaction.status');
+      await emitResult(rolledBack.page, statusCall.id, failedTransaction('rolled-back'));
+      await rolledBack.page.waitForFunction((needle) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent?.includes(needle)
+      ), en['patch.apply.failed.recheck'], { timeout: 3000 });
+      const failed = await requestText(rolledBack.page);
+      assert.equal(failed.includes(en['patch.apply.failed.unknown']), true, failed);
+      assert.equal(failed.includes(en['patch.apply.unconfirmed']), false, failed);
+      assert.deepEqual((await completionSnapshot(rolledBack.page)).reloads, []);
+      await emitResult(rolledBack.page, statusCall.id, appliedTransaction());
+      await rolledBack.page.waitForTimeout(40);
+      assert.equal(await requestText(rolledBack.page), failed);
+      await emitResult(rolledBack.page, approve.id, appliedBody);
+      await rolledBack.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      assert.deepEqual((await completionSnapshot(rolledBack.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      const sent = await approveCallCount(rolledBack.page);
+      await rolledBack.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
+      await rolledBack.page.locator('#approve-patch-button').dispatchEvent('click');
+      assert.equal(await approveCallCount(rolledBack.page), sent);
+      assert.deepEqual(rolledBack.pageErrors, []);
+    } finally {
+      await rolledBack.page.close();
+    }
+
+    const silentStatus = await openPanel(browser, port);
+    try {
+      await showReady(silentStatus.page, 30);
+      await silentStatus.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 200; });
+      await installHost(silentStatus.page);
+      await clickApply(silentStatus.page);
+      await waitForCall(silentStatus.page, 'project.transaction.status');
+      assert.equal(await requestText(silentStatus.page), en['patch.apply.checking']);
+      await silentStatus.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
+      assert.equal(await silentStatus.page.locator('#request-status').getAttribute('data-state'), 'failed');
+      assert.equal((await requestText(silentStatus.page)).includes('KiCad'), true);
+      assert.deepEqual((await completionSnapshot(silentStatus.page)).reloads, []);
+      const approve = (await approveCalls(silentStatus.page)).at(-1);
+      await emitResult(silentStatus.page, approve.id, appliedBody);
+      await silentStatus.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      assert.deepEqual((await completionSnapshot(silentStatus.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      const sent = await approveCallCount(silentStatus.page);
+      await silentStatus.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
+      await silentStatus.page.locator('#approve-patch-button').dispatchEvent('click');
+      assert.equal(await approveCallCount(silentStatus.page), sent);
+      assert.deepEqual(silentStatus.pageErrors, []);
+    } finally {
+      await silentStatus.page.close();
+    }
+
+    const silentInspect = await openPanel(browser, port);
+    try {
+      await showReady(silentInspect.page, 30);
+      await silentInspect.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 350; });
+      await installHost(silentInspect.page);
+      await clickApply(silentInspect.page);
+      const statusCall = await waitForCall(silentInspect.page, 'project.transaction.status');
+      await emitResult(silentInspect.page, statusCall.id, { transactions: [] });
+      const inspectCall = await waitForCall(silentInspect.page, 'project.inspect');
+      assert.equal(await requestText(silentInspect.page), en['patch.apply.checking']);
+      await silentInspect.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
+      await emitResult(silentInspect.page, inspectCall.id, {
+        manifest: { freshness: { status: 'current' } },
+        inspection: { projectDigest: 'digest-before' },
+        evidenceDigest: { projectDigest: 'digest-before', matches: true }
+      });
+      await silentInspect.page.waitForTimeout(40);
+      const text = await requestText(silentInspect.page);
+      assert.equal(text, en['patch.apply.unconfirmed'], text);
+      assert.equal(text.includes(en['patch.apply.failed.unknown']), false, text);
+      assert.deepEqual((await completionSnapshot(silentInspect.page)).reloads, []);
+      assert.deepEqual(silentInspect.pageErrors, []);
+    } finally {
+      await silentInspect.page.close();
     }
   } finally {
     await new Promise((resolveClose) => server.close(resolveClose));

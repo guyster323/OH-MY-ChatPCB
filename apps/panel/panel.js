@@ -126,6 +126,7 @@ let approveFlight = null;
 const spentPatchIds = new Set();
 const closedApproveCalls = new Set();
 const DEFAULT_APPROVE_TIMEOUT_MS = 30000;
+const DEFAULT_RECONCILE_TIMEOUT_MS = 30000;
 let removalConfirmArmed = false;
 let syncingRemoval = false;
 let removalClosedForFocus = false;
@@ -384,6 +385,27 @@ function approveTimeoutMs() {
   return DEFAULT_APPROVE_TIMEOUT_MS;
 }
 
+function reconcileTimeoutMs() {
+  const value = Number(window.__chatpcbReconcileTimeoutMs);
+  if (Number.isFinite(value) && value >= 0) return value;
+  return DEFAULT_RECONCILE_TIMEOUT_MS;
+}
+
+function clearReconcileTimer(flight) {
+  if (!flight?.reconcileTimer) return;
+  clearTimeout(flight.reconcileTimer);
+  flight.reconcileTimer = null;
+}
+
+function armReconcileTimer(flight) {
+  if (!flight) return;
+  clearReconcileTimer(flight);
+  flight.reconcileTimer = setTimeout(() => {
+    if (approveFlight !== flight || flight.settled || flight.phase !== 'checking') return;
+    finishApproveReconcile('unknown');
+  }, reconcileTimeoutMs());
+}
+
 function reconnectDelayMs() {
   const value = Number(window.__chatpcbReconnectMs);
   if (Number.isFinite(value) && value >= 0) return value;
@@ -525,8 +547,14 @@ function handleEnvelope(envelope) {
   const id = envelope.payload.id;
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
   pendingCalls.delete(id);
-  // A reply that arrives after the approve timeout must not paint over the reconcile result.
-  if (closedApproveCalls.has(id)) return;
+  // A late error or a second status keeps the first reconcile result.
+  // An authoritative applied:true may still upgrade unknown or not-applied.
+  if (closedApproveCalls.has(id)) {
+    if (isAuthoritativeApplied(envelope.payload, approveFlight?.patchId)) {
+      correctUnconfirmedApply(id, envelope.payload.result);
+    }
+    return;
+  }
   if (callName === 'project.transaction.status') {
     handleTransactionStatusReply(id, envelope.payload);
     return;
@@ -706,15 +734,17 @@ function handleEnvelope(envelope) {
       inspectActiveProject();
       return;
     }
-    const removedRefs = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
+    const removedRefs = (patchApprovalState.removedComponents ?? [])
+      .map((part) => part.ref)
+      .filter((ref) => typeof ref === 'string' && ref.length > 0);
     clearPatchApproval();
-    renderProjectRequest({
+    const completed = renderProjectRequest({
       ...result,
       operation: result.operation || 'patched',
       fromPatchApprove: true,
       removedRefs
     });
-    inspectActiveProject();
+    if (completed !== true) inspectActiveProject();
     return;
   }
   if (callName === 'schematic.patch.cancel') {
@@ -1038,6 +1068,14 @@ function renderProjectRequest(result) {
     });
     return;
   }
+  completeAppliedPatch(result);
+  return true;
+}
+
+// Direct applied:true and a reconcile-confirmed apply both finish here:
+// same copy, same completed state, and one project.reload.
+function completeAppliedPatch(result) {
+  renderConversation(result);
   renderReview(result.review);
   renderArtifacts(result.files);
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
@@ -1053,12 +1091,17 @@ function renderProjectRequest(result) {
   renderRequestStatus({ state: 'completed', summaryKey, summaryVars });
   appendProgress({ stage: 'done', text: t(summaryKey, summaryVars) });
 
-  const projectFile = findProjectFile(result.files);
-  if (!projectFile) return;
-  kiCadLinkCardEl.hidden = false;
-  const hostAvailable = postHostMessage({ type: 'project.reload', projectPath: activeProject.projectDir });
-  renderKiCadLink({ linkState: hostAvailable ? 'reload-needed' : 'available', projectPath: projectFile });
-  if (!hostAvailable) showKiCadFallback(projectFile);
+  const projectDir = activeProject?.projectDir;
+  if (typeof projectDir === 'string' && projectDir.length > 0) {
+    const hostAvailable = postHostMessage({ type: 'project.reload', projectPath: projectDir });
+    const projectFile = findProjectFile(result?.files ?? {});
+    if (projectFile) {
+      kiCadLinkCardEl.hidden = false;
+      renderKiCadLink({ linkState: hostAvailable ? 'reload-needed' : 'available', projectPath: projectFile });
+      if (!hostAvailable) showKiCadFallback(projectFile);
+    }
+  }
+  inspectActiveProject();
 }
 
 function inspectActiveProject() {
@@ -1702,7 +1745,9 @@ function armApproveFlight(callId) {
       .filter((ref) => typeof ref === 'string' && ref.length > 0),
     phase: 'applying',
     settled: false,
+    outcome: null,
     timer: null,
+    reconcileTimer: null,
     statusCallId: null,
     inspectCallId: null
   };
@@ -1749,6 +1794,7 @@ function beginApproveReconcile() {
   clearPatchApproval();
   renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.checking' });
   if (socket?.readyState === WebSocket.OPEN) startApproveReconcile();
+  else armReconcileTimer(flight);
 }
 
 function restartApproveReconcile() {
@@ -1764,10 +1810,14 @@ function restartApproveReconcile() {
 function startApproveReconcile() {
   const flight = approveFlight;
   if (!flight || flight.phase !== 'checking' || flight.settled || flight.statusCallId || flight.inspectCallId) return;
-  if (!flight.projectDir || socket?.readyState !== WebSocket.OPEN) return;
+  if (!flight.projectDir || socket?.readyState !== WebSocket.OPEN) {
+    armReconcileTimer(flight);
+    return;
+  }
   const id = `txn_status_${Date.now()}_${crypto.randomUUID()}`;
   flight.statusCallId = id;
   pendingCalls.set(id, 'project.transaction.status');
+  armReconcileTimer(flight);
   sendToolCall({ id, name: 'project.transaction.status', args: { projectDir: flight.projectDir } });
 }
 
@@ -1804,11 +1854,8 @@ function classifyInspect(payload, flight) {
   const digest = typeof result.inspection?.projectDigest === 'string'
     ? result.inspection.projectDigest
     : (typeof result.evidenceDigest?.projectDigest === 'string' ? result.evidenceDigest.projectDigest : '');
-  const matchesAfter = typeof flight.afterDigest === 'string' && flight.afterDigest.length > 0 && digest === flight.afterDigest;
-  const matchesBefore = result.evidenceDigest?.matches === true
-    || (typeof flight.beforeDigest === 'string' && flight.beforeDigest.length > 0 && digest === flight.beforeDigest);
-  if (matchesAfter) return 'applied';
-  if (matchesBefore) return 'not-applied';
+  // No transaction record yet. An unchanged project is not proof the apply failed.
+  if (typeof flight.afterDigest === 'string' && flight.afterDigest.length > 0 && digest === flight.afterDigest) return 'applied';
   return 'unknown';
 }
 
@@ -1823,6 +1870,7 @@ function requestReconcileInspect(flight) {
   pendingCalls.set(id, 'project.inspect');
   const args = { projectDir: flight.projectDir };
   if (typeof flight.beforeDigest === 'string' && flight.beforeDigest.length > 0) args.expectedDigest = flight.beforeDigest;
+  armReconcileTimer(flight);
   sendToolCall({ id, name: 'project.inspect', args });
 }
 
@@ -1843,17 +1891,43 @@ function handleReconcileInspect(id, payload) {
   finishApproveReconcile(classifyInspect(payload, flight));
 }
 
+function isAuthoritativeApplied(payload, patchId) {
+  if (!payload || payload.ok !== true) return false;
+  const result = payload.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+  if (normalizeDaemonReply(result, 'patch-apply').ok !== true) return false;
+  if (typeof result.patchId === 'string' && result.patchId.length > 0 && result.patchId !== patchId) return false;
+  return true;
+}
+
+function correctUnconfirmedApply(callId, result) {
+  const flight = approveFlight;
+  if (!flight || flight.callId !== callId || flight.settled !== true) return;
+  if (flight.outcome !== 'unknown' && flight.outcome !== 'not-applied') return;
+  flight.outcome = 'applied';
+  completeAppliedPatch({
+    ...result,
+    applied: true,
+    operation: result?.operation || 'patched',
+    fromPatchApprove: true,
+    removedRefs: flight.removedRefs
+  });
+}
+
 function finishApproveReconcile(outcome) {
   const flight = approveFlight;
   if (!flight || flight.settled || flight.phase !== 'checking') return;
+  clearReconcileTimer(flight);
   flight.settled = true;
+  flight.outcome = outcome;
   if (flight.patchId) spentPatchIds.add(flight.patchId);
   if (outcome === 'applied') {
-    const summaryKey = flight.removedRefs.length > 0 ? 'patch.apply.done' : 'patch.apply.applied';
-    const summaryVars = flight.removedRefs.length > 0 ? { refs: flight.removedRefs.join(', ') } : undefined;
-    workflowFlags.circuitApplied = true;
-    renderRequestStatus({ state: 'completed', summaryKey, summaryVars });
-    appendProgress({ stage: 'done', text: t(summaryKey, summaryVars) });
+    completeAppliedPatch({
+      applied: true,
+      operation: 'patched',
+      fromPatchApprove: true,
+      removedRefs: flight.removedRefs
+    });
     return;
   }
   if (outcome === 'not-applied') {
@@ -2677,6 +2751,7 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
     showPatch(state = {}) {
       if (approveFlight && !(approveFlight.phase === 'checking' && approveFlight.settled !== true)) {
         if (approveFlight.timer) clearTimeout(approveFlight.timer);
+        clearReconcileTimer(approveFlight);
         approveFlight = null;
       }
       const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
