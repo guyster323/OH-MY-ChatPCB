@@ -280,7 +280,18 @@ test('tolerance, labeled and bare resistors, fullwidth digits, and sub-ohm refus
   assert.match(fractionBlocker.en, /^Is 3\.2 a resistor in ohms, an LED count, or something else\?/);
   assert.match(fractionBlocker.ko, /^3\.2는 저항\(Ω\)인가요, LED 개수인가요\?/);
 
-  for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0.5Ω', 'LED 5V R47', 'LED 5V 0']) {
+  for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0']) {
+    const refused = await generateLed(prompt);
+    assert.equal(refused.spec.discrete.refused, true, prompt);
+    assert.equal(components(refused, 'Device:LED').length, 0, prompt);
+    assert.equal(components(refused, 'Device:R').length, 0, prompt);
+    assert.equal(refused.review.status, 'blocked', prompt);
+    const blocker = refused.review.findings.blockers.find((finding) => finding.code === 'discrete-led-invalid-resistor');
+    assert.ok(blocker, `${prompt} ${JSON.stringify(refused.review.findings.blockers.map((item) => item.code))}`);
+    assert.match(blocker.en, /not valid/, blocker.en);
+  }
+
+  for (const prompt of ['LED 5V 0.5Ω', 'LED 5V R47']) {
     const refused = await generateLed(prompt);
     assert.equal(refused.spec.discrete.refused, true, prompt);
     assert.equal(components(refused, 'Device:LED').length, 0, prompt);

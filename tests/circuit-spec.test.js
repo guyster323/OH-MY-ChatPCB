@@ -715,14 +715,18 @@ test('fullwidth digits, glued counts, word pcs, and sub-ohm resistors', () => {
     assert.equal(parsed.supplyVolts, 5, prompt);
   }
 
+  for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0', '엘이디 0Ω']) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-invalid-resistor', prompt);
+    assert.match(parsed.reviewBlockers[0].en, /not valid/);
+    assert.match(parsed.reviewBlockers[0].ko, /올바르지 않아요/);
+  }
+
   const tooSmall = [
-    ['LED 5V 0R', /0R/, /0Ω은/],
-    ['LED 5V 0Ω', /0Ω/, /0Ω은/],
-    ['LED 5V 0 ohm', /0 ohm/, /0Ω은/],
-    ['LED 5V 0', /0 \(0Ω\)/, /0Ω은/],
     ['LED 5V 0.5Ω', /0\.5Ω/, /0\.5Ω은/],
     ['LED 5V R47', /R47/, /0\.47Ω은/],
-    ['엘이디 0Ω', /0Ω/, /0Ω은/],
     ['엘이디 R47', /R47/, /0\.47Ω은/]
   ];
   for (const [prompt, english, korean] of tooSmall) {
@@ -1590,9 +1594,6 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     ['R1=330', [{ value: 330, unit: 'ohm', raw: 'R1=330' }]],
     ['R1 330', [{ value: 330, unit: 'ohm', raw: 'R1 330' }]],
     ['R47', [{ value: 0.47, unit: 'ohm', raw: 'R47' }]],
-    ['0R', [{ value: 0, unit: 'ohm', raw: '0R' }]],
-    ['0Ω', [{ value: 0, unit: 'ohm', raw: '0Ω' }]],
-    ['0 ohm', [{ value: 0, unit: 'ohm', raw: '0 ohm' }]],
     ['0.5Ω', [{ value: 0.5, unit: 'ohm', raw: '0.5Ω' }]],
     ['LEDx3', [{ value: 3, unit: 'count', raw: 'LEDx3' }]],
     ['LED×3', [{ value: 3, unit: 'count', raw: 'LED×3' }]],
@@ -2146,6 +2147,8 @@ test('every discrete LED message is one language and Korean has no English words
     'LED 5V 20uA',
     'LED 0 pcs',
     'LED 0Ω',
+    'LED 5V R47',
+    '엘이디 R47',
     'LED 5V 4m7',
     '5V에 LED 2m2 저항',
     'LED 5V -10 ohm',

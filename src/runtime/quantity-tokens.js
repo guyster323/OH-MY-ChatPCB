@@ -174,7 +174,7 @@ function trailingSupplyKind(prompt, end) {
 }
 
 // Every resistor form goes through parseResistorOhms. A lone m is refused
-// there (4m7 and 4.7m are not values). Zero stays 0 so 0Ω is visible.
+// there (4m7 and 4.7m are not values). Zero is null, so 0Ω is not a token.
 function resistorOhmsNumber(text) {
   const parsed = parseResistorOhms(text);
   if (parsed == null) return null;
@@ -419,7 +419,7 @@ function collectOhm(prompt, candidates) {
     const end = matchStart + match[0].length;
     const start = matchStart + match[0].indexOf(match[1]);
     const ohms = resistorOhmsNumber(prompt.slice(start, end));
-    // 0Ω is kept so the draft can refuse it instead of ignoring the token.
+    // 0Ω does not parse, so the span is unparseable instead of a 0Ω token.
     // "1.000 ohm" does not parse. The span stays covered so a bare 1.000 is not 1Ω.
     if (ohms == null) {
       candidates.push(invalidResistorCandidate(PRIORITY.ohm, start, end, prompt.slice(start, end)));
@@ -433,6 +433,17 @@ function collectOhm(prompt, candidates) {
       invalid: false,
       token: resistanceToken(prompt, start, end, ohms, 'ohm')
     });
+  }
+}
+
+// "4,7k" must not be read as 7k. A comma-grouped number plus a suffix or an
+// ohm unit covers the whole span, including the digits the suffix matcher
+// would otherwise start after the comma.
+function collectGroupedComma(prompt, candidates) {
+  const pattern = /(?<![\w.])\d{1,3}(?:,\d+)+(?:\.\d+)?(?:\s*(?:meg|[rRkKmM])(?:\s*(?:Ω|옴|ohms?))?|\s*(?:Ω|옴|ohms?))(?![A-Za-z])/giu;
+  for (const match of prompt.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    candidates.push(invalidResistorCandidate(PRIORITY.suffix, start, start + match[0].length, match[0]));
   }
 }
 
@@ -879,20 +890,17 @@ function collectBare(prompt, candidates) {
     const end = start + match[0].length;
     const rawNumber = match[1];
     const ohms = Number(rawNumber);
-    // Bare 0 is a resistor of 0Ω so the range check can refuse it. A dropped 0
-    // would leave the calculated default in its place.
+    // Bare 0 is unparseable. Dropping it would leave the calculated default.
     if (!(ohms > 0)) {
       if (ohms === 0) {
-        const parsed = resistorOhmsNumber(rawNumber);
-        if (parsed === 0) {
-          candidates.push({
-            priority: PRIORITY.bare,
-            start,
-            end,
-            invalid: false,
-            token: resistanceToken(prompt, start, end, 0, 'bare')
-          });
-        }
+        candidates.push({
+          priority: PRIORITY.bare,
+          start,
+          end,
+          invalid: true,
+          reason: 'invalid',
+          token: null
+        });
       }
       continue;
     }
@@ -959,6 +967,7 @@ export function tokenizeQuantities(prompt) {
   collectRkm(text, candidates);
   collectLabeledResistor(text, candidates);
   collectOhm(text, candidates);
+  collectGroupedComma(text, candidates);
   collectSuffix(text, candidates);
   collectCurrent(text, candidates);
   collectTolerance(text, candidates);

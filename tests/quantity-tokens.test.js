@@ -38,9 +38,6 @@ test('resistor quantity tokens match parseResistorOhms', () => {
     ['1.05M', 1_050_000],
     ['1.24k', 1240],
     ['R47', 0.47],
-    ['0R', 0],
-    ['0Ω', 0],
-    ['0 ohm', 0],
     ['0.5Ω', 0.5]
   ];
 
@@ -91,17 +88,24 @@ test('a leading sign is not stripped from a resistor token', () => {
   assert.equal(current.tokens[0].value, -20);
 });
 
-test('a bare zero stays a resistor token', () => {
-  const scan = tokenizeQuantities('LED 5V 0');
-  assert.equal(scan.unparseable, false);
-  assert.equal(scan.resistorFault ?? null, null);
-  const resistor = scan.tokens.find((token) => token.kind === 'resistance');
-  assert.equal(resistor?.value, 0);
-  assert.equal(resistor?.raw, '0');
+test('zero resistance is unparseable and a comma group is not a suffix', () => {
+  for (const prompt of ['0', '0R', '0Ω', '0 ohm', 'LED 5V 0', 'LED with a 0 ohm resistor', 'LED with a 4,7k resistor', '4,7k']) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.unparseable, true, prompt);
+    assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
+    assert.equal(scan.tokens.some((token) => token.value === 7000 || token.value === 7), false, prompt);
+  }
+  assert.equal(parseResistorOhms('0'), null);
+  assert.equal(parseResistorOhms('0R'), null);
+  assert.equal(parseResistorOhms('4,7k'), null);
 
   const current = tokenizeQuantities('0mA').tokens[0];
   assert.equal(current.unit, 'mA');
   assert.equal(current.value, 0);
+
+  const kept = tokenizeQuantities('LED with a 4k7 resistor');
+  assert.equal(kept.unparseable, false);
+  assert.equal(kept.tokens.find((token) => token.kind === 'resistance').value, 4700);
 });
 
 test('an ambiguous thousands dot is not read as a resistor', () => {

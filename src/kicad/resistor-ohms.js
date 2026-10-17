@@ -41,8 +41,9 @@ function formatResistorOhms(ohms) {
 const OHM_UNIT_TAIL = /(?:\s*(?:Ω|옴|ohms?))$/iu;
 
 // One resistor-value parser. Unparseable text returns null. Callers must fail
-// closed instead of guessing a value. Zero is "0" so a 0Ω token stays visible.
-export function parseResistorOhms(value) {
+// closed instead of guessing a value. Zero is null here so a 0Ω token is not a
+// resistance. classifyResistorValue still sees 0 and refuses it as out of range.
+function parseResistorOhmsAllowingZero(value) {
   const text = String(value ?? '')
     .trim()
     .normalize('NFKC')
@@ -71,6 +72,13 @@ export function parseResistorOhms(value) {
   return formatResistorOhms(resistorNumber(whole, fraction, multiplier));
 }
 
+export function parseResistorOhms(value) {
+  const text = parseResistorOhmsAllowingZero(value);
+  if (text == null) return null;
+  if (Number(text) === 0) return null;
+  return text;
+}
+
 function bareResistorText(value) {
   return String(value ?? '')
     .trim()
@@ -86,10 +94,11 @@ export function isLoneMilliResistorSuffix(value) {
 }
 
 // Shared by the edit path and SPICE. A lone m is refused with the M hint.
-// parseResistorOhms returns null for it, including 1000m.
+// parseResistorOhms returns null for it, including 1000m. Zero is parsed here
+// so the edit path can say the value is outside 1Ω–10MΩ.
 export function classifyResistorValue(value) {
   if (isLoneMilliResistorSuffix(value)) return { reason: 'milli' };
-  const ohmsText = parseResistorOhms(value);
+  const ohmsText = parseResistorOhmsAllowingZero(value);
   if (ohmsText == null) return { reason: 'invalid' };
   const ohms = Number(ohmsText);
   if (!(ohms >= LED_SERIES_RESISTOR_RANGE.min && ohms <= LED_SERIES_RESISTOR_RANGE.max)) {
