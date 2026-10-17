@@ -20,7 +20,8 @@ import {
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
-  resistorValueInvalidMessage
+  resistorValueInvalidMessage,
+  resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
@@ -1448,7 +1449,7 @@ test('naming R3 on a board with no series resistor never calls the provider', as
     assert.equal(called, false);
     assert.equal(missing.ok, false, missing.error?.message);
     assert.equal(missing.error?.code, 'RESISTOR_REF_NOT_FOUND');
-    assert.equal(missing.error?.message, resistorRefNotFoundMessage('R3'));
+    assert.equal(missing.error?.message, resistorRefNotFoundMessage('R3', { ledHint: true }));
     const unsupported = await dispatchToolCall({
       id: 'call_r1_no_series',
       name: 'project.request',
@@ -1460,6 +1461,92 @@ test('naming R3 on a board with no series resistor never calls the provider', as
     assert.equal(unsupported.error?.message, resistorRefUnsupportedMessage(null));
     assert.equal(await readFile(schematicPath, 'utf8'), schematic);
     assert.equal(schematicRefValue(schematic, 'R1'), '1k');
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('the same LED resistor value and another resistor role never call the provider', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-resistor-same-'));
+  const spec = {
+    sourcePrompt: 'existing',
+    mcu: { family: 'STM32' },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '330Ω' }
+    ],
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '5.1k' },
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' },
+        { ref: 'R4', libId: 'ChatPCB:I2C_PULLUP', value: '4.7k' }
+      ]
+    },
+    boardProfile: {
+      productionParts: [
+        { ref: 'R1', role: 'usb-c-cc1-pulldown', value: '5.1k' },
+        { ref: 'R3', role: 'status-led-resistor', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' },
+        { ref: 'R4', role: 'i2c-scl-pullup', value: '4.7k' }
+      ]
+    }
+  };
+  const before = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "ChatPCB:LED_RESISTOR") (at 10 0 0)',
+    '    (property "Reference" "R3" (at 10 0 0))',
+    '    (property "Value" "330Ω" (at 10 0 0))))'
+  ].join('\n');
+  const schematicPath = path.join(projectDir, 'board.kicad_sch');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(schematicPath, before);
+  let called = false;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      called = true;
+      throw new Error('provider must not be called');
+    }
+  };
+  const unchanged = resistorValueUnchangedMessage('R3', '330Ω');
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  const rows = [
+    ['LED 저항 330Ω으로', 'RESISTOR_VALUE_UNCHANGED', unchanged],
+    ['change R3 to 330Ω', 'RESISTOR_VALUE_UNCHANGED', unchanged],
+    ['LED resistor to 330 ohm', 'RESISTOR_VALUE_UNCHANGED', unchanged],
+    ['LED resistor 330R', 'RESISTOR_VALUE_UNCHANGED', unchanged],
+    ['change the LED resistor to 0.33k', 'RESISTOR_VALUE_UNCHANGED', unchanged],
+    ['change R3 to 330', 'RESISTOR_UNIT_REQUIRED', null],
+    ['CC 저항 5.1k → 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['I2C 저항 2.2k로', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['SDA 저항 2.2k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['pull up resistor 2.2k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['USB CC resistor to 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['풀업 저항 4.7k로', 'RESISTOR_REF_UNSUPPORTED', unsupported]
+  ];
+  try {
+    for (const [index, [prompt, code, message]] of rows.entries()) {
+      const preview = await dispatchToolCall({
+        id: `call_resistor_same_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(called, false, prompt);
+      assert.equal(preview.ok, false, `${prompt} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.error?.code, code, `${prompt} ${preview.error?.message ?? ''}`);
+      if (message) assert.equal(preview.error?.message, message, prompt);
+      assert.match(preview.error?.message ?? '', /Nothing was changed|아무것도 바꾸지 않았어요/, prompt);
+      const schematic = await readFile(schematicPath, 'utf8');
+      assert.equal(schematic, before, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '330Ω', prompt);
+    }
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });

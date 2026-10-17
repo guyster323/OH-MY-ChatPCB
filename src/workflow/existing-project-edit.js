@@ -331,9 +331,25 @@ export function resistorTargetUnclearMessage(ohmsText) {
   return `${en}\n${ko}`;
 }
 
-export function resistorRefNotFoundMessage(ref) {
-  const en = `There is no part ${ref} in this project. Nothing was changed.`;
-  const ko = `이 프로젝트에는 ${ref} 부품이 없어요. 아무것도 바꾸지 않았어요.`;
+export function resistorRefNotFoundMessage(ref, { ledHint = false } = {}) {
+  const hintEn = ledHint
+    ? ' Say "LED resistor" instead, like "LED resistor to 470Ω".'
+    : '';
+  const hintKo = ledHint
+    ? ' "LED 저항 470Ω으로"처럼 \'LED 저항\'이라고 말해 주세요.'
+    : '';
+  const en = `There is no part ${ref} in this project.${hintEn} Nothing was changed.`;
+  const ko = `이 프로젝트에는 ${ref} 부품이 없어요.${hintKo} 아무것도 바꾸지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
+// The reference is read letter by letter, so the topic particle is always 는.
+// The value particle follows the lossless label (330Ω이에요, 4.7k예요).
+export function resistorValueUnchangedMessage(ref, label) {
+  const shown = String(label);
+  const ending = valueHasBatchim(shown) ? '이에요' : '예요';
+  const en = `${ref} is already ${shown}. Nothing was changed.`;
+  const ko = `${ref}는 이미 ${shown}${ending}. 바꾼 것은 없어요.`;
   return `${en}\n${ko}`;
 }
 
@@ -497,14 +513,16 @@ function unclearRemoval() {
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
   // A wrong ref is reported before we ask for a unit, so R1 470 stays unsupported.
-  if (resistor.kind === 'invalid' && resistor.reason === 'unit-required') {
-    const gated = resistorRefDecision(text, spec);
-    if (gated) return gated;
+  if (resistor.kind === 'invalid' && resistor.reason !== 'unit-required') {
     return invalidResistor(resistor);
   }
-  if (resistor.kind === 'invalid') return invalidResistor(resistor);
   const gated = resistorRefDecision(text, spec);
   if (gated) return gated;
+  const foreign = foreignRoleDecision(text, spec, resistor);
+  if (foreign) return foreign;
+  if (resistor.kind === 'invalid') return invalidResistor(resistor);
+  const unchanged = unchangedResistor(spec, resistor);
+  if (unchanged) return unchanged;
   return { mode: 'merge', edit: resistor };
 }
 
@@ -564,6 +582,7 @@ export function blocksBeforeProvider(text, decision) {
   const normalized = String(text ?? '').normalize('NFKC').trim();
   if (valueOnlyDecision(normalized)) return true;
   if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
+  if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
 }
@@ -1552,8 +1571,192 @@ function seriesResistorRef(spec) {
   return part ? String(part.ref) : null;
 }
 
+// A kept part is not an edit target. The object is the few words before
+// 그대로/유지/남겨/unchanged, or after keep/without. A word that starts with a
+// digit is a value, so the walk stops there and the value stays an edit.
+const GUARD_BEFORE = /남겨|남기|유지|그대로|\bunchanged\b/iu;
+const GUARD_AFTER = /\b(?:keep|without)\b/iu;
+const GUARD_AFTER_STOP = /^(?:change|set|update|make|modify|to)$|(?:바꿔|변경|수정)/iu;
+const LED_ROLE = /\bled\b|엘이디|(?<![가-힣])상태(?![가-힣])|(?<![가-힣])직렬(?![가-힣])|\bstatus\b/iu;
+const FOREIGN_ROLE = /\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|\bUSB\b|\bBOOT\d*\b|\breset\b|\bprogramming\b|pull[\s-]?downs?|pull[\s-]?ups?|풀업|풀다운|프로그래밍|(?<![가-힣])리셋/iu;
+const PULL_ROLE = /pull[\s-]?downs?|pull[\s-]?ups?|풀업|풀다운/iu;
+const OHM_VALUE_IN_CLAUSE = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[rRkK])\b|\d+(?:\.\d+)?\s*[kKmM]\d*\b|\d+\s*[rR]\d+/iu;
+
+function editTargetResistorRefs(text) {
+  const normalized = String(text ?? '').normalize('NFKC');
+  const refs = resistorReferenceTokens(normalized);
+  if (refs.length < 2) return refs;
+  const masked = maskGuardObjects(normalized);
+  const visible = new Set();
+  for (const match of masked.matchAll(/\bR\d+\b/giu)) visible.add(match[0].toUpperCase());
+  const targets = refs.filter((ref) => visible.has(ref));
+  // Every ref sat in a keep phrase. Ask, instead of guessing which one changes.
+  if (targets.length === 0) return refs;
+  return targets;
+}
+
+function maskGuardObjects(text) {
+  const normalized = String(text ?? '').normalize('NFKC');
+  const chars = normalized.split('');
+  for (const clause of splitClauses(normalized)) maskClauseGuards(chars, normalized, clause);
+  return chars.join('');
+}
+
+function maskClauseGuards(chars, text, clause) {
+  const base = clause.start;
+  for (const match of clause.text.matchAll(new RegExp(GUARD_BEFORE.source, 'giu'))) {
+    blankWordsBefore(chars, text, base, base + match.index);
+  }
+  for (const match of clause.text.matchAll(new RegExp(GUARD_AFTER.source, 'giu'))) {
+    const cueEnd = base + match.index + match[0].length;
+    blankWordsAfter(chars, text, cueEnd, base + clause.text.length);
+  }
+}
+
+function blankWordsBefore(chars, text, clauseStart, cueStart) {
+  const words = [...text.slice(clauseStart, cueStart).matchAll(/\S+/gu)];
+  const taken = [];
+  for (let index = words.length - 1; index >= 0 && taken.length < 2; index -= 1) {
+    if (/^\d/.test(words[index][0])) break;
+    taken.push(words[index]);
+  }
+  if (taken.length === 0) return;
+  blankRange(chars, clauseStart + taken[taken.length - 1].index, cueStart);
+}
+
+function blankWordsAfter(chars, text, cueEnd, clauseEnd) {
+  const words = [...text.slice(cueEnd, clauseEnd).matchAll(/\S+/gu)];
+  let end = cueEnd;
+  let count = 0;
+  for (const word of words) {
+    if (count >= 6) break;
+    if (/^\d/.test(word[0]) || GUARD_AFTER_STOP.test(word[0])) break;
+    end = cueEnd + word.index + word[0].length;
+    count += 1;
+  }
+  blankRange(chars, cueEnd, end);
+}
+
+function blankRange(chars, from, to) {
+  const end = Math.min(to, chars.length);
+  for (let index = Math.max(0, from); index < end; index += 1) chars[index] = ' ';
+}
+
+// Another resistor job (CC, I2C, pull-up, reset, …) is not the LED series
+// resistor. The role has to modify the resistor noun, unless it is a bare
+// pull-up or pull-down. A role that only appears in a keep phrase is ignored.
+// LED and a different role on the same edit ask which resistor.
+function foreignRoleDecision(text, spec, resistor) {
+  const kind = foreignRoleKind(maskGuardObjects(text));
+  if (!kind) return null;
+  if (kind === 'ambiguous' && resistor?.kind === 'resistor') {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_TARGET_UNCLEAR',
+      message: resistorTargetUnclearMessage(resistor.ohmsText)
+    };
+  }
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_REF_UNSUPPORTED',
+    message: resistorRefUnsupportedMessage(seriesResistorRef(spec))
+  };
+}
+
+function foreignRoleKind(text) {
+  const nouns = [...text.matchAll(/저항|抵抗|\bresistor\b/giu)];
+  if (nouns.length === 0) return bareForeignKind(text);
+  const roles = [];
+  for (const noun of nouns) {
+    const role = closestRole(nounPrefix(text, noun.index));
+    if (role) roles.push(role);
+  }
+  if (PULL_ROLE.test(text)) roles.push('foreign');
+  if (roles.includes('ambiguous') || (roles.includes('led') && roles.includes('foreign'))) return 'ambiguous';
+  if (roles.includes('foreign')) return 'foreign';
+  return null;
+}
+
+// No "resistor" noun: a pull-up still names a resistor job. CC, I2C, reset,
+// and the other role words count only in the clause that also states a value,
+// so "680옴으로. I2C는 삭제하지 마" stays an LED edit.
+function bareForeignKind(text) {
+  if (PULL_ROLE.test(text)) return 'foreign';
+  for (const clause of splitClauses(text)) {
+    if (!OHM_VALUE_IN_CLAUSE.test(clause.text)) continue;
+    if (FOREIGN_ROLE.test(clause.text)) return 'foreign';
+  }
+  return null;
+}
+
+function nounPrefix(text, nounIndex) {
+  const before = text.slice(0, nounIndex);
+  let start = 0;
+  for (const match of before.matchAll(/[.;!?,。！？]/gu)) start = match.index + match[0].length;
+  const slice = before.slice(start);
+  const words = [...slice.matchAll(/\S+/gu)];
+  const last = words.slice(-4);
+  if (last.length === 0) return '';
+  return slice.slice(last[0].index);
+}
+
+function closestRole(prefix) {
+  if (!prefix) return null;
+  const leds = [...prefix.matchAll(new RegExp(LED_ROLE.source, 'giu'))];
+  const foreigns = [...prefix.matchAll(new RegExp(FOREIGN_ROLE.source, 'giu'))];
+  if (leds.length === 0 && foreigns.length === 0) return null;
+  if (leds.length === 0) return 'foreign';
+  if (foreigns.length === 0) return 'led';
+  for (const led of leds) {
+    for (const foreign of foreigns) {
+      if (wordsBetween(prefix, led, foreign) <= 1) return 'ambiguous';
+    }
+  }
+  const ledEnd = Math.max(...leds.map((match) => match.index + match[0].length));
+  const foreignEnd = Math.max(...foreigns.map((match) => match.index + match[0].length));
+  return foreignEnd > ledEnd ? 'foreign' : 'led';
+}
+
+function wordsBetween(text, left, right) {
+  const start = Math.min(left.index + left[0].length, right.index + right[0].length);
+  const end = Math.max(left.index, right.index);
+  if (end <= start) return 0;
+  return text.slice(start, end).trim().split(/\s+/u).filter(Boolean).length;
+}
+
+// The saved series value wins over the user's spelling. 330Ω, 330R, and 0.33k
+// are one value. No series part, or a value that does not parse, is not "already".
+function unchangedResistor(spec, resistor) {
+  if (resistor?.kind !== 'resistor') return null;
+  const current = currentSeriesOhms(spec);
+  if (!current || current.ohmsText !== String(resistor.ohmsText)) return null;
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_VALUE_UNCHANGED',
+    message: resistorValueUnchangedMessage(current.ref, formatResistorLabel(current.ohmsText))
+  };
+}
+
+function currentSeriesOhms(spec) {
+  const ref = seriesResistorRef(spec);
+  if (!ref) return null;
+  const record = refRecord(spec, ref);
+  const peripherals = Array.isArray(spec?.peripherals) ? spec.peripherals : [];
+  const peripheral = peripherals.find((item) => item?.kind === 'status-led-resistor');
+  const parts = Array.isArray(spec?.boardProfile?.productionParts) ? spec.boardProfile.productionParts : [];
+  const part = parts.find((item) => String(item?.ref ?? '').toUpperCase() === ref.toUpperCase())
+    ?? parts.find((item) => item?.role === 'status-led-resistor');
+  for (const raw of [record?.value, peripheral?.value, part?.value]) {
+    if (raw == null || String(raw).trim() === '') continue;
+    const ohmsText = parseResistorOhms(String(raw));
+    if (!ohmsText) continue;
+    return { ref: record?.ref ? String(record.ref) : ref, ohmsText };
+  }
+  return null;
+}
+
 function resistorRefDecision(text, spec) {
-  const refs = resistorReferenceTokens(text);
+  const refs = editTargetResistorRefs(text);
   if (refs.length >= 2) {
     return {
       mode: 'refuse',
@@ -1565,10 +1768,12 @@ function resistorRefDecision(text, spec) {
   const token = refs[0];
   const record = refRecord(spec, token);
   if (!record) {
+    const shown = displayRef(spec, token);
+    const ledHint = shown.toUpperCase() === 'R3' && !seriesResistorRef(spec);
     return {
       mode: 'refuse',
       code: 'RESISTOR_REF_NOT_FOUND',
-      message: resistorRefNotFoundMessage(displayRef(spec, token))
+      message: resistorRefNotFoundMessage(shown, { ledHint })
     };
   }
   if (!isEditableLedSeriesResistor(spec, record)) {
@@ -1925,8 +2130,6 @@ function resistorReferenceTokens(text) {
 function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const namedRefs = resistorReferenceTokens(normalized);
-  const pullupOnly = /pull-?up|풀업|\bcc\d\b/i.test(normalized) && !/led|상태|직렬/i.test(normalized);
-  if (pullupOnly && namedRefs.length === 0) return null;
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   const named = namedRefs[0] ?? null;

@@ -28,12 +28,12 @@ const SPEC = {
   schematic: {
     components: [
       { ref: 'R1', libId: 'Device:R', value: '1k' },
-      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' }
+      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '123Ω' }
     ]
   },
   peripherals: [
     { kind: 'status-led' },
-    { kind: 'status-led-resistor', value: '330Ω' }
+    { kind: 'status-led-resistor', value: '123Ω' }
   ]
 };
 
@@ -655,7 +655,7 @@ test('a named resistor edit changes only the LED series resistor', () => {
   const missingR3 = classifyExistingProjectRequest('change R3 to 470', noSeries);
   assert.equal(missingR3.mode, 'refuse');
   assert.equal(missingR3.code, 'RESISTOR_REF_NOT_FOUND');
-  assert.equal(missingR3.message, resistorRefNotFoundMessage('R3'));
+  assert.equal(missingR3.message, resistorRefNotFoundMessage('R3', { ledHint: true }));
   assert.equal(missingR3.edit, undefined);
   const generic = classifyExistingProjectRequest('change the LED resistor to 470', noSeries);
   assert.equal(generic.mode, 'refuse');

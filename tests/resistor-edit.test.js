@@ -14,7 +14,7 @@ const SPEC = {
   sourcePrompt: 'existing',
   schematic: {
     components: [
-      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' }
+      { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '123Ω' }
     ]
   }
 };
