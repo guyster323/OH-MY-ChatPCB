@@ -61,8 +61,6 @@ export async function writeGeneratedProject({
   const guard = allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {};
   assertSafeProjectDir(projectDir, guard);
   await assertUnlinkedAncestors(projectDir, guard);
-  await mkdir(projectDir, { recursive: true });
-  await assertInspectionTree(projectDir, guard);
   const schematic = buildMcuSchematicAst(drafted);
   const spec = attachDiscretePartManifest(drafted, schematic);
   const baseName = sanitizeProjectName(projectName);
@@ -92,6 +90,12 @@ export async function writeGeneratedProject({
     files.board = path.join(projectDir, boardFileName);
   }
 
+  // Invalid resistor text throws here, before mkdir, so a failure leaves no project files.
+  const spiceText = renderSpiceFixture(spec);
+
+  await mkdir(projectDir, { recursive: true });
+  await assertInspectionTree(projectDir, guard);
+
   await writeFile(files.project, renderKiCadProject(baseName), 'utf8');
   await writeFile(files.schematic, renderKiCadSchematic({ baseName, spec, schematic }), 'utf8');
   if (files.board) {
@@ -108,7 +112,7 @@ export async function writeGeneratedProject({
   }
   await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(schematic.components.map((component) => component.libId)), 'utf8');
   await writeFile(files.symbolTable, renderProjectSymbolTable(), 'utf8');
-  await writeFile(files.spice, renderSpiceFixture(spec), 'utf8');
+  await writeFile(files.spice, spiceText, 'utf8');
   await writeFile(files.spec, `${JSON.stringify(projectMetadata, null, 2)}\n`, 'utf8');
 
   const review = reviewCircuitReadiness({ spec: projectMetadata });
