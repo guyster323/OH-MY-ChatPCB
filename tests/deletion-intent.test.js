@@ -7,6 +7,7 @@ import {
   classifyExistingProjectRequest,
   mixedRemovalAndEditMessage,
   removalIntentUnclearMessage,
+  removalNeedsVerbMessage,
   removalOneAtATimeMessage,
   removalRefNotFoundMessage,
   removalRefUnsupportedMessage
@@ -569,7 +570,7 @@ test('a missing reference is a localized refusal and removes nothing', () => {
   assert.equal(removesI2c(decision), false);
 });
 
-test('two references ask which one, with 와 or 과 from the first ref', () => {
+test('two references ask for one full removal sentence', () => {
   const cases = [
     ['J2, D1 빼', ['J2', 'D1']],
     ['remove J2 and D1', ['J2', 'D1']],
@@ -585,12 +586,34 @@ test('two references ask which one, with 와 or 과 from the first ref', () => {
     assert.equal(removesI2c(decision), false, prompt);
   }
   const j2 = removalOneAtATimeMessage(['J2', 'D1']);
-  assert.match(j2, /J2 or D1/);
-  assert.match(j2, /J2와 D1/);
+  assert.match(j2, /Say it like "remove J2"/);
+  assert.match(j2, /"J2 빼"/);
   const d1 = removalOneAtATimeMessage(['D1', 'J2']);
-  assert.match(d1, /D1과 J2/);
-  assert.match(removalOneAtATimeMessage(['R4', 'D1']), /R4와 D1/);
-  assert.match(removalOneAtATimeMessage(['R1', 'D1']), /R1과 D1/);
+  assert.match(d1, /Say it like "remove D1"/);
+  assert.match(d1, /"D1 빼"/);
+  assert.match(removalOneAtATimeMessage(['R4', 'D1']), /Say it like "remove R4"/);
+});
+
+test('a bare reference asks for a verb and does not remove', () => {
+  const guidance = removalNeedsVerbMessage('J2');
+  assert.equal(guidance, removalOneAtATimeMessage(['J2']));
+  assert.match(guidance, /Say it like "remove J2"/);
+  assert.match(guidance, /"J2 빼"/);
+  for (const prompt of ['J2', 'J2부터', 'J2 first', 'J2 먼저', 'j2', 'J2 please']) {
+    const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'REMOVAL_NEEDS_VERB', prompt);
+    assert.equal(decision.message, guidance, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(removesI2c(decision), false, prompt);
+  }
+  const missing = classifyExistingProjectRequest('J9', REF_SPEC);
+  assert.equal(missing.code, 'REMOVAL_REF_NOT_FOUND');
+  assert.equal(missing.message, removalRefNotFoundMessage('J9'));
+  const pair = classifyExistingProjectRequest('J2 D1', REF_SPEC);
+  assert.equal(pair.code, 'REMOVAL_ONE_AT_A_TIME');
+  assert.equal(pair.message, removalOneAtATimeMessage(['J2', 'D1']));
+  assert.equal(pair.edit, undefined);
 });
 
 test('negation, retraction, and a mixed name do not become a single ref removal', () => {

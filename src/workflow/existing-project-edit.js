@@ -225,32 +225,21 @@ export function removalRefNotFoundMessage(ref) {
   return `${en}\n${ko}`;
 }
 
-// 1, 3, 6, 7, 8, 0 are read with a batchim (과). 2, 4, 5, 9 are open (와).
-const REF_BATCHIM_DIGITS = new Set(['0', '1', '3', '6', '7', '8']);
-
-function refParticle(ref) {
-  return REF_BATCHIM_DIGITS.has(String(ref).slice(-1)) ? '과' : '와';
-}
-
-function englishRefChoice(refs) {
-  if (refs.length <= 1) return refs.join('');
-  if (refs.length === 2) return `${refs[0]} or ${refs[1]}`;
-  return `${refs.slice(0, -1).join(', ')}, or ${refs.at(-1)}`;
-}
-
-function koreanRefChoice(refs) {
-  let text = String(refs[0] ?? '');
-  for (let index = 1; index < refs.length; index += 1) {
-    text += `${refParticle(refs[index - 1])} ${refs[index]}`;
-  }
-  return text;
+// The example is the first offered ref, so "J2 and D1" asks for "remove J2".
+function removalVerbExample(ref) {
+  const shown = String(ref || 'J2');
+  const en = `I can remove one part at a time. Say it like "remove ${shown}". Nothing was removed.`;
+  const ko = `한 번에 한 부품만 뺄 수 있어요. "${shown} 빼"처럼 하나씩 말해 주세요. 아무것도 빼지 않았어요.`;
+  return `${en}\n${ko}`;
 }
 
 export function removalOneAtATimeMessage(refs) {
-  const list = (refs ?? []).map((ref) => String(ref));
-  const en = `I can remove one part at a time. Which one first: ${englishRefChoice(list)}? Nothing was removed.`;
-  const ko = `한 번에 한 부품만 뺄 수 있어요. ${koreanRefChoice(list)} 중 어느 것부터 뺄까요? 아무것도 빼지 않았어요.`;
-  return `${en}\n${ko}`;
+  const list = (refs ?? []).map((ref) => String(ref)).filter((ref) => ref.length > 0);
+  return removalVerbExample(list[0]);
+}
+
+export function removalNeedsVerbMessage(ref) {
+  return removalVerbExample(ref);
 }
 
 export function removalRefUnsupportedMessage(ref) {
@@ -324,6 +313,16 @@ export function resistorUnitlessMessage() {
   return `${en}\n${ko}`;
 }
 
+export function resistorTargetUnclearMessage(ohmsText) {
+  const label = formatResistorLabel(ohmsText);
+  const shown = /[ΩΩ옴]/.test(label) ? label : `${label}Ω`;
+  const particle = valueHasBatchim(shown) ? '을' : '를';
+  const exampleParticle = valueHasBatchim(label) ? '으로' : '로';
+  const en = `Which resistor should use ${shown}? Say it like "LED resistor to ${label}". Nothing was changed.`;
+  const ko = `${shown}${particle} 어느 저항에 쓸까요? "LED 저항 ${label}${exampleParticle}"처럼 말해 주세요. 아무것도 바꾸지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
 export function mixedRemovalAndEditMessage() {
   const en = 'Please ask for one change at a time: the removal or the resistor value. Nothing was changed.';
   const ko = '한 번에 한 가지만 요청해 주세요. 부품 빼기와 저항 값 바꾸기 중 하나만요. 아무것도 바꾸지 않았어요.';
@@ -362,6 +361,10 @@ function classifyPrompt(text, spec) {
 }
 
 function classifySeparateIntent(editText, intentText, spec) {
+  const valueOnly = valueOnlyDecision(intentText);
+  if (valueOnly) return valueOnly;
+  const bare = bareRefDecision(intentText, spec);
+  if (bare) return bare;
   const removal = removalDecision(intentText, spec);
   const fromUser = nonRemovalEdit(intentText);
   if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
@@ -376,6 +379,10 @@ function classifySeparateIntent(editText, intentText, spec) {
 }
 
 function classifyEditText(text, spec) {
+  const valueOnly = valueOnlyDecision(text);
+  if (valueOnly) return valueOnly;
+  const bare = bareRefDecision(text, spec);
+  if (bare) return bare;
   const removal = removalDecision(text, spec);
   const resistor = nonRemovalEdit(text);
   if (isMixedRemovalAndEdit(removal, resistor)) return mixedRemovalAndEdit();
@@ -459,6 +466,96 @@ function invalidResistor(result) {
 function nonRemovalEdit(text) {
   if (isFullDesignPrompt(text)) return null;
   return interpretResistor(text);
+}
+
+const VALUE_ONLY_TAIL = /(?:\s*(?:으로|로|요|please))$/iu;
+const BARE_REF_TAIL = /(?:\s*(?:부터|먼저|first|please))+$/iu;
+const BARE_REF_GAP = /^(?:[\s,/&]+|\s*(?:and|or|와|과|랑|하고|및|그리고)\s*)+$/iu;
+
+function wholeResistorToken(text) {
+  RESISTOR_TOKEN.lastIndex = 0;
+  const match = RESISTOR_TOKEN.exec(text);
+  const next = match ? RESISTOR_TOKEN.exec(text) : null;
+  RESISTOR_TOKEN.lastIndex = 0;
+  if (!match || next || match.index !== 0 || match[0].length !== text.length) return null;
+  return match[0];
+}
+
+// The whole request is one resistor token, optionally with a particle. A valid
+// value asks which resistor. It is not applied to R3. A bare number asks for a unit.
+function valueOnlyDecision(text) {
+  const normalized = String(text ?? '').normalize('NFKC').trim();
+  if (!normalized) return null;
+  const stripped = normalized.replace(VALUE_ONLY_TAIL, '').trim();
+  if (!stripped) return null;
+  const raw = wholeResistorToken(stripped);
+  if (!raw) return null;
+  if (/^[A-Za-z]{1,3}\d+$/.test(raw) || RESISTOR_PACKAGE.test(raw)) return null;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
+    if (/^\d+\.\d{3}$/.test(raw)) return invalidResistor({ reason: 'invalid' });
+    const result = classifyResistorValue(raw);
+    if (result.ohmsText == null || !(Number(raw) > 0)) {
+      return invalidResistor({ reason: result.reason === 'milli' ? 'milli' : (result.reason === 'invalid' ? 'invalid' : 'range') });
+    }
+    return invalidResistor({ reason: 'unitless' });
+  }
+  const result = classifyResistorValue(raw);
+  if (result.ohmsText != null) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_TARGET_UNCLEAR',
+      message: resistorTargetUnclearMessage(result.ohmsText)
+    };
+  }
+  return invalidResistor({ reason: result.reason });
+}
+
+function bareReferenceList(text) {
+  let body = stripQuotedMentions(normalizeDeletionText(text)).trim();
+  if (!body) return null;
+  body = body.replace(BARE_REF_TAIL, '').trim();
+  if (!body) return null;
+  const designator = new RegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
+  const refs = [];
+  let last = 0;
+  for (const match of body.matchAll(designator)) {
+    const gap = body.slice(last, match.index);
+    if (refs.length === 0) {
+      if (gap.trim() !== '') return null;
+    } else if (!BARE_REF_GAP.test(gap)) {
+      return null;
+    }
+    refs.push(match[0]);
+    last = match.index + match[0].length;
+  }
+  if (refs.length === 0 || body.slice(last).trim() !== '') return null;
+  return refs;
+}
+
+// A previous clarification is not on the request, so a bare ref is not a removal.
+function bareRefDecision(text, spec) {
+  const refs = bareReferenceList(text);
+  if (!refs) return null;
+  const shown = refs.map((token) => displayRef(spec, token));
+  if (shown.length >= 2) {
+    return {
+      mode: 'refuse',
+      code: 'REMOVAL_ONE_AT_A_TIME',
+      message: removalOneAtATimeMessage(shown)
+    };
+  }
+  if (!refRecord(spec, refs[0])) {
+    return {
+      mode: 'refuse',
+      code: 'REMOVAL_REF_NOT_FOUND',
+      message: removalRefNotFoundMessage(shown[0])
+    };
+  }
+  return {
+    mode: 'refuse',
+    code: 'REMOVAL_NEEDS_VERB',
+    message: removalNeedsVerbMessage(shown[0])
+  };
 }
 
 function isFullDesignPrompt(text) {
@@ -1511,7 +1608,9 @@ function removalDecision(text, spec) {
 // names a resistor. The matched text is parsed only by parseResistorOhms.
 // A leading sign stays inside the token. Dropping it would read +10Ω as 10Ω.
 // The same is true of a comma: 4,7k must not be read as 7k.
-const RESISTOR_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{N}_.+,\u2212\u2013\u00B1-])(?:${[
+// Hiragana and katakana are not part of a reference designator, so を470 stays
+// a value. Latin letters and Hangul still block a match inside a word.
+const RESISTOR_TOKEN = new RegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3\p{N}_.+,\u2212\u2013\u00B1-])(?:${[
   String.raw`\d+\s*/\s*\d+\s*[Ww](?![A-Za-z])`,
   String.raw`[+\-\u2212\u2013\uFF0D\u00B1]\s*(?:\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)|\d+[rRkKmM]\d+|\d+(?:\.\d+)?\s*meg|\d+(?:\.\d+)?\s*[rRkKmMuUnNpPfFgGtT]|\d+(?:\.\d+)?(?!\s*%))(?![A-Za-z])`,
   String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
@@ -1659,9 +1758,10 @@ function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const pullupOnly = /pull-?up|풀업|\bcc\d\b/i.test(normalized) && !/led|상태|직렬/i.test(normalized);
   if (pullupOnly) return null;
-  const aboutLed = /led|저항|resistor|\bstatus\b/i.test(normalized);
+  const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
-  if (!aboutLed && !change) return null;
+  const named = namedResistorRef(normalized);
+  if (!aboutLed && !change && !named) return null;
 
   const tokens = scanResistorTokens(normalized);
   promoteCoordinatedBareValues(tokens, normalized);
@@ -1708,7 +1808,7 @@ function interpretResistor(text) {
 // and R-reference digits are set aside. A sign, a comma, a lowercase m, or
 // three digits after one dot stays refused. The range check is unchanged.
 function namesResistorTarget(text, tokens) {
-  if (/저항|\bresistor\b/iu.test(text)) return true;
+  if (/저항|抵抗|\bresistor\b/iu.test(text)) return true;
   return tokens.some((token) => /^[rR]\d$/.test(token.raw));
 }
 

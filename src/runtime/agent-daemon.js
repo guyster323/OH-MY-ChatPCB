@@ -21,6 +21,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
+import { classifyExistingProjectRequest } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -720,6 +721,15 @@ async function requestProject(call, ctx) {
     let keepSnapshot = false;
     const fsOps = resolveSnapshotFs(ctx);
     try {
+      if (hasSpec) {
+        const existingSpec = await readChatPcbManifest(projectDir);
+        const decision = classifyExistingProjectRequest(generatePrompt, existingSpec, prompt);
+        if (decision.mode === 'refuse' && decision.code) {
+          const refused = new Error(decision.message);
+          refused.code = decision.code;
+          throw refused;
+        }
+      }
       snapshot = hasSpec ? await snapshotProject(projectDir, fsOps) : null;
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
       providerResult = await invokeProvider({

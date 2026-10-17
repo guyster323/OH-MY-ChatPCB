@@ -1218,3 +1218,57 @@ test('PROVIDER_NO_PATCH tells the user to name the part or start a new project',
     await rm(projectDir, { force: true, recursive: true });
   }
 });
+
+test('a value-only prompt and a bare reference never call the provider', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  let called = false;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      called = true;
+      throw new Error('provider must not be called');
+    }
+  };
+  const rows = [
+    ['1k', 'RESISTOR_TARGET_UNCLEAR'],
+    ['4.99k로', 'RESISTOR_TARGET_UNCLEAR'],
+    ['680Ω', 'RESISTOR_TARGET_UNCLEAR'],
+    ['330옴으로', 'RESISTOR_TARGET_UNCLEAR'],
+    ['-10 ohm', 'RESISTOR_VALUE_INVALID'],
+    ['±10 ohm', 'RESISTOR_VALUE_INVALID'],
+    ['4m7', 'RESISTOR_VALUE_INVALID'],
+    ['1/4W', 'RESISTOR_VALUE_INVALID'],
+    ['J2', 'REMOVAL_NEEDS_VERB'],
+    ['J2부터', 'REMOVAL_NEEDS_VERB'],
+    ['J2 first', 'REMOVAL_NEEDS_VERB'],
+    ['J2 먼저', 'REMOVAL_NEEDS_VERB'],
+    ['j2', 'REMOVAL_NEEDS_VERB'],
+    ['J9', 'REMOVAL_REF_NOT_FOUND'],
+    ['J2 D1', 'REMOVAL_ONE_AT_A_TIME']
+  ];
+  try {
+    for (const [index, [prompt, code]] of rows.entries()) {
+      const preview = await dispatchToolCall({
+        id: `call_closed_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(called, false, prompt);
+      assert.equal(preview.ok, false, `${prompt} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.error?.code, code, `${prompt} ${preview.error?.message ?? ''}`);
+      assert.match(preview.error?.message ?? '', /Nothing was (?:changed|removed)/, prompt);
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});

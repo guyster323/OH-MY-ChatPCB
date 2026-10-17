@@ -8,6 +8,7 @@ import { tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
 import {
   applyExistingProjectEdit,
   classifyExistingProjectRequest,
+  resistorTargetUnclearMessage,
   resistorUnitlessMessage,
   resistorValueAmbiguousMessage
 } from '../src/workflow/existing-project-edit.js';
@@ -177,6 +178,7 @@ test('a unitless number is ohms only when one clean resistor target is named', (
     ['change R1 to 470', 470, '470Ω'],
     ['R3 330으로', 330, '330Ω'],
     ['LED resistor 4700', 4700, '4.7k'],
+    ['LEDの抵抗を470に', 470, '470Ω'],
     ['set R3 to 1000000', 1_000_000, '1M']
   ];
   for (const [prompt, ohms, label] of accepted) {
@@ -329,28 +331,28 @@ const SHARED_ROWS = [
   {
     id: 'zero',
     token: '0',
-    parse: 0,
+    parse: null,
     spice: null,
     editPrompt: 'change R1 to 0',
     edit: { code: 'RESISTOR_VALUE_INVALID', hint: /1Ω to 10MΩ/ },
     scanPrompt: 'LED 5V 0',
-    scan: { unparseable: false, fault: null, resistance: [0] },
+    scan: { unparseable: true, fault: 'invalid', resistance: [] },
     discretePrompt: 'LED 5V 0',
-    discrete: { refused: true, code: 'discrete-led-resistor-too-small' },
-    differs: 'parseResistorOhms("0") is "0" so the token stays visible. SPICE returns null. The edit path refuses by range. The new-project path refuses below 1Ω. Bare 0 is not dropped and is not the 300Ω default.'
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor' },
+    differs: 'parseResistorOhms("0") is null. SPICE returns null. The edit path still refuses by range because classifyResistorValue sees 0. The new-project path treats the uncovered 0 as an invalid resistor and does not use the 300Ω default.'
   },
   {
     id: 'zero-r',
     token: '0R',
-    parse: 0,
+    parse: null,
     spice: null,
     editPrompt: 'change R1 to 0R',
     edit: { code: 'RESISTOR_VALUE_INVALID', hint: /1Ω to 10MΩ/ },
     scanPrompt: '0R',
-    scan: { unparseable: false, fault: null, resistance: [0] },
+    scan: { unparseable: true, fault: 'invalid', resistance: [] },
     discretePrompt: 'LED 5V 0R',
-    discrete: { refused: true, code: 'discrete-led-resistor-too-small' },
-    differs: 'parseResistorOhms("0R") is "0". Every entry point refuses it by the 1Ω–10MΩ rule. The new-project code stays discrete-led-resistor-too-small.'
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor' },
+    differs: 'parseResistorOhms("0R") is null. The edit path refuses 0R by the 1Ω–10MΩ rule. The new-project path refuses it as an invalid resistor.'
   },
   {
     id: 'bare-e24',
@@ -517,4 +519,48 @@ test('E96 labels from 1Ω through 9.76MΩ round-trip, and 10MΩ does too', () =>
   const tenBack = ten.edit?.label == null ? null : asNumber(parseResistorOhms(ten.edit.label));
   if (!close(tenBack, 1e7)) failures.push(`10M -> ${ten.edit?.label} -> ${tenBack}`);
   assert.deepEqual(failures, []);
+});
+
+test('a value with no part name asks which resistor in English and Korean', () => {
+  const fourNine = [
+    'Which resistor should use 4.99kΩ? Say it like "LED resistor to 4.99k". Nothing was changed.',
+    '4.99kΩ을 어느 저항에 쓸까요? "LED 저항 4.99k로"처럼 말해 주세요. 아무것도 바꾸지 않았어요.'
+  ].join('\n');
+  const rows = [
+    ['4.99k로', '4990', fourNine],
+    ['4.99k', '4990', fourNine],
+    ['4.99k please', '4990', fourNine],
+    ['680Ω', '680', resistorTargetUnclearMessage('680')],
+    ['330옴으로', '330', resistorTargetUnclearMessage('330')],
+    ['1k', '1000', resistorTargetUnclearMessage('1000')],
+    ['1k요', '1000', resistorTargetUnclearMessage('1000')]
+  ];
+  for (const [prompt, ohmsText, message] of rows) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.message, resistorTargetUnclearMessage(ohmsText), prompt);
+    assert.match(decision.message, /Nothing was changed/);
+    assert.match(decision.message, /아무것도 바꾸지 않았어요/);
+  }
+  assert.match(resistorTargetUnclearMessage('680'), /680Ω을/);
+  assert.match(resistorTargetUnclearMessage('680'), /LED 저항 680Ω으로/);
+  assert.match(resistorTargetUnclearMessage('1000'), /1kΩ을/);
+  assert.match(resistorTargetUnclearMessage('1000'), /LED resistor to 1k/);
+
+  for (const prompt of ['-10 ohm', '±10 ohm', '1/4W', '1/4W로']) {
+    assertEdit(prompt, null);
+  }
+  assertEdit('4m7', null, { hint: true });
+  assertEdit('0', null);
+  const bare = classifyExistingProjectRequest('470', SPEC);
+  assert.equal(bare.code, 'RESISTOR_VALUE_INVALID');
+  assert.equal(bare.message, resistorUnitlessMessage());
+
+  const sentence = classifyExistingProjectRequest('4.99k로 바꿔줘', SPEC);
+  assert.equal(sentence.code, undefined);
+  assert.equal(sentence.mode, 'merge');
+  assert.equal(sentence.edit?.ohms, 4990);
 });
