@@ -594,6 +594,48 @@ test('negation, retraction, and a mixed name do not become a single ref removal'
   }
 });
 
+// A ref is read through the saved part. Keeping that same part, or writing a
+// different role beside the ref, is not a removal. An agreeing label, or a
+// keep of a different part, still is.
+test('a resolved reference that conflicts with a keep or a co-written role is not a removal', () => {
+  const conflicts = [
+    'remove J2 but keep I2C',
+    'remove J2 but keep the I2C connector',
+    'J2 삭제하고 I2C는 남겨',
+    'remove D1 but keep LED',
+    'D1 빼고 LED는 유지',
+    'remove J2 (the LED)',
+    'remove J2, the LED',
+    'remove D1 (I2C connector)',
+    'delete the LED J2',
+    'J2(LED) 삭제'
+  ];
+  for (const prompt of conflicts) {
+    const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'REMOVAL_INTENT_UNCLEAR', prompt);
+    assert.equal(decision.message, REMOVAL_UNCLEAR_MESSAGE, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(removesI2c(decision), false, prompt);
+  }
+
+  assertRefRemoval('remove J2 (the I2C connector)', 'J2', 'i2c');
+  assertRefRemoval('remove D1 (the LED)', 'D1', 'led');
+  assertRefRemoval('remove J2 but keep LED', 'J2', 'i2c');
+  assertRefRemoval('remove J2', 'J2', 'i2c');
+  for (const [prompt, target] of [
+    ['remove the I2C connector J2', 'i2c'],
+    ['remove LED but keep J2', 'led']
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.kind, 'delete', prompt);
+    assert.deepEqual(decision.edit?.targets, [target], prompt);
+    assert.equal(decision.edit?.refs, undefined, prompt);
+    assert.equal(removesI2c(decision), target === 'i2c', prompt);
+  }
+});
+
 test('a ref the deletion machinery cannot remove alone is refused', () => {
   for (const prompt of ['remove J3', 'U1 삭제', 'R3 지워줘']) {
     const decision = classifyExistingProjectRequest(prompt, REF_SPEC);

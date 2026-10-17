@@ -1056,6 +1056,42 @@ test('the unclear hint example removes that reference on a project that has it',
   }
 });
 
+test('a provider with no patch removes nothing when a reference conflicts with a keep or a role', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  const prompts = [
+    'remove J2 but keep I2C',
+    'remove J2 but keep the I2C connector',
+    'J2 삭제하고 I2C는 남겨',
+    'remove D1 but keep LED',
+    'D1 빼고 LED는 유지',
+    'remove J2 (the LED)',
+    'remove J2, the LED',
+    'remove D1 (I2C connector)',
+    'delete the LED J2',
+    'J2(LED) 삭제'
+  ];
+  try {
+    for (const [index, prompt] of prompts.entries()) {
+      const preview = await dispatchToolCall({
+        id: `call_conflict_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...codexNoPatch() });
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, 'REMOVAL_INTENT_UNCLEAR', prompt);
+      assert.equal(preview.error?.message, removalIntentUnclearMessage(), prompt);
+      assert.equal(preview.result, undefined, prompt);
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
 test('a provider with no patch still proposes one reference and the override must match', async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();

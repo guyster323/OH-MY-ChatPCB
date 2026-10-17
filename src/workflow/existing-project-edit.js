@@ -1341,6 +1341,34 @@ function joinedNamedBeside(text, intents) {
   return [...joinedIdsForPositive(text, intents)].filter((id) => !isRefTarget(id));
 }
 
+// The saved ref is the part. Keeping that same part, or writing a different
+// role beside the ref, is not a removal. A keep of a different part is still
+// the one clear candidate ("remove J2 but keep LED" is J2).
+function resolvedRefConflicts(spec, text) {
+  const kept = partsBlockedByKeep(text);
+  const keptRefs = new Set();
+  const roles = [];
+  for (const id of kept) {
+    if (isRefTarget(id)) keptRefs.add(id.slice(4));
+  }
+  for (const mention of findMentions(text)) {
+    if (mention.id !== 'i2c' && mention.id !== 'led') continue;
+    if (kept.has(mention.id) || roles.includes(mention.id)) continue;
+    roles.push(mention.id);
+  }
+  for (const token of designatorsInOrder(text)) {
+    if (keptRefs.has(token)) continue;
+    if (!machineryForRecord(spec, refRecord(spec, token))) continue;
+    for (const id of kept) {
+      if (sameMachinery(spec, token, id)) return true;
+    }
+    for (const role of roles) {
+      if (!sameMachinery(spec, token, role)) return true;
+    }
+  }
+  return false;
+}
+
 // Fail closed. A removal candidate exists only when one part is the clear
 // object of a removal verb and no negation, keep, question, correction, list,
 // or second candidate makes that reading unsafe. One existing reference is
@@ -1364,6 +1392,7 @@ function removalDecision(text, spec) {
     for (const id of named) {
       if (!sameMachinery(spec, refTokens[0], id)) return { kind: 'unclear' };
     }
+    if (resolvedRefConflicts(spec, normalized)) return { kind: 'unclear' };
     return resolveRefRemoval(spec, refTokens[0]);
   }
 
@@ -1374,6 +1403,7 @@ function removalDecision(text, spec) {
     if (!actionable.includes(intent.target)) actionable.push(intent.target);
   }
   if (actionable.length === 1 && !removalIsUnclear(intents, actionable)) {
+    if (resolvedRefConflicts(spec, normalized)) return { kind: 'unclear' };
     return { kind: 'remove', targets: actionable };
   }
   if (removalIsUnclear(intents, actionable)) return { kind: 'unclear' };
