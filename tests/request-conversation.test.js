@@ -281,6 +281,33 @@ test('choosing the closest profile marks the conversation ready to generate', ()
   assert.match(next.generatePrompt, /Release profile/);
 });
 
+test('project.request accepts locale en or ko and does not reject the extra arg', async () => {
+  for (const locale of ['en', 'ko']) {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-request-locale-'));
+    try {
+      const created = await dispatchToolCall({
+        name: 'project.create',
+        args: { workspaceRoot, projectName: `Locale ${locale}` }
+      });
+      const result = await dispatchToolCall({
+        id: `call_locale_${locale}`,
+        name: 'project.request',
+        args: {
+          projectDir: created.result.projectDir,
+          prompt: USER_PROMPT,
+          proMode: true,
+          locale
+        }
+      });
+      assert.equal(result.ok, true, `${locale} ${result.error?.code ?? ''} ${result.error?.message ?? ''}`);
+      assert.equal(result.result.operation, 'clarify');
+      assert.equal(result.error, undefined);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  }
+});
+
 test('project.request returns a clarify operation for an unmatched board instead of a dummy schematic', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-clarify-'));
   try {

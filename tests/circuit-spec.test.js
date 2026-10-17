@@ -153,7 +153,7 @@ test('count markers are quantities and only small or fractional bare numbers sta
     assert.match(blocker.en, new RegExp(`^Is ${shown} a resistor in ohms, an LED count, or something else\\?`), blocker.en);
     assert.match(blocker.en, /LED count/i, blocker.en);
     assert.match(blocker.en, /330Ω/, blocker.en);
-    assert.match(blocker.en, /3개/, blocker.en);
+    assert.match(blocker.en, /3 LEDs/, blocker.en);
     assert.equal(blocker.en.includes('Refusing to draft'), false, blocker.en);
     assert.match(blocker.ko, new RegExp(`^${shown}(?:은|는) 저항\\(Ω\\)인가요, LED 개수인가요\\?`), blocker.ko);
     assert.match(blocker.ko, /330Ω/, blocker.ko);
@@ -495,7 +495,7 @@ test('several resistor candidates, years, pins, and package codes ask or are con
     const blocker = parsed.reviewBlockers[0];
     assert.equal(blocker.code, 'discrete-led-ambiguous-resistor', `${prompt} ${blocker.code} ${blocker.en}`);
     assert.match(blocker.en, /^Which resistor should the LED use,/, blocker.en);
-    assert.match(blocker.ko, /^어느 것을 직렬 저항으로 쓸까요,/, blocker.ko);
+    assert.match(blocker.ko, /중 어느 것을 LED 직렬 저항으로 쓸까요\?/, blocker.ko);
     for (const label of labels) {
       assert.match(blocker.en, new RegExp(escapeRegExp(label)), blocker.en);
       assert.match(blocker.ko, new RegExp(escapeRegExp(label)), blocker.ko);

@@ -18,7 +18,6 @@ const ALLOWLISTED_KINDS = [
   'symbol-library',
   'footprint',
   'design-rules',
-  'chatpcb-manifest',
   'spice',
   'symbol-table',
   'footprint-table'
@@ -52,7 +51,8 @@ test('collectTransactionInventory includes every allowlisted kind and is byte-id
     const second = await collectTransactionInventory({ projectDir: root });
     assert.deepEqual(second, first);
     assert.ok(first.artifacts.some((item) => item.path === 'nested/전원.kicad_sch'));
-    assert.ok(first.artifacts.some((item) => item.path.endsWith('.chatpcb.json')));
+    assert.equal(first.artifacts.some((item) => item.path.endsWith('.chatpcb.json')), false);
+    assert.equal(first.artifacts.some((item) => item.path.endsWith('.evidence.json')), false);
     assert.ok(first.artifacts.some((item) => item.path.endsWith('.kicad_mod')));
     assert.ok(first.artifacts.some((item) => item.path.endsWith('.kicad_dru')));
     assert.ok(!first.artifacts.some((item) => item.path.endsWith('.kicad_prl')));
@@ -81,8 +81,13 @@ test('collectTransactionSnapshot attaches the exact read bytes to sorted files',
     const inventory = await collectTransactionInventory({ projectDir: root });
     assert.deepEqual(snapshot.artifacts, inventory.artifacts);
     assert.equal(snapshot.transactionDigest, inventory.transactionDigest);
-    assert.equal(snapshot.files.length, snapshot.artifacts.length);
-    for (const [index, file] of snapshot.files.entries()) {
+    const manifest = snapshot.files.find((item) => item.path === 'board.chatpcb.json');
+    assert.equal(manifest.kind, 'chatpcb-manifest');
+    assert.equal(snapshot.artifacts.some((item) => item.path === 'board.chatpcb.json'), false);
+    const digested = snapshot.files.filter((item) => snapshot.artifacts.some((artifact) => artifact.path === item.path));
+    assert.equal(digested.length, snapshot.artifacts.length);
+    assert.equal(snapshot.files.length, snapshot.artifacts.length + 1);
+    for (const [index, file] of digested.entries()) {
       assert.equal(file.path, snapshot.artifacts[index].path);
       assert.equal(file.kind, snapshot.artifacts[index].kind);
       assert.ok(Buffer.isBuffer(file.bytes));
@@ -101,6 +106,10 @@ test('collectTransactionSnapshot attaches the exact read bytes to sorted files',
 test('transactionArtifactKind classifies allowlisted names and rejects transients', () => {
   assert.equal(transactionArtifactKind('nested/전원.kicad_sch'), 'schematic');
   assert.equal(transactionArtifactKind('board.chatpcb.json'), 'chatpcb-manifest');
+  assert.equal(transactionArtifactKind('nested/Board.CHATPCB.JSON'), 'chatpcb-manifest');
+  assert.equal(transactionArtifactKind('notes.evidence.json'), null);
+  assert.equal(transactionArtifactKind('_AUTOSAVE-X.chatpcb.json'), null);
+  assert.equal(transactionArtifactKind('X-BACKUPS/old.chatpcb.json'), null);
   assert.equal(transactionArtifactKind('.chatpcb-conversation.json'), 'conversation');
   assert.equal(transactionArtifactKind('sym-lib-table'), 'symbol-table');
   assert.equal(transactionArtifactKind('fp-lib-table'), 'footprint-table');
@@ -117,11 +126,35 @@ const PROTECTED_MUTATIONS = [
   { name: 'symbol-library', file: 'demo.kicad_sym', before: 'sym-1', after: 'sym-2' },
   { name: 'footprint', file: 'demo.kicad_mod', before: 'mod-1', after: 'mod-2' },
   { name: 'design-rules', file: 'demo.kicad_dru', before: 'dru-1', after: 'dru-2' },
-  { name: 'chatpcb-manifest', file: 'demo.chatpcb.json', before: '{"n":1}', after: '{"n":2}' },
   { name: 'spice', file: 'demo.cir', before: 'cir-1', after: 'cir-2' },
   { name: 'symbol-table', file: 'sym-lib-table', before: 'sym-1', after: 'sym-2' },
   { name: 'footprint-table', file: 'fp-lib-table', before: 'fp-1', after: 'fp-2' }
 ];
+
+test('mutating a chatpcb manifest does not change the transaction digest', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-transaction-manifest-'));
+  try {
+    await writeFile(path.join(root, 'demo.kicad_sch'), 'sch-1');
+    await writeFile(path.join(root, 'demo.chatpcb.json'), '{"n":1}');
+    await writeFile(path.join(root, 'demo.evidence.json'), '{"e":1}');
+    const first = await collectTransactionInventory({ projectDir: root });
+    const firstSnapshot = await collectTransactionSnapshot({ projectDir: root });
+    await writeFile(path.join(root, 'demo.chatpcb.json'), '{"n":2}');
+    await writeFile(path.join(root, 'demo.evidence.json'), '{"e":2}');
+    const second = await collectTransactionInventory({ projectDir: root });
+    const secondSnapshot = await collectTransactionSnapshot({ projectDir: root });
+    assert.equal(first.transactionDigest, second.transactionDigest);
+    assert.equal(first.artifacts.some((item) => item.path.endsWith('.chatpcb.json')), false);
+    assert.equal(second.artifacts.some((item) => item.path.endsWith('.evidence.json')), false);
+    const before = firstSnapshot.files.find((item) => item.path === 'demo.chatpcb.json');
+    const after = secondSnapshot.files.find((item) => item.path === 'demo.chatpcb.json');
+    assert.equal(before.kind, 'chatpcb-manifest');
+    assert.notEqual(before.sha256, after.sha256);
+    assert.equal(secondSnapshot.files.some((item) => item.path === 'demo.evidence.json'), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('mutating one byte of a protected artifact changes the transaction digest', async (t) => {
   for (const mutation of PROTECTED_MUTATIONS) {

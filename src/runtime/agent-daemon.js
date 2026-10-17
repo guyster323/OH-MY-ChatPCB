@@ -184,6 +184,9 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         kicadCliPath,
         ...(call.args?.selection !== undefined ? { selection: call.args.selection } : {}),
         ...(allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {}),
+        ...(typeof call.args?.expectedDigest === 'string' && call.args.expectedDigest.length > 0
+          ? { expectedDigest: call.args.expectedDigest }
+          : {}),
         analyzerAdapters: call.args?.analyzerAdapters
       }));
 

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { digestOfArtifacts, isExcludedFromDigest } from '../src/evidence/digest-exclusions.js';
 import {
   collectTransactionInventory,
   collectTransactionSnapshot,
@@ -98,9 +99,7 @@ async function buildPlan(projectDir, edits) {
     });
   }
 
-  const sorted = [...artifacts.values()].sort((left, right) => (
-    left.path < right.path ? -1 : left.path > right.path ? 1 : 0
-  ));
+  const sorted = [...artifacts.values()].filter((item) => !isExcludedFromDigest(item.path));
 
   return {
     proposalId: `sha256:${sha256(Buffer.from(JSON.stringify({
@@ -108,7 +107,7 @@ async function buildPlan(projectDir, edits) {
       paths: edits.map((edit) => edit.path)
     })))}`,
     baseTransactionDigest: snapshot.transactionDigest,
-    afterTransactionDigest: sha256(JSON.stringify(sorted)),
+    afterTransactionDigest: digestOfArtifacts(sorted),
     changes,
     source: { id: 'native', version: '1' }
   };

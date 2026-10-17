@@ -54,6 +54,12 @@ test('schematic patch preview returns a diff without modifying existing project 
 
     assert.equal(preview.requiresApproval, true);
     assert.equal(preview.applied, false);
+    assert.equal(typeof preview.projectDigest, 'string');
+    assert.equal(preview.projectDigest, preview.beforeTransactionDigest);
+    assert.equal(
+      preview.projectDigest,
+      (await collectTransactionInventory({ projectDir: root })).transactionDigest
+    );
     assert.ok(preview.diff.includes('--- chatpcb_mcu_peripheral.chatpcb.json'));
     assert.ok(preview.diff.includes('+++ chatpcb_mcu_peripheral.chatpcb.json'));
     assert.ok(preview.changedFiles.includes('chatpcb_mcu_peripheral.chatpcb.json'));

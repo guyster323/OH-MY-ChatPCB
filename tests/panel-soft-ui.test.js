@@ -173,7 +173,7 @@ test('Apply stays enabled when the candidate ERC passes and the open file still 
         sent: sent.length
       };
     });
-    assert.equal(result.disabled, false);
+    assert.equal(result.disabled, true);
     assert.equal(result.ariaDisabled, null);
     assert.equal(result.whyHidden, true);
     assert.equal(result.sent, 1);
@@ -193,7 +193,7 @@ test('en and ko panel locales have the same keys', async () => {
   assert.equal(en['patch.ready'], 'Patch preview is ready for approval.');
   assert.equal(en['provider.pending'], 'Provider pending');
   assert.equal(en['connection.connecting'], 'Connecting');
-  assert.equal(en['connection.connected'], 'Connected');
+  assert.equal(en['connection.connected'], 'Daemon connected');
   for (const key of ['request.idle', 'patch.ready', 'provider.pending', 'connection.connecting', 'connection.connected']) {
     assert.notEqual(ko[key], en[key], key);
     assert.match(ko[key], /[가-힣]/, key);
@@ -758,7 +758,9 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           await window.chatpcbI18n.setLang(nextLang);
           return { missing, available, switched };
         }, lang);
-        const missingCopy = `${locale['provider.status.codex.missing']} ${locale['provider.status.missing.next']}`;
+        const missingHead = String(locale['provider.status.codex.missing'] ?? '').trimEnd();
+        const missingTail = String(locale['provider.status.missing.next'] ?? '').trimStart();
+        const missingCopy = /[.!?…。．]$/.test(missingHead) ? `${missingHead} ${missingTail}` : `${missingHead}. ${missingTail}`;
         assert.equal(providerLine.missing, missingCopy, `${theme}/${lang} provider missing`);
         if (lang === 'en') assert.match(providerLine.missing, /Install it and sign in, or choose another provider/);
         if (lang === 'ko') {
@@ -818,6 +820,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
             background: style.backgroundColor,
             fontSize: style.fontSize,
             fontWeight: style.fontWeight,
+            whiteSpace: style.whiteSpace,
+            labelWhiteSpace: getComputedStyle(el.querySelector('span')).whiteSpace,
             text: el.innerText.trim(),
             lang: el.lang
           };
@@ -828,6 +832,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.equal(button.background, 'rgb(0, 0, 0)', `${theme}/${lang} ChatGPT button background`);
         assert.equal(button.fontSize, '15px', `${theme}/${lang} ChatGPT button font size`);
         assert.equal(button.fontWeight, '500', `${theme}/${lang} ChatGPT button weight`);
+        assert.equal(button.whiteSpace, 'nowrap', `${theme}/${lang} ChatGPT button nowrap`);
+        assert.equal(button.labelWhiteSpace, 'nowrap', `${theme}/${lang} ChatGPT label nowrap`);
         assert.equal(button.text, 'Continue with ChatGPT', `${theme}/${lang} ChatGPT button text`);
         assert.equal(button.lang, 'en', `${theme}/${lang} ChatGPT button lang`);
 
