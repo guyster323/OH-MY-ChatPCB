@@ -334,6 +334,7 @@ async function dispatchSchematicPatch(args, ctx) {
       approved: true,
       expectedPatchId: args.patchId,
       patchPlan: plan,
+      allowRemovedComponents: args.allowRemovedComponents,
       validateProjectImpl,
       validateBoardImpl,
       verifyAppliedProjectImpl,

@@ -16,8 +16,8 @@ function editError(message) {
 }
 
 export function modifyRefusalMessage() {
-  const en = 'The requested change could not be applied onto the existing design. Restate the full specification. The existing circuit was left unchanged.';
-  const ko = '수정 사항을 적용할 수 없습니다. 전체 사양을 다시 적어 주세요. 기존 회로는 바꾸지 않았습니다.';
+  const en = 'The requested change could not be applied onto the existing design. Describe the change more specifically (name the part or reference and the value), or start a new project for a full redesign. The existing circuit was left unchanged.';
+  const ko = '수정 사항을 적용할 수 없습니다. 바꿀 부품이나 참조 이름과 값을 구체적으로 적어 주세요. 전체를 다시 설계하려면 새 프로젝트를 시작하세요. 기존 회로는 바꾸지 않았습니다.';
   return `${en}\n${ko}`;
 }
 
@@ -30,25 +30,6 @@ export function classifyExistingProjectRequest(prompt, existingSpec) {
   const edit = parseExistingProjectEdit(text);
   if (edit) return { mode: 'merge', edit };
   return { mode: 'refuse' };
-}
-
-// The guard blocks a same-board edit that drops parts. It does not block a
-// project that has no schematic yet, or a full description of a different MCU.
-export function removalGuardApplies(prompt, beforeSpec) {
-  if (!hasPriorSchematic(beforeSpec)) return false;
-  if (!isFullDesignPrompt(prompt)) return true;
-  const next = canonicalMcu(prompt);
-  const current = canonicalMcu(beforeSpec?.mcu?.family) ?? canonicalMcu(beforeSpec?.sourcePrompt);
-  return !(next && current && next !== current);
-}
-
-function hasPriorSchematic(spec) {
-  return (spec?.schematic?.components ?? []).some((component) => component?.ref && component?.libId);
-}
-
-function canonicalMcu(text) {
-  const match = String(text ?? '').match(FULL_DESIGN_MCU);
-  return match ? match[1].toLowerCase() : null;
 }
 
 function isFullDesignPrompt(text) {
@@ -260,33 +241,27 @@ export function removedComponents(beforeSpec, afterSpec) {
   return removed;
 }
 
-export function deletionAuthorized(prompt, removed) {
-  if (!removed?.length) return true;
-  const text = String(prompt ?? '');
-  if (!DELETE_WORDS.test(text)) return false;
-  return removed.every((component) => mentionsRemovedComponent(text, component));
-}
-
-function mentionsRemovedComponent(text, component) {
-  const blob = `${component.ref ?? ''} ${component.value ?? ''} ${component.libId ?? ''}`;
-  if (/i2c/i.test(blob) && /\bi2c\b|아이\s*2\s*씨|아이씨/i.test(text)) return true;
-  const tokens = [component.ref, component.value, component.libId]
-    .flatMap((token) => String(token ?? '').split(/[:_\s]+/))
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3 && !/^(chatpcb|device|connector|generic)$/i.test(token));
-  const haystack = text.toLowerCase();
-  return tokens.some((token) => haystack.includes(token.toLowerCase()));
+function listedComponent(component) {
+  return [component.ref, component.libId, component.value]
+    .filter((part) => part != null && part !== '')
+    .join(' ');
 }
 
 export function removalFinding(removed) {
-  const listed = removed.map((component) => `${component.ref ?? '?'} ${component.libId ?? '?'}`).join(', ');
-  const en = `Existing components were removed (${listed}). Apply stays closed unless the request explicitly deletes those parts.`;
-  const ko = `기존 부품이 빠졌습니다 (${listed}). 요청에 해당 부품 삭제를 명시하지 않으면 적용할 수 없습니다.`;
+  const removedComponents = removed.map((component) => ({
+    ref: component.ref,
+    libId: component.libId ?? null,
+    value: component.value ?? null
+  }));
+  const listed = removedComponents.map(listedComponent).join(', ');
+  const en = `Existing components were removed (${listed}). Apply stays closed until the client confirms this exact set.`;
+  const ko = `기존 부품이 빠졌습니다 (${listed}). 클라이언트가 이 목록을 그대로 확인하기 전에는 적용할 수 없습니다.`;
   return {
     id: 'existing-components-removed',
     code: 'existing-components-removed',
     en,
     ko,
-    message: `${en} ${ko}`
+    message: `${en} ${ko}`,
+    removedComponents
   };
 }

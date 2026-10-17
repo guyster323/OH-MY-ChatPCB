@@ -38,6 +38,7 @@ export function sourceImportsHomeHook(source) {
 test('isolate-home hook sets a private home before the entry module and removes it on exit', () => {
   const parentHome = Object.hasOwn(process.env, 'HOME') ? process.env.HOME : null;
   const parentKicadConfig = Object.hasOwn(process.env, 'KICAD_CONFIG_HOME') ? process.env.KICAD_CONFIG_HOME : null;
+  const parentCache = Object.hasOwn(process.env, 'XDG_CACHE_HOME') ? process.env.XDG_CACHE_HOME : null;
   const parentUserProfile = Object.hasOwn(process.env, 'USERPROFILE') ? process.env.USERPROFILE : null;
   const parentHomeExisted = typeof parentHome === 'string' && existsSync(parentHome);
   const script = `
@@ -60,6 +61,7 @@ test('isolate-home hook sets a private home before the entry module and removes 
       appDataAfter: Object.hasOwn(process.env, 'APPDATA') ? process.env.APPDATA : null,
       localAppData: Object.hasOwn(process.env, 'LOCALAPPDATA') ? process.env.LOCALAPPDATA : null,
       xdg: Object.hasOwn(process.env, 'XDG_CONFIG_HOME') ? process.env.XDG_CONFIG_HOME : null,
+      xdgCache: Object.hasOwn(process.env, 'XDG_CACHE_HOME') ? process.env.XDG_CACHE_HOME : null,
       kicadConfig: Object.hasOwn(process.env, 'KICAD_CONFIG_HOME') ? process.env.KICAD_CONFIG_HOME : null,
       configDir: resolveChatGPTConfigDir(),
       exists: existsSync(root),
@@ -113,6 +115,15 @@ test('isolate-home hook sets a private home before the entry module and removes 
   // the temporary home, and must not replace a value already set.
   assert.equal(info.kicadConfig, parentKicadConfig);
   if (parentKicadConfig) assert.equal(pathInside(info.kicadConfig, info.root), false);
+  // The private config cache follows this process's home. Stock flatpak mounts
+  // that home, and a cache inherited from the parent sits outside it.
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    assert.equal(info.xdgCache, parentCache);
+  } else {
+    assert.equal(info.xdgCache, path.join(info.root, '.cache'));
+    assert.equal(pathInside(info.xdgCache, info.root), true);
+    if (parentCache) assert.notEqual(path.resolve(info.xdgCache), path.resolve(parentCache));
+  }
   assert.equal(existsSync(info.root), false);
   if (parentHomeExisted) assert.equal(existsSync(parentHome), true);
 });
@@ -439,32 +450,44 @@ test('isolateProcessHome pins the real KiCad config before redirecting home', ()
   assert.equal(process.env.APPDATA, appDataBefore);
 });
 
-test('isolateProcessHome pins an unset XDG_CACHE_HOME to the real cache directory on linux', () => {
+test('isolateProcessHome points XDG_CACHE_HOME at the temporary home cache on linux', () => {
   const homeBefore = process.env.HOME;
   const cacheBefore = process.env.XDG_CACHE_HOME;
   const configBefore = process.env.XDG_CONFIG_HOME;
   const home = '/home/dev';
   const realCache = path.join(home, '.cache');
+  const underTmp = (candidate) => candidate === tmpdir() || candidate.startsWith(`${tmpdir()}${path.sep}`);
 
   const linux = { HOME: home, XDG_CONFIG_HOME: '/xdg/config' };
   const linuxRoot = isolateInjected('linux', linux, [], 'cache-linux');
-  assert.equal(linux.XDG_CACHE_HOME, realCache);
+  assert.equal(linux.XDG_CACHE_HOME, path.join(linuxRoot, '.cache'));
   assert.equal(path.isAbsolute(linux.XDG_CACHE_HOME), true);
   assert.equal(linux.HOME, linuxRoot);
   assert.notEqual(path.resolve(linux.HOME), path.resolve(home));
-  assert.equal(pathInside(linux.XDG_CACHE_HOME, linuxRoot), false);
+  assert.equal(pathInside(linux.XDG_CACHE_HOME, linuxRoot), true);
+  assert.equal(pathInside(linux.XDG_CACHE_HOME, home), false);
+  assert.equal(underTmp(linux.XDG_CACHE_HOME), true);
+  assert.notEqual(linux.XDG_CACHE_HOME, realCache);
   assert.equal(linux.XDG_CONFIG_HOME, path.join(linuxRoot, '.config'));
   const linuxConfig = resolveChatGPTConfigDir({ platform: 'linux', env: linux, home: linuxRoot });
   assert.equal(linuxConfig, path.join(linuxRoot, '.config', 'chatpcb'));
   assert.equal(pathInside(linuxConfig, linuxRoot), true);
+  assert.equal(pathInside(linuxConfig, linux.XDG_CACHE_HOME), false);
   assert.equal(pathInside(linuxConfig, realCache), false);
 
+  // A cache outside the new home is invisible to stock flatpak (filesystems=home
+  // mounts that home) and to the UAT wrapper. The KiCad config pin stays put.
   const keptCache = '/custom/cache';
-  const kept = { HOME: home, XDG_CACHE_HOME: keptCache };
+  const keptConfig = '/custom/kicad';
+  const kept = { HOME: home, XDG_CACHE_HOME: keptCache, KICAD_CONFIG_HOME: keptConfig };
   const keptRoot = isolateInjected('linux', kept, [], 'cache-kept');
-  assert.equal(kept.XDG_CACHE_HOME, keptCache);
+  assert.equal(kept.XDG_CACHE_HOME, path.join(keptRoot, '.cache'));
+  assert.notEqual(kept.XDG_CACHE_HOME, keptCache);
   assert.notEqual(kept.XDG_CACHE_HOME, realCache);
-  assert.equal(pathInside(kept.XDG_CACHE_HOME, keptRoot), false);
+  assert.equal(pathInside(kept.XDG_CACHE_HOME, keptRoot), true);
+  assert.equal(underTmp(kept.XDG_CACHE_HOME), true);
+  assert.equal(kept.KICAD_CONFIG_HOME, keptConfig);
+  assert.equal(pathInside(kept.KICAD_CONFIG_HOME, keptRoot), false);
   assert.equal(kept.XDG_CONFIG_HOME, path.join(keptRoot, '.config'));
   assert.equal(
     resolveChatGPTConfigDir({ platform: 'linux', env: kept, home: keptRoot }),
@@ -472,16 +495,20 @@ test('isolateProcessHome pins an unset XDG_CACHE_HOME to the real cache director
   );
 
   const relativeCache = { HOME: home, XDG_CACHE_HOME: 'relative/cache' };
-  isolateInjected('linux', relativeCache, [], 'cache-relative');
-  assert.equal(relativeCache.XDG_CACHE_HOME, 'relative/cache');
+  const relativeCacheRoot = isolateInjected('linux', relativeCache, [], 'cache-relative');
+  assert.equal(relativeCache.XDG_CACHE_HOME, path.join(relativeCacheRoot, '.cache'));
+  assert.equal(pathInside(relativeCache.XDG_CACHE_HOME, relativeCacheRoot), true);
 
   const blank = { HOME: home, XDG_CACHE_HOME: '' };
-  isolateInjected('linux', blank, [], 'cache-blank');
-  assert.equal(blank.XDG_CACHE_HOME, realCache);
+  const blankRoot = isolateInjected('linux', blank, [], 'cache-blank');
+  assert.equal(blank.XDG_CACHE_HOME, path.join(blankRoot, '.cache'));
+  assert.equal(pathInside(blank.XDG_CACHE_HOME, blankRoot), true);
+  assert.notEqual(blank.XDG_CACHE_HOME, realCache);
 
   const noHome = {};
   const noHomeRoot = isolateInjected('linux', noHome, [], 'cache-no-home');
-  assert.equal(Object.hasOwn(noHome, 'XDG_CACHE_HOME'), false);
+  assert.equal(noHome.XDG_CACHE_HOME, path.join(noHomeRoot, '.cache'));
+  assert.equal(pathInside(noHome.XDG_CACHE_HOME, noHomeRoot), true);
   assert.equal(noHome.HOME, noHomeRoot);
   assert.equal(noHome.XDG_CONFIG_HOME, path.join(noHomeRoot, '.config'));
   assert.equal(
@@ -491,7 +518,8 @@ test('isolateProcessHome pins an unset XDG_CACHE_HOME to the real cache director
 
   const relativeHome = { HOME: 'relative-home' };
   const relativeHomeRoot = isolateInjected('linux', relativeHome, [], 'cache-rel-home');
-  assert.equal(Object.hasOwn(relativeHome, 'XDG_CACHE_HOME'), false);
+  assert.equal(relativeHome.XDG_CACHE_HOME, path.join(relativeHomeRoot, '.cache'));
+  assert.equal(pathInside(relativeHome.XDG_CACHE_HOME, relativeHomeRoot), true);
   assert.equal(relativeHome.HOME, relativeHomeRoot);
   assert.equal(
     resolveChatGPTConfigDir({ platform: 'linux', env: relativeHome, home: relativeHomeRoot }),
@@ -500,9 +528,10 @@ test('isolateProcessHome pins an unset XDG_CACHE_HOME to the real cache director
 
   const other = { HOME: home };
   const otherRoot = isolateInjected('freebsd', other, [], 'cache-freebsd');
-  assert.equal(other.XDG_CACHE_HOME, realCache);
+  assert.equal(other.XDG_CACHE_HOME, path.join(otherRoot, '.cache'));
   assert.equal(other.HOME, otherRoot);
-  assert.equal(pathInside(other.XDG_CACHE_HOME, otherRoot), false);
+  assert.equal(pathInside(other.XDG_CACHE_HOME, otherRoot), true);
+  assert.equal(pathInside(other.XDG_CACHE_HOME, home), false);
   assert.equal(
     resolveChatGPTConfigDir({ platform: 'freebsd', env: other, home: otherRoot }),
     path.join(otherRoot, '.config', 'chatpcb')

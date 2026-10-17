@@ -53,8 +53,43 @@ function findRemovalBlocker(plan) {
   )) ?? null;
 }
 
-function removalFailure(plan) {
+function removedRefs(plan) {
   const blocker = findRemovalBlocker(plan);
+  const listed = Array.isArray(blocker?.removedComponents) ? blocker.removedComponents : [];
+  return listed.map((component) => component?.ref).filter((ref) => typeof ref === 'string' && ref.length > 0);
+}
+
+function mismatchDetail(missing, extra) {
+  const missingText = missing.length > 0 ? missing.join(', ') : '(none)';
+  const extraText = extra.length > 0 ? extra.join(', ') : '(none)';
+  return {
+    code: 'ALLOW_REMOVED_COMPONENTS_MISMATCH',
+    missing,
+    extra,
+    message: `allowRemovedComponents does not match the removed references. Missing: ${missingText}. Extra: ${extraText}.`
+  };
+}
+
+function removalOverrideDecision(allowRemovedComponents, removedRefList) {
+  if (removedRefList.length === 0) return { match: true };
+  if (allowRemovedComponents === undefined) return { match: false };
+  const removed = [...new Set(removedRefList)].sort();
+  const invalid = !Array.isArray(allowRemovedComponents)
+    || allowRemovedComponents.some((ref) => typeof ref !== 'string' || ref.trim() === '');
+  if (invalid) return { match: false, mismatch: mismatchDetail(removed, []) };
+  const allowed = [...new Set(allowRemovedComponents.map((ref) => ref.trim()))].sort();
+  const removedSet = new Set(removed);
+  const allowedSet = new Set(allowed);
+  const missing = removed.filter((ref) => !allowedSet.has(ref));
+  const extra = allowed.filter((ref) => !removedSet.has(ref));
+  if (missing.length === 0 && extra.length === 0) return { match: true };
+  return { match: false, mismatch: mismatchDetail(missing, extra) };
+}
+
+function removalFailure(plan, mismatch) {
+  const blocker = findRemovalBlocker(plan);
+  const removedComponents = Array.isArray(blocker?.removedComponents) ? blocker.removedComponents : [];
+  const baseMessage = blocker?.message ?? 'Existing components were removed. Apply stays closed until the client confirms this exact set. 기존 부품이 빠졌습니다. 클라이언트가 이 목록을 그대로 확인하기 전에는 적용할 수 없습니다.';
   return {
     requiresApproval: false,
     approved: true,
@@ -64,9 +99,12 @@ function removalFailure(plan) {
     changedFiles: plan?.changedFiles ?? [],
     diff: plan?.diff ?? '',
     ...(plan ? { validation: plan.validation, review: plan.review } : {}),
+    removedComponents,
     reason: {
       code: 'EXISTING_COMPONENTS_REMOVED',
-      message: blocker?.message ?? 'Existing components were removed. Apply stays closed unless the request explicitly deletes those parts. 기존 부품이 빠졌습니다. 요청에 해당 부품 삭제를 명시하지 않으면 적용할 수 없습니다.'
+      message: mismatch ? `${baseMessage} ${mismatch.message}` : baseMessage,
+      removedComponents,
+      ...(mismatch ? { mismatch } : {})
     }
   };
 }
@@ -179,6 +217,7 @@ export async function applySchematicPatch({
   cancel = false,
   expectedPatchId,
   patchPlan,
+  allowRemovedComponents,
   validateProjectImpl = validateProject,
   validateBoardImpl = validateBoard,
   validateCandidateImpl,
@@ -226,10 +265,13 @@ export async function applySchematicPatch({
     const preview = previewFrom(plan);
     const blocker = findRemovalBlocker(plan);
     if (blocker) {
+      const removedComponents = Array.isArray(blocker.removedComponents) ? blocker.removedComponents : [];
       preview.requiresApproval = false;
+      preview.removedComponents = removedComponents;
       preview.reason = {
         code: 'EXISTING_COMPONENTS_REMOVED',
-        message: blocker.message
+        message: blocker.message,
+        removedComponents
       };
     }
     if (ownsPlan) await disposeNativeProposal(plan);
@@ -237,8 +279,11 @@ export async function applySchematicPatch({
   }
 
   if (findRemovalBlocker(plan)) {
-    if (ownsPlan) await disposeNativeProposal(plan);
-    return removalFailure(plan);
+    const decision = removalOverrideDecision(allowRemovedComponents, removedRefs(plan));
+    if (!decision.match) {
+      if (ownsPlan) await disposeNativeProposal(plan);
+      return removalFailure(plan, decision.mismatch);
+    }
   }
 
   if (expectedPatchId && expectedPatchId !== plan.proposalId && expectedPatchId !== plan.patchId) {

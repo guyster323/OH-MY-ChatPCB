@@ -59,28 +59,19 @@ function pinRealKicadConfigHome(platform, env, exists) {
   if (dir) env.KICAD_CONFIG_HOME = dir;
 }
 
-// Real cache directory for $XDG_CACHE_HOME/chatpcb. An absolute XDG_CACHE_HOME
-// is that directory. Otherwise it is <real HOME>/.cache. A relative value is
-// not a cache directory; callers decide whether to keep it.
-function realAbsoluteCacheDir(env) {
-  const existing = envPath(env.XDG_CACHE_HOME);
-  if (existing && path.isAbsolute(existing)) return existing;
-  const home = envPath(env.HOME);
-  if (!home || !path.isAbsolute(home)) return null;
-  return path.join(home, '.cache');
-}
-
-// A private KiCad config copy is stored under $XDG_CACHE_HOME/chatpcb. A stock
-// Flatpak KiCad sandbox (filesystems=home) cannot see a temporary HOME under
-// /tmp, so before HOME moves, an unset XDG_CACHE_HOME on Linux (and any other
-// platform that is not macOS or Windows) is pinned to the real cache directory.
-// A value that is already set stays as it is. ChatGPT config isolation follows
-// XDG_CONFIG_HOME and HOME, and does not read XDG_CACHE_HOME.
-function pinRealXdgCacheHome(platform, env) {
+// The private KiCad config copy lives under $XDG_CACHE_HOME/chatpcb.
+// KICAD_CONFIG_HOME stays the copy source. Stock flatpak filesystems=home
+// mounts the current $HOME, not the passwd home and not /tmp. The UAT wrapper
+// only adds /workspace and /tmp. The host wrapper can see the temp directory.
+// After HOME moves under os.tmpdir(), point XDG_CACHE_HOME at <temp HOME>/.cache
+// so all three can read the copy. An earlier absolute cache, including the real
+// ~/.cache, is outside that HOME and is replaced. ChatGPT config isolation
+// follows XDG_CONFIG_HOME and HOME, and does not read XDG_CACHE_HOME. macOS
+// and Windows do not use this flatpak sandbox.
+function pinVisibleXdgCacheHome(platform, env, root) {
   if (platform === 'darwin' || platform === 'win32') return;
-  if (envPath(env.XDG_CACHE_HOME)) return;
-  const dir = realAbsoluteCacheDir(env);
-  if (dir) env.XDG_CACHE_HOME = dir;
+  if (!root || !path.isAbsolute(root)) return;
+  env.XDG_CACHE_HOME = path.join(root, '.cache');
 }
 
 // os.homedir() on Windows is USERPROFILE, not HOME. The resolver only needs
@@ -120,7 +111,6 @@ export function isolateProcessHome({
   // reads KICAD_CONFIG_HOME from the environment, which would otherwise see
   // only the empty temporary root.
   pinRealKicadConfigHome(platform, env, exists);
-  pinRealXdgCacheHome(platform, env);
   const root = mkdtemp(path.join(temporaryDirectory, 'chatpcb-home-'));
   if (platform === 'win32') {
     // ChatPCB config is %APPDATA%\chatpcb. USERPROFILE is only the fallback
@@ -145,6 +135,7 @@ export function isolateProcessHome({
   if (platform !== 'darwin' && platform !== 'win32') {
     env.XDG_CONFIG_HOME = path.join(root, '.config');
   }
+  pinVisibleXdgCacheHome(platform, env, root);
   const home = configHome(platform, env);
   const configDir = resolveChatGPTConfigDir({
     platform,
