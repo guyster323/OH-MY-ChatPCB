@@ -48,5 +48,7 @@
   "patch.remove.title": "Remove existing parts?",
   "patch.remove.lead": "This draft removes existing parts. Applying deletes them from the schematic.",
   "patch.remove.cancel": "Don't apply",
-  "patch.remove.confirm": "Apply and remove these parts"
+  "patch.remove.confirm": "Apply and remove these parts",
+  "patch.apply.progress": "Adding it to the schematic…",
+  "patch.apply.summary": "Applying the circuit draft…"
 }

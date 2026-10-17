@@ -48,5 +48,7 @@
   "patch.remove.title": "기존 부품을 빼고 적용할까요?",
   "patch.remove.lead": "이 초안은 기존 부품을 스키매틱에서 뺍니다. 적용하면 이 부품이 삭제됩니다.",
   "patch.remove.cancel": "적용하지 않기",
-  "patch.remove.confirm": "이 부품을 빼고 적용"
+  "patch.remove.confirm": "이 부품을 빼고 적용",
+  "patch.apply.progress": "스키매틱에 넣는 중…",
+  "patch.apply.summary": "회로 초안을 적용하는 중…"
 }

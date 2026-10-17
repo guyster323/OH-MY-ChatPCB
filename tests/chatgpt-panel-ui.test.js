@@ -161,18 +161,22 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
           result = { projectDir: '/tmp/chatpcb-ui-project', displayName: call.args?.projectName || 'Board' };
         }
         if (config.approvalFlow && call.name === 'project.inspect') {
+          const status = typeof window.__inspectionFreshness === 'string' && window.__inspectionFreshness
+            ? window.__inspectionFreshness
+            : 'missing';
           result = {
-            manifest: { freshness: { status: 'missing', reason: 'No manifest' } },
+            manifest: { freshness: { status, reason: status === 'missing' ? 'No manifest' : `Evidence is ${status}` } },
             inspection: { projectDigest: 'abcdef123456', artifactCount: 0 }
           };
         }
         if (config.approvalFlow && call.name === 'project.request') {
+          const expiresAt = Number.isFinite(window.__previewExpiresAt) ? window.__previewExpiresAt : Date.now() + 120000;
           result = {
             requiresApproval: true,
             approved: false,
             applied: false,
             patchId: 'sha256:preview',
-            expiresAt: Date.now() + 120000,
+            expiresAt,
             operation: 'generated',
             files: {},
             conversation: { messages: [] }
@@ -966,9 +970,24 @@ test('removed-part confirm copy exists in English and Korean', async () => {
   assert.equal(ko['patch.remove.confirm'], '이 부품을 빼고 적용');
   assert.equal(ko['patch.remove.title'], '기존 부품을 빼고 적용할까요?');
   assert.equal(ko['patch.remove.lead'], '이 초안은 기존 부품을 스키매틱에서 뺍니다. 적용하면 이 부품이 삭제됩니다.');
-  for (const key of ['patch.remove.cancel', 'patch.remove.confirm', 'patch.remove.title', 'patch.remove.lead']) {
+  assert.equal(en['patch.apply.progress'], 'Adding it to the schematic…');
+  assert.equal(en['patch.apply.summary'], 'Applying the circuit draft…');
+  assert.equal(ko['patch.apply.progress'], '스키매틱에 넣는 중…');
+  assert.equal(ko['patch.apply.summary'], '회로 초안을 적용하는 중…');
+  for (const key of [
+    'patch.remove.cancel', 'patch.remove.confirm', 'patch.remove.title', 'patch.remove.lead',
+    'patch.apply.progress', 'patch.apply.summary'
+  ]) {
     assert.notEqual(ko[key], en[key], key);
   }
+  const panel = await readFile(path.join(panelRoot, 'panel.js'), 'utf8');
+  const confirmStart = panel.indexOf('function confirmRemovalApply');
+  const confirmEnd = panel.indexOf('function approvePatch');
+  const confirmBody = panel.slice(confirmStart, confirmEnd);
+  assert.match(confirmBody, /t\('patch\.apply\.progress'\)/);
+  assert.match(confirmBody, /t\('patch\.apply\.summary'\)/);
+  assert.equal(confirmBody.includes('스키매틱에 넣는 중…'), false);
+  assert.equal(confirmBody.includes('Applying the circuit draft…'), false);
 });
 
 test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply', async (t) => {
@@ -1007,7 +1026,21 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
     assert.equal(await page.locator('#cancel-apply-remove-components').innerText(), en['patch.remove.cancel']);
     assert.equal(await page.locator('#confirm-apply-remove-components').innerText(), en['patch.remove.confirm']);
     assert.equal(await page.locator('#apply-remove-components-lead').innerText(), en['patch.remove.lead']);
-    assert.equal(await dialog.getAttribute('aria-label'), en['patch.remove.title']);
+    assert.equal(await dialog.getAttribute('aria-labelledby'), 'apply-remove-components-title');
+    assert.equal(await page.locator('#apply-remove-components-title').innerText(), en['patch.remove.title']);
+    assert.equal(await dialog.getAttribute('aria-describedby'), 'apply-remove-components-parts');
+    assert.equal(await dialog.getAttribute('aria-label'), null);
+    await page.keyboard.press('Shift+Tab');
+    await page.waitForFunction(() => document.activeElement?.id === 'confirm-apply-remove-components');
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => document.activeElement?.id === 'cancel-apply-remove-components');
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => document.activeElement?.id === 'confirm-apply-remove-components');
+    assert.equal(await page.evaluate(() => (
+      document.querySelector('#apply-remove-components-confirm')?.contains(document.activeElement) === true
+    )), true);
+    await page.keyboard.press('Shift+Tab');
+    await page.waitForFunction(() => document.activeElement?.id === 'cancel-apply-remove-components');
 
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
@@ -1041,11 +1074,20 @@ test('confirming removed parts sends allowRemovedComponents with the exact refs'
   const opened = await openApprovalPanel(t, 'en-US');
   if (!opened) return;
   const { page, context, pageErrors } = opened;
+  const { en } = await removalConfirmCopy();
   try {
     await sendRemovalPreview(page);
     await page.waitForFunction(() => {
       const node = document.querySelector('#apply-remove-components-confirm');
       return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
+    });
+    await page.evaluate(() => {
+      window.__applyRunning = [];
+      const status = document.querySelector('#request-status');
+      const note = () => {
+        if (status?.dataset.state === 'running') window.__applyRunning.push(status.textContent);
+      };
+      new MutationObserver(note).observe(status, { attributes: true, childList: true, subtree: true, characterData: true });
     });
     await page.locator('#confirm-apply-remove-components').click();
     const calls = await approvedApplyCalls(page);
@@ -1053,6 +1095,9 @@ test('confirming removed parts sends allowRemovedComponents with the exact refs'
     assert.equal(calls[0].args.approved, true);
     assert.equal(calls[0].args.patchId, 'sha256:preview');
     assert.deepEqual(calls[0].args.allowRemovedComponents, REMOVED_PARTS.map((part) => part.ref));
+    const running = await page.evaluate(() => window.__applyRunning);
+    assert.equal(running.includes(en['patch.apply.summary']), true, JSON.stringify(running));
+    assert.equal((await page.locator('#request-progress').innerText()).includes(en['patch.apply.progress']), true);
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -1073,7 +1118,10 @@ test('removed-part confirm dialog is localized in Korean', async (t) => {
     }, ko['patch.remove.cancel']);
     assert.equal(await page.locator('#confirm-apply-remove-components').innerText(), ko['patch.remove.confirm']);
     assert.equal(await page.locator('#apply-remove-components-lead').innerText(), ko['patch.remove.lead']);
-    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-label'), ko['patch.remove.title']);
+    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-labelledby'), 'apply-remove-components-title');
+    assert.equal(await page.locator('#apply-remove-components-title').innerText(), ko['patch.remove.title']);
+    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-describedby'), 'apply-remove-components-parts');
+    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-label'), null);
     const describedText = await describedRemovalText(page);
     for (const part of REMOVED_PARTS) {
       assert.equal(describedText.includes(part.ref), true, describedText);
@@ -1082,6 +1130,77 @@ test('removed-part confirm dialog is localized in Korean', async (t) => {
     }
     await page.locator('#cancel-apply-remove-components').click();
     await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    assert.deepEqual(await approvedApplyCalls(page), []);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+async function removalDialogHidden(page) {
+  return page.locator('#apply-remove-components-confirm').evaluate((node) => node.hidden);
+}
+
+test('stale, expired, or disabled removal preview does not open confirm or send apply', async (t) => {
+  const opened = await openApprovalPanel(t, 'en-US');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    await page.evaluate(() => { window.__inspectionFreshness = 'stale'; });
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('#apply-remove-components-confirm');
+      const button = document.querySelector('#approve-patch-button');
+      const status = document.querySelector('#patch-approval-status');
+      return dialog && dialog.hidden === false
+        && button?.disabled === true
+        && status?.dataset.state === 'stale';
+    });
+    assert.deepEqual(await approvedApplyCalls(page), []);
+    await page.locator('#confirm-apply-remove-components').click();
+    assert.deepEqual(await approvedApplyCalls(page), []);
+    await page.locator('#cancel-apply-remove-components').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await removalDialogHidden(page), true);
+    assert.deepEqual(await approvedApplyCalls(page), []);
+
+    await page.evaluate(() => {
+      window.__inspectionFreshness = 'missing';
+      window.__removalPreview = null;
+      window.__previewExpiresAt = Date.now() + 120000;
+    });
+    await page.locator('#prompt').fill('ESP32-S3 sensor board');
+    await page.locator('#composer').getByRole('button', { name: 'Send' }).click();
+    await page.waitForFunction(() => (
+      document.querySelector('#inspection-freshness')?.textContent === 'missing'
+      && document.querySelector('#approve-patch-button')?.disabled === false
+      && document.querySelector('#apply-remove-components-confirm')?.hidden === true
+    ));
+
+    await page.evaluate(() => { window.__previewExpiresAt = Date.now() - 1000; });
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => (
+      document.querySelector('#approve-patch-button')?.disabled === true
+      && document.querySelector('#patch-approval-card')?.hidden === true
+    ));
+    assert.equal(await removalDialogHidden(page), true);
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await removalDialogHidden(page), true);
+    assert.deepEqual(await approvedApplyCalls(page), []);
+
+    await page.evaluate(() => { window.__previewExpiresAt = Date.now() + 120000; });
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('#apply-remove-components-confirm');
+      const button = document.querySelector('#approve-patch-button');
+      return dialog && dialog.hidden === false && button?.disabled === false;
+    });
+    await page.locator('#cancel-apply-remove-components').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = true; });
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await removalDialogHidden(page), true);
     assert.deepEqual(await approvedApplyCalls(page), []);
     assert.deepEqual(pageErrors, []);
   } finally {

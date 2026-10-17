@@ -209,6 +209,7 @@ const patchApprovalTechnicalDetailEl = document.querySelector('#patch-approval-t
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
 const applyRemoveConfirmEl = document.querySelector('#apply-remove-components-confirm');
+const applyRemoveTitleEl = document.querySelector('#apply-remove-components-title');
 const applyRemoveLeadEl = document.querySelector('#apply-remove-components-lead');
 const applyRemovePartsEl = document.querySelector('#apply-remove-components-parts');
 const cancelApplyRemoveButtonEl = document.querySelector('#cancel-apply-remove-components');
@@ -287,10 +288,22 @@ cancelPatchButtonEl.addEventListener('click', cancelPatch);
 cancelApplyRemoveButtonEl?.addEventListener('click', cancelRemovalConfirm);
 confirmApplyRemoveButtonEl?.addEventListener('click', confirmRemovalApply);
 document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return;
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    cancelRemovalConfirm();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const buttons = [cancelApplyRemoveButtonEl, confirmApplyRemoveButtonEl].filter((button) => button);
+  if (buttons.length === 0) return;
   event.preventDefault();
-  cancelRemovalConfirm();
+  const index = buttons.indexOf(document.activeElement);
+  const direction = event.shiftKey ? -1 : 1;
+  const next = index < 0
+    ? (event.shiftKey ? buttons[buttons.length - 1] : buttons[0])
+    : buttons[(index + direction + buttons.length) % buttons.length];
+  next.focus();
 });
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
@@ -989,28 +1002,59 @@ function clearPatchApproval(message = 'No patch preview active.') {
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
 }
 
-function renderPatchApproval() {
+function patchApprovalGate() {
   const freshness = inspectionState.result?.manifest?.freshness?.status;
   const approvedEvidence = freshness === 'current' || freshness === 'legacy-unverified' || freshness === 'missing';
   const unexpired = Number.isFinite(Number(patchApprovalState.expiresAt)) && Number(patchApprovalState.expiresAt) > Date.now();
   const active = Boolean(patchApprovalState.patchId) && unexpired;
-  approvePatchButtonEl.disabled = !active || !approvedEvidence;
-  cancelPatchButtonEl.disabled = !active;
-  if (patchApprovalCardEl) patchApprovalCardEl.hidden = !active;
+  return { freshness, approvedEvidence, active };
+}
+
+function patchApplyBusy() {
+  if (activeRequestId) return true;
+  for (const name of pendingCalls.values()) {
+    if (name === 'project.request'
+      || name === 'schematic.generate'
+      || name === 'schematic.patch'
+      || name === 'schematic.patch.approve'
+      || name === 'schematic.patch.cancel') return true;
+  }
+  return false;
+}
+
+// Same decision the Apply button uses: disabled control, active project, patch id,
+// unexpired preview, approved evidence, and no in-flight project mutation.
+function applyGateOpen() {
+  const gate = patchApprovalGate();
+  const evidenceOpen = Boolean(activeProject) && gate.active && gate.approvedEvidence;
+  if (!evidenceOpen) {
+    if (approvePatchButtonEl) approvePatchButtonEl.disabled = true;
+    return false;
+  }
+  if (approvePatchButtonEl?.disabled) return false;
+  if (patchApplyBusy()) return false;
+  return true;
+}
+
+function renderPatchApproval() {
+  const gate = patchApprovalGate();
+  approvePatchButtonEl.disabled = !gate.active || !gate.approvedEvidence;
+  cancelPatchButtonEl.disabled = !gate.active;
+  if (patchApprovalCardEl) patchApprovalCardEl.hidden = !gate.active;
   setPatchApprovalTechnicalDetail('');
-  if (freshness === 'stale' && patchApprovalState.patchId) {
+  if (gate.freshness === 'stale' && patchApprovalState.patchId) {
     if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
     patchApprovalStatusEl.dataset.state = 'stale';
     patchApprovalStatusEl.textContent = 'Approval unavailable: stale evidence. Inspect the project again before approving.';
     return;
   }
-  if (!active) return;
-  if (freshness === 'legacy-unverified') {
+  if (!gate.active) return;
+  if (gate.freshness === 'legacy-unverified') {
     patchApprovalStatusEl.dataset.state = 'warning';
     patchApprovalStatusEl.textContent = 'Approval allowed with legacy-unverified evidence; exact patch hashes will still be verified.';
     return;
   }
-  if (freshness === 'missing' || !freshness) {
+  if (gate.freshness === 'missing' || !gate.freshness) {
     patchApprovalStatusEl.dataset.state = 'warning';
     patchApprovalStatusEl.textContent = approvalNoManifestMessage();
     setPatchApprovalTechnicalDetail(approvalNoManifestDetail());
@@ -1044,10 +1088,10 @@ function existingComponentsRemoved(preview) {
 }
 
 function applyRemovalConfirmCopy() {
+  if (applyRemoveTitleEl) applyRemoveTitleEl.textContent = t('patch.remove.title');
   if (applyRemoveLeadEl) applyRemoveLeadEl.textContent = t('patch.remove.lead');
   if (cancelApplyRemoveButtonEl) cancelApplyRemoveButtonEl.textContent = t('patch.remove.cancel');
   if (confirmApplyRemoveButtonEl) confirmApplyRemoveButtonEl.textContent = t('patch.remove.confirm');
-  if (applyRemoveConfirmEl) applyRemoveConfirmEl.setAttribute('aria-label', t('patch.remove.title'));
 }
 
 function hideRemovalConfirm() {
@@ -1055,6 +1099,7 @@ function hideRemovalConfirm() {
 }
 
 function presentRemovalConfirm() {
+  if (!applyGateOpen()) return;
   const parts = patchApprovalState.removedComponents;
   if (!applyRemoveConfirmEl || !parts?.length) return;
   applyRemovalConfirmCopy();
@@ -1078,12 +1123,12 @@ function cancelRemovalConfirm() {
 
 function confirmRemovalApply() {
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
-  if (!activeProject || !patchApprovalState.patchId) return;
+  if (!applyGateOpen()) return;
   const allowRemovedComponents = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
   if (allowRemovedComponents.length === 0) return;
   hideRemovalConfirm();
-  appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
-  renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
+  appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
+  renderRequestStatus({ state: 'running', summary: t('patch.apply.summary') });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({
@@ -1099,11 +1144,11 @@ function confirmRemovalApply() {
 }
 
 function approvePatch() {
+  if (!applyGateOpen()) return;
   if (patchApprovalState.removedComponents?.length) {
     presentRemovalConfirm();
     return;
   }
-  if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
   const id = `patch_approve_${Date.now()}`;
