@@ -66,15 +66,15 @@ test('a lone m is not a resistor value', () => {
 });
 
 test('an ambiguous thousands dot is not read as a resistor', () => {
-  for (const prompt of ['1.000 ohm', '4.700 ohm', '1.000Ω', 'R1=1.000']) {
+  for (const prompt of ['1.000 ohm', '4.700 ohm', '1.000Ω', 'R1=1.000', '1.000k']) {
     const scan = tokenizeQuantities(prompt);
     assert.equal(parseResistorOhms(prompt.replace(/^R1=/, '')), null, prompt);
     assert.equal(resistanceTokens(prompt).length, 0, prompt);
     assert.equal(scan.unparseable, true, prompt);
-    assert.equal(scan.tokens.some((token) => token.value === 1 || token.value === 4.7), false, prompt);
+    assert.equal(scan.tokens.some((token) => token.value === 1 || token.value === 4.7 || token.value === 1000), false, prompt);
   }
 
-  for (const prompt of ['1.5 ohm', '4.75k', '1.000k', '1.24k']) {
+  for (const prompt of ['1.5 ohm', '4.75k', '1.24k']) {
     const scan = tokenizeQuantities(prompt);
     assert.equal(scan.unparseable, false, prompt);
     assert.equal(resistanceTokens(prompt).length, 1, prompt);

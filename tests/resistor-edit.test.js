@@ -453,7 +453,11 @@ test('SPICE validation and edit classification agree after the range check', () 
     ['1G', null],
     ['10kk', null],
     ['1e3', null],
-    ['0R', null]
+    ['0', null],
+    ['0R', null],
+    ['100f', null],
+    ['1.000k', null],
+    ['1.000옴', null]
   ];
   for (const [token, ohmsText] of rows) {
     const spice = spiceResistorOhms(token);

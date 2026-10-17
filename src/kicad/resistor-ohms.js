@@ -63,9 +63,10 @@ export function parseResistorOhms(value) {
   if (!suffixed) return null;
   const multiplier = resistorScale(suffixed[2] ?? '');
   if (multiplier == null) return null;
-  // "1.000" is a thousands separator in some locales and a decimal in others.
-  // A multiplier ("1.000k", "4.75k") shows which reading was meant.
-  if (!suffixed[2] && /^\d+\.\d{3}$/.test(suffixed[1])) return null;
+  // "1.000" and "1.000k" are a thousands separator in some locales and a
+  // decimal in others. Exactly three digits after one dot is refused with or
+  // without a prefix. "4.75k" and "1k005" stay exact.
+  if (/^\d+\.\d{3}$/.test(suffixed[1])) return null;
   const [whole, fraction = ''] = suffixed[1].split('.');
   return formatResistorOhms(resistorNumber(whole, fraction, multiplier));
 }

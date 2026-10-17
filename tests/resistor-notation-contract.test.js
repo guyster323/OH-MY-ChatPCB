@@ -163,6 +163,67 @@ test('the edit entry keeps 1Ω and 10MΩ and refuses the outside', () => {
   assertEdit('change R1 to 10M', 1e7);
 });
 
+test('a unitless number is ohms only when one clean resistor target is named', () => {
+  const accepted = [
+    ['LED 저항 330으로', 330, '330Ω'],
+    ['change the LED resistor to 330', 330, '330Ω'],
+    ['R3 330으로', 330, '330Ω'],
+    ['LED resistor 4700', 4700, '4.7k'],
+    ['set R3 to 1000000', 1_000_000, '1M']
+  ];
+  for (const [prompt, ohms, label] of accepted) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+  }
+
+  for (const prompt of [
+    'LED 저항 1/4W로',
+    'LED 저항 -10',
+    'LED 저항 +330',
+    'LED 저항 4,7',
+    'LED 저항 330 470',
+    'LED 저항 1.000'
+  ]) {
+    assertEdit(prompt, null);
+  }
+
+  const low = classifyExistingProjectRequest('LED 저항 0.47', SPEC);
+  assert.equal(low.mode, 'refuse');
+  assert.equal(low.code, 'RESISTOR_VALUE_INVALID');
+  assert.equal(low.edit, undefined);
+  assert.match(low.message ?? '', /1Ω to 10MΩ/);
+  assert.match(low.message ?? '', /1Ω~10MΩ/);
+
+  for (const prompt of ['LED 저항 0603', '330으로 바꿔줘', 'LED 330']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+});
+
+test('three digits after one dot are ambiguous with or without a prefix', () => {
+  for (const input of ['1.000k', '1.000옴', '1.000Ω', '4.700k']) assertParsed(input, null);
+  assertEdit('LED resistor 1.000k', null);
+  assertEdit('LED 저항 1.000옴', null);
+  assertEdit('change R1 to 1.000k', null);
+});
+
+test('non-E-series labels round-trip through a form the parser accepts', () => {
+  const refused = /^\d+\.\d{3}[kKmM]$/;
+  for (const ohms of [1005, 2001, 1000500]) {
+    const decision = classifyExistingProjectRequest(`change R1 to ${ohms} ohm`, SPEC);
+    const label = decision.edit?.label ?? null;
+    assert.equal(decision.mode, 'merge', String(ohms));
+    assert.equal(decision.edit?.ohms, ohms, label);
+    assert.equal(refused.test(label ?? ''), false, label);
+    assert.equal(asNumber(parseResistorOhms(label)), ohms, label);
+    assert.equal(asNumber(spiceResistorOhms(label)), ohms, label);
+  }
+});
+
 test('E96 labels from 1Ω through 9.76MΩ round-trip, and 10MΩ does too', () => {
   let rows = 0;
   const failures = [];

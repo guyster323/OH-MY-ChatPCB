@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { classifyResistorValue } from '../kicad/resistor-ohms.js';
+import { classifyResistorValue, parseResistorOhms } from '../kicad/resistor-ohms.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
@@ -277,6 +277,12 @@ export function resistorValueOutOfRangeMessage() {
   return `${en}\n${ko}`;
 }
 
+export function mixedRemovalAndEditMessage() {
+  const en = 'Please ask for one change at a time: the removal or the resistor value. Nothing was changed.';
+  const ko = '한 번에 한 가지만 요청해 주세요. 부품 빼기와 저항 값 바꾸기 중 하나만요. 아무것도 바꾸지 않았어요.';
+  return `${en}\n${ko}`;
+}
+
 export function modifyRefusalMessage() {
   const en = 'The requested change could not be applied onto the existing design. Describe the change more specifically (name the part or reference and the value), or start a new project for a full redesign. The existing circuit was left unchanged.';
   const ko = '수정 사항을 적용할 수 없어요. 바꿀 부품이나 참조 이름과 값을 구체적으로 적어 주세요. 전체를 다시 설계하려면 새 프로젝트를 시작하세요. 기존 회로는 바꾸지 않았어요.';
@@ -310,9 +316,10 @@ function classifyPrompt(text, spec) {
 
 function classifySeparateIntent(editText, intentText, spec) {
   const removal = removalDecision(intentText, spec);
+  const fromUser = nonRemovalEdit(intentText);
+  if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  const fromUser = nonRemovalEdit(intentText);
   if (fromUser?.kind === 'invalid') return invalidResistor(fromUser.reason);
   if (fromUser) return { mode: 'merge', edit: fromUser };
   if (removal.kind === 'unclear') return unclearRemoval();
@@ -323,13 +330,31 @@ function classifySeparateIntent(editText, intentText, spec) {
 
 function classifyEditText(text, spec) {
   const removal = removalDecision(text, spec);
+  const resistor = nonRemovalEdit(text);
+  if (isMixedRemovalAndEdit(removal, resistor)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  const resistor = nonRemovalEdit(text);
   if (resistor?.kind === 'invalid') return invalidResistor(resistor.reason);
   if (resistor) return { mode: 'merge', edit: resistor };
   if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
+}
+
+// A positive removal beside a resistor value is one request with two changes.
+// Applying either half would drop the other. A negated removal ("삭제하지 마")
+// is not affirmative, so the value edit still applies.
+function isMixedRemovalAndEdit(removal, resistor) {
+  if (!removal?.affirmative) return false;
+  if (resistor?.kind === 'resistor') return true;
+  return resistor?.kind === 'invalid' && resistor.valued === true;
+}
+
+function mixedRemovalAndEdit() {
+  return {
+    mode: 'refuse',
+    code: 'MIXED_REMOVAL_AND_EDIT',
+    message: mixedRemovalAndEditMessage()
+  };
 }
 
 function refusalForRemoval(removal) {
@@ -1210,7 +1235,12 @@ function applyUnexplainedResidue(intents, text) {
       intent.sourceIndex >= item.start && intent.sourceIndex < item.start + item.text.length
     ));
     if (!clause || findVerbs(clause.text).length === 0) continue;
-    if (hasUnexplainedResidue(clause.text)) blockIntent(intent, 'corrected');
+    if (hasUnexplainedResidue(clause.text)) {
+      blockIntent(intent, 'corrected');
+      // The verb itself was not negated. Residue such as "후" or a value in
+      // the same clause blocked it, so a resistor edit must not proceed alone.
+      intent.residue = true;
+    }
   }
 }
 
@@ -1381,19 +1411,26 @@ function removalDecision(text, spec) {
   applyTrailingCorrection(intents, normalized);
   applyMultiTargetBlock(intents, normalized);
   applyListedRemovalBlock(intents, normalized);
-  if (intents.some((intent) => intent.question || intent.corrected)) return { kind: 'unclear' };
+  const affirmative = intents.some((intent) => (
+    isTrackedTarget(intent.target) && (intent.polarity === 'positive' || intent.residue === true)
+  ));
+  const finish = (decision) => {
+    decision.affirmative = affirmative;
+    return decision;
+  };
+  if (intents.some((intent) => intent.question || intent.corrected)) return finish({ kind: 'unclear' });
 
   const refTokens = collectPositiveRefs(normalized, intents);
   if (refTokens.length >= 2) {
-    return { kind: 'one-at-a-time', refs: refTokens.map((token) => displayRef(spec, token)) };
+    return finish({ kind: 'one-at-a-time', refs: refTokens.map((token) => displayRef(spec, token)) });
   }
   if (refTokens.length === 1) {
     const named = new Set([...collectPositiveNamed(intents), ...joinedNamedBeside(normalized, intents)]);
     for (const id of named) {
-      if (!sameMachinery(spec, refTokens[0], id)) return { kind: 'unclear' };
+      if (!sameMachinery(spec, refTokens[0], id)) return finish({ kind: 'unclear' });
     }
-    if (resolvedRefConflicts(spec, normalized)) return { kind: 'unclear' };
-    return resolveRefRemoval(spec, refTokens[0]);
+    if (resolvedRefConflicts(spec, normalized)) return finish({ kind: 'unclear' });
+    return finish(resolveRefRemoval(spec, refTokens[0]));
   }
 
   const actionable = [];
@@ -1403,16 +1440,17 @@ function removalDecision(text, spec) {
     if (!actionable.includes(intent.target)) actionable.push(intent.target);
   }
   if (actionable.length === 1 && !removalIsUnclear(intents, actionable)) {
-    if (resolvedRefConflicts(spec, normalized)) return { kind: 'unclear' };
-    return { kind: 'remove', targets: actionable };
+    if (resolvedRefConflicts(spec, normalized)) return finish({ kind: 'unclear' });
+    return finish({ kind: 'remove', targets: actionable });
   }
-  if (removalIsUnclear(intents, actionable)) return { kind: 'unclear' };
-  return { kind: 'none' };
+  if (removalIsUnclear(intents, actionable)) return finish({ kind: 'unclear' });
+  return finish({ kind: 'none' });
 }
 
 // A candidate carries an ohm unit or an RKM/SI suffix. Package codes, wattage,
 // voltage, current, percent, bare numbers, and reference designators are not
-// values. The matched text is parsed only by parseResistorOhms.
+// candidates here. One bare number can still be ohms later, when the request
+// names a resistor. The matched text is parsed only by parseResistorOhms.
 // A leading sign stays inside the token. Dropping it would read +10Ω as 10Ω.
 // The same is true of a comma: 4,7k must not be read as 7k.
 const RESISTOR_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{N}_.+,\u2212\u2013\u00B1-])(?:${[
@@ -1435,6 +1473,7 @@ const RESISTOR_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{N}_.+,\u2212\u2013\u00
   String.raw`\d+(?:\.\d+)?[A-Za-z]{2,}`,
   String.raw`[A-Za-z]+(?:\s*(?:Ω|옴|ohms?))(?![A-Za-z])`,
   String.raw`[A-Za-z]+\d+`,
+  String.raw`\d+,\d+`,
   String.raw`\d+(?:\.\d+)?`
 ].join('|')})`, 'gu');
 const RESISTOR_PACKAGE = /^(?:0402|0603|0805|1206)$/;
@@ -1565,28 +1604,89 @@ function interpretResistor(text) {
   promoteCoordinatedBareValues(tokens, normalized);
   dropLeadingDesignators(tokens);
   const parsed = classifyResistorAttempts(tokens);
-  if (parsed.milli) return { kind: 'invalid', reason: 'milli' };
-  if (parsed.malformed) return { kind: 'invalid' };
-  if (parsed.outOfRange) return { kind: 'invalid', reason: 'range' };
+  if (parsed.milli) return { kind: 'invalid', reason: 'milli', valued: true };
+  if (parsed.malformed) return { kind: 'invalid', valued: true };
+  if (parsed.outOfRange) return { kind: 'invalid', reason: 'range', valued: true };
 
   const chosen = destinationAmount(normalized, parsed.valid);
   if (chosen) return resistorEdit(chosen);
   const distinct = new Set(parsed.valid.map((amount) => amount.ohmsText));
-  if (distinct.size > 1) return { kind: 'invalid' };
+  if (distinct.size > 1) return { kind: 'invalid', valued: true };
   if (distinct.size === 1) return resistorEdit(parsed.valid[parsed.valid.length - 1]);
+
+  const unitless = unitlessResistor(normalized, tokens);
+  if (unitless) return unitless;
+
   const asked = aboutLed && /(?:으로|로(?!부터|서|써)|->|→|\bto\b|바꿔|변경)/u.test(normalized);
   if (asked) return { kind: 'invalid' };
   return null;
 }
 
+// A bare number is ohms only when the request names a resistor and exactly
+// one numeric token remains after package, wattage, voltage, current, percent,
+// and R-reference digits are set aside. A sign, a comma, a lowercase m, or
+// three digits after one dot stays refused. The range check is unchanged.
+function namesResistorTarget(text, tokens) {
+  if (/저항|\bresistor\b/iu.test(text)) return true;
+  return tokens.some((token) => /^[rR]\d$/.test(token.raw));
+}
+
+function isBareUnitlessToken(token) {
+  if (token.attempt) return false;
+  const raw = token.raw.trim();
+  if (!/^\d+(?:\.\d+)?$/.test(raw)) return false;
+  if (RESISTOR_PACKAGE.test(raw)) return false;
+  if (/^0\d+$/.test(raw)) return false;
+  return true;
+}
+
+function isCleanUnitless(raw) {
+  if (/[+\-\u2212\u2013\uFF0D\u00B1]/.test(raw)) return false;
+  if (raw.includes(',') || raw.includes('m')) return false;
+  if (/^\d+\.\d{3}$/.test(raw)) return false;
+  return /^\d+(?:\.\d+)?$/.test(raw);
+}
+
+function unitlessResistor(text, tokens) {
+  if (!namesResistorTarget(text, tokens)) return null;
+  const candidates = tokens.filter((token) => isBareUnitlessToken(token));
+  if (candidates.length === 0) return null;
+  if (candidates.length > 1) return { kind: 'invalid', valued: true };
+  const raw = candidates[0].raw.trim();
+  if (!isCleanUnitless(raw)) return { kind: 'invalid', valued: true };
+  const result = classifyResistorValue(raw);
+  if (result.reason === 'range') return { kind: 'invalid', reason: 'range', valued: true };
+  if (result.reason === 'milli') return { kind: 'invalid', reason: 'milli', valued: true };
+  if (result.ohmsText == null) return { kind: 'invalid', valued: true };
+  return resistorEdit({ ohms: result.ohms, ohmsText: result.ohmsText });
+}
+
 // Sub-1k keeps the Ω suffix (680Ω, 1.5Ω). Kilo and mega keep every digit of
 // the canonical ohms string, so 4990 is 4.99k and 1050000 is 1.05M.
+// 1005 must not become "1.005k": three digits after one dot no longer parse.
+// RKM ("1k005") or plain ohms is used when that form would not re-parse.
 function formatResistorLabel(ohmsText) {
   const text = String(ohmsText);
   const value = Number(text);
-  if (value >= 1_000_000) return `${scaleOhms(text, 6)}M`;
-  if (value >= 1000) return `${scaleOhms(text, 3)}k`;
+  const candidates = [];
+  if (Number.isFinite(value) && value >= 1_000_000) {
+    const scaled = scaleOhms(text, 6);
+    candidates.push(`${scaled}M`, dottedMultiplier(scaled, 'M'));
+  } else if (Number.isFinite(value) && value >= 1000) {
+    const scaled = scaleOhms(text, 3);
+    candidates.push(`${scaled}k`, dottedMultiplier(scaled, 'k'));
+  }
+  candidates.push(`${text}Ω`);
+  for (const label of candidates) {
+    if (label && parseResistorOhms(label) === text) return label;
+  }
   return `${text}Ω`;
+}
+
+function dottedMultiplier(scaled, letter) {
+  const dot = scaled.indexOf('.');
+  if (dot < 0) return null;
+  return `${scaled.slice(0, dot)}${letter}${scaled.slice(dot + 1)}`;
 }
 
 function scaleOhms(text, places) {

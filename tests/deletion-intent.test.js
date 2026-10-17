@@ -5,6 +5,7 @@ import {
   DELETION_INTENT_VOCABULARY,
   classifyDeletionIntents,
   classifyExistingProjectRequest,
+  mixedRemovalAndEditMessage,
   removalIntentUnclearMessage,
   removalOneAtATimeMessage,
   removalRefNotFoundMessage,
@@ -668,4 +669,42 @@ test('cancel in a resistor edit does not block the value change', () => {
   assert.equal(decision.mode, 'merge');
   assert.equal(decision.edit?.kind, 'resistor');
   assert.equal(decision.edit?.ohms, 680);
+});
+
+// A removal and a value edit in one request used to apply only one of them.
+// The whole request asks, and nothing is edited or removed.
+test('a removal mixed with a resistor edit asks for one change', () => {
+  const message = [
+    'Please ask for one change at a time: the removal or the resistor value. Nothing was changed.',
+    '한 번에 한 가지만 요청해 주세요. 부품 빼기와 저항 값 바꾸기 중 하나만요. 아무것도 바꾸지 않았어요.'
+  ].join('\n');
+  assert.equal(mixedRemovalAndEditMessage(), message);
+
+  const rows = [
+    ['I2C 삭제 후 LED 저항 680옴', SPEC],
+    ['remove I2C and set the LED resistor to 680 ohm', SPEC],
+    ['J2 빼고 LED 저항 1k로', REF_SPEC],
+    ['delete the LED, change R3 to 470Ω', SPEC]
+  ];
+  for (const [prompt, spec] of rows) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'MIXED_REMOVAL_AND_EDIT', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(removesI2c(decision), false, prompt);
+  }
+
+  const kept = classifyExistingProjectRequest('680옴으로 바꿔줘. I2C는 삭제하지 마', SPEC);
+  assert.equal(outcomeOf(kept), 'edit-applied');
+  assert.equal(kept.edit.ohms, 680);
+  assert.equal(removesI2c(kept), false);
+
+  const removal = classifyExistingProjectRequest('remove I2C', SPEC);
+  assert.equal(outcomeOf(removal), 'removal-candidate:i2c');
+  assert.deepEqual(removal.edit.targets, ['i2c']);
+
+  const edit = classifyExistingProjectRequest('LED 저항 680옴', SPEC);
+  assert.equal(outcomeOf(edit), 'edit-applied');
+  assert.equal(edit.edit.ohms, 680);
 });
