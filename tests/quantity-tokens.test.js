@@ -124,6 +124,36 @@ test('an ambiguous thousands dot is not read as a resistor', () => {
   }
 });
 
+test('length and time are not resistor tokens', () => {
+  const ignored = [
+    '1 m cable',
+    'blinking every 5m',
+    'LED with 2m wire',
+    '5V LED, 1 m cable',
+    '2m long wire',
+    'blink every 500ms'
+  ];
+  for (const prompt of ignored) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
+    assert.equal(scan.resistorFault ?? null, null, prompt);
+    assert.equal(scan.unparseable, false, prompt);
+  }
+
+  // 4m7 is an invalid resistor code. Next to LED or the word resistor it stays refused.
+  for (const prompt of ['LED 4m7 resistor', 'LED resistor 4m7', 'LED 5V 4m7', 'LED with a 1m resistor']) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
+    assert.equal(scan.resistorFault, 'milli', prompt);
+    assert.equal(scan.unparseable, true, prompt);
+  }
+
+  const kept = tokenizeQuantities('LED resistor 4k7');
+  assert.equal(kept.unparseable, false);
+  assert.equal(kept.resistorFault ?? null, null);
+  assert.equal(kept.tokens.find((token) => token.kind === 'resistance').value, 4700);
+});
+
 test('voltage and current milli stay milli', () => {
   const millivolts = tokenizeQuantities('3300mV').tokens[0];
   assert.equal(millivolts.unit, 'mV');

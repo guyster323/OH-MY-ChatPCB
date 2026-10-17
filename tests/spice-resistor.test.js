@@ -129,6 +129,48 @@ test('SPICE_RESISTOR_INVALID leaves project files uncreated and unchanged', asyn
   }
 });
 
+test('a length or a time next to a status LED is not the series resistor', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'chatpcb-spice-length-'));
+  const prompts = [
+    'RP2040 board with status LED and a 1 m cable',
+    'RP2040 board with status LED blinking every 5m',
+    'RP2040 board with status LED and a 2m long wire',
+    'RP2040 board with status LED, blink every 500ms',
+    'RP2040 board with status LED mounted 2 m high',
+    'RP2040 board with status LED, 상태 LED는 5m마다 깜빡임'
+  ];
+  try {
+    const plain = await generateMcuPeripheralProject({
+      projectDir: path.join(parent, 'plain'),
+      prompt: 'RP2040 board with status LED',
+      projectName: 'plain'
+    });
+    const plainValue = plain.spec.peripherals.find((item) => item.kind === 'status-led-resistor')?.value;
+    for (const [index, prompt] of prompts.entries()) {
+      const generated = await generateMcuPeripheralProject({
+        projectDir: path.join(parent, `p${index}`),
+        prompt,
+        projectName: `p${index}`
+      });
+      const value = generated.spec.peripherals.find((item) => item.kind === 'status-led-resistor')?.value;
+      assert.equal(value, plainValue, prompt);
+    }
+    await assert.rejects(
+      () => generateMcuPeripheralProject({
+        projectDir: path.join(parent, 'bad'),
+        prompt: 'RP2040 board with status LED and a 4m7 resistor',
+        projectName: 'bad'
+      }),
+      (error) => {
+        assert.equal(error.code, 'SPICE_RESISTOR_INVALID');
+        return true;
+      }
+    );
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
 test('generateMcuPeripheralProject creates the directory only after SPICE validation', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'chatpcb-spice-mkdir-'));
   const fresh = path.join(parent, 'fresh');

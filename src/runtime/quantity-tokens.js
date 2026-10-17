@@ -215,6 +215,21 @@ function bareHasResistorContext(prompt, start, end) {
   return RESISTOR_CONTEXT_BEFORE.test(before) || RESISTOR_CONTEXT_AFTER.test(after);
 }
 
+// A lone m (1m, 4.7m, 4m7) is a resistor only in a resistor phrase, or when the
+// whole prompt is that suffix. "1 m cable" and "every 5m" are length and time.
+// 4m7 and 2m2 stay resistor faults wherever they appear. LED alone is not context.
+const MILLI_RESISTOR_CONTEXT = /(?:\bohms?\b|\bresistors?\b|저항|抵抗|(?<![가-힣])옴|Ω|\bR\d+\b)/iu;
+
+export function loneMilliCountsAsResistor(prompt, start, end) {
+  const text = String(prompt ?? '');
+  const raw = text.slice(start, end).replace(/\s+/g, '');
+  if (/^\d+m\d+$/i.test(raw)) return true;
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  if (before.trim() === '' && after.trim() === '') return true;
+  return MILLI_RESISTOR_CONTEXT.test(before.slice(-24)) || MILLI_RESISTOR_CONTEXT.test(after.slice(0, 24));
+}
+
 function pushMatch(candidates, match, priority, token, invalid = false) {
   const start = match.index ?? 0;
   candidates.push({
@@ -454,6 +469,18 @@ function collectSuffix(prompt, candidates) {
     const end = start + match[0].length;
     const ohms = resistorOhmsFromSuffix(match[0]);
     if (ohms == null) {
+      // Cover a length or a time so the digits are not a bare resistor, and so
+      // the span is not an invalid milli fault. 1m beside "resistor" still is.
+      if (isLoneMilliResistorSuffix(match[0]) && !loneMilliCountsAsResistor(prompt, start, end)) {
+        candidates.push({
+          priority: PRIORITY.suffix,
+          start,
+          end,
+          invalid: false,
+          token: contextToken(prompt, start, end, 'length')
+        });
+        continue;
+      }
       candidates.push(invalidResistorCandidate(PRIORITY.suffix, start, end, match[0]));
       continue;
     }
