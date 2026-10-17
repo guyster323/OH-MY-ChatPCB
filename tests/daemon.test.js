@@ -753,7 +753,7 @@ test('daemon candidate validation rejection does not delete the project director
       {
         id: 'call_project_request_restore_dir',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
+        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.' }
       },
       {
         ...providerOptions({
@@ -1347,7 +1347,7 @@ test('daemon keeps existing project artifacts when candidate ERC validation fail
       {
         id: 'call_project_request_rollback',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
+        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.' }
       },
       {
         ...providerOptions({
@@ -1542,7 +1542,7 @@ test('daemon ignores disallowed calls after patch preview and succeeds without r
               createEnvelope('tool.call', {
                 id: 'call_patch_then_fail',
                 name: 'schematic.patch',
-                args: { prompt: 'STM32 board with USB-C power and UART header.' }
+                args: { prompt: 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.' }
               }),
               createEnvelope('tool.call', {
                 id: 'call_provider_forbidden_create',
@@ -2629,7 +2629,7 @@ test('daemon websocket transports approved patch results with large diffs', asyn
               name: 'schematic.patch',
               args: {
                 projectDir: root,
-                prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.',
+                prompt: 'RP2040 board with USB-C power, I2C connector, UART debug header, reset button, and status LED.',
                 approved: false
               }
             }

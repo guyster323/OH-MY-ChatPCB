@@ -8,10 +8,8 @@ import { CONVERSATION_FILE } from '../runtime/request-conversation.js';
 import {
   applyMergedProjectEdit,
   classifyExistingProjectRequest,
-  deletionAuthorized,
   modifyRefusalMessage,
   removalFinding,
-  removalGuardApplies,
   removedComponents
 } from './existing-project-edit.js';
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
@@ -203,10 +201,11 @@ function candidatePassed(verification, required) {
   return true;
 }
 
-function reviewWithRemovalGuard(review, beforeSpec, afterSpec, prompt) {
+function reviewWithRemovalGuard(review, beforeSpec, afterSpec) {
   const removed = removedComponents(beforeSpec, afterSpec);
-  if (removed.length === 0 || deletionAuthorized(prompt, removed)) return review;
-  if (!removalGuardApplies(prompt, beforeSpec)) return review;
+  // Prompt text never authorizes a removal. A missing ref stays blocked until
+  // apply carries an allowRemovedComponents set that matches these refs.
+  if (removed.length === 0) return review;
   const finding = removalFinding(removed);
   review.findings.blockers.push(finding);
   review.status = 'blocked';
@@ -496,7 +495,7 @@ export async function createNativeProposal({
       review: reviewWithRemovalGuard(reviewCircuitReadiness({
         spec: proposed.spec,
         validation: isLegacyErcResult(rawVerification) ? rawVerification : rawVerification?.erc
-      }), existingSpec, proposed.spec, prompt)
+      }), existingSpec, proposed.spec)
     };
   } catch (error) {
     await rm(tempDir, { force: true, recursive: true });
