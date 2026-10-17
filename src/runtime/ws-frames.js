@@ -1,6 +1,10 @@
 // Per-connection WebSocket framing for the daemon's raw TCP upgrade.
 // Client frames are masked (RFC 6455). A declared length above the ceiling
 // closes the socket before the body is buffered.
+//
+// Inbound bytes stay in a chunk list. The handler copies a frame once, when
+// the header says the body is complete. Concatenating on every socket read
+// would copy an 8 MiB frame again for each small chunk.
 
 export const MAX_WEBSOCKET_MESSAGE_BYTES = 8 * 1024 * 1024;
 
@@ -34,7 +38,8 @@ export function attachWebSocketFrameHandler(socket, {
     throw new Error('WebSocket frame handler requires onMessage.');
   }
 
-  let pending = Buffer.alloc(0);
+  const incoming = createReceiveBuffer();
+  let pendingTotal = 0;
   let fragment = null;
   let closing = false;
 
@@ -42,10 +47,13 @@ export function attachWebSocketFrameHandler(socket, {
     if (closing) return;
     closing = true;
     fragment = null;
-    pending = Buffer.alloc(0);
+    pendingTotal = 0;
+    incoming.clear();
     const body = echoPayload ?? encodeClosePayload(code, reason);
     try {
-      if (!socket.destroyed) socket.end(encodeServerFrame(0x8, body));
+      if (!socket.destroyed && !socket.writableEnded) {
+        socket.end(encodeServerFrame(0x8, body));
+      }
     } catch (error) {
       console.error('ChatPCB websocket close failed:', error);
       if (!socket.destroyed) socket.destroy();
@@ -70,13 +78,22 @@ export function attachWebSocketFrameHandler(socket, {
   };
 
   socket.on('data', (chunk) => {
-    if (closing || socket.destroyed) return;
-    const incoming = Buffer.from(chunk);
-    pending = pending.length === 0 ? incoming : Buffer.concat([pending, incoming]);
+    if (closing || socket.destroyed || socket.writableEnded) return;
+    if (chunk.length === 0) return;
+    incoming.push(Buffer.from(chunk));
 
     for (;;) {
-      const frame = tryReadClientFrame(pending, maxMessageBytes);
+      // The header is parsed once. Later chunks only compare the buffered
+      // length with that total, so a large frame of tiny reads stays linear.
+      if (pendingTotal > 0 && incoming.length < pendingTotal) return;
+      const frame = tryReadClientFrame(incoming, maxMessageBytes);
       if (!frame) return;
+      if (frame.pending) {
+        pendingTotal = frame.pending;
+        if (incoming.length < pendingTotal) return;
+        continue;
+      }
+      pendingTotal = 0;
       if (frame.error) {
         shutdown(frame.code, frame.reason);
         return;
@@ -85,8 +102,9 @@ export function attachWebSocketFrameHandler(socket, {
         shutdown(1002, 'Invalid frame.');
         return;
       }
-      pending = frame.consumed >= pending.length ? Buffer.alloc(0) : pending.subarray(frame.consumed);
+      incoming.consume(frame.consumed);
       if (!dispatchFrame(frame)) return;
+      if (closing || socket.destroyed || socket.writableEnded) return;
     }
   });
 
@@ -98,15 +116,32 @@ export function attachWebSocketFrameHandler(socket, {
       return true;
     }
     if (opcode === 0xA) return true;
-    if (opcode === 0x8) {
-      if (payload.length === 1) {
-        shutdown(1002, 'Invalid close payload.');
-        return false;
-      }
-      shutdown(1000, '', payload);
+    if (opcode === 0x8) return handleClose(payload);
+    return appendData(opcode, fin, payload);
+  }
+
+  function handleClose(payload) {
+    if (payload.length === 1) {
+      shutdown(1002, 'Invalid close payload.');
       return false;
     }
-    return appendData(opcode, fin, payload);
+    if (payload.length >= 2) {
+      const code = payload.readUInt16BE(0);
+      // RFC 6455 §7.4.1: 1004/1005/1006/1015 must not appear on the wire,
+      // codes below 1000 are unused, 1016-2999 are unassigned, and only
+      // 3000-4999 are left for libraries and private use. Echoing an
+      // illegal code is itself a protocol error, so answer with 1002.
+      if (!isValidCloseCode(code)) {
+        shutdown(1002, 'Invalid close code.');
+        return false;
+      }
+      if (!isValidUtf8(payload.subarray(2))) {
+        shutdown(1007, 'Invalid close reason.');
+        return false;
+      }
+    }
+    shutdown(1000, '', payload);
+    return false;
   }
 
   function appendData(opcode, fin, payload) {
@@ -117,6 +152,10 @@ export function attachWebSocketFrameHandler(socket, {
       }
     } else if (fragment) {
       shutdown(1002, 'Data frame interrupted a fragmented message.');
+      return false;
+    } else if (opcode === 0x2) {
+      // The daemon speaks text envelopes only. Reject before any reassembly.
+      shutdown(1003, 'Binary messages are not supported.');
       return false;
     } else if (!fin) {
       fragment = { opcode, chunks: [], size: 0 };
@@ -134,20 +173,146 @@ export function attachWebSocketFrameHandler(socket, {
       const messageOpcode = active.opcode;
       const message = Buffer.concat(active.chunks, active.size);
       fragment = null;
-      deliver(messageOpcode, message);
-      return true;
+      return deliverMessage(messageOpcode, message);
     }
 
-    deliver(opcode, payload);
-    return true;
+    return deliverMessage(opcode, payload);
   }
+
+  function deliverMessage(opcode, payload) {
+    if (opcode === 0x1 && !isValidUtf8(payload)) {
+      shutdown(1007, 'Invalid UTF-8.');
+      return false;
+    }
+    deliver(opcode, payload);
+    return !closing && !socket.destroyed && !socket.writableEnded;
+  }
+
+  return {
+    close(code, reason) {
+      shutdown(code, reason);
+    }
+  };
+}
+
+function createReceiveBuffer() {
+  const chunks = [];
+  let index = 0;
+  let offset = 0;
+  let length = 0;
+
+  function locate(position) {
+    let skip = position;
+    let cursor = index;
+    let start = offset;
+    while (cursor < chunks.length) {
+      const available = chunks[cursor].length - start;
+      if (skip < available) return { cursor, start: start + skip };
+      skip -= available;
+      cursor += 1;
+      start = 0;
+    }
+    return null;
+  }
+
+  function byteAt(position) {
+    const found = locate(position);
+    if (!found) throw new RangeError(`WebSocket buffer underrun at ${position}.`);
+    return chunks[found.cursor][found.start];
+  }
+
+  return {
+    get length() {
+      return length;
+    },
+    push(chunk) {
+      if (chunk.length === 0) return;
+      chunks.push(chunk);
+      length += chunk.length;
+    },
+    clear() {
+      chunks.length = 0;
+      index = 0;
+      offset = 0;
+      length = 0;
+    },
+    consume(count) {
+      let remaining = count > length ? length : count;
+      length -= remaining;
+      while (remaining > 0) {
+        const available = chunks[index].length - offset;
+        if (remaining < available) {
+          offset += remaining;
+          break;
+        }
+        remaining -= available;
+        index += 1;
+        offset = 0;
+      }
+      if (length === 0) {
+        chunks.length = 0;
+        index = 0;
+        offset = 0;
+        return;
+      }
+      if (index > 32) {
+        chunks.splice(0, index);
+        index = 0;
+      }
+    },
+    get(position) {
+      return byteAt(position);
+    },
+    readUInt16BE(position) {
+      return (byteAt(position) << 8) | byteAt(position + 1);
+    },
+    readBigUInt64BE(position) {
+      let value = 0n;
+      for (let byte = 0; byte < 8; byte += 1) {
+        value = (value << 8n) | BigInt(byteAt(position + byte));
+      }
+      return value;
+    },
+    read(start, size, mask) {
+      if (size === 0) return Buffer.alloc(0);
+      const out = Buffer.alloc(size);
+      let skip = start;
+      let dest = 0;
+      let cursor = index;
+      let startAt = offset;
+      while (dest < size) {
+        const chunk = chunks[cursor];
+        const available = chunk.length - startAt;
+        if (skip >= available) {
+          skip -= available;
+          cursor += 1;
+          startAt = 0;
+          continue;
+        }
+        const begin = startAt + skip;
+        const take = Math.min(available - skip, size - dest);
+        if (mask) {
+          for (let step = 0; step < take; step += 1) {
+            out[dest + step] = chunk[begin + step] ^ mask[(dest + step) % 4];
+          }
+        } else {
+          chunk.copy(out, dest, begin, begin + take);
+        }
+        dest += take;
+        skip = 0;
+        cursor += 1;
+        startAt = 0;
+      }
+      return out;
+    }
+  };
 }
 
 function tryReadClientFrame(buffer, maxMessageBytes) {
   if (buffer.length < 2) return null;
 
-  const first = buffer[0];
-  const second = buffer[1];
+  const first = buffer.get(0);
+  const second = buffer.get(1);
   if ((first & 0x70) !== 0) {
     return protocolError(1002, 'Reserved RSV bits are not supported.');
   }
@@ -187,21 +352,32 @@ function tryReadClientFrame(buffer, maxMessageBytes) {
 
   // Reject before the body arrives so an oversized or illegal header cannot pin memory.
   if (!masked) return protocolError(1002, 'Client frames must be masked.');
-  if (buffer.length < offset + 4 + length) return null;
+  const total = offset + 4 + length;
+  if (buffer.length < total) return { pending: total };
 
-  const mask = buffer.subarray(offset, offset + 4);
-  offset += 4;
-  const payload = Buffer.alloc(length);
-  for (let index = 0; index < length; index += 1) {
-    payload[index] = buffer[offset + index] ^ mask[index % 4];
-  }
-
+  const mask = buffer.read(offset, 4);
+  const payload = buffer.read(offset + 4, length, mask);
   return {
     fin,
     opcode,
     payload,
-    consumed: offset + length
+    consumed: total
   };
+}
+
+// Status codes a peer is allowed to put in a Close frame (RFC 6455 §7.4).
+function isValidCloseCode(code) {
+  return (code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006)
+    || (code >= 3000 && code <= 4999);
+}
+
+function isValidUtf8(payload) {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(payload);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function protocolError(code, reason) {

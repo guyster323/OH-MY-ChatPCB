@@ -1069,11 +1069,14 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     clients.add(socket);
     sendWebSocketJson(socket, createEnvelope('system.status', { ok: true, service: 'chatpcb-agentd' }));
 
-    const enqueue = createSocketMessageQueue();
-    attachWebSocketFrameHandler(socket, {
+    let enqueue;
+    const frames = attachWebSocketFrameHandler(socket, {
       onMessage: (_opcode, payload) => {
         scheduleSocketMessage(socket, payload, resolvedDispatchOptions, enqueue);
       }
+    });
+    enqueue = createSocketMessageQueue(() => {
+      frames.close(1013, 'Pending message limit exceeded.');
     });
 
     socket.on('close', () => clients.delete(socket));
@@ -1370,11 +1373,31 @@ function createWebSocketAccept(key) {
 
 // provider.cancel must run while an earlier tool call on this socket is still
 // awaiting. Queueing it behind that call would wait for the invoke it aborts.
-function createSocketMessageQueue() {
+// It does not count toward MAX_PENDING_SOCKET_MESSAGES.
+//
+// The cap includes the message that is running. One more message closes the
+// socket with 1013 (Try Again Later): the backlog is temporary overload, and
+// the peer can open a new connection. 1008 would describe a policy violation;
+// 1013 tells the peer to retry.
+export const MAX_PENDING_SOCKET_MESSAGES = 64;
+
+function createSocketMessageQueue(onOverflow) {
   let tail = Promise.resolve();
+  let pending = 0;
+  let overflowed = false;
   return (task) => {
+    if (overflowed || pending >= MAX_PENDING_SOCKET_MESSAGES) {
+      if (!overflowed) {
+        overflowed = true;
+        onOverflow();
+      }
+      return;
+    }
+    pending += 1;
     tail = tail.then(task).catch((error) => {
       console.error('ChatPCB websocket handler failed:', error);
+    }).finally(() => {
+      pending -= 1;
     });
   };
 }

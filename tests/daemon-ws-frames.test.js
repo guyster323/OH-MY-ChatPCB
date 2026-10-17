@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import net from 'node:net';
 import test from 'node:test';
 
-import { startDaemon } from '../src/runtime/agent-daemon.js';
-import { MAX_WEBSOCKET_MESSAGE_BYTES } from '../src/runtime/ws-frames.js';
+import { MAX_PENDING_SOCKET_MESSAGES, startDaemon } from '../src/runtime/agent-daemon.js';
+import { attachWebSocketFrameHandler, MAX_WEBSOCKET_MESSAGE_BYTES } from '../src/runtime/ws-frames.js';
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 const unhandledRejections = [];
@@ -12,8 +13,8 @@ process.on('unhandledRejection', (reason) => {
   unhandledRejections.push(reason);
 });
 
-function wsTest(name, fn) {
-  test(name, { timeout: 15000 }, fn);
+function wsTest(name, fn, timeout = 15000) {
+  test(name, { timeout }, fn);
 }
 
 function envelope({ id, name = 'provider.list', args = {}, createdAt = '2026-01-01T00:00:00.000Z' }) {
@@ -43,9 +44,13 @@ function sizedToolText(id, size) {
   return text;
 }
 
-function encodeClientFrame(opcode, payload, { fin = true, masked = true } = {}) {
+function encodeClientFrame(opcode, payload, { fin = true, masked = true, rsv1 = false, rsv2 = false, rsv3 = false } = {}) {
   const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
-  const byte0 = (fin ? 0x80 : 0x00) | (opcode & 0x0f);
+  const byte0 = (fin ? 0x80 : 0x00)
+    | (rsv1 ? 0x40 : 0x00)
+    | (rsv2 ? 0x20 : 0x00)
+    | (rsv3 ? 0x10 : 0x00)
+    | (opcode & 0x0f);
   const maskBit = masked ? 0x80 : 0x00;
   let header;
   if (data.length < 126) {
@@ -315,6 +320,41 @@ async function withDaemon(dispatchOptions, fn) {
 async function sendCalls(client, calls) {
   const frames = calls.map((call) => encodeTextFrame(envelope(call)));
   await writeBuffer(client.socket, Buffer.concat(frames));
+}
+
+async function assertStillServing(daemon, open, id) {
+  const health = await fetch(`${daemon.url}/health`).then((response) => response.json());
+  assert.equal(health.ok, true);
+  const other = await open();
+  await sendCalls(other, [{ id }]);
+  await expectOkIds(other, [id]);
+}
+
+async function expectProtocolClose(daemon, open, frame, code, id, timeoutMs = 2000) {
+  const client = await open();
+  await writeBuffer(client.socket, frame);
+  await waitFor(() => closeFrames(client).length > 0, timeoutMs);
+  const close = closeFrames(client)[0];
+  assert.ok(close.payload.length >= 2);
+  assert.equal(close.payload.readUInt16BE(0), code);
+  assert.equal(toolResults(client).length, 0);
+  await assertStillServing(daemon, open, id);
+  return close;
+}
+
+function encodeNonMinimalFrame(payloadLength, width) {
+  const data = Buffer.alloc(payloadLength, 0x78);
+  const mask = crypto.randomBytes(4);
+  const maskedPayload = Buffer.alloc(payloadLength);
+  for (let index = 0; index < payloadLength; index += 1) {
+    maskedPayload[index] = data[index] ^ mask[index % 4];
+  }
+  const header = width === 16 ? Buffer.alloc(4) : Buffer.alloc(10);
+  header[0] = 0x81;
+  header[1] = 0x80 | (width === 16 ? 126 : 127);
+  if (width === 16) header.writeUInt16BE(payloadLength, 2);
+  else header.writeBigUInt64BE(BigInt(payloadLength), 2);
+  return Buffer.concat([header, mask, maskedPayload]);
 }
 
 function fastDispatch() {
@@ -712,4 +752,346 @@ wsTest('a panel burst of provider.status, chatpcb.test.nonexistent-tool, and pro
     assert.equal(results[2].ok, true);
     assert.equal(results[2].result.projectDir, '/tmp/chatpcb-ws-panel');
   });
+});
+
+wsTest('a fragmented message whose total exceeds the max closes with 1009 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const client = await open();
+    const fragmentBytes = 8 * 1024;
+    const fragmentCount = Math.floor(MAX_WEBSOCKET_MESSAGE_BYTES / fragmentBytes) + 1;
+    assert.ok(fragmentBytes < MAX_WEBSOCKET_MESSAGE_BYTES);
+    assert.ok(fragmentBytes * fragmentCount > MAX_WEBSOCKET_MESSAGE_BYTES);
+    const piece = Buffer.alloc(fragmentBytes, 0x61);
+    let batch = [];
+    for (let index = 0; index < fragmentCount; index += 1) {
+      batch.push(encodeClientFrame(index === 0 ? 0x1 : 0x0, piece, {
+        fin: index === fragmentCount - 1
+      }));
+      const last = index === fragmentCount - 1;
+      if (batch.length === 32 || last) {
+        try {
+          await writeBuffer(client.socket, Buffer.concat(batch));
+        } catch (error) {
+          if (!['EPIPE', 'ECONNRESET', 'ERR_STREAM_DESTROYED'].includes(error.code)) throw error;
+          break;
+        }
+        batch = [];
+        if (closeFrames(client).length > 0 || client.ended) break;
+      }
+    }
+    await waitFor(() => closeFrames(client).length > 0, 10000);
+    assert.equal(closeFrames(client)[0].payload.readUInt16BE(0), 1009);
+    assert.equal(toolResults(client).length, 0);
+    await assertStillServing(daemon, open, 'after-fragment-cap');
+  });
+}, 30000);
+
+wsTest('a fragmented ping closes with 1002 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const client = await open();
+    const payload = Buffer.from('frag-ping');
+    await writeBuffer(client.socket, encodeClientFrame(0x9, payload, { fin: false }));
+    await waitFor(() => closeFrames(client).length > 0);
+    assert.equal(closeFrames(client)[0].payload.readUInt16BE(0), 1002);
+    assert.equal(client.frames.some((frame) => frame.opcode === 0xA), false);
+    await assertStillServing(daemon, open, 'after-frag-ping');
+  });
+});
+
+wsTest('a 125-byte ping is ponged and a longer control payload closes with 1002', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const okClient = await open();
+    const okPayload = Buffer.alloc(125, 0x58);
+    await writeBuffer(okClient.socket, encodeClientFrame(0x9, okPayload));
+    await waitFor(() => okClient.frames.some((frame) => frame.opcode === 0xA));
+    const pong = okClient.frames.find((frame) => frame.opcode === 0xA);
+    assert.equal(pong.fin, true);
+    assert.deepEqual(pong.payload, okPayload);
+    assert.equal(closeFrames(okClient).length, 0);
+
+    await expectProtocolClose(
+      daemon,
+      open,
+      encodeClientFrame(0x9, Buffer.alloc(126, 0x59)),
+      1002,
+      'after-long-ping'
+    );
+  });
+});
+
+wsTest('a stray continuation frame closes with 1002 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const payload = Buffer.from(JSON.stringify(envelope({ id: 'stray' })));
+    await expectProtocolClose(
+      daemon,
+      open,
+      encodeClientFrame(0x0, payload, { fin: true }),
+      1002,
+      'after-stray'
+    );
+  });
+});
+
+wsTest('a new data frame during a fragmented message closes with 1002 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const whole = Buffer.from(JSON.stringify(envelope({ id: 'second' })));
+    await expectProtocolClose(
+      daemon,
+      open,
+      Buffer.concat([
+        encodeClientFrame(0x1, whole.subarray(0, 4), { fin: false }),
+        encodeClientFrame(0x1, whole, { fin: true })
+      ]),
+      1002,
+      'after-interrupt'
+    );
+    await expectProtocolClose(
+      daemon,
+      open,
+      Buffer.concat([
+        encodeClientFrame(0x1, Buffer.from('abc'), { fin: false }),
+        encodeClientFrame(0x2, whole, { fin: true })
+      ]),
+      1002,
+      'after-binary-interrupt'
+    );
+  });
+});
+
+wsTest('RSV1, RSV2, and RSV3 each close with 1002 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const bits = [
+      [{ rsv1: true }, 'rsv1'],
+      [{ rsv2: true }, 'rsv2'],
+      [{ rsv3: true }, 'rsv3'],
+      [{ rsv1: true, rsv2: true, rsv3: true }, 'rsv-all']
+    ];
+    for (const [flags, id] of bits) {
+      await expectProtocolClose(
+        daemon,
+        open,
+        encodeTextFrame(envelope({ id }), flags),
+        1002,
+        `after-${id}`
+      );
+    }
+  });
+});
+
+wsTest('reserved opcodes 3-7 and 0xB-0xF close with 1002 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const opcodes = [0x3, 0x4, 0x5, 0x6, 0x7, 0xB, 0xC, 0xD, 0xE, 0xF];
+    for (const opcode of opcodes) {
+      const payload = Buffer.from(JSON.stringify(envelope({ id: `op${opcode.toString(16)}` })));
+      await expectProtocolClose(
+        daemon,
+        open,
+        encodeClientFrame(opcode, payload),
+        1002,
+        `after-op-${opcode.toString(16)}`
+      );
+    }
+  });
+});
+
+wsTest('a non-minimal payload length closes with 1002 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    await expectProtocolClose(daemon, open, encodeNonMinimalFrame(125, 16), 1002, 'after-short-16');
+    await expectProtocolClose(daemon, open, encodeNonMinimalFrame(65535, 64), 1002, 'after-short-64');
+  });
+});
+
+wsTest('a ping between fragments is ponged and the text is still reassembled', async () => {
+  await withDaemon(fastDispatch(), async (_daemon, open) => {
+    const client = await open();
+    const bytes = Buffer.from(JSON.stringify(envelope({ id: 'frag-ping' })));
+    const mid = Math.floor(bytes.length / 2);
+    assert.ok(mid > 1 && mid < bytes.length - 1);
+    const pingPayload = Buffer.from([0x01, 0x02, 0x7f, 0x80]);
+    await writeBuffer(client.socket, Buffer.concat([
+      encodeClientFrame(0x1, bytes.subarray(0, mid), { fin: false }),
+      encodeClientFrame(0x9, pingPayload),
+      encodeClientFrame(0x0, bytes.subarray(mid), { fin: true })
+    ]));
+    await waitFor(() => client.frames.some((frame) => frame.opcode === 0xA));
+    const pong = client.frames.find((frame) => frame.opcode === 0xA);
+    assert.equal(pong.fin, true);
+    assert.deepEqual(pong.payload, pingPayload);
+    await expectOkIds(client, ['frag-ping']);
+  });
+});
+
+wsTest('invalid close codes close with 1002, an empty close is kept, and a 1-byte close payload closes with 1002', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const invalidCodes = [0, 999, 1004, 1005, 1006, 1015, 1016, 2000, 2999, 5000];
+    for (const code of invalidCodes) {
+      await expectProtocolClose(
+        daemon,
+        open,
+        encodeCloseFrame(code, 'nope'),
+        1002,
+        `after-close-${code}`
+      );
+    }
+
+    const emptyClient = await open();
+    await writeBuffer(emptyClient.socket, encodeClientFrame(0x8, Buffer.alloc(0)));
+    await waitFor(() => closeFrames(emptyClient).length > 0);
+    assert.equal(closeFrames(emptyClient)[0].payload.length, 0);
+    await assertStillServing(daemon, open, 'after-empty-close');
+
+    await expectProtocolClose(
+      daemon,
+      open,
+      encodeClientFrame(0x8, Buffer.from([0x03])),
+      1002,
+      'after-one-byte-close'
+    );
+
+    const echoed = [
+      [1000, ''],
+      [1001, 'going'],
+      [1014, 'gw'],
+      [3000, 'lib'],
+      [4999, 'priv']
+    ];
+    for (const [code, reason] of echoed) {
+      const client = await open();
+      await writeBuffer(client.socket, encodeCloseFrame(code, reason));
+      await waitFor(() => closeFrames(client).length > 0);
+      const close = closeFrames(client)[0];
+      assert.equal(close.payload.readUInt16BE(0), code);
+      assert.equal(close.payload.subarray(2).toString('utf8'), reason);
+    }
+
+    const badReason = Buffer.alloc(3);
+    badReason.writeUInt16BE(1000, 0);
+    badReason[2] = 0xff;
+    await expectProtocolClose(daemon, open, encodeClientFrame(0x8, badReason), 1007, 'after-bad-reason');
+    await assertStillServing(daemon, open, 'after-close-codes');
+  });
+});
+
+wsTest('invalid UTF-8 text closes with 1007 and a split multibyte character still reassembles', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    await expectProtocolClose(
+      daemon,
+      open,
+      encodeClientFrame(0x1, Buffer.from([0xff, 0xfe])),
+      1007,
+      'after-bad-utf8'
+    );
+    await expectProtocolClose(
+      daemon,
+      open,
+      Buffer.concat([
+        encodeClientFrame(0x1, Buffer.from([0xc3]), { fin: false }),
+        encodeClientFrame(0x0, Buffer.from([0x28]), { fin: true })
+      ]),
+      1007,
+      'after-split-bad-utf8'
+    );
+
+    const client = await open();
+    const text = JSON.stringify(envelope({ id: 'split-utf8', args: { label: '©' } }));
+    const bytes = Buffer.from(text);
+    const mark = bytes.indexOf(0xc2);
+    assert.ok(mark > 0);
+    assert.equal(bytes[mark + 1], 0xa9);
+    await writeBuffer(client.socket, Buffer.concat([
+      encodeClientFrame(0x1, bytes.subarray(0, mark + 1), { fin: false }),
+      encodeClientFrame(0x0, bytes.subarray(mark + 1), { fin: true })
+    ]));
+    await expectOkIds(client, ['split-utf8']);
+  });
+});
+
+wsTest('a binary message closes with 1003 and the daemon keeps serving', async () => {
+  await withDaemon(fastDispatch(), async (daemon, open) => {
+    const payload = Buffer.from(JSON.stringify(envelope({ id: 'bin' })));
+    await expectProtocolClose(daemon, open, encodeClientFrame(0x2, payload), 1003, 'after-binary');
+    await expectProtocolClose(
+      daemon,
+      open,
+      encodeClientFrame(0x2, payload, { fin: false }),
+      1003,
+      'after-binary-fragment'
+    );
+  });
+});
+
+wsTest('a socket queue past the pending cap closes with 1013 and the daemon keeps serving', async () => {
+  let releaseGate = () => {};
+  const gate = new Promise((resolve) => {
+    releaseGate = resolve;
+  });
+  let started = 0;
+  let finished = 0;
+  try {
+    await withDaemon({
+      checkProviderAvailabilityImpl: async () => {
+        started += 1;
+        await gate;
+        finished += 1;
+        return { provider: 'codex', available: true, status: 'available' };
+      }
+    }, async (daemon, open) => {
+      try {
+        const client = await open();
+        const frames = [];
+        for (let index = 0; index < MAX_PENDING_SOCKET_MESSAGES + 1; index += 1) {
+          frames.push(encodeTextFrame(envelope({
+            id: `q${index}`,
+            name: 'provider.status',
+            args: { provider: 'codex' }
+          })));
+        }
+        await writeBuffer(client.socket, Buffer.concat(frames));
+        await waitFor(() => closeFrames(client).length > 0 && started === 1);
+        const close = closeFrames(client)[0];
+        assert.equal(close.payload.readUInt16BE(0), 1013);
+        assert.equal(close.payload.subarray(2).toString('utf8'), 'Pending message limit exceeded.');
+        assert.equal(started, 1);
+        await assertStillServing(daemon, open, 'after-queue-cap');
+        releaseGate();
+        await waitFor(() => finished === MAX_PENDING_SOCKET_MESSAGES);
+        assert.equal(finished, MAX_PENDING_SOCKET_MESSAGES);
+      } finally {
+        releaseGate();
+        await yieldToServer();
+      }
+    });
+  } finally {
+    releaseGate();
+  }
+});
+
+test('many one-byte chunks of a large frame are assembled in linear time', { timeout: 20000 }, () => {
+  const payload = Buffer.alloc(512 * 1024, 0x61);
+  const frame = encodeClientFrame(0x1, payload);
+  const received = [];
+  const socket = new EventEmitter();
+  socket.destroyed = false;
+  socket.writableEnded = false;
+  socket.write = () => true;
+  socket.end = () => {
+    socket.writableEnded = true;
+  };
+  socket.destroy = () => {
+    socket.destroyed = true;
+  };
+  attachWebSocketFrameHandler(socket, {
+    onMessage(_opcode, body) {
+      received.push(body);
+    }
+  });
+  const started = Date.now();
+  for (let index = 0; index < frame.length; index += 1) {
+    socket.emit('data', frame.subarray(index, index + 1));
+  }
+  const elapsed = Date.now() - started;
+  assert.equal(socket.writableEnded, false);
+  assert.equal(received.length, 1);
+  assert.ok(received[0].equals(payload));
+  assert.ok(elapsed < 2000, `assembling ${frame.length} one-byte chunks took ${elapsed}ms`);
 });
