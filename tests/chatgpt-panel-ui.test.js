@@ -2067,6 +2067,132 @@ test('Korean apply failures use the same reason codes', async (t) => {
   }
 });
 
+test('project.request sends the panel locale and the patch card shows each part value', async (t) => {
+  const { en, ko } = await removalConfirmCopy();
+  const parts = [
+    { ref: 'U1', value: 'TPS62177DQC', libId: 'Regulator_Switching:TPS62177DQC' },
+    { ref: 'R4', value: '4.7k', libId: 'Device:R' }
+  ];
+  for (const locale of ['en-US', 'ko-KR']) {
+    const copy = locale.startsWith('ko') ? ko : en;
+    const lang = locale.startsWith('ko') ? 'ko' : 'en';
+    const opened = await openApprovalPanel(t, locale);
+    if (!opened) return;
+    const { page, context, pageErrors } = opened;
+    try {
+      await page.evaluate((next) => {
+        window.__draftSource = { provider: 'chatgpt', via: 'provider' };
+        window.__draftParts = next;
+      }, parts);
+      await page.locator('#prompt').fill('ESP32-S3 sensor board with a 3.3V regulator');
+      await page.locator('#composer button[type="submit"]').click();
+      await page.waitForFunction(() => document.querySelector('#patch-approval-parts')?.hidden === false);
+      const lines = await page.locator('#patch-approval-parts li').allInnerTexts();
+      assert.equal(lines.length, 2);
+      assert.match(lines[0], /^U1\b[\s·]*TPS62177DQC/);
+      assert.match(lines[1], /^R4\b[\s·]*4\.7k/);
+      assert.equal(await page.locator('#patch-approval-source').innerText(), copy['source.chatgpt']);
+      const request = await page.evaluate(() => window.__sent.filter((call) => call.name === 'project.request').at(-1));
+      assert.equal(request.args.locale, lang);
+      assert.deepEqual(pageErrors, []);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('a reply without validation and without applied does not reload or show success', async (t) => {
+  const { en, ko } = await removalConfirmCopy();
+  const missing = [
+    {
+      id: 'request-missing',
+      via: 'request',
+      result: {
+        operation: 'generated',
+        files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' }
+      }
+    },
+    {
+      id: 'apply-missing',
+      via: 'apply',
+      result: {
+        operation: 'patched',
+        files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' }
+      }
+    },
+    {
+      id: 'unconfirmed-preview',
+      via: 'request',
+      result: {
+        operation: 'patched',
+        applied: false,
+        requiresApproval: false,
+        patchId: 'sha256:preview',
+        files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' },
+        removedComponents: [{ value: '4.7k' }]
+      }
+    }
+  ];
+  for (const locale of ['en-US', 'ko-KR']) {
+    const copy = locale.startsWith('ko') ? ko : en;
+    const opened = await openApprovalPanel(t, locale);
+    if (!opened) return;
+    const { page, context, pageErrors } = opened;
+    try {
+      await page.evaluate(() => {
+        window.__hostMessages = [];
+        window.chatpcbHost = {
+          postMessage(message) { window.__hostMessages.push(message); },
+          send(message) { window.__hostMessages.push(message); },
+          getProjectStatus() { return { dirty: false, linkState: 'linked' }; }
+        };
+      });
+      for (const item of missing) {
+        await page.evaluate(() => { window.__hostMessages = []; window.__requestResult = null; window.__patchApplyResult = null; });
+        if (item.via === 'apply') {
+          await sendPlainPreview(page, `preview ${item.id}`);
+          await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
+          await page.evaluate((next) => { window.__patchApplyResult = next; }, item.result);
+          await page.locator('#approve-patch-button').click();
+        } else {
+          await page.evaluate((next) => { window.__requestResult = next; }, item.result);
+          await page.locator('#prompt').fill(`case ${item.id}`);
+          await page.locator('#composer button[type="submit"]').click();
+        }
+        await page.waitForFunction(() => {
+          const state = document.querySelector('#request-status')?.dataset.state;
+          return state === 'failed' || state === 'completed';
+        });
+        const status = page.locator('#request-status');
+        const text = await status.innerText();
+        assert.equal(await status.getAttribute('data-state'), 'failed', `${locale} ${item.id} ${text}`);
+        assert.equal(text.includes(en['patch.apply.applied']), false, text);
+        assert.equal(text.includes(ko['patch.apply.applied']), false, text);
+        const reloads = await page.evaluate(() => window.__hostMessages.filter((message) => message?.type === 'project.reload'));
+        assert.deepEqual(reloads, [], `${locale} ${item.id}`);
+      }
+      await page.evaluate(() => { window.__requestResult = null; window.__patchApplyResult = null; window.__hostMessages = []; });
+      await sendPlainPreview(page, 'applied without validation');
+      await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
+      await page.evaluate(() => {
+        window.__patchApplyResult = {
+          applied: true,
+          operation: 'patched',
+          files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' }
+        };
+      });
+      await page.locator('#approve-patch-button').click();
+      await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, copy['patch.apply.applied']);
+      const appliedReloads = await page.evaluate(() => window.__hostMessages.filter((message) => message?.type === 'project.reload'));
+      assert.equal(appliedReloads.length, 1);
+      assert.equal(appliedReloads[0].projectPath, '/tmp/chatpcb-ui-project');
+      assert.deepEqual(pageErrors, []);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
 test('ERC summary avoids a zero error count when violations exist or the result is incomplete', async (t) => {
   const cases = [
     {

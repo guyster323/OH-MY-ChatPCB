@@ -468,6 +468,7 @@ async function sendProjectRequest() {
   activeRequestId = id;
   activeRequestProjectDir = requestProject.projectDir;
   pendingCalls.set(id, 'project.request');
+  const lang = window.chatpcbI18n?.getLang?.();
   sendToolCall({
     id,
     name: 'project.request',
@@ -475,7 +476,8 @@ async function sendProjectRequest() {
       projectDir: requestProject.projectDir,
       prompt,
       provider: providerEl.value,
-      proMode: document.querySelector('#pro-mode')?.getAttribute('aria-checked') === 'true'
+      proMode: document.querySelector('#pro-mode')?.getAttribute('aria-checked') === 'true',
+      locale: lang === 'ko' ? 'ko' : 'en'
     }
   });
 }
@@ -994,7 +996,8 @@ function renderConversation(result) {
 }
 
 function renderProjectRequest(result) {
-  const verdict = normalizeDaemonReply(result, result?.fromPatchApprove === true ? 'patch-apply' : 'project-generate');
+  const kind = result?.fromPatchApprove === true ? 'patch-apply' : 'project-generate';
+  const verdict = normalizeDaemonReply(result, kind);
   if (result?.operation !== 'clarify' && !isApprovalPreview(result) && verdict.ok === false) {
     renderApplyFailure(verdict);
     return;
@@ -1025,54 +1028,37 @@ function renderProjectRequest(result) {
     renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
     return;
   }
+  // Success is only the patch-apply shape (applied === true, not canceled).
+  // A missing applied flag or a missing validation result stays a failure, and KiCad is not reloaded.
+  if (verdict.ok !== true || kind !== 'patch-apply') {
+    renderApplyFailure({
+      ok: false,
+      kind,
+      code: verdict.ok === true ? 'APPLIED_MISSING' : (verdict.code || 'APPLIED_MISSING')
+    });
+    return;
+  }
   renderReview(result.review);
   renderArtifacts(result.files);
   renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
-  // A skipped candidate keeps validation.ok false. Once the daemon applied it, the request succeeded.
-  const validationFailed = result.applied !== true && result.validation?.ok === false;
-  const requestFailed = result.rolledBack || validationFailed;
-  const completedDetail = result.operation === 'patched' ? t('request.completed-updated') : t('request.completed-generated');
   const removedRefs = Array.isArray(result.removedRefs)
     ? result.removedRefs.filter((ref) => typeof ref === 'string' && ref.length > 0)
     : [];
-  let summaryKey = 'request.completed';
-  let summaryVars = { detail: completedDetail };
-  if (!requestFailed && result.fromPatchApprove === true) {
-    if (removedRefs.length > 0) {
-      summaryKey = 'patch.apply.done';
-      summaryVars = { refs: removedRefs.join(', ') };
-    } else {
-      summaryKey = 'patch.apply.applied';
-      summaryVars = undefined;
-    }
-  }
-  const summary = result.rolledBack
-    ? t('request.rollback')
-    : validationFailed
-      ? t('request.validation-failed')
-      : t(summaryKey, summaryVars);
-  if (!requestFailed && verdict.ok === true) workflowFlags.circuitApplied = true;
-  if (!requestFailed && result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
+  const summaryKey = removedRefs.length > 0 ? 'patch.apply.done' : 'patch.apply.applied';
+  const summaryVars = removedRefs.length > 0 ? { refs: removedRefs.join(', ') } : undefined;
+  workflowFlags.circuitApplied = true;
+  if (result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
     workflowFlags.circuitReviewed = true;
   }
-  renderRequestStatus(result.rolledBack
-    ? { state: 'failed', summaryKey: 'request.rollback' }
-    : validationFailed
-      ? { state: 'failed', summaryKey: 'request.validation-failed' }
-      : { state: 'completed', summaryKey, summaryVars });
-  appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
+  renderRequestStatus({ state: 'completed', summaryKey, summaryVars });
+  appendProgress({ stage: 'done', text: t(summaryKey, summaryVars) });
 
   const projectFile = findProjectFile(result.files);
-  const successfulUpdate = !requestFailed && verdict.ok === true && result.applied === true;
-  if (!successfulUpdate) return;
-  if (projectFile) {
-    kiCadLinkCardEl.hidden = false;
-    const hostAvailable = postHostMessage({ type: 'project.reload', projectPath: activeProject.projectDir });
-    renderKiCadLink({ linkState: hostAvailable ? 'reload-needed' : 'available', projectPath: projectFile });
-    if (!hostAvailable) {
-      showKiCadFallback(projectFile);
-    }
-  }
+  if (!projectFile) return;
+  kiCadLinkCardEl.hidden = false;
+  const hostAvailable = postHostMessage({ type: 'project.reload', projectPath: activeProject.projectDir });
+  renderKiCadLink({ linkState: hostAvailable ? 'reload-needed' : 'available', projectPath: projectFile });
+  if (!hostAvailable) showKiCadFallback(projectFile);
 }
 
 function inspectActiveProject() {
