@@ -13,6 +13,7 @@ import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
+import { ercApprovalDecision, normalizeRecordedErc, recordedErcSource } from './erc-gate.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
 import { createProjectMutexRegistry } from './project-mutex-registry.js';
 import { createTransactionJournal } from './transaction-journal.js';
@@ -49,7 +50,7 @@ function progressCopy(prompt, ko, en) {
   return /[가-힣]/.test(prompt ?? '') ? ko : en;
 }
 
-const PROJECT_BUSY_KO = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도하세요.';
+const PROJECT_BUSY_KO = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
 const PROJECT_BUSY_EN = 'Another operation is using this project. Try again in a moment.';
 
 function projectBusyClientMessage(prompt) {
@@ -293,6 +294,22 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
   }
 }
 
+function recordedVerificationPatchIds(verification) {
+  if (!verification || typeof verification !== 'object') return [];
+  const erc = verification.erc && typeof verification.erc === 'object' ? verification.erc : null;
+  return [verification.patchId, erc?.patchId];
+}
+
+// A patch id on the ERC evidence is a different patch. The plan's own patchId
+// and proposalId are the approval identity, not a stale ERC binding.
+function candidateErcBindingStale(record, patchId) {
+  const ids = [
+    ...recordedVerificationPatchIds(record?.plan?.candidateVerification),
+    ...recordedVerificationPatchIds(record?.candidateVerification)
+  ];
+  return ids.some((id) => typeof id === 'string' && id.length > 0 && id !== patchId);
+}
+
 async function dispatchSchematicPatch(args, ctx) {
   const projectDir = args.projectDir;
   const {
@@ -323,11 +340,24 @@ async function dispatchSchematicPatch(args, ctx) {
     }, ctx);
   }
 
-  emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });
   if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to approve a patch preview.');
   const peeked = patchApprovalRegistry.peek({ patchId: args.patchId, projectDir });
   if (!peeked.ok) return { ok: false, error: peeked.reason };
   const plan = peeked.record.plan;
+  // The registry record is the only ERC the approval may trust. Client fields
+  // such as passed, validation, or ercResult on the request are ignored.
+  if (candidateErcBindingStale(peeked.record, args.patchId)) {
+    console.warn('patch.apply.blocked-stale');
+    return failure('ERC_BLOCKED', 'ERC_BLOCKED: patch.apply.blocked-stale');
+  }
+  const recorded = normalizeRecordedErc(recordedErcSource(peeked.record));
+  const decision = ercApprovalDecision(recorded, args.ercOverride);
+  if (!decision.allow) {
+    if (decision.reason === 'missing') console.warn('patch.apply.blocked-missing');
+    return failure('ERC_BLOCKED', decision.message);
+  }
+
+  emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });
   try {
     await ensureReconciled(projectDir, ctx);
     const applied = sanitizeApplyResult(await applySchematicPatch({
@@ -343,7 +373,8 @@ async function dispatchSchematicPatch(args, ctx) {
       verifyAppliedProjectImpl,
       approvalRegistry: patchApprovalRegistry,
       mutexRegistry: projectMutexRegistry,
-      journal: transactionJournal
+      journal: transactionJournal,
+      allowSkippedErc: decision.allowSkippedErc === true
     }));
     if (applied?.reason?.code === 'PROJECT_BUSY') return projectBusyFailure(args.prompt);
     return ok(applied);
@@ -1379,6 +1410,7 @@ async function previewNativeChange({ projectDir, prompt, userPrompt, projectName
     projectDir,
     plan,
     ...plan,
+    ercResult: normalizeRecordedErc(plan.candidateVerification?.erc),
     dispose: () => disposeSchematicPatchPlan(plan)
   });
   const preview = await applySchematicPatch({ projectDir, approved: false, patchPlan: plan });

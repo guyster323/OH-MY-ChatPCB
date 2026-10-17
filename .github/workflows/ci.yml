@@ -29,7 +29,17 @@ jobs:
       
       - name: Install dependencies
         run: npm ci
-      
+
+      # Panel Playwright tests fail when CI is set and Chromium is missing.
+      # Linux also needs the browser's system libraries.
+      - name: Install Playwright Chromium
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium
+        if: runner.os != 'Linux'
+        run: npx playwright install chromium
+
       - name: Run lint
         run: npm run lint
 
