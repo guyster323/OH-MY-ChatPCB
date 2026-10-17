@@ -235,8 +235,10 @@ async function assertNegationOutcome(prompt, outcome) {
         (error) => {
           if (outcome === 'refuse-clarify') {
             assert.equal(error.code, 'REMOVAL_INTENT_UNCLEAR', `${prompt}: ${error.message}`);
-            assert.match(error.message, /which part to remove/i);
-            assert.match(error.message, /제거할 부품/);
+            assert.equal(error.message, [
+              'Which part should I remove? Give its reference, like J2. Nothing was removed.',
+              '어떤 부품을 뺄까요? 참조번호(예: J2)로 알려 주세요. 아무것도 빼지 않았어요.'
+            ].join('\n'), prompt);
           } else {
             assert.equal(error.code, 'PROVIDER_NO_PATCH', `${prompt}: ${error.message}`);
           }

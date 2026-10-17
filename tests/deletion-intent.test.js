@@ -9,6 +9,10 @@ import {
 } from '../src/workflow/existing-project-edit.js';
 
 const SPEC = { sourcePrompt: 'existing' };
+const REMOVAL_UNCLEAR_MESSAGE = [
+  'Which part should I remove? Give its reference, like J2. Nothing was removed.',
+  '어떤 부품을 뺄까요? 참조번호(예: J2)로 알려 주세요. 아무것도 빼지 않았어요.'
+].join('\n');
 
 // Fail-closed contract. A row removes I2C only when it is a plain delete.
 // Earlier expectations that changed when double negation, same-sentence
@@ -207,8 +211,7 @@ function boundTargets(prompt, negated) {
 
 test('deletion intent contract is fail-closed', () => {
   const ask = removalIntentUnclearMessage();
-  assert.match(ask, /which part to remove/i);
-  assert.match(ask, /제거할 부품/);
+  assert.equal(ask, REMOVAL_UNCLEAR_MESSAGE);
 
   for (const row of CONTRACT) {
     const decision = classifyExistingProjectRequest(row.prompt, SPEC);
@@ -229,8 +232,7 @@ test('deletion intent contract is fail-closed', () => {
     }
     if (row.outcome === 'refuse-clarify' && row.ask) {
       assert.equal(decision.code, 'REMOVAL_INTENT_UNCLEAR', row.prompt);
-      assert.match(decision.message, /which part to remove/i, row.prompt);
-      assert.match(decision.message, /제거할 부품/, row.prompt);
+      assert.equal(decision.message, REMOVAL_UNCLEAR_MESSAGE, row.prompt);
     }
     if (row.outcome === 'refuse-clarify' && !row.ask) {
       assert.equal(decision.code, undefined, row.prompt);
@@ -251,8 +253,7 @@ test('intentional fail-closed: asks instead of removing', () => {
     assert.equal(outcomeOf(decision), 'refuse-clarify', row.prompt);
     assert.equal(decision.code, 'REMOVAL_INTENT_UNCLEAR', row.prompt);
     assert.equal(removesI2c(decision), false, row.prompt);
-    assert.match(decision.message, /which part to remove/i, row.prompt);
-    assert.match(decision.message, /제거할 부품/, row.prompt);
+    assert.equal(decision.message, REMOVAL_UNCLEAR_MESSAGE, row.prompt);
   }
 });
 

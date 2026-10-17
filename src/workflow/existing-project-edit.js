@@ -177,8 +177,8 @@ function editError(message) {
 }
 
 export function removalIntentUnclearMessage() {
-  const en = 'It is not clear which part to remove. State exactly which part to remove, for example "remove the I2C connector" or "remove the LED". Nothing was removed.';
-  const ko = '어떤 부품을 제거할지 명확하지 않습니다. 제거할 부품을 정확히 적어 주세요. 예: "I2C 커넥터 삭제" 또는 "LED 삭제". 아무것도 제거하지 않았습니다.';
+  const en = 'Which part should I remove? Give its reference, like J2. Nothing was removed.';
+  const ko = '어떤 부품을 뺄까요? 참조번호(예: J2)로 알려 주세요. 아무것도 빼지 않았어요.';
   return `${en}\n${ko}`;
 }
 
@@ -1139,9 +1139,15 @@ function interpretResistor(text) {
   return null;
 }
 
+// Same kilo and mega breakpoints as formatOhms in circuit-spec.js.
+// Ω stays on values below 1k, matching schematic fields such as 1k and 680Ω.
 function formatResistorLabel(ohms) {
-  if (ohms >= 1000 && ohms % 1000 === 0) return `${ohms / 1000}k`;
-  return `${ohms}Ω`;
+  if (!(ohms >= 1000)) return `${ohms}Ω`;
+  const nearest = Math.round(ohms);
+  const value = Math.abs(ohms - nearest) < 1e-6 ? nearest : ohms;
+  const mega = value >= 1_000_000;
+  const scaled = mega ? value / 1_000_000 : value / 1000;
+  return `${Math.round(scaled * 10) / 10}${mega ? 'M' : 'k'}`;
 }
 
 export function applyExistingProjectEdit(spec, edit) {

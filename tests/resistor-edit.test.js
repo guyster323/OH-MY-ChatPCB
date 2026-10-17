@@ -61,27 +61,28 @@ test('plain resistor values still apply', () => {
 
 test('resistor notation uses the same values the SPICE parser accepts', () => {
   const rows = [
-    ['LED 저항 1k', 1000],
-    ['LED 저항 1kΩ으로', 1000],
-    ['change the LED resistor to 1 kΩ', 1000],
-    ['change the LED resistor to 4.7k', 4700],
-    ['LED resistor 4k7', 4700],
-    ['set the status LED resistor to 1M', 1000000],
-    ['LED 저항 2M2로', 2200000],
-    ['status LED resistor 1meg', 1000000],
-    ['LED resistor 330R', 330],
-    ['LED resistor 1R5', 1.5],
-    ['LED resistor 680 ohm', 680],
-    ['LED 저항 680옴', 680],
-    ['change the LED resistor from 680 to 1k', 1000],
-    ['LED 저항 680옴에서 1k옴으로', 1000]
+    ['LED 저항 1k', 1000, '1k'],
+    ['LED 저항 1kΩ으로', 1000, '1k'],
+    ['change the LED resistor to 1 kΩ', 1000, '1k'],
+    ['change the LED resistor to 4.7k', 4700, '4.7k'],
+    ['LED resistor 4k7', 4700, '4.7k'],
+    ['set the status LED resistor to 1M', 1000000, '1M'],
+    ['LED 저항 2M2로', 2200000, '2.2M'],
+    ['status LED resistor 1meg', 1000000, '1M'],
+    ['LED resistor 330R', 330, '330Ω'],
+    ['LED resistor 1R5', 1.5, '1.5Ω'],
+    ['LED resistor 680 ohm', 680, '680Ω'],
+    ['LED 저항 680옴', 680, '680Ω'],
+    ['change the LED resistor from 680 to 1k', 1000, '1k'],
+    ['LED 저항 680옴에서 1k옴으로', 1000, '1k']
   ];
 
-  for (const [prompt, ohms] of rows) {
+  for (const [prompt, ohms, label] of rows) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
     assert.equal(decision.mode, 'merge', prompt);
     assert.equal(decision.edit?.kind, 'resistor', prompt);
     assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
     assert.equal((decision.edit?.targets ?? []).includes('i2c'), false, prompt);
   }
 });
@@ -105,6 +106,7 @@ test('a valid user resistor value wins over a different value in the rewrite', (
   assert.equal(decision.mode, 'merge');
   assert.equal(decision.edit?.kind, 'resistor');
   assert.equal(decision.edit?.ohms, 4700);
+  assert.equal(decision.edit?.label, '4.7k');
 });
 
 test('invalid resistor text previews no patch and leaves the schematic unchanged', async () => {
@@ -148,12 +150,14 @@ test('invalid resistor text previews no patch and leaves the schematic unchanged
   }
 });
 
-test('sequential resistor edits apply 330, then 680, then 1k and keep I2C', async () => {
+test('sequential resistor edits apply 330, then 680, then 1k, 4.7k, and 1M and keep I2C', async () => {
   const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-resistor-seq-'));
   const steps = [
     ['Change the status LED series resistor to 330 ohm.', '330Ω'],
     ['Change the status LED series resistor to 680 ohm.', '680Ω'],
-    ['LED 저항을 1kΩ으로 바꿔줘', '1k']
+    ['LED 저항을 1kΩ으로 바꿔줘', '1k'],
+    ['change the LED resistor to 4.7k', '4.7k'],
+    ['set the status LED resistor to 1M', '1M']
   ];
   const plans = [];
   try {
