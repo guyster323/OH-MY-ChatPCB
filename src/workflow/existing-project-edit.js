@@ -78,6 +78,7 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: '유지', re: '유지' })
   ]),
   // A later clause can take a removal back: "remove I2C. jk", "삭제 노노", "... NOT".
+  // "never mind" is a retraction. The shorter negation "never" stays a negation marker.
   correctionCues: Object.freeze([
     Object.freeze({ id: 'nono', re: String.raw`(?<![가-힣])노노(?![가-힣])` }),
     Object.freeze({
@@ -87,7 +88,30 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     }),
     Object.freeze({ id: 'jk', re: String.raw`\bjk\b` }),
     Object.freeze({ id: 'just-kidding', re: String.raw`\bjust\s+kidding\b` }),
-    Object.freeze({ id: 'trailing-not', re: String.raw`(?:\.{3}|…)\s*not\b` })
+    Object.freeze({ id: 'trailing-not', re: String.raw`(?:\.{3}|…)\s*not\b` }),
+    Object.freeze({ id: 'nvm', re: String.raw`\bnvm\b` }),
+    Object.freeze({ id: 'nevermind', re: String.raw`\bnevermind\b` }),
+    Object.freeze({ id: 'never-mind', re: String.raw`\bnever\s+mind\b` }),
+    Object.freeze({ id: 'scratch-that', re: String.raw`\bscratch\s+that\b` }),
+    Object.freeze({ id: 'cancel', re: String.raw`\bcancel\b` }),
+    Object.freeze({ id: '취소', re: String.raw`(?<![가-힣])취소(?![가-힣])` }),
+    Object.freeze({ id: '아니야', re: String.raw`(?<![가-힣])아니야(?![가-힣])` }),
+    Object.freeze({ id: '아냐', re: String.raw`(?<![가-힣])아냐(?![가-힣])` }),
+    Object.freeze({ id: '됐어', re: String.raw`(?<![가-힣])됐어(?![가-힣])` }),
+    Object.freeze({
+      id: 'lone-nieun',
+      // A single ㄴ. The doubled form is the nn cue above; the lookahead keeps them apart.
+      re: String.raw`(?<![\u1100-\u11FF\u3131-\u318E])(?:\u3134|\u1102)(?![\u1100-\u11FF\u3131-\u318E])`
+    })
+  ]),
+  // Keep/negation whose object is only the rest is not a negation of the named part.
+  restPhrases: Object.freeze([
+    Object.freeze({ id: 'anything-else', re: String.raw`\banything\s+else\b` }),
+    Object.freeze({ id: 'everything-else', re: String.raw`\beverything\s+else\b` }),
+    Object.freeze({ id: 'nothing-else', re: String.raw`\bnothing\s+else\b` }),
+    Object.freeze({ id: 'the-rest', re: String.raw`\bthe\s+rest\b` }),
+    Object.freeze({ id: 'nameoji', re: '나머지' }),
+    Object.freeze({ id: 'dareun-geon', re: String.raw`다른\s*건` })
   ]),
   // Mapped to ASCII ' after NFKC. U+00B4's NFKC form is a space plus U+0301.
   apostrophes: '\u2018\u2019\u201A\u201B\u2032\u2035\u02BC\u02BB\u0060\u00B4\uFF07\u02B9\u02CA\u02CB\uA78C\u055A\u0301',
@@ -165,7 +189,10 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: 'led', re: String.raw`\bled\b|엘이디` }),
     Object.freeze({ id: 'resistor', re: String.raw`\bresistor\b|저항` }),
     Object.freeze({ id: 'pronoun', re: String.raw`\bit\b|그것|이거|그거` })
-  ])
+  ]),
+  // A reference designator is [A-Za-z]{1,3}\d+. "I2C" is not I2: the boundary
+  // fails between the digit and the following letter.
+  referenceDesignator: String.raw`\b[A-Za-z]{1,3}\d+\b`
 });
 
 function editError(message) {
@@ -177,6 +204,46 @@ function editError(message) {
 export function removalIntentUnclearMessage() {
   const en = 'Which part should I remove? Give its reference, like J2. Nothing was removed.';
   const ko = '어떤 부품을 뺄까요? 참조번호(예: J2)로 알려 주세요. 아무것도 빼지 않았어요.';
+  return `${en}\n${ko}`;
+}
+
+export function removalRefNotFoundMessage(ref) {
+  const en = `There is no part ${ref} in this project. Nothing was removed.`;
+  const ko = `이 프로젝트에는 ${ref} 부품이 없어요. 아무것도 빼지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
+// 1, 3, 6, 7, 8, 0 are read with a batchim (과). 2, 4, 5, 9 are open (와).
+const REF_BATCHIM_DIGITS = new Set(['0', '1', '3', '6', '7', '8']);
+
+function refParticle(ref) {
+  return REF_BATCHIM_DIGITS.has(String(ref).slice(-1)) ? '과' : '와';
+}
+
+function englishRefChoice(refs) {
+  if (refs.length <= 1) return refs.join('');
+  if (refs.length === 2) return `${refs[0]} or ${refs[1]}`;
+  return `${refs.slice(0, -1).join(', ')}, or ${refs.at(-1)}`;
+}
+
+function koreanRefChoice(refs) {
+  let text = String(refs[0] ?? '');
+  for (let index = 1; index < refs.length; index += 1) {
+    text += `${refParticle(refs[index - 1])} ${refs[index]}`;
+  }
+  return text;
+}
+
+export function removalOneAtATimeMessage(refs) {
+  const list = (refs ?? []).map((ref) => String(ref));
+  const en = `I can remove one part at a time. Which one first: ${englishRefChoice(list)}? Nothing was removed.`;
+  const ko = `한 번에 한 부품만 뺄 수 있어요. ${koreanRefChoice(list)} 중 어느 것부터 뺄까요? 아무것도 빼지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
+export function removalRefUnsupportedMessage(ref) {
+  const en = `There is no safe removal for ${ref} in this project. Nothing was removed.`;
+  const ko = `이 프로젝트에서 ${ref} 부품만 안전하게 빼지는 못해요. 아무것도 빼지 않았어요.`;
   return `${en}\n${ko}`;
 }
 
@@ -213,19 +280,20 @@ export function classifyExistingProjectRequest(prompt, existingSpec, userPrompt)
   const hasUser = typeof userPrompt === 'string' && userPrompt.trim().length > 0;
   const intentText = hasUser ? String(userPrompt) : editText;
   const separateIntent = hasUser && intentText.trim() !== editText.trim();
-  if (!separateIntent) return classifyPrompt(editText);
+  if (!separateIntent) return classifyPrompt(editText, existingSpec);
 
-  return classifySeparateIntent(editText, intentText);
+  return classifySeparateIntent(editText, intentText, existingSpec);
 }
 
-function classifyPrompt(text) {
+function classifyPrompt(text, spec) {
   if (isFullDesignPrompt(text)) return { mode: 'regenerate' };
-  return classifyEditText(text);
+  return classifyEditText(text, spec);
 }
 
-function classifySeparateIntent(editText, intentText) {
-  const removal = removalDecision(intentText);
-  if (removal.kind === 'remove') return removalEdit(removal);
+function classifySeparateIntent(editText, intentText, spec) {
+  const removal = removalDecision(intentText, spec);
+  const decided = refusalForRemoval(removal);
+  if (decided) return decided;
   const fromUser = nonRemovalEdit(intentText);
   if (fromUser?.kind === 'invalid') return invalidResistor(fromUser.reason);
   if (fromUser) return { mode: 'merge', edit: fromUser };
@@ -235,9 +303,10 @@ function classifySeparateIntent(editText, intentText) {
   return { mode: 'refuse' };
 }
 
-function classifyEditText(text) {
-  const removal = removalDecision(text);
-  if (removal.kind === 'remove') return removalEdit(removal);
+function classifyEditText(text, spec) {
+  const removal = removalDecision(text, spec);
+  const decided = refusalForRemoval(removal);
+  if (decided) return decided;
   const resistor = nonRemovalEdit(text);
   if (resistor?.kind === 'invalid') return invalidResistor(resistor.reason);
   if (resistor) return { mode: 'merge', edit: resistor };
@@ -245,8 +314,24 @@ function classifyEditText(text) {
   return { mode: 'refuse' };
 }
 
+function refusalForRemoval(removal) {
+  if (removal.kind === 'remove') return removalEdit(removal);
+  if (removal.kind === 'ref-not-found') {
+    return { mode: 'refuse', code: 'REMOVAL_REF_NOT_FOUND', message: removalRefNotFoundMessage(removal.ref) };
+  }
+  if (removal.kind === 'one-at-a-time') {
+    return { mode: 'refuse', code: 'REMOVAL_ONE_AT_A_TIME', message: removalOneAtATimeMessage(removal.refs) };
+  }
+  if (removal.kind === 'ref-unsupported') {
+    return { mode: 'refuse', code: 'REMOVAL_REF_UNSUPPORTED', message: removalRefUnsupportedMessage(removal.ref) };
+  }
+  return null;
+}
+
 function removalEdit(removal) {
-  return { mode: 'merge', edit: { kind: 'delete', targets: removal.targets } };
+  const edit = { kind: 'delete', targets: removal.targets };
+  if (removal.refs?.length) edit.refs = removal.refs;
+  return { mode: 'merge', edit };
 }
 
 function unclearRemoval() {
@@ -278,10 +363,12 @@ function isFullDesignPrompt(text) {
 // matched. `"remove I2C" is not what I want` therefore has no removal verb.
 // Double quotes always count. A balanced '...' pair counts when it is not a
 // contraction such as don't or shouldn't.
-// Format characters (Cf: ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft hyphen) are
-// removed before NFKC, so they cannot hide a negation. U+00B4 then decomposes
-// to a space plus combining acute, and that residue is folded back to an
-// apostrophe before the other apostrophe-like characters are mapped.
+// Format characters (Cf) are removed before NFKC, so they cannot hide a
+// negation or a retraction. Cf includes bidi controls U+202A–U+202E and
+// U+2066–U+2069, plus ZWSP, ZWNJ, ZWJ, word joiner, BOM, and soft hyphen.
+// U+00B4 then decomposes to a space plus combining acute, and that residue is
+// folded back to an apostrophe before the other apostrophe-like characters
+// are mapped.
 function normalizeDeletionText(text) {
   const apostrophes = [...DELETION_INTENT_VOCABULARY.apostrophes]
     .filter((ch) => ch !== '\u0301')
@@ -508,6 +595,12 @@ function findMentions(text) {
       found.push({ id: target.id, index: match.index, length: match[0].length });
     }
   }
+  const refRe = new RegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
+  for (const match of text.matchAll(refRe)) {
+    if (match[0].length === 0) continue;
+    const token = match[0].toUpperCase();
+    found.push({ id: `ref:${token}`, index: match.index, length: match[0].length });
+  }
   return found;
 }
 
@@ -545,7 +638,7 @@ function chooseTarget(windowText, verbOffset, verb) {
     ranked.push({ id: 'led', index: closestMention(leds, verbOffset).index });
   }
   for (const item of mentions) {
-    if (item.id === 'i2c' || item.id === 'pronoun') ranked.push(item);
+    if (item.id === 'i2c' || item.id === 'pronoun' || isRefTarget(item.id)) ranked.push(item);
   }
   if (ranked.length === 0) return null;
   ranked.sort((left, right) => Math.abs(left.index - verbOffset) - Math.abs(right.index - verbOffset));
@@ -662,6 +755,7 @@ export function classifyDeletionIntents(text) {
   }
   applySameTargetGuard(intents, normalized);
   applyCorrectionCues(intents, normalized);
+  applyUnexplainedResidue(intents, normalized);
   return intents;
 }
 
@@ -679,6 +773,30 @@ function hasCue(text, cues) {
 
 function hasVerbScopeCue(text) {
   return hasCue(text, verbScopeCues());
+}
+
+function isRestOnlyClause(text) {
+  if (!hasCue(text, DELETION_INTENT_VOCABULARY.restPhrases)) return false;
+  return !findMentions(text).some((item) => (
+    item.id === 'i2c' || item.id === 'led' || item.id === 'resistor' || isRefTarget(item.id)
+  ));
+}
+
+// A verb-scope cue whose clause only names the rest ("anything else", "나머지")
+// does not block the removal in the other clause. Other cues still do.
+function hasBlockingVerbScopeCue(text) {
+  const clauses = splitClauses(text);
+  for (const cue of verbScopeCues()) {
+    const re = new RegExp(cue.re, 'giu');
+    for (const match of text.matchAll(re)) {
+      if (match[0].length === 0) continue;
+      const clause = clauses.find((item) => (
+        match.index >= item.start && match.index < item.start + item.text.length
+      ));
+      if (!clause || !isRestOnlyClause(clause.text)) return true;
+    }
+  }
+  return false;
 }
 
 function hasPartScopeCue(text) {
@@ -730,7 +848,7 @@ function applySentenceBlocks(intents, normalized) {
       blockIntent(intent, 'question');
       continue;
     }
-    if (hasVerbScopeCue(sentence.text) && sentenceMentions(sentence.text, intent.target)) {
+    if (hasBlockingVerbScopeCue(sentence.text) && sentenceMentions(sentence.text, intent.target)) {
       blockIntent(intent);
     }
   }
@@ -753,10 +871,16 @@ function resolveMentionId(mentions, mention) {
 
 function partsBlockedByKeep(text) {
   const mentions = findMentions(text);
+  const clauses = splitClauses(text);
   const blocked = new Set();
   for (const cue of DELETION_INTENT_VOCABULARY.partScopeCues) {
     const re = new RegExp(cue.re, 'giu');
     for (const match of text.matchAll(re)) {
+      const clause = clauses.find((item) => (
+        match.index >= item.start && match.index < item.start + item.text.length
+      ));
+      // "keep everything else" / "나머지는 유지" does not name the removed part.
+      if (clause && isRestOnlyClause(clause.text)) continue;
       const nearest = nearestMention(mentions, match.index, match[0].length);
       const id = resolveMentionId(mentions, nearest);
       if (id) blocked.add(id);
@@ -862,10 +986,23 @@ function applyMultiTargetBlock(intents, normalized) {
   }
 }
 
-function removalPartIds(target) {
+function isRefTarget(target) {
+  return typeof target === 'string' && target.startsWith('ref:');
+}
+
+function isTrackedTarget(target) {
+  return target === 'i2c' || target === 'led' || target === 'led-resistor' || isRefTarget(target);
+}
+
+function namedRemovalIds(target) {
   if (target === 'led-resistor') return ['led', 'resistor'];
   if (target === 'i2c' || target === 'led' || target === 'resistor') return [target];
   return [];
+}
+
+function removalPartIds(target) {
+  if (isRefTarget(target)) return [target];
+  return namedRemovalIds(target);
 }
 
 function listGapPattern() {
@@ -904,7 +1041,7 @@ function tailRejectsCoRemoval(tail) {
 
 function sortedPartMentions(text) {
   return findMentions(text)
-    .filter((item) => item.id === 'i2c' || item.id === 'led' || item.id === 'resistor')
+    .filter((item) => item.id === 'i2c' || item.id === 'led' || item.id === 'resistor' || isRefTarget(item.id))
     .sort((left, right) => left.index - right.index || right.length - left.length);
 }
 
@@ -951,7 +1088,9 @@ function alsoAttachedPartIds(text) {
       const after = clauseRemainder(text, match.index + match[0].length);
       if (hasPartScopeCue(after) || tailRejectsCoRemoval(after)) continue;
       for (const mention of findMentions(span)) {
-        if (mention.id === 'i2c' || mention.id === 'led' || mention.id === 'resistor') ids.add(mention.id);
+        if (mention.id === 'i2c' || mention.id === 'led' || mention.id === 'resistor' || isRefTarget(mention.id)) {
+          ids.add(mention.id);
+        }
       }
     }
   }
@@ -968,7 +1107,9 @@ function applyListedRemovalBlock(intents, text) {
   for (const intent of intents) {
     if (intent.polarity !== 'positive') continue;
     positive.push(intent);
-    for (const id of removalPartIds(intent.target)) positiveIds.add(id);
+    // Designators are not named parts. Two refs stay a one-at-a-time refusal
+    // instead of this list block flipping them to a generic unclear ask.
+    for (const id of namedRemovalIds(intent.target)) positiveIds.add(id);
   }
   if (positiveIds.size === 0) return;
   const joined = listJoinedPartIds(text);
@@ -989,17 +1130,192 @@ function applyListedRemovalBlock(intents, text) {
 function removalIsUnclear(intents, actionable) {
   if (actionable.length > 1) return true;
   if (intents.some((intent) => intent.question || intent.corrected || intent.multi)) return true;
-  const known = intents.some((intent) => (
-    intent.target === 'i2c' || intent.target === 'led' || intent.target === 'led-resistor'
-  ));
+  const known = intents.some((intent) => isTrackedTarget(intent.target));
   if (!known) return false;
   return actionable.length !== 1;
 }
 
+// Words that may sit next to a removal target without being a second request.
+// Bare coordinator 나 is omitted: it is a single syllable and would hide real text.
+function residueBlankSources() {
+  const vocab = DELETION_INTENT_VOCABULARY;
+  const sources = [
+    ...vocab.positiveVerbs.map((item) => item.re),
+    ...vocab.targets.map((item) => item.re),
+    vocab.referenceDesignator,
+    ...vocab.targetListFillers.map((item) => item.re),
+    ...vocab.targetListJoins.map((item) => item.re),
+    ...vocab.coordinators.filter((item) => item.id !== 'na').map((item) => item.re),
+    ...vocab.correctionCues.map((item) => item.re),
+    ...vocab.negationMarkers.map((item) => item.re),
+    ...vocab.restPhrases.map((item) => item.re),
+    String.raw`\b(?:connector|header|standard|bandgap|command)\b`,
+    '커넥터|헤더',
+    // 하지만 splits on 지만 and leaves the connective 하. 해도/돼 is "may I".
+    String.raw`해\s*주세요|해\s*줘|주세요|(?<![가-힣])해도(?![가-힣])|(?<![가-힣])줘(?![가-힣])|(?<![가-힣])자(?![가-힣])|(?<![가-힣])돼(?![가-힣])|(?<![가-힣])하(?![가-힣])`,
+    String.raw`(?<![가-힣])[은는이가을를도](?![가-힣])`
+  ];
+  for (const word of [...vocab.parentheticals, ...vocab.auxiliaries, ...vocab.subjects]) {
+    sources.push(String.raw`\b${escapeRegExp(word)}\b`);
+  }
+  return sources;
+}
+
+function hasUnexplainedResidue(clauseText) {
+  let rest = clauseText;
+  for (const source of residueBlankSources()) {
+    rest = rest.replace(new RegExp(source, 'giu'), ' ');
+  }
+  return /[\p{L}\p{N}]/u.test(rest);
+}
+
+// Unknown trailing text in the removal clause ("remove I2C" plus reversed "don't")
+// takes the removal back. A clause with no tracked part is left alone, so
+// "reset 버튼 삭제" stays a plain refusal.
+function applyUnexplainedResidue(intents, text) {
+  const clauses = splitClauses(text);
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive' || !isTrackedTarget(intent.target)) continue;
+    const clause = clauses.find((item) => (
+      intent.sourceIndex >= item.start && intent.sourceIndex < item.start + item.text.length
+    ));
+    if (!clause || findVerbs(clause.text).length === 0) continue;
+    if (hasUnexplainedResidue(clause.text)) blockIntent(intent, 'corrected');
+  }
+}
+
+function schematicComponents(spec) {
+  const components = spec?.schematic?.components;
+  return Array.isArray(components) ? components : [];
+}
+
+function refRecord(spec, token) {
+  const key = String(token ?? '').toUpperCase();
+  if (!key) return null;
+  return schematicComponents(spec).find((component) => (
+    String(component?.ref ?? '').toUpperCase() === key
+  )) ?? null;
+}
+
+function displayRef(spec, token) {
+  const record = refRecord(spec, token);
+  if (record?.ref) return String(record.ref);
+  return String(token).toUpperCase();
+}
+
+function componentRole(spec, ref) {
+  const parts = spec?.boardProfile?.productionParts;
+  if (!Array.isArray(parts)) return '';
+  const key = String(ref ?? '').toUpperCase();
+  const part = parts.find((item) => String(item?.ref ?? '').toUpperCase() === key);
+  return String(part?.role ?? '');
+}
+
+const DEDICATED_REMOVAL_ROLES = new Set([
+  'status-led-resistor',
+  'i2c-scl-pullup',
+  'i2c-sda-pullup'
+]);
+
+// Identity comes from the saved component, never from the letters of the ref.
+// A dedicated series resistor or pull-up is not removed on its own.
+function machineryForRecord(spec, record) {
+  const libId = String(record?.libId ?? '');
+  const value = String(record?.value ?? '');
+  const role = componentRole(spec, record?.ref);
+  if (
+    libId === 'ChatPCB:LED_RESISTOR'
+    || value === 'LED_RESISTOR'
+    || libId === 'ChatPCB:I2C_PULLUP'
+    || value === 'I2C_PULLUP'
+    || DEDICATED_REMOVAL_ROLES.has(role)
+  ) {
+    return null;
+  }
+  if (libId === 'ChatPCB:I2C_CONNECTOR' || value === 'I2C_CONNECTOR' || role === 'i2c-sensor-header') {
+    return 'i2c';
+  }
+  if (libId === 'ChatPCB:STATUS_LED' || value === 'STATUS_LED' || role === 'status-led') {
+    return 'led';
+  }
+  return null;
+}
+
+function sameMachinery(spec, token, namedId) {
+  const record = refRecord(spec, token);
+  if (!record) return false;
+  const target = machineryForRecord(spec, record);
+  if (!target) return false;
+  if (namedId === target) return true;
+  return target === 'led' && namedId === 'led-resistor';
+}
+
+function resolveRefRemoval(spec, token) {
+  const record = refRecord(spec, token);
+  if (!record) return { kind: 'ref-not-found', ref: String(token).toUpperCase() };
+  const ref = record.ref ? String(record.ref) : String(token).toUpperCase();
+  const target = machineryForRecord(spec, record);
+  if (!target) return { kind: 'ref-unsupported', ref };
+  return { kind: 'remove', targets: [target], refs: [ref] };
+}
+
+function designatorsInOrder(text) {
+  const re = new RegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
+  return [...text.matchAll(re)].map((match) => match[0].toUpperCase());
+}
+
+function collectPositiveNamed(intents) {
+  const named = [];
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive') continue;
+    for (const id of namedRemovalIds(intent.target)) {
+      if (!named.includes(id)) named.push(id);
+    }
+  }
+  return named;
+}
+
+function joinedIdsForPositive(text, intents) {
+  const joined = listJoinedPartIds(text);
+  if (joined.size < 2) return joined;
+  const positiveKeys = new Set();
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive' || !intent.target) continue;
+    if (isRefTarget(intent.target)) positiveKeys.add(intent.target);
+    for (const id of namedRemovalIds(intent.target)) positiveKeys.add(id);
+  }
+  if (![...positiveKeys].some((id) => joined.has(id))) return new Set();
+  return joined;
+}
+
+function collectPositiveRefs(text, intents) {
+  const wanted = new Set();
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive' || !isRefTarget(intent.target)) continue;
+    wanted.add(intent.target.slice(4).toUpperCase());
+  }
+  for (const id of joinedIdsForPositive(text, intents)) {
+    if (isRefTarget(id)) wanted.add(id.slice(4).toUpperCase());
+  }
+  const seen = new Set();
+  const ordered = [];
+  for (const token of designatorsInOrder(text)) {
+    if (!wanted.has(token) || seen.has(token)) continue;
+    seen.add(token);
+    ordered.push(token);
+  }
+  return ordered;
+}
+
+function joinedNamedBeside(text, intents) {
+  return [...joinedIdsForPositive(text, intents)].filter((id) => !isRefTarget(id));
+}
+
 // Fail closed. A removal candidate exists only when one part is the clear
 // object of a removal verb and no negation, keep, question, correction, list,
-// or second candidate makes that reading unsafe.
-function removalDecision(text) {
+// or second candidate makes that reading unsafe. One existing reference is
+// removed through the same native deletion as its named part.
+function removalDecision(text, spec) {
   const normalized = stripQuotedMentions(normalizeDeletionText(text));
   const intents = classifyDeletionIntents(text);
   applySentenceBlocks(intents, normalized);
@@ -1007,6 +1323,20 @@ function removalDecision(text) {
   applyTrailingCorrection(intents, normalized);
   applyMultiTargetBlock(intents, normalized);
   applyListedRemovalBlock(intents, normalized);
+  if (intents.some((intent) => intent.question || intent.corrected)) return { kind: 'unclear' };
+
+  const refTokens = collectPositiveRefs(normalized, intents);
+  if (refTokens.length >= 2) {
+    return { kind: 'one-at-a-time', refs: refTokens.map((token) => displayRef(spec, token)) };
+  }
+  if (refTokens.length === 1) {
+    const named = new Set([...collectPositiveNamed(intents), ...joinedNamedBeside(normalized, intents)]);
+    for (const id of named) {
+      if (!sameMachinery(spec, refTokens[0], id)) return { kind: 'unclear' };
+    }
+    return resolveRefRemoval(spec, refTokens[0]);
+  }
+
   const actionable = [];
   for (const intent of intents) {
     if (intent.polarity !== 'positive') continue;

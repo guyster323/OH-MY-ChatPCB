@@ -5,7 +5,10 @@ import {
   DELETION_INTENT_VOCABULARY,
   classifyDeletionIntents,
   classifyExistingProjectRequest,
-  removalIntentUnclearMessage
+  removalIntentUnclearMessage,
+  removalOneAtATimeMessage,
+  removalRefNotFoundMessage,
+  removalRefUnsupportedMessage
 } from '../src/workflow/existing-project-edit.js';
 
 const SPEC = { sourcePrompt: 'existing' };
@@ -173,11 +176,48 @@ const CONTRACT = [
   { prompt: 'remove I2C, just kidding', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
   { prompt: 'remove I2C. jk', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
   { prompt: 'remove I2C... NOT', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
-  { prompt: "don't remove R1", outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
-  { prompt: 'R1 삭제하지 마', outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
+  // A designator is a real removal target once the project is known. With no
+  // R1 in this spec the delete is a missing-ref refusal. Negation still asks.
+  { prompt: "don't remove R1", outcome: 'refuse-clarify', ask: true, positive: [], negated: ['ref:R1'] },
+  { prompt: 'R1 삭제하지 마', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['ref:R1'] },
+  { prompt: 'remove R1', outcome: 'ref-not-found', ref: 'R1', positive: ['ref:R1'], negated: [] },
   { prompt: 'without deleting the LED', outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
+  // Retraction, wherever it sits, asks again. I2C is not a removal candidate.
+  { prompt: 'remove I2C nvm', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'remove I2C... never mind', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'remove I2C, scratch that', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'remove I2C (cancel)', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 삭제 취소', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 삭제 아냐', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'nvm, remove I2C', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: '취소, I2C 삭제', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 삭제 ㄴ', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 삭제 아니야', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 삭제 됐어', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'remove I2C nevermind', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  // RLO stores "don't" reversed. After bidi controls are stripped, t'nod is unknown trailing text.
+  { prompt: 'remove I2C \u202Et\'nod\u202C', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  // A keep/negation whose object is only the rest is still a single I2C removal.
+  { prompt: 'I2C는 삭제하고 나머지는 그대로 유지해', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'remove I2C, don\'t touch anything else', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'I2C 삭제하고 나머지는 건드리지 마', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'I2C 삭제, 다른 건 바꾸지 마', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'remove I2C and keep everything else', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'remove I2C. Don\'t change anything else.', outcome: 'removal-candidate:i2c', positive: ['i2c'], negated: [] },
+  // The cue names I2C itself, so this still asks.
+  { prompt: 'remove I2C but keep I2C', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 삭제하고 I2C는 유지', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
+  // "don't change the LED" is a verb-scope negation in the same sentence, not
+  // the keep-cue used by "remove I2C but keep LED". The removal verb itself
+  // stays positive; the sentence block asks instead of removing I2C.
+  { prompt: 'remove I2C and don\'t change the LED', outcome: 'refuse-clarify', ask: true, positive: ['i2c'], negated: [] },
+  // LED removal is the status LED. When the schematic also has that LED's
+  // dedicated series resistor, the removed set is D1 and R3 and lists every
+  // ref. A board that has not drawn R3 yet removes only D1. Classify still
+  // names the LED; the ref list is decided by the deletion machinery.
+  { prompt: 'remove the LED', outcome: 'removal-candidate:LED', positive: ['led'], negated: [] },
+  { prompt: 'LED 삭제', outcome: 'removal-candidate:LED', positive: ['led'], negated: [] },
   { prompt: 'keep everything, no removal', outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
-  { prompt: 'remove R1', outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
   { prompt: 'don\u2018t remove I2C', outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
   { prompt: 'I2C는 남겨둬', outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
   { prompt: "there's no need to delete the I2C connector", outcome: 'refuse-clarify', ask: true, positive: [], negated: ['i2c'] },
@@ -219,6 +259,16 @@ test('deletion intent contract is fail-closed', () => {
     if (row.outcome === 'resistor-invalid') {
       assert.equal(decision.mode, 'refuse', row.prompt);
       assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', row.prompt);
+      assert.equal(decision.edit, undefined, row.prompt);
+      assert.deepEqual(boundTargets(row.prompt, false), row.positive, `${row.prompt} positive`);
+      assert.deepEqual(boundTargets(row.prompt, true), row.negated, `${row.prompt} negated`);
+      assert.equal(removesI2c(decision), false, row.prompt);
+      continue;
+    }
+    if (row.outcome === 'ref-not-found') {
+      assert.equal(decision.mode, 'refuse', row.prompt);
+      assert.equal(decision.code, 'REMOVAL_REF_NOT_FOUND', row.prompt);
+      assert.equal(decision.message, removalRefNotFoundMessage(row.ref), row.prompt);
       assert.equal(decision.edit, undefined, row.prompt);
       assert.deepEqual(boundTargets(row.prompt, false), row.positive, `${row.prompt} positive`);
       assert.deepEqual(boundTargets(row.prompt, true), row.negated, `${row.prompt} negated`);
@@ -355,6 +405,15 @@ test('deletion checks share one positive and negative vocabulary', () => {
   assert.ok(DELETION_INTENT_VOCABULARY.alsoAttachments.some((item) => item.id === 'hago-do'));
   assert.ok(DELETION_INTENT_VOCABULARY.coordinatedVerbs.some((item) => item.id === 'change'));
   assert.ok(DELETION_INTENT_VOCABULARY.coordinatedVerbs.some((item) => item.id === '변경'));
+  const retractions = DELETION_INTENT_VOCABULARY.correctionCues.map((cue) => cue.id);
+  for (const id of ['nvm', 'never-mind', 'nevermind', 'scratch-that', 'cancel', '취소', '아냐', '아니야', '됐어', 'lone-nieun']) {
+    assert.ok(retractions.includes(id), id);
+  }
+  const rests = DELETION_INTENT_VOCABULARY.restPhrases.map((cue) => cue.id);
+  for (const id of ['anything-else', 'everything-else', 'nothing-else', 'the-rest', 'nameoji', 'dareun-geon']) {
+    assert.ok(rests.includes(id), id);
+  }
+  assert.match(DELETION_INTENT_VOCABULARY.referenceDesignator, /\[A-Za-z\]\{1,3\}/);
   for (const verb of DELETION_INTENT_VOCABULARY.positiveVerbs) {
     const sample = {
       remove: 'remove I2C',
@@ -370,4 +429,115 @@ test('deletion checks share one positive and negative vocabulary', () => {
     assert.equal(decision.edit?.kind, 'delete', verb.id);
     assert.deepEqual(decision.edit?.targets, ['i2c'], verb.id);
   }
+});
+
+function projectSpec(components) {
+  return {
+    sourcePrompt: 'existing',
+    interfaces: [{ kind: 'i2c' }],
+    peripherals: [{ kind: 'status-led' }, { kind: 'status-led-resistor', value: '1k' }],
+    schematic: { components }
+  };
+}
+
+const REF_SPEC = projectSpec([
+  { ref: 'J2', libId: 'ChatPCB:I2C_CONNECTOR', value: 'I2C_CONNECTOR' },
+  { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' },
+  { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' },
+  { ref: 'J3', libId: 'ChatPCB:UART_HEADER', value: 'UART_HEADER' },
+  { ref: 'U1', libId: 'ChatPCB:REGULATOR_3V3', value: 'REGULATOR_3V3' }
+]);
+
+function assertRefRemoval(prompt, ref, target) {
+  const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+  assert.equal(decision.mode, 'merge', prompt);
+  assert.equal(decision.edit?.kind, 'delete', prompt);
+  assert.deepEqual(decision.edit?.targets, [target], prompt);
+  assert.deepEqual(decision.edit?.refs, [ref], prompt);
+  assert.equal(removesI2c(decision), target === 'i2c', prompt);
+}
+
+test('an existing reference designator is one removal candidate', () => {
+  for (const prompt of ['J2 빼', 'J2 삭제해줘', 'Remove J2', 'remove J2', 'delete J2', 'J2 지워줘', 'remove j2']) {
+    assertRefRemoval(prompt, 'J2', 'i2c');
+  }
+  assertRefRemoval('D1 삭제해줘', 'D1', 'led');
+  assertRefRemoval('d1 삭제', 'D1', 'led');
+});
+
+test('a missing reference is a localized refusal and removes nothing', () => {
+  const decision = classifyExistingProjectRequest('J9 삭제', REF_SPEC);
+  assert.equal(decision.mode, 'refuse');
+  assert.equal(decision.code, 'REMOVAL_REF_NOT_FOUND');
+  assert.equal(decision.message, removalRefNotFoundMessage('J9'));
+  assert.equal(decision.edit, undefined);
+  assert.equal(removesI2c(decision), false);
+});
+
+test('two references ask which one, with 와 or 과 from the first ref', () => {
+  const cases = [
+    ['J2, D1 빼', ['J2', 'D1']],
+    ['remove J2 and D1', ['J2', 'D1']],
+    ['J2랑 D1 삭제해줘', ['J2', 'D1']],
+    ['D1, J2 삭제', ['D1', 'J2']]
+  ];
+  for (const [prompt, refs] of cases) {
+    const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'REMOVAL_ONE_AT_A_TIME', prompt);
+    assert.equal(decision.message, removalOneAtATimeMessage(refs), prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(removesI2c(decision), false, prompt);
+  }
+  const j2 = removalOneAtATimeMessage(['J2', 'D1']);
+  assert.match(j2, /J2 or D1/);
+  assert.match(j2, /J2와 D1/);
+  const d1 = removalOneAtATimeMessage(['D1', 'J2']);
+  assert.match(d1, /D1과 J2/);
+  assert.match(removalOneAtATimeMessage(['R4', 'D1']), /R4와 D1/);
+  assert.match(removalOneAtATimeMessage(['R1', 'D1']), /R1과 D1/);
+});
+
+test('negation, retraction, and a mixed name do not become a single ref removal', () => {
+  for (const prompt of ['don\'t remove J2', 'J2 삭제하지 마', 'remove J2 nvm', 'remove J2 and the LED']) {
+    const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'REMOVAL_INTENT_UNCLEAR', prompt);
+    assert.equal(decision.message, REMOVAL_UNCLEAR_MESSAGE, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+});
+
+test('a ref the deletion machinery cannot remove alone is refused', () => {
+  for (const prompt of ['remove J3', 'U1 삭제', 'R3 지워줘']) {
+    const decision = classifyExistingProjectRequest(prompt, REF_SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'REMOVAL_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.match(decision.message, /Nothing was removed/);
+    assert.match(decision.message, /아무것도 빼지 않았어요/);
+  }
+  assert.equal(
+    classifyExistingProjectRequest('remove J3', REF_SPEC).message,
+    removalRefUnsupportedMessage('J3')
+  );
+});
+
+test('the unclear hint example removes that reference instead of looping', () => {
+  const hint = removalIntentUnclearMessage();
+  assert.equal(hint, REMOVAL_UNCLEAR_MESSAGE);
+  const example = hint.match(/like\s+([A-Za-z]{1,3}\d+)/u);
+  assert.ok(example, hint);
+  const ref = example[1].toUpperCase();
+  assert.equal(ref, 'J2');
+  assert.ok(REF_SPEC.schematic.components.some((component) => component.ref.toUpperCase() === ref));
+  assertRefRemoval(`remove ${ref}`, ref, 'i2c');
+  assertRefRemoval(`${ref} 삭제`, ref, 'i2c');
+});
+
+test('cancel in a resistor edit does not block the value change', () => {
+  const decision = classifyExistingProjectRequest('set LED resistor 680 ohm. cancel is not this edit', REF_SPEC);
+  assert.equal(decision.mode, 'merge');
+  assert.equal(decision.edit?.kind, 'resistor');
+  assert.equal(decision.edit?.ohms, 680);
 });

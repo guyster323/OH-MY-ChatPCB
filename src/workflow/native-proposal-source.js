@@ -472,6 +472,7 @@ export async function createNativeProposal({
       if (decision.code === 'RESISTOR_VALUE_INVALID') {
         throw coded('RESISTOR_VALUE_INVALID', decision.message || resistorValueInvalidMessage());
       }
+      if (decision.code) throw coded(decision.code, decision.message);
       throw coded('PROVIDER_NO_PATCH', modifyRefusalMessage());
     } else if (decision.mode === 'merge') {
       proposed = await applyMergedProjectEdit({

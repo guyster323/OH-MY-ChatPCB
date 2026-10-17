@@ -12,6 +12,7 @@ import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-regis
 import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { removalIntentUnclearMessage } from '../src/workflow/existing-project-edit.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 import { isolateHome } from './isolate-home.js';
@@ -998,6 +999,163 @@ test('allowRemovedComponents is ignored when nothing is removed', async () => {
     assert.notEqual(schematic, before);
     assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
   });
+});
+
+function codexNoPatch() {
+  return {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => ({ exitCode: 0, stderr: '', events: [] })
+  };
+}
+
+function assertExactRemoved(result, refs) {
+  assert.equal(result.applied, false);
+  assert.equal(result.requiresApproval, false);
+  assert.equal(result.reason?.code, 'EXISTING_COMPONENTS_REMOVED');
+  assert.deepEqual(result.removedComponents.map((item) => item.ref), refs);
+}
+
+test('the unclear hint example removes that reference on a project that has it', async () => {
+  const hint = removalIntentUnclearMessage();
+  const example = hint.split('\n')[0].match(/like\s+([A-Za-z]{1,3}\d+)/u);
+  assert.ok(example, hint);
+  const ref = example[1].toUpperCase();
+  const { projectDir, generated } = await generatedStm32Project();
+  try {
+    const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+    assert.ok((spec.schematic?.components ?? []).some((component) => component.ref?.toUpperCase() === ref));
+    const before = await readFile(generated.files.schematic, 'utf8');
+    for (const prompt of [`remove ${ref}`, `${ref} 삭제`]) {
+      const plan = await createSchematicPatchPlan({
+        projectDir,
+        prompt,
+        projectName: 'stm32_i2c',
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc
+      });
+      try {
+        const preview = await applySchematicPatch({
+          projectDir,
+          prompt,
+          approved: false,
+          patchPlan: plan
+        });
+        assertExactRemoved(preview, [ref]);
+        assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+      } finally {
+        await disposeSchematicPatchPlan(plan);
+      }
+    }
+  } finally {
+    await rm(projectDir, { force: true, recursive: true });
+  }
+});
+
+test('a provider with no patch still proposes one reference and the override must match', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  let before = await readFile(generated.files.schematic, 'utf8');
+  try {
+    for (const [prompt, refs] of [['J2 삭제해줘', ['J2']], ['Remove D1', ['D1']]]) {
+      const preview = await dispatchToolCall({
+        id: `call_ref_${refs[0]}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...codexNoPatch() });
+      assert.equal(preview.ok, true, preview.error?.message);
+      assert.equal(preview.result.providerFallback, 'built-in-draft');
+      assert.equal(preview.result.source?.via, 'native-fallback');
+      assertExactRemoved(preview.result, refs);
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+
+      const blocked = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: preview.result.patchId }
+      }, services);
+      assert.equal(blocked.ok, true, blocked.error?.message);
+      assertExactRemoved(blocked.result, refs);
+
+      const mismatch = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: {
+          projectDir,
+          approved: true,
+          patchId: preview.result.patchId,
+          allowRemovedComponents: ['J9']
+        }
+      }, services);
+      assert.equal(mismatch.ok, true, mismatch.error?.message);
+      assert.equal(mismatch.result.applied, false);
+      assert.equal(mismatch.result.reason?.mismatch?.code, 'ALLOW_REMOVED_COMPONENTS_MISMATCH');
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: {
+          projectDir,
+          approved: true,
+          patchId: preview.result.patchId,
+          allowRemovedComponents: refs
+        }
+      }, services);
+      assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+      before = await readFile(generated.files.schematic, 'utf8');
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('removing D1 after its series resistor exists lists D1 and R3 and the override must match', async () => {
+  const services = await transactionServices();
+  try {
+    await withBoardResistor(330, async ({ projectDir, generated }) => {
+      const prompt = 'Remove D1';
+      const preview = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, prompt, projectName: 'stm32_i2c' }
+      }, services);
+      assert.equal(preview.ok, true, preview.error?.message);
+      assertExactRemoved(preview.result, ['D1', 'R3']);
+      const mismatch = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: {
+          projectDir,
+          approved: true,
+          patchId: preview.result.patchId,
+          allowRemovedComponents: ['D1']
+        }
+      }, services);
+      assert.equal(mismatch.result.applied, false);
+      assert.deepEqual(mismatch.result.reason?.mismatch?.missing, ['R3']);
+      const applied = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: {
+          projectDir,
+          approved: true,
+          patchId: preview.result.patchId,
+          allowRemovedComponents: ['D1', 'R3']
+        }
+      }, services);
+      assert.equal(applied.ok, true, applied.error?.message ?? JSON.stringify(applied.result?.reason));
+      assert.equal(applied.result.applied, true, JSON.stringify(applied.result?.reason));
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      assert.equal(schematic.includes('STATUS_LED'), false);
+      assert.equal(schematic.includes('LED_RESISTOR'), false);
+      assert.match(schematic, /I2C_CONNECTOR/);
+    });
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
 });
 
 test('PROVIDER_NO_PATCH tells the user to name the part or start a new project', async () => {
