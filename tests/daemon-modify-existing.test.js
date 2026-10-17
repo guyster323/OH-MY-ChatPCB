@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -17,6 +17,9 @@ import {
   modifyRefusalMessage,
   removalIntentUnclearMessage,
   removalNeedsVerbMessage,
+  resistorRefAmbiguousMessage,
+  resistorRefNotFoundMessage,
+  resistorRefUnsupportedMessage,
   resistorValueInvalidMessage
 } from '../src/workflow/existing-project-edit.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
@@ -1291,6 +1294,172 @@ test('a value-only prompt and a bare reference never call the provider', async (
       assert.match(preview.error?.message ?? '', /Nothing was (?:changed|removed)/, prompt);
       assert.equal(await readFile(generated.files.schematic, 'utf8'), before, prompt);
     }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+function schematicRefValue(schematic, ref) {
+  const match = schematic.match(new RegExp(`\\(property "Reference" "${ref}"[\\s\\S]*?\\(property "Value" "([^"]*)"`));
+  return match?.[1] ?? null;
+}
+
+test('a named resistor that is not the LED series resistor never calls the provider', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-resistor-ref-'));
+  const spec = {
+    sourcePrompt: 'existing',
+    mcu: { family: 'STM32' },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '330' }
+    ],
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '1k' },
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' },
+        { ref: 'R4', libId: 'ChatPCB:I2C_PULLUP', value: '4.7k' }
+      ]
+    },
+    boardProfile: {
+      productionParts: [
+        { ref: 'R1', role: 'generic-resistor', libId: 'Device:R', value: '1k' },
+        { ref: 'R3', role: 'status-led-resistor', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' },
+        { ref: 'R4', role: 'i2c-scl-pullup', libId: 'ChatPCB:I2C_PULLUP', value: '4.7k' }
+      ]
+    }
+  };
+  const before = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "Device:R") (at 0 0 0)',
+    '    (property "Reference" "R1" (at 0 0 0))',
+    '    (property "Value" "1k" (at 0 0 0)))',
+    '  (symbol (lib_id "ChatPCB:LED_RESISTOR") (at 10 0 0)',
+    '    (property "Reference" "R3" (at 10 0 0))',
+    '    (property "Value" "330Ω" (at 10 0 0)))',
+    '  (symbol (lib_id "ChatPCB:I2C_PULLUP") (at 20 0 0)',
+    '    (property "Reference" "R4" (at 20 0 0))',
+    '    (property "Value" "4.7k" (at 20 0 0))))'
+  ].join('\n');
+  const schematicPath = path.join(projectDir, 'board.kicad_sch');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(schematicPath, before);
+  const r1Before = schematicRefValue(before, 'R1');
+  const r3Before = schematicRefValue(before, 'R3');
+  const r4Before = schematicRefValue(before, 'R4');
+  let called = false;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      called = true;
+      throw new Error('provider must not be called');
+    }
+  };
+  const supported = resistorRefUnsupportedMessage('R3');
+  const rows = [
+    ['change R1 to 470', 'RESISTOR_REF_UNSUPPORTED', supported],
+    ['R1 470', 'RESISTOR_REF_UNSUPPORTED', supported],
+    ['저항 R1 470으로 바꿔줘', 'RESISTOR_REF_UNSUPPORTED', supported],
+    ['change R1 to 1k', 'RESISTOR_REF_UNSUPPORTED', supported],
+    ['change R4 to 470', 'RESISTOR_REF_UNSUPPORTED', supported],
+    ['change R9 to 470', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')],
+    ['change R1 and R3 to 470', 'RESISTOR_REF_AMBIGUOUS', resistorRefAmbiguousMessage(['R1', 'R3'])],
+    ['change R1 to 4m7', 'RESISTOR_VALUE_INVALID', null]
+  ];
+  try {
+    for (const [index, [prompt, code, message]] of rows.entries()) {
+      const preview = await dispatchToolCall({
+        id: `call_resistor_ref_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(called, false, prompt);
+      assert.equal(preview.ok, false, `${prompt} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.error?.code, code, `${prompt} ${preview.error?.message ?? ''}`);
+      if (message) assert.equal(preview.error?.message, message, prompt);
+      assert.match(preview.error?.message ?? '', /Nothing was changed/, prompt);
+      const schematic = await readFile(schematicPath, 'utf8');
+      assert.equal(schematic, before, prompt);
+      assert.equal(schematicRefValue(schematic, 'R1'), r1Before, prompt);
+      assert.equal(schematicRefValue(schematic, 'R1'), '1k', prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), r3Before, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '330Ω', prompt);
+      assert.equal(schematicRefValue(schematic, 'R4'), r4Before, prompt);
+      assert.equal(schematicRefValue(schematic, 'R4'), '4.7k', prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('naming R3 on a board with no series resistor never calls the provider', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-no-series-'));
+  const spec = {
+    sourcePrompt: 'status LED without a series resistor',
+    peripherals: [{ kind: 'status-led' }],
+    schematic: {
+      components: [
+        { ref: 'D1', libId: 'Device:LED', value: 'LED' },
+        { ref: 'R1', libId: 'Device:R', value: '1k' }
+      ]
+    }
+  };
+  const schematicPath = path.join(projectDir, 'led.kicad_sch');
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "Device:LED") (at 0 0 0)',
+    '    (property "Reference" "D1" (at 0 0 0))',
+    '    (property "Value" "LED" (at 0 0 0)))',
+    '  (symbol (lib_id "Device:R") (at 10 0 0)',
+    '    (property "Reference" "R1" (at 10 0 0))',
+    '    (property "Value" "1k" (at 10 0 0))))'
+  ].join('\n');
+  await writeFile(path.join(projectDir, 'led.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(schematicPath, schematic);
+  let called = false;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      called = true;
+      throw new Error('provider must not be called');
+    }
+  };
+  try {
+    const missing = await dispatchToolCall({
+      id: 'call_missing_r3',
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, prompt: 'change R3 to 470' }
+    }, { ...services, ...provider });
+    assert.equal(called, false);
+    assert.equal(missing.ok, false, missing.error?.message);
+    assert.equal(missing.error?.code, 'RESISTOR_REF_NOT_FOUND');
+    assert.equal(missing.error?.message, resistorRefNotFoundMessage('R3'));
+    const unsupported = await dispatchToolCall({
+      id: 'call_r1_no_series',
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, prompt: 'change R1 to 470' }
+    }, { ...services, ...provider });
+    assert.equal(called, false);
+    assert.equal(unsupported.ok, false, unsupported.error?.message);
+    assert.equal(unsupported.error?.code, 'RESISTOR_REF_UNSUPPORTED');
+    assert.equal(unsupported.error?.message, resistorRefUnsupportedMessage(null));
+    assert.equal(await readFile(schematicPath, 'utf8'), schematic);
+    assert.equal(schematicRefValue(schematic, 'R1'), '1k');
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
