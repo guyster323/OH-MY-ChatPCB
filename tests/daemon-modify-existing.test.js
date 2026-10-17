@@ -453,6 +453,22 @@ for (const prompt of [
   });
 }
 
+for (const prompt of ['I2C 지워줘', 'I2C 커넥터 지워']) {
+  test(`positive delete ${prompt} stays blocked without allowRemovedComponents`, async () => {
+    await assertApplyStaysBlocked(prompt);
+  });
+}
+
+for (const prompt of [
+  "remove the LED but don't remove I2C",
+  "don't remove I2C, remove LED",
+  'I2C 남기고 LED 저항 삭제'
+]) {
+  test(`mixed removal keeps I2C (${prompt})`, async () => {
+    await assertNegatedRemovalKeepsI2c(prompt);
+  });
+}
+
 test('a resistor edit that says not to remove I2C keeps I2C and changes the resistor', async () => {
   const prompt = "Change the status LED series resistor to 680 ohm. don't remove I2C.";
   const { projectDir, generated } = await generatedStm32Project();
@@ -477,8 +493,8 @@ test('a resistor edit that says not to remove I2C keeps I2C and changes the resi
   }
 });
 
-test('other-part delete reset 버튼 삭제 blocks Apply when it drops I2C', async () => {
-  await assertApplyStaysBlocked('reset 버튼 삭제. I2C 커넥터는 유지하세요.');
+test('reset 버튼 삭제 in a separate sentence does not remove I2C', async () => {
+  await assertNegatedRemovalKeepsI2c('reset 버튼 삭제. I2C 커넥터는 유지하세요.');
 });
 
 test('casual Like an ESP32 board mention blocks Apply without an override', async () => {

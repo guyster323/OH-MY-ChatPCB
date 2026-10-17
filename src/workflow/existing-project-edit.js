@@ -6,8 +6,52 @@ import { writeGeneratedProject } from './generate-mcu-project.js';
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
-const DELETE_WORDS = /(삭제|제거|\bremove\b|\bdelete\b)/i;
 const RESISTOR_AMOUNT = /(\d+(?:\.\d+)?)\s*(?:Ω|옴|ohms?)/iu;
+
+// Every deletion-intent check reads this table. Clause split, verb binding,
+// and negation do not keep a second word list.
+// 말고 closes the left clause ("제거 말고" is not a removal of that part).
+export const DELETION_INTENT_VOCABULARY = Object.freeze({
+  positiveVerbs: Object.freeze([
+    Object.freeze({ id: 'remove', lang: 'en', re: String.raw`\bremove\b` }),
+    Object.freeze({ id: 'delete', lang: 'en', re: String.raw`\bdelete\b` }),
+    Object.freeze({ id: '삭제', lang: 'ko', re: '삭제' }),
+    Object.freeze({ id: '제거', lang: 'ko', re: '제거' }),
+    Object.freeze({ id: '지워', lang: 'ko', re: '지워' }),
+    Object.freeze({ id: '지우', lang: 'ko', re: '지우' })
+  ]),
+  // `n't` and `not` are separate so "don't not" counts as two markers.
+  negationMarkers: Object.freeze([
+    Object.freeze({ id: 'no-need-to', re: String.raw`\bno\s+need\s+to\b` }),
+    Object.freeze({ id: 'need-to-not', re: String.raw`(?:\b(?:do|does)\s+not|n't)\s+need\s+to\b` }),
+    Object.freeze({ id: 'never', re: String.raw`\bnever\b` }),
+    Object.freeze({ id: "n't", re: String.raw`n't\b` }),
+    Object.freeze({ id: 'not', re: String.raw`\bnot\b` })
+  ]),
+  // After a Korean verb stem. A particle (은/는/을/를) may sit in between.
+  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|금지|말고|하지\s*않도록|안\s*함|지(?:\s*는)?\s*[마말])`,
+  clauseSeparators: Object.freeze([
+    Object.freeze({ id: 'and-then', re: String.raw`\band\s+then\b`, negatesLeft: false }),
+    Object.freeze({ id: 'but', re: String.raw`\bbut\b`, negatesLeft: false }),
+    Object.freeze({ id: 'semicolon', re: ';', negatesLeft: false }),
+    Object.freeze({ id: 'go-naseo', re: String.raw`고\s*나서`, negatesLeft: false }),
+    Object.freeze({ id: 'hago', re: '하고', negatesLeft: false }),
+    Object.freeze({ id: 'jiman', re: '지만', negatesLeft: false }),
+    Object.freeze({ id: 'malgo', re: '말고', negatesLeft: true }),
+    Object.freeze({ id: 'go', re: String.raw`(?<=[가-힣])고(?!\s*나서)`, negatesLeft: false }),
+    Object.freeze({ id: 'sentence', re: String.raw`(?<!\d)\.(?!\d)|[!?]`, negatesLeft: false })
+  ]),
+  parentheticals: Object.freeze(['please', 'just', 'ever', 'really', 'actually', 'simply', 'kindly']),
+  auxiliaries: Object.freeze(['do', 'does', 'did', 'should', 'would', 'could', 'must', 'can', 'will', 'shall']),
+  subjects: Object.freeze(['i', 'you', 'we', 'they', 'he', 'she']),
+  adverbPhrases: Object.freeze(['under any circumstances', 'under any circumstance']),
+  targets: Object.freeze([
+    Object.freeze({ id: 'i2c', re: String.raw`\bi2c\b|아이\s*2\s*씨|아이씨` }),
+    Object.freeze({ id: 'led', re: String.raw`\bled\b|엘이디` }),
+    Object.freeze({ id: 'resistor', re: String.raw`\bresistor\b|저항` }),
+    Object.freeze({ id: 'pronoun', re: String.raw`\bit\b|그것|이거|그거` })
+  ])
+});
 
 function editError(message) {
   const error = new Error(message);
@@ -42,20 +86,319 @@ function parseExistingProjectEdit(text) {
   return parseResistorEdit(text);
 }
 
-// "don't remove" / "삭제하지 마" keeps the named part. A delete word counts only
-// after those negated phrases are removed.
-function stripNegatedDeletions(text) {
-  return String(text)
-    .replace(/\b(?:do\s+not|don't|never)\s+(?:remove|delete)\b/gi, ' ')
-    .replace(/(?:삭제|제거)(?:\s*[은는을를])?\s*하\s*지(?:\s*는)?\s*[마말][^\s.]*/g, ' ')
-    .replace(/지우\s*지(?:\s*는)?\s*[마말][^\s.]*/g, ' ');
+// Quoted spans are mentions, not commands, and are dropped before verbs are
+// matched. `"remove I2C" is not what I want` therefore has no removal verb.
+// Double quotes always count. A balanced '...' pair counts when it is not a
+// contraction such as don't or shouldn't.
+function normalizeDeletionText(text) {
+  return String(text ?? '')
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+    .replace(/\u00A0/g, ' ');
+}
+
+function stripQuotedMentions(text) {
+  const withoutDouble = text.replace(/"[^"]*"/g, ' ');
+  return withoutDouble.replace(/(^|[\s([{])'([^']*)'(?=$|[\s)\].,;:!?])/g, '$1 ');
+}
+
+function isSkippableWord(word) {
+  const lower = word.toLowerCase();
+  const vocab = DELETION_INTENT_VOCABULARY;
+  return vocab.parentheticals.includes(lower)
+    || vocab.auxiliaries.includes(lower)
+    || vocab.subjects.includes(lower);
+}
+
+function phraseSource(phrase) {
+  return escapeRegExp(phrase).replace(/ /g, '\\s+');
+}
+
+function matchEdge(edge, text, source) {
+  const re = edge === 'end'
+    ? new RegExp(`(?:${source})\\s*$`, 'iu')
+    : new RegExp(`^(?:${source})`, 'iu');
+  return text.match(re);
+}
+
+function consumeEdge(edge, text, source) {
+  const match = matchEdge(edge, text, source);
+  if (!match || match[0].length === 0) return null;
+  return edge === 'end' ? text.slice(0, match.index) : text.slice(match[0].length);
+}
+
+function longestMarker(edge, text) {
+  let best = null;
+  for (const marker of DELETION_INTENT_VOCABULARY.negationMarkers) {
+    const match = matchEdge(edge, text, marker.re);
+    if (!match || match[0].length === 0) continue;
+    if (!best || match[0].length > best.length) {
+      best = { length: match[0].length, index: match.index, end: match[0].length };
+    }
+  }
+  return best;
+}
+
+// Markers between a negation and its verb ("don't, please, remove",
+// "do not under any circumstances remove") stay in the same clause.
+// A comma is a new clause only when the piece is not just that padding.
+function wordCarriesNegation(word) {
+  return DELETION_INTENT_VOCABULARY.negationMarkers.some((marker) => (
+    new RegExp(`(?:${marker.re})$`, 'iu').test(word)
+  ));
+}
+
+function isParentheticalFragment(segment) {
+  if (findVerbs(segment).length > 0) return false;
+  let rest = segment.trim();
+  if (!rest) return true;
+  const phrases = [...DELETION_INTENT_VOCABULARY.adverbPhrases].sort((left, right) => right.length - left.length);
+  while (rest.length > 0) {
+    rest = rest.replace(/^[\s,]+/u, '');
+    if (!rest) return true;
+    let ate = false;
+    for (const phrase of phrases) {
+      const next = consumeEdge('start', rest, phraseSource(phrase));
+      if (next != null && next.length < rest.length) {
+        rest = next;
+        ate = true;
+        break;
+      }
+    }
+    if (ate) continue;
+    const marker = longestMarker('start', rest);
+    if (marker && marker.end > 0) {
+      rest = rest.slice(marker.end);
+      continue;
+    }
+    const word = rest.match(/^[A-Za-z]+(?:'[A-Za-z]+)?/u);
+    if (!word) return false;
+    if (!isSkippableWord(word[0]) && !wordCarriesNegation(word[0])) return false;
+    rest = rest.slice(word[0].length);
+  }
+  return true;
+}
+
+function splitCommaClauses(text) {
+  const bits = text.split(',');
+  const groups = [];
+  let pending = '';
+  for (let index = 0; index < bits.length; index += 1) {
+    const bit = bits[index];
+    const last = index === bits.length - 1;
+    if (!last && isParentheticalFragment(bit)) {
+      pending = pending ? `${pending},${bit}` : bit;
+      continue;
+    }
+    groups.push(pending ? `${pending},${bit}` : bit);
+    pending = '';
+  }
+  if (pending) groups.push(pending);
+  return groups.map((group) => group.trim()).filter((group) => group.length > 0);
+}
+
+function findSeparators(text) {
+  const hits = [];
+  for (const sep of DELETION_INTENT_VOCABULARY.clauseSeparators) {
+    const re = new RegExp(sep.re, 'giu');
+    for (let match = re.exec(text); match; match = re.exec(text)) {
+      if (match[0].length === 0) {
+        re.lastIndex += 1;
+        continue;
+      }
+      hits.push({
+        index: match.index,
+        length: match[0].length,
+        negatesLeft: sep.negatesLeft
+      });
+    }
+  }
+  hits.sort((left, right) => left.index - right.index || right.length - left.length);
+  const kept = [];
+  let cursor = 0;
+  for (const hit of hits) {
+    if (hit.index < cursor) continue;
+    kept.push(hit);
+    cursor = hit.index + hit.length;
+  }
+  return kept;
+}
+
+function splitClauses(text) {
+  const pieces = [];
+  const separators = findSeparators(text);
+  let start = 0;
+  for (const sep of separators) {
+    pieces.push({ text: text.slice(start, sep.index), negatedBySeparator: sep.negatesLeft });
+    start = sep.index + sep.length;
+  }
+  pieces.push({ text: text.slice(start), negatedBySeparator: false });
+  const clauses = [];
+  for (const piece of pieces) {
+    for (const part of splitCommaClauses(piece.text)) {
+      clauses.push({ text: part, negatedBySeparator: piece.negatedBySeparator });
+    }
+  }
+  return clauses;
+}
+
+function findVerbs(text) {
+  const verbs = DELETION_INTENT_VOCABULARY.positiveVerbs;
+  const re = new RegExp(verbs.map((verb) => `(?:${verb.re})`).join('|'), 'giu');
+  const found = [];
+  for (let match = re.exec(text); match; match = re.exec(text)) {
+    if (match[0].length === 0) {
+      re.lastIndex += 1;
+      continue;
+    }
+    const entry = verbs.find((verb) => new RegExp(`^(?:${verb.re})$`, 'iu').test(match[0]));
+    if (!entry) continue;
+    found.push({ id: entry.id, lang: entry.lang, index: match.index, length: match[0].length });
+  }
+  return found;
+}
+
+function targetPattern(id) {
+  const target = DELETION_INTENT_VOCABULARY.targets.find((item) => item.id === id);
+  return target.re;
+}
+
+function findMentions(text) {
+  const found = [];
+  for (const target of DELETION_INTENT_VOCABULARY.targets) {
+    const re = new RegExp(target.re, 'giu');
+    for (let match = re.exec(text); match; match = re.exec(text)) {
+      if (match[0].length === 0) {
+        re.lastIndex += 1;
+        continue;
+      }
+      found.push({ id: target.id, index: match.index });
+    }
+  }
+  return found;
+}
+
+function closestMention(mentions, verbOffset) {
+  return mentions.reduce((best, item) => (
+    Math.abs(item.index - verbOffset) < Math.abs(best.index - verbOffset) ? item : best
+  ));
+}
+
+function explicitPart(text) {
+  const led = new RegExp(targetPattern('led'), 'iu').test(text);
+  const resistor = new RegExp(targetPattern('resistor'), 'iu').test(text);
+  const i2c = new RegExp(targetPattern('i2c'), 'iu').test(text);
+  if (led && resistor) return 'led-resistor';
+  if (led) return 'led';
+  if (i2c) return 'i2c';
+  return null;
+}
+
+function chooseTarget(windowText, verbOffset) {
+  const mentions = findMentions(windowText);
+  const leds = mentions.filter((item) => item.id === 'led');
+  const resistors = mentions.filter((item) => item.id === 'resistor');
+  const ranked = [];
+  if (leds.length > 0 && resistors.length > 0) {
+    ranked.push({ id: 'led-resistor', index: closestMention(leds.concat(resistors), verbOffset).index });
+  } else if (leds.length > 0) {
+    ranked.push({ id: 'led', index: closestMention(leds, verbOffset).index });
+  }
+  for (const item of mentions) {
+    if (item.id === 'i2c' || item.id === 'pronoun') ranked.push(item);
+  }
+  if (ranked.length === 0) return null;
+  ranked.sort((left, right) => Math.abs(left.index - verbOffset) - Math.abs(right.index - verbOffset));
+  return ranked[0].id;
+}
+
+function verbWindow(text, verbs, index) {
+  const verb = verbs[index];
+  const start = index === 0 ? 0 : verbs[index - 1].index + verbs[index - 1].length;
+  const end = index + 1 < verbs.length ? verbs[index + 1].index : text.length;
+  return {
+    text: text.slice(start, end),
+    verbOffset: verb.index - start,
+    verb
+  };
+}
+
+function koreanSuffixNegates(after) {
+  return new RegExp(`^${DELETION_INTENT_VOCABULARY.koreanNegationSuffix}`, 'u').test(after);
+}
+
+// An even count stays a removal. "don't not remove I2C" is two markers.
+function englishNegationCount(prefix) {
+  let rest = prefix;
+  let count = 0;
+  const phrases = [...DELETION_INTENT_VOCABULARY.adverbPhrases].sort((left, right) => right.length - left.length);
+  while (rest.length > 0) {
+    const trimmed = rest.replace(/[\s,]+$/u, '');
+    if (!trimmed) break;
+    rest = trimmed;
+    let ate = false;
+    for (const phrase of phrases) {
+      const next = consumeEdge('end', rest, phraseSource(phrase));
+      if (next != null) {
+        rest = next;
+        ate = true;
+        break;
+      }
+    }
+    if (ate) continue;
+    const marker = longestMarker('end', rest);
+    if (marker) {
+      rest = rest.slice(0, marker.index);
+      count += 1;
+      continue;
+    }
+    const word = rest.match(/[A-Za-z]+(?:'[A-Za-z]+)?$/u);
+    if (!word || !isSkippableWord(word[0])) break;
+    rest = rest.slice(0, -word[0].length);
+  }
+  return count;
+}
+
+function verbIsNegated(window, negatedBySeparator) {
+  if (window.verb.lang === 'ko') {
+    const after = window.text.slice(window.verbOffset + window.verb.length);
+    if (koreanSuffixNegates(after)) return true;
+    return negatedBySeparator;
+  }
+  return englishNegationCount(window.text.slice(0, window.verbOffset)) % 2 === 1;
+}
+
+export function classifyDeletionIntents(text) {
+  const normalized = stripQuotedMentions(normalizeDeletionText(text));
+  const intents = [];
+  let previousExplicit = null;
+  for (const clause of splitClauses(normalized)) {
+    const verbs = findVerbs(clause.text);
+    if (verbs.length === 0) {
+      const mentioned = explicitPart(clause.text);
+      if (mentioned) previousExplicit = mentioned;
+      continue;
+    }
+    for (let index = 0; index < verbs.length; index += 1) {
+      const window = verbWindow(clause.text, verbs, index);
+      const negated = verbIsNegated(window, clause.negatedBySeparator);
+      let target = chooseTarget(window.text, window.verbOffset);
+      if (target === 'pronoun') target = explicitPart(window.text) ?? previousExplicit;
+      intents.push({ verb: window.verb.id, target, negated });
+    }
+    const mentioned = explicitPart(clause.text);
+    if (mentioned) previousExplicit = mentioned;
+  }
+  return intents;
 }
 
 function parseDeletion(text) {
-  const actionable = stripNegatedDeletions(text);
-  if (!DELETE_WORDS.test(actionable)) return null;
   const targets = [];
-  if (/\bi2c\b|아이\s*2\s*씨|아이씨/i.test(actionable)) targets.push('i2c');
+  for (const intent of classifyDeletionIntents(text)) {
+    if (intent.negated || intent.target !== 'i2c' || targets.includes('i2c')) continue;
+    targets.push('i2c');
+  }
   if (targets.length === 0) return null;
   return { kind: 'delete', targets };
 }
