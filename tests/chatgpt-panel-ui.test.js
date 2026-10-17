@@ -188,6 +188,20 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
           if (window.__removalPreview && typeof window.__removalPreview === 'object') {
             Object.assign(result, window.__removalPreview);
           }
+          if (window.__candidateErc && typeof window.__candidateErc === 'object') {
+            result.candidateVerification = { erc: window.__candidateErc };
+          }
+        }
+        if (config.approvalFlow && call.name === 'schematic.patch' && call.args?.approved === true && window.__holdPatchResult === true) {
+          const socket = this;
+          const heldId = call.id;
+          window.__heldPatch = {
+            emit(extra = {}) {
+              const payload = { id: heldId, ok: true, result: extra };
+              queueMicrotask(() => socket.emit('message', { data: JSON.stringify({ version: 1, id: `r_${heldId}`, type: 'tool.result', createdAt: new Date().toISOString(), payload }) }));
+            }
+          };
+          return;
         }
         const payload = { id: call.id, ok, result };
         if (error) payload.error = error;
@@ -981,9 +995,16 @@ test('removed-part confirm copy exists in English and Korean', async () => {
   assert.equal(en['patch.apply.summary'], 'Applying the circuit draft…');
   assert.equal(ko['patch.apply.progress'], '스키매틱에 넣는 중…');
   assert.equal(ko['patch.apply.summary'], '회로 초안을 적용하는 중…');
+  assert.equal(en['patch.apply.done'], 'Patch applied: removed {refs}');
+  assert.equal(ko['patch.apply.done'], '패치를 적용했어요. 뺀 부품: {refs}');
+  assert.equal(en['patch.apply.applied'], 'Patch applied.');
+  assert.equal(ko['patch.apply.applied'], '패치를 적용했어요.');
+  assert.equal(en['patch.apply.blocked-disabled'], 'This preview cannot be applied.');
+  assert.equal(ko['patch.apply.blocked-disabled'], '이 미리보기는 적용할 수 없어요.');
   for (const key of [
     'patch.remove.cancel', 'patch.remove.confirm', 'patch.remove.title', 'patch.remove.lead',
-    'patch.apply.progress', 'patch.apply.summary'
+    'patch.apply.progress', 'patch.apply.summary', 'patch.apply.done', 'patch.apply.applied',
+    'patch.apply.blocked-disabled'
   ]) {
     assert.notEqual(ko[key], en[key], key);
   }
@@ -992,9 +1013,25 @@ test('removed-part confirm copy exists in English and Korean', async () => {
   const confirmEnd = panel.indexOf('function approvePatch');
   const confirmBody = panel.slice(confirmStart, confirmEnd);
   assert.match(confirmBody, /t\('patch\.apply\.progress'\)/);
-  assert.match(confirmBody, /t\('patch\.apply\.summary'\)/);
+  assert.match(confirmBody, /summaryKey: 'patch\.apply\.summary'/);
   assert.equal(confirmBody.includes('스키매틱에 넣는 중…'), false);
   assert.equal(confirmBody.includes('Applying the circuit draft…'), false);
+  const approveStart = panel.indexOf('function approvePatch(');
+  const approveEnd = panel.indexOf('function hideApplyWithoutErcConfirm');
+  const approveBody = panel.slice(approveStart, approveEnd);
+  assert.match(approveBody, /t\('patch\.apply\.progress'\)/);
+  assert.match(approveBody, /summaryKey: 'patch\.apply\.summary'/);
+  assert.equal(approveBody.includes('Applying the circuit draft…'), false);
+  assert.equal(approveBody.includes('스키매틱에 넣는 중…'), false);
+});
+
+test('applyGateOpen refuses an apply that is already in progress', async () => {
+  const panel = await readFile(path.join(panelRoot, 'panel.js'), 'utf8');
+  const start = panel.indexOf('function applyGateOpen(');
+  const end = panel.indexOf('\nfunction ', start + 1);
+  assert.ok(start >= 0 && end > start);
+  const body = panel.slice(start, end).split('\n').map((line) => line.replace(/\/\/.*$/, '')).join('\n');
+  assert.match(body, /if\s*\(\s*patchApplyBusy\(\)\s*\)\s*return false;/);
 });
 
 test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply', async (t) => {
@@ -1050,7 +1087,10 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
     await page.waitForFunction(() => document.activeElement?.id === 'cancel-apply-remove-components');
 
     await page.keyboard.press('Escape');
-    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.activeElement?.id === 'approve-patch-button'
+    ));
     assert.equal((await approvedApplyCalls(page)).length, 1);
 
     await page.locator('#approve-patch-button').click();
@@ -1060,7 +1100,10 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
     });
     assert.equal((await approvedApplyCalls(page)).length, 1);
     await page.keyboard.press('Enter');
-    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.activeElement?.id === 'approve-patch-button'
+    ));
     assert.equal((await approvedApplyCalls(page)).length, 1);
 
     await page.locator('#approve-patch-button').click();
@@ -1069,7 +1112,10 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
       return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
     });
     await page.locator('#cancel-apply-remove-components').click();
-    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.activeElement?.id === 'approve-patch-button'
+    ));
     assert.equal((await approvedApplyCalls(page)).length, 1);
     assert.deepEqual(pageErrors, []);
   } finally {
@@ -1105,6 +1151,12 @@ test('confirming removed parts sends allowRemovedComponents with the exact refs'
     const running = await page.evaluate(() => window.__applyRunning);
     assert.equal(running.includes(en['patch.apply.summary']), true, JSON.stringify(running));
     assert.equal((await page.locator('#request-progress').innerText()).includes(en['patch.apply.progress']), true);
+    const done = en['patch.apply.done'].replaceAll('{refs}', REMOVED_PARTS.map((part) => part.ref).join(', '));
+    await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, done);
+    const progressText = await page.locator('#request-progress').innerText();
+    assert.equal(progressText.includes('Generated project'), false, progressText);
+    assert.equal(progressText.includes('Completed:'), false, progressText);
+    assert.equal((await page.locator('#request-status').innerText()).includes('Generated project'), false);
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -1136,8 +1188,18 @@ test('removed-part confirm dialog is localized in Korean', async (t) => {
       assert.equal(describedText.includes(part.libId), true, describedText);
     }
     await page.locator('#cancel-apply-remove-components').click();
-    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.activeElement?.id === 'approve-patch-button'
+    ));
     assert.deepEqual(await approvedApplyCalls(page), []);
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+    await page.locator('#confirm-apply-remove-components').click();
+    const done = ko['patch.apply.done'].replaceAll('{refs}', REMOVED_PARTS.map((part) => part.ref).join(', '));
+    await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, done);
+    assert.equal((await page.locator('#request-status').innerText()).includes('Generated project'), false);
+    assert.equal((await page.locator('#request-status').innerText()).includes('Completed:'), false);
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -1152,6 +1214,7 @@ test('stale, expired, or disabled removal preview does not open confirm or send 
   const opened = await openApprovalPanel(t, 'en-US');
   if (!opened) return;
   const { page, context, pageErrors } = opened;
+  const { en } = await removalConfirmCopy();
   try {
     await page.evaluate(() => { window.__inspectionFreshness = 'stale'; });
     await sendRemovalPreview(page);
@@ -1165,9 +1228,12 @@ test('stale, expired, or disabled removal preview does not open confirm or send 
     });
     assert.deepEqual(await approvedApplyCalls(page), []);
     await page.locator('#confirm-apply-remove-components').click();
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.activeElement?.id === 'approve-patch-button'
+    ));
+    assert.equal(await page.locator('#patch-approval-status').innerText(), en['patch.stale']);
     assert.deepEqual(await approvedApplyCalls(page), []);
-    await page.locator('#cancel-apply-remove-components').click();
-    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
     await page.locator('#approve-patch-button').dispatchEvent('click');
     assert.equal(await removalDialogHidden(page), true);
     assert.deepEqual(await approvedApplyCalls(page), []);
@@ -1209,8 +1275,187 @@ test('stale, expired, or disabled removal preview does not open confirm or send 
     await page.locator('#approve-patch-button').dispatchEvent('click');
     assert.equal(await removalDialogHidden(page), true);
     assert.deepEqual(await approvedApplyCalls(page), []);
+
+    await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = false; });
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+    await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = true; });
+    await page.locator('#confirm-apply-remove-components').click();
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === true
+      && document.activeElement?.id === 'approve-patch-button'
+    ));
+    assert.equal(await page.locator('#patch-approval-status').innerText(), en['patch.apply.blocked-disabled']);
+    assert.deepEqual(await approvedApplyCalls(page), []);
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
   }
+});
+
+async function sendPlainPreview(page, prompt) {
+  await page.evaluate(() => { window.__removalPreview = null; });
+  await page.locator('#prompt').fill(prompt);
+  await page.locator('#composer button[type="submit"]').click();
+}
+
+async function emitDaemonProgress(page, text) {
+  await page.evaluate((note) => {
+    window.__daemonSocket.emit('message', {
+      data: JSON.stringify({
+        version: 1,
+        id: `delta_${Date.now()}_${Math.random()}`,
+        type: 'agent.delta',
+        createdAt: new Date().toISOString(),
+        payload: { text: note, stage: 'provider', channel: 'progress' }
+      })
+    });
+  }, text);
+}
+
+test('normal Apply is blocked when stale, expired, disabled, or busy, and sends when open', async (t) => {
+  const opened = await openApprovalPanel(t, 'en-US');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  const { en } = await removalConfirmCopy();
+  try {
+    await page.evaluate(() => { window.__inspectionFreshness = 'stale'; });
+    await sendPlainPreview(page, 'ESP32-S3 sensor board');
+    await page.waitForFunction((stale) => (
+      document.querySelector('#approve-patch-button')?.disabled === true
+      && document.querySelector('#patch-approval-status')?.textContent === stale
+    ), en['patch.stale']);
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.deepEqual(await approvedApplyCalls(page), []);
+
+    await page.evaluate(() => {
+      window.__inspectionFreshness = 'missing';
+      window.__previewExpiresAt = Date.now() - 1000;
+    });
+    await sendPlainPreview(page, 'ESP32-S3 sensor board expired');
+    await page.waitForFunction(() => (
+      document.querySelector('#approve-patch-button')?.disabled === true
+      && document.querySelector('#patch-approval-card')?.hidden === true
+      && document.querySelector('#apply-remove-components-confirm')?.hidden === true
+    ));
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await removalDialogHidden(page), true);
+    assert.deepEqual(await approvedApplyCalls(page), []);
+
+    await page.evaluate(() => { window.__previewExpiresAt = Date.now() + 120000; });
+    await sendPlainPreview(page, 'ESP32-S3 sensor board open');
+    await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
+    await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = true; });
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.deepEqual(await approvedApplyCalls(page), []);
+
+    await page.evaluate(() => {
+      document.querySelector('#approve-patch-button').disabled = false;
+      window.__holdPatchResult = true;
+    });
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction((summary) => document.querySelector('#request-status')?.textContent === summary, en['patch.apply.summary']);
+    const calls = await approvedApplyCalls(page);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args.approved, true);
+    assert.equal(Object.hasOwn(calls[0].args, 'allowRemovedComponents'), false);
+    assert.equal((await page.locator('#request-progress').innerText()).includes(en['patch.apply.progress']), true);
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal((await approvedApplyCalls(page)).length, 1);
+
+    await page.evaluate(() => { window.__heldPatch.emit({}); });
+    await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.applied']);
+    const progressText = await page.locator('#request-progress').innerText();
+    const statusText = await page.locator('#request-status').innerText();
+    assert.equal(progressText.includes('Generated project'), false, progressText);
+    assert.equal(progressText.includes('Completed:'), false, progressText);
+    assert.equal(statusText.includes('Generated project'), false, statusText);
+    assert.equal(statusText.includes('Completed:'), false, statusText);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+const KNOWN_DAEMON_NOTE = 'Applying the draft to the schematic.';
+const UNKNOWN_DAEMON_NOTE = 'untranslated daemon note 42';
+
+test('daemon progress and patch card follow the panel language', async (t) => {
+  const { en, ko } = await removalConfirmCopy();
+  assert.equal(en['daemon.progress.applying'], KNOWN_DAEMON_NOTE);
+  assert.notEqual(ko['daemon.progress.applying'], KNOWN_DAEMON_NOTE);
+  assert.notEqual(ko['request.project-busy'], 'PROJECT_BUSY');
+  assert.notEqual(ko['patch.stale'], 'PATCH_STALE');
+
+  async function expectLocalizedSurface(locale, copy) {
+    const opened = await openApprovalPanel(t, locale);
+    if (!opened) return false;
+    const { page, context, pageErrors } = opened;
+    try {
+      await sendPlainPreview(page, 'ESP32-S3 sensor board');
+      await page.waitForFunction(({ ready, title, status }) => {
+        const strong = document.querySelector('#request-progress li:last-child strong');
+        return strong?.textContent === ready
+          && document.querySelector('#patch-approval-title')?.textContent === title
+          && document.querySelector('#patch-approval-status')?.textContent === status
+          && document.querySelector('#patch-approval-status')?.hidden === false;
+      }, {
+        ready: copy['progress.ready'],
+        title: copy['patch.title'],
+        status: copy['approval.no-manifest']
+      });
+      if (locale === 'en-US') {
+        const label = await page.locator('#request-progress li:last-child strong').innerText();
+        const card = await page.locator('#patch-approval-card').innerText();
+        assert.equal(/[\uAC00-\uD7A3]/.test(label), false, label);
+        assert.equal(/[\uAC00-\uD7A3]/.test(card), false, card);
+      }
+
+      await emitDaemonProgress(page, KNOWN_DAEMON_NOTE);
+      await emitDaemonProgress(page, 'PROJECT_BUSY');
+      await emitDaemonProgress(page, UNKNOWN_DAEMON_NOTE);
+      const expectedNotes = [
+        copy['daemon.progress.applying'],
+        copy['request.project-busy'],
+        UNKNOWN_DAEMON_NOTE
+      ];
+      await page.waitForFunction((notes) => {
+        const items = [...document.querySelectorAll('#request-progress p')].map((node) => node.textContent);
+        return notes.every((note, index) => items[index] === note) && items.length === notes.length;
+      }, expectedNotes);
+      const notes = await page.locator('#request-progress p').allInnerTexts();
+      assert.equal(notes.includes('PROJECT_BUSY'), false);
+      if (locale === 'ko-KR') assert.equal(notes.includes(KNOWN_DAEMON_NOTE), false);
+
+      await page.evaluate(() => {
+        window.__candidateErc = {
+          ok: false,
+          errorCount: 3,
+          errors: ['Applying the draft to the schematic.', 'PATCH_STALE', 'untranslated daemon note 42']
+        };
+      });
+      await sendPlainPreview(page, 'ESP32-S3 sensor board erc');
+      const expectedErc = [
+        copy['daemon.progress.applying'],
+        copy['patch.stale'],
+        UNKNOWN_DAEMON_NOTE
+      ];
+      await page.waitForFunction((items) => {
+        const shown = [...document.querySelectorAll('#patch-erc li')].map((node) => node.textContent);
+        return items.every((item, index) => shown[index] === item) && shown.length === items.length;
+      }, expectedErc);
+      const ercText = await page.locator('#patch-erc').innerText();
+      assert.equal(ercText.includes('PATCH_STALE'), false, ercText);
+      if (locale === 'ko-KR') assert.equal(ercText.includes(KNOWN_DAEMON_NOTE), false, ercText);
+      assert.equal(await page.locator('#patch-approval-title').innerText(), copy['patch.title']);
+      assert.deepEqual(pageErrors, []);
+      return true;
+    } finally {
+      await context.close();
+    }
+  }
+
+  const english = await expectLocalizedSurface('en-US', en);
+  if (!english) return;
+  await expectLocalizedSurface('ko-KR', ko);
 });

@@ -298,5 +298,16 @@
   "patch.remove.cancel": "Don't apply",
   "patch.remove.confirm": "Apply and remove these parts",
   "patch.apply.progress": "Adding it to the schematic…",
-  "patch.apply.summary": "Applying the circuit draft…"
+  "patch.apply.summary": "Applying the circuit draft…",
+  "patch.apply.done": "Patch applied: removed {refs}",
+  "patch.apply.applied": "Patch applied.",
+  "patch.apply.blocked-disabled": "This preview cannot be applied.",
+  "daemon.progress.preview-patch": "Preparing a schematic patch preview.",
+  "daemon.progress.applying": "Applying the draft to the schematic.",
+  "daemon.progress.reading": "Reading the circuit request.",
+  "daemon.progress.prepared": "Prepared the recommended configuration.",
+  "daemon.progress.builtin": "The provider returned no tool call. Using the built-in draft.",
+  "daemon.progress.ready": "Circuit draft is ready. Apply it to change the schematic.",
+  "daemon.erc.failed": "ERC did not pass for this patch.",
+  "daemon.patch.missing": "Patch approval was not found."
 }

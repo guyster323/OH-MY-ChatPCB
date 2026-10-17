@@ -595,8 +595,16 @@ function handleEnvelope(envelope) {
       renderPatchApproval();
       return;
     }
+    const removedRefs = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
+    const succeeded = result.applied !== false;
     clearPatchApproval();
-    renderProjectRequest(result);
+    renderProjectRequest({
+      ...result,
+      operation: result.operation || (succeeded ? 'patched' : result.operation),
+      applied: result.applied === undefined ? true : result.applied,
+      fromPatchApprove: succeeded,
+      removedRefs: succeeded ? removedRefs : []
+    });
     inspectActiveProject();
     return;
   }
@@ -843,11 +851,25 @@ function renderProjectRequest(result) {
   const validationFailed = result.applied !== true && result.validation?.ok === false;
   const requestFailed = result.rolledBack || validationFailed;
   const completedDetail = result.operation === 'patched' ? t('request.completed-updated') : t('request.completed-generated');
+  const removedRefs = Array.isArray(result.removedRefs)
+    ? result.removedRefs.filter((ref) => typeof ref === 'string' && ref.length > 0)
+    : [];
+  let summaryKey = 'request.completed';
+  let summaryVars = { detail: completedDetail };
+  if (!requestFailed && result.fromPatchApprove === true) {
+    if (removedRefs.length > 0) {
+      summaryKey = 'patch.apply.done';
+      summaryVars = { refs: removedRefs.join(', ') };
+    } else {
+      summaryKey = 'patch.apply.applied';
+      summaryVars = undefined;
+    }
+  }
   const summary = result.rolledBack
     ? t('request.rollback')
     : validationFailed
       ? t('request.validation-failed')
-      : t('request.completed', { detail: completedDetail });
+      : t(summaryKey, summaryVars);
   if (!result.rolledBack) workflowFlags.circuitApplied = true;
   if (!requestFailed && result.review?.status && result.review.status !== 'blocked' && result.review.status !== 'needs-input') {
     workflowFlags.circuitReviewed = true;
@@ -856,7 +878,7 @@ function renderProjectRequest(result) {
     ? { state: 'failed', summaryKey: 'request.rollback' }
     : validationFailed
       ? { state: 'failed', summaryKey: 'request.validation-failed' }
-      : { state: 'completed', summaryKey: 'request.completed', summaryVars: { detail: completedDetail } });
+      : { state: 'completed', summaryKey, summaryVars });
   appendProgress({ stage: requestFailed ? 'fail' : 'done', text: summary });
 
   const projectFile = findProjectFile(result.files);
@@ -1153,7 +1175,7 @@ function renderCurrentFileErc(candidate, active) {
   const list = document.createElement('ul');
   for (const message of current.messages) {
     const item = document.createElement('li');
-    item.textContent = message;
+    item.textContent = localizeDaemonText(message);
     list.append(item);
   }
   info.append(list);
@@ -1239,7 +1261,7 @@ function renderErcBox(erc, active) {
   const items = erc.messages.length ? erc.messages : [t('patch.apply.blocked-erc', { count: erc.count })];
   for (const message of items) {
     const item = document.createElement('li');
-    item.textContent = message;
+    item.textContent = localizeDaemonText(message);
     list.append(item);
   }
   patchErcEl.append(list);
@@ -1360,12 +1382,15 @@ function askChatpcbToFixErc() {
 function confirmRemovalApply() {
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
   if (patchApplyBusy()) return;
-  if (!applyGateOpen()) return;
+  if (!applyGateOpen()) {
+    dismissRemovalConfirmForClosedGate();
+    return;
+  }
   const allowRemovedComponents = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
   if (allowRemovedComponents.length === 0) return;
   hideRemovalConfirm();
   appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
-  renderRequestStatus({ state: 'running', summary: t('patch.apply.summary') });
+  renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.summary' });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({
@@ -1387,8 +1412,8 @@ function approvePatch() {
     return;
   }
   if (approvePatchButtonEl.getAttribute('aria-disabled') === 'true' || ercBlockState().passed !== true) return;
-  appendProgress({ stage: 'apply', text: t('request.apply-progress') });
-  renderRequestStatus({ state: 'running', summaryKey: 'request.applying' });
+  appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
+  renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.summary' });
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({ id, name: 'schematic.patch', args: { projectDir: activeProject.projectDir, approved: true, patchId: patchApprovalState.patchId } });
@@ -1755,9 +1780,10 @@ function appendProgress(payload = {}) {
   title.dataset.i18n = copy.titleKey;
   title.textContent = titleText;
   body.append(title);
-  if (payload.text) {
+  const progressText = payload.text ? localizeDaemonText(payload.text) : '';
+  if (progressText) {
     const text = document.createElement('p');
-    text.textContent = payload.text;
+    text.textContent = progressText;
     body.append(text);
   }
   item.append(img, body);
@@ -1767,7 +1793,7 @@ function appendProgress(payload = {}) {
   }
   item.scrollIntoView({ block: 'nearest' });
   lastProgressStage = stage;
-  lastProgressText = payload.text || titleText;
+  lastProgressText = progressText || titleText;
   syncWorkflow();
 }
 
@@ -2097,7 +2123,7 @@ function isProjectBusyCall(callName) {
 
 function showProjectBusy(callName, message) {
   const summary = typeof message === 'string' && message.trim()
-    ? message.trim()
+    ? localizeDaemonText(message.trim())
     : t('request.project-busy');
   if (callName === 'project.request') {
     const requestProjectDir = activeRequestProjectDir;
@@ -2136,6 +2162,9 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
       activeProjectEl.hidden = false;
       if (projectSetupEl) projectSetupEl.hidden = true;
       setRequestBusy(false);
+      pendingCalls.clear();
+      activeRequestId = null;
+      activeRequestProjectDir = null;
       lastRequestResult = state.staleRequest ?? {
         operation: state.operation || 'generated',
         patchId: state.patchId ?? 'patch_test',
@@ -2186,7 +2215,8 @@ function patchApplyBusy() {
   return false;
 }
 
-// Same decision the Apply button uses, plus the ERC gate so a removal confirm cannot skip it.
+// Same decision the Apply button uses, plus ERC and an in-flight apply.
+// A removal confirm rechecks this so a stale, expired, or disabled preview cannot skip it.
 function applyGateOpen() {
   const gate = patchApprovalGate();
   const evidenceOpen = Boolean(activeProject) && gate.active && gate.approvedEvidence;
@@ -2197,6 +2227,7 @@ function applyGateOpen() {
   if (approvePatchButtonEl?.disabled) return false;
   if (approvePatchButtonEl?.getAttribute('aria-disabled') === 'true') return false;
   if (ercBlockState().passed !== true) return false;
+  if (patchApplyBusy()) return false;
   return true;
 }
 
@@ -2315,7 +2346,74 @@ function presentRemovalConfirm() {
 function cancelRemovalConfirm() {
   if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
   hideRemovalConfirm();
-  approvePatchButtonEl?.focus();
+  focusApplyButton();
+}
+
+function applyGateClosedStatus() {
+  const gate = patchApprovalGate();
+  if (!patchApprovalState.patchId || !gate.active) return { key: 'patch.expired', state: 'expired' };
+  if (gate.freshness === 'stale' || !gate.approvedEvidence) return { key: 'patch.stale', state: 'stale' };
+  if (ercBlockState().passed !== true) {
+    return { key: applyBlockedReason(ercBlockState()).key, state: 'blocked' };
+  }
+  return { key: 'patch.apply.blocked-disabled', state: 'blocked' };
+}
+
+function focusApplyButton() {
+  const button = approvePatchButtonEl;
+  if (!button) return;
+  if (button.disabled) {
+    button.disabled = false;
+    button.setAttribute('aria-disabled', 'true');
+  }
+  button.focus();
+}
+
+function dismissRemovalConfirmForClosedGate() {
+  hideRemovalConfirm();
+  const reason = applyGateClosedStatus();
+  if (patchApprovalCardEl && patchApprovalState.patchId) patchApprovalCardEl.hidden = false;
+  if (patchApprovalStatusEl) {
+    patchApprovalStatusEl.hidden = false;
+    patchApprovalStatusEl.dataset.state = reason.state;
+    setPatchStatus(reason.key);
+  }
+  focusApplyButton();
+}
+
+// Daemon progress and patch-card text arrive in English (or as a code). Known
+// strings follow the UI language. Anything else stays as the daemon sent it.
+const DAEMON_TEXT_TO_KEY = {
+  'Preparing a schematic patch preview.': 'daemon.progress.preview-patch',
+  'Applying the draft to the schematic.': 'daemon.progress.applying',
+  'Reading the circuit request.': 'daemon.progress.reading',
+  'Prepared the recommended configuration.': 'daemon.progress.prepared',
+  'The provider returned no tool call. Using the built-in draft.': 'daemon.progress.builtin',
+  'Circuit draft is ready. Apply it to change the schematic.': 'daemon.progress.ready',
+  'Drawing a local schematic draft.': 'request.draft-progress',
+  'Another operation is using this project. Try again in a moment.': 'request.project-busy',
+  'ERC_BLOCKED: patch.apply.blocked-stale': 'patch.apply.blocked-stale',
+  'ERC_BLOCKED: ERC did not pass for this patch.': 'daemon.erc.failed',
+  'ERC_BLOCKED: ERC was skipped. Approve with ercOverride "skipped" to apply without ERC.': 'patch.apply.skipped',
+  'ERC_BLOCKED: no ERC result is recorded for this patch.': 'patch.apply.blocked-missing',
+  'Patch approval was not found.': 'daemon.patch.missing',
+  'Patch approval has expired.': 'patch.expired',
+  'Patch approval belongs to a different project.': 'patch.stale',
+  PROJECT_BUSY: 'request.project-busy',
+  ERC_BLOCKED: 'patch.blocked',
+  PATCH_APPROVAL_EXPIRED: 'patch.expired',
+  PATCH_APPROVAL_MISSING: 'daemon.patch.missing',
+  PATCH_STALE: 'patch.stale',
+  EXISTING_COMPONENTS_REMOVED: 'patch.remove.lead',
+  PATCH_CANDIDATE_UNVERIFIED: 'patch.unverified.body'
+};
+
+function localizeDaemonText(text) {
+  if (typeof text !== 'string' || text.length === 0) return text;
+  const key = DAEMON_TEXT_TO_KEY[text];
+  if (!key) return text;
+  const translated = t(key);
+  return translated === key ? text : translated;
 }
 
 function restoreProviderSelection() {
