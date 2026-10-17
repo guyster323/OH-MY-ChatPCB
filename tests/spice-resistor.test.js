@@ -18,7 +18,12 @@ test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
     ['1M', '1000000'],
     ['1meg', '1000000'],
     ['1MEG', '1000000'],
+    ['1Meg', '1000000'],
     ['1 Meg', '1000000'],
+    ['4M7', '4700000'],
+    ['1.5 ohm', '1.5'],
+    ['4.75k', '4750'],
+    ['1.05M', '1050000'],
     ['330', '330'],
     ['1', '1'],
     ['1R', '1'],
@@ -46,7 +51,9 @@ test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
 test('spiceResistorOhms rejects unparseable and non-positive values', () => {
   for (const input of [
     '330Ω±5%', '1/4W 330', '-10', '10kk', 'abc', '1,000', '0', '',
-    '1m', '10m', '2m2', '4m7', 'R47', '1p', '100f', '1u', '10n', '1G', '1T', '0R', '1e3'
+    '1m', '10m', '2m2', '4m7', '4.7m', '1000m',
+    '1.000', '1.000 ohm', '4.700 ohm', '1.000Ω',
+    'R47', '1p', '100f', '1u', '10n', '1G', '1T', '0R', '1e3'
   ]) {
     assert.equal(spiceResistorOhms(input), null, input);
   }
@@ -83,7 +90,7 @@ test('renderSpiceFixture writes the parsed status LED resistance', () => {
 });
 
 test('renderSpiceFixture rejects status LED resistance outside 1Ω to 10MΩ', () => {
-  for (const value of ['10m', '2m2', '4m7', 'R47', '1p', '100f', '1u', '10n', '1G', '1T']) {
+  for (const value of ['10m', '2m2', '4m7', '4.7m', '1000m', 'R47', '1p', '100f', '1u', '10n', '1G', '1T']) {
     assert.throws(() => renderSpiceFixture(statusLedSpec(value)), (error) => {
       assert.equal(error.code, 'SPICE_RESISTOR_INVALID', value);
       assert.equal(error.message.includes('led 0'), false, value);

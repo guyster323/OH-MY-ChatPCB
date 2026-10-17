@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
 import { resolveKicadCli } from './kicad-cli.js';
-import { LED_SERIES_RESISTOR_RANGE, parseResistorOhms } from './resistor-ohms.js';
+import { classifyResistorValue } from './resistor-ohms.js';
 import {
   flatpakAppLibraryPaths,
   flatpakLibraryRoots,
@@ -197,14 +197,10 @@ function statusLedResistorValue(spec) {
   return '1k';
 }
 
-// Shared with existing-project edits. Unparseable text and values outside
-// LED_SERIES_RESISTOR_RANGE return null.
+// Shared with existing-project edits: parseResistorOhms, then the lone-m
+// refusal and the 1Ω–10MΩ window. Anything refused returns null.
 export function spiceResistorOhms(value) {
-  const parsed = parseResistorOhms(value);
-  if (parsed == null) return null;
-  const ohms = Number(parsed);
-  if (!(ohms >= LED_SERIES_RESISTOR_RANGE.min && ohms <= LED_SERIES_RESISTOR_RANGE.max)) return null;
-  return parsed;
+  return classifyResistorValue(value).ohmsText ?? null;
 }
 
 function requireSpiceResistorOhms(value) {

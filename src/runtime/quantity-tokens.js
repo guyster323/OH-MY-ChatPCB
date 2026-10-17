@@ -17,7 +17,6 @@ const RANGE_SEPARATOR = '(?:-|~|–|—|～|〜|(?<![A-Za-z])[Tt][Oo](?![A-Za-z]
 // itself stays outside the token so the forward-voltage binder can see it.
 const VOLTAGE_START = '(?:(?<![\\w.])|(?<=\\b[Vv][Ff]))';
 
-const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
 const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
 const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
 const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
@@ -174,15 +173,28 @@ function trailingSupplyKind(prompt, end) {
   return null;
 }
 
-function resistanceMultiplier(letter) {
-  return RESISTANCE_MULTIPLIER[String(letter).toLowerCase()] ?? null;
+// Every resistor form goes through parseResistorOhms. A lone m is milli there
+// (4.7m is 0.0047Ω), the same reading as 4m7. Zero stays 0 so 0Ω is visible.
+function resistorOhmsNumber(text) {
+  const parsed = parseResistorOhms(text);
+  if (parsed == null) return null;
+  const ohms = Number(parsed);
+  return Number.isFinite(ohms) ? ohms : null;
+}
+
+// "1kR" writes the ohm unit after the multiplier. The parser sees that R as a
+// second suffix, so it is stripped only when the whole token does not parse.
+function resistorOhmsFromSuffix(text) {
+  const direct = resistorOhmsNumber(text);
+  if (direct != null) return direct;
+  const stripped = String(text).replace(/\s*[rR]$/u, '');
+  if (stripped === String(text)) return null;
+  return resistorOhmsNumber(stripped);
 }
 
 function rkmToOhms(whole, fraction, letter) {
-  const parsed = parseResistorOhms(`${whole}${letter}${fraction}`);
-  if (parsed == null) return null;
-  const ohms = Number(parsed);
-  return ohms > 0 ? ohms : null;
+  const ohms = resistorOhmsNumber(`${whole}${letter}${fraction}`);
+  return ohms != null && ohms > 0 ? ohms : null;
 }
 
 function isPotentiometer(prompt, start, end) {
@@ -330,9 +342,8 @@ function collectRkm(prompt, candidates) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
     if (isDesignatorAssignment(prompt, end)) continue;
-    const fraction = match[1];
-    const ohms = Number(fraction) / (10 ** fraction.length);
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
+    const ohms = resistorOhmsNumber(match[0]);
+    if (ohms == null || ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.rkm,
       start,
@@ -347,10 +358,15 @@ function collectLabeledResistor(prompt, candidates) {
   // The designator stays inside the token so "R1" is not its own bare number.
   const pattern = /(?<![\w.])[Rr](\d+)?(?:\s*=\s*|\s+)(\d+(?:\.\d+)?)(?![\w.])/g;
   for (const match of prompt.matchAll(pattern)) {
-    const ohms = Number(match[2]);
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const start = match.index ?? 0;
     const end = start + match[0].length;
+    const ohms = resistorOhmsNumber(match[2]);
+    // "R1=1.000" is ambiguous. Cover the span so a bare number cannot read it as 1Ω.
+    if (ohms == null) {
+      candidates.push({ priority: PRIORITY.rkm, start, end, invalid: true, token: null });
+      continue;
+    }
+    if (ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.rkm,
       start,
@@ -365,13 +381,17 @@ function collectOhm(prompt, candidates) {
   // "vf330Ω" keeps the Vf label outside the token. The ohm value is a resistor.
   const pattern = /(?<![\w.])(?:[Vv][Ff](?=\d))?(\d+(?:\.\d+)?)\s*([rRkKmM])?\s*(?:옴|ohms?|Ω)/gi;
   for (const match of prompt.matchAll(pattern)) {
-    const multiplier = match[2] ? resistanceMultiplier(match[2]) : 1;
-    const ohms = Number(match[1]) * multiplier;
-    // 0Ω is kept so the draft can refuse it instead of ignoring the token.
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const matchStart = match.index ?? 0;
     const end = matchStart + match[0].length;
     const start = matchStart + match[0].indexOf(match[1]);
+    const ohms = resistorOhmsNumber(prompt.slice(start, end));
+    // 0Ω is kept so the draft can refuse it instead of ignoring the token.
+    // "1.000 ohm" does not parse. The span stays covered so a bare 1.000 is not 1Ω.
+    if (ohms == null) {
+      candidates.push({ priority: PRIORITY.ohm, start, end, invalid: true, token: null });
+      continue;
+    }
+    if (ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.ohm,
       start,
@@ -385,11 +405,14 @@ function collectOhm(prompt, candidates) {
 function collectSuffix(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+(?:\.\d+)?)\s*([rRkKmM])(?:\s*[rR]\b|\b)(?![A-Za-z])/g;
   for (const match of prompt.matchAll(pattern)) {
-    const multiplier = resistanceMultiplier(match[2]);
-    const ohms = Number(match[1]) * multiplier;
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const start = match.index ?? 0;
     const end = start + match[0].length;
+    const ohms = resistorOhmsFromSuffix(match[0]);
+    if (ohms == null) {
+      candidates.push({ priority: PRIORITY.suffix, start, end, invalid: true, token: null });
+      continue;
+    }
+    if (ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.suffix,
       start,
@@ -825,9 +848,23 @@ function collectBare(prompt, candidates) {
     if (!(ohms > 0)) continue;
     if (LED_PACKAGE_SET.has(rawNumber)) continue;
     const asResistor = bareHasResistorContext(prompt, start, end) || isBareE24Resistor(rawNumber);
-    const token = asResistor
-      ? resistanceToken(prompt, start, end, ohms, 'bare')
-      : ambiguousNumberToken(prompt, start, end, ohms);
+    if (asResistor) {
+      const parsed = resistorOhmsNumber(rawNumber);
+      if (parsed == null) {
+        candidates.push({ priority: PRIORITY.bare, start, end, invalid: true, token: null });
+        continue;
+      }
+      if (!(parsed > 0)) continue;
+      candidates.push({
+        priority: PRIORITY.bare,
+        start,
+        end,
+        invalid: false,
+        token: resistanceToken(prompt, start, end, parsed, 'bare')
+      });
+      continue;
+    }
+    const token = ambiguousNumberToken(prompt, start, end, ohms);
     candidates.push({
       priority: PRIORITY.bare,
       start,
