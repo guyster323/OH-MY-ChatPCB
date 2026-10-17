@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { collectArtifactInventory } from '../src/evidence/artifact-inventory.js';
+import { collectTransactionInventory } from '../src/evidence/transaction-inventory.js';
 import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { inspectProject } from '../src/workflow/inspect-project.js';
@@ -52,8 +53,12 @@ test('a schematic edit after generation makes the preview digest stale without w
     await writeFile(generated.files.spec, `${JSON.stringify(spec, null, 2)}\n`);
     const afterSpec = await inspect(root, { expectedDigest: baseline });
     assert.equal(afterSpec.ok, true);
-    assert.equal(afterSpec.result.evidenceDigest.matches, true);
-    assert.equal(afterSpec.result.evidenceDigest.projectDigest, baseline);
+    assert.equal(afterSpec.result.evidenceDigest.matches, false);
+    assert.notEqual(afterSpec.result.evidenceDigest.projectDigest, baseline);
+    const afterSpecInventory = await collectArtifactInventory({ projectDir: root });
+    const afterSpecTransaction = await collectTransactionInventory({ projectDir: root });
+    assert.equal(afterSpecInventory.projectDigest, afterSpecTransaction.transactionDigest);
+    assert.equal(afterSpec.result.evidenceDigest.projectDigest, afterSpecInventory.projectDigest);
     assert.equal(afterSpec.result.manifest.freshness.status, 'legacy-unverified');
     assert.equal(JSON.parse(await readFile(generated.files.spec, 'utf8')).schemaVersion, undefined);
 
@@ -64,10 +69,10 @@ test('a schematic edit after generation makes the preview digest stale without w
     assert.equal(afterSchematic.ok, true);
     assert.equal(afterSchematic.result.evidenceDigest.matches, false);
     assert.notEqual(afterSchematic.result.evidenceDigest.projectDigest, baseline);
-    assert.equal(
-      afterSchematic.result.evidenceDigest.projectDigest,
-      (await collectArtifactInventory({ projectDir: root })).projectDigest
-    );
+    const afterSchematicInventory = await collectArtifactInventory({ projectDir: root });
+    const afterSchematicTransaction = await collectTransactionInventory({ projectDir: root });
+    assert.equal(afterSchematicInventory.projectDigest, afterSchematicTransaction.transactionDigest);
+    assert.equal(afterSchematic.result.evidenceDigest.projectDigest, afterSchematicInventory.projectDigest);
     assert.equal(afterSchematic.result.manifest.freshness.status, 'legacy-unverified');
     assert.equal(JSON.parse(await readFile(generated.files.spec, 'utf8')).schemaVersion, undefined);
   } finally {

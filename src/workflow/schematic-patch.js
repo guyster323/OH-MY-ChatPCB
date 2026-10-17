@@ -141,6 +141,7 @@ function previewFrom(plan) {
     afterArtifacts: plan.afterArtifacts,
     beforeProjectDigest: plan.beforeProjectDigest,
     afterProjectDigest: plan.afterProjectDigest,
+    projectDigest: plan.baseTransactionDigest,
     beforeTransactionDigest: plan.baseTransactionDigest,
     afterTransactionDigest: plan.afterTransactionDigest,
     validation: plan.validation,

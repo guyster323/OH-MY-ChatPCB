@@ -392,7 +392,7 @@ test('inspectProject discards selection context when evidence changes during ins
   }
 });
 
-test('inspectProject discards selection context when the transaction digest moves without changing evidence', async () => {
+test('inspectProject discards facts and selection context when a manifest edit changes the shared digest', async () => {
   const root = await makeProject();
   await writeFile(path.join(root, 'demo.kicad_sch'), schematicWithSelectionTargets(), 'utf8');
   let releaseValidation;
@@ -424,12 +424,12 @@ test('inspectProject discards selection context when the transaction digest move
     releaseValidation();
 
     const result = await inspectionPromise;
-    assert.equal(result.inspection.facts.length > 0, true);
+    assert.deepEqual(result.inspection.facts, []);
     assert.deepEqual(result.context.facts, []);
     assert.deepEqual(result.context.findings, []);
     assert.equal(result.context.diagnostics.some((diagnostic) => diagnostic.code === 'CONTEXT_INPUT_CHANGED'), true);
     assert.equal(result.manifest.freshness.status, 'missing');
-    assert.equal(result.context.coverage.diagnostics[0].code, 'SELECTION_CONNECTIVITY_UNPROVEN');
+    assert.equal(result.context.coverage.diagnostics.some((diagnostic) => diagnostic.code === 'SELECTION_CONNECTIVITY_UNPROVEN'), true);
   } finally {
     releaseValidation?.();
     await rm(root, { force: true, recursive: true });
