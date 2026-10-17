@@ -160,7 +160,7 @@
       </section>
 
       <section id="conversation-card" class="chat-column card">
-        <p id="request-status" role="status" aria-label="Request status" data-i18n-aria-label="request.status-label" data-state="idle" data-i18n="request.idle">Create a project to send a circuit request.</p>
+        <div id="request-status" role="status" aria-label="Request status" data-i18n-aria-label="request.status-label" data-state="idle"><h2 id="request-result-heading" tabindex="-1" data-i18n="request.idle">Create a project to send a circuit request.</h2></div>
         <details id="request-technical-details" hidden>
           <summary data-i18n="dialog.technical">Technical details</summary>
           <pre id="request-technical-detail"></pre>
@@ -196,15 +196,15 @@
             <p id="apply-remove-components-lead" data-i18n="patch.remove.lead">This draft removes existing parts. Applying deletes them from the schematic.</p>
             <ul id="apply-remove-components-parts" class="patch-parts"></ul>
             <div class="patch-approval-actions">
-              <button id="cancel-apply-remove-components" type="button" data-i18n="patch.remove.cancel">Don't apply</button>
-              <button id="confirm-apply-remove-components" type="button" data-i18n="patch.remove.confirm">Apply and remove these parts</button>
+              <button id="cancel-apply-remove-components" type="button" class="btn-primary" data-i18n="patch.remove.cancel">Don't apply</button>
+              <button id="confirm-apply-remove-components" type="button" class="btn-quiet-danger" data-i18n="patch.remove.confirm">Apply and remove these parts</button>
             </div>
           </div>
           <div id="apply-without-erc-confirm" class="apply-without-erc-confirm" role="alertdialog" aria-describedby="apply-without-erc-risk" data-i18n-aria-label="patch.apply.without-erc" aria-label="Apply without ERC" hidden>
             <p id="apply-without-erc-risk" data-i18n="patch.apply.without-erc.risk">ERC did not run, so circuit errors in this draft were not checked. Applying still changes the schematic.</p>
             <div class="row">
-              <button id="cancel-apply-without-erc" type="button" data-i18n="patch.apply.without-erc.cancel">Don't apply</button>
-              <button id="confirm-apply-without-erc" type="button" data-i18n="patch.apply.without-erc.confirm">Apply anyway</button>
+              <button id="cancel-apply-without-erc" type="button" class="btn-primary" data-i18n="patch.apply.without-erc.cancel">Don't apply</button>
+              <button id="confirm-apply-without-erc" type="button" class="btn-quiet-danger" data-i18n="patch.apply.without-erc.confirm">Apply anyway</button>
             </div>
           </div>
           <p id="apply-why" hidden></p>

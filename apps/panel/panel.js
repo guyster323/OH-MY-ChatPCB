@@ -125,6 +125,7 @@ let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
 let chatgptAuthExpiryTimer = null;
+let chatgptAuthStatusEl = null;
 let i18nReady = false;
 let switchOfferEpoch = 0;
 let activeSwitchOfferStorageKey = null;
@@ -158,7 +159,7 @@ window.chatpcbI18n?.onChange(() => {
   renderPatchApproval();
   applyRemovalConfirmCopy();
   renderChatGPTAuth();
-  if (requestStatusKey) requestStatusEl.textContent = t(requestStatusKey, requestStatusVars);
+  if (requestStatusKey) setRequestStatusText(t(requestStatusKey, requestStatusVars));
   if (lastProviderStatus) renderProviderStatus(lastProviderStatus);
   if (inspectionState.result) renderInspection(inspectionState.result);
 });
@@ -310,6 +311,14 @@ function setChatGptShell(el, visible) {
   el.hidden = !show;
   if (show) el.removeAttribute('inert');
   else el.setAttribute('inert', '');
+}
+
+function setChatGPTPlanVisible(show) {
+  const plan = document.querySelector('#chatgpt-plan');
+  if (!plan) return;
+  plan.hidden = !show;
+  if (show) plan.removeAttribute('inert');
+  else plan.setAttribute('inert', '');
 }
 
 function setChatGptAuthState(state = {}) {
@@ -659,19 +668,34 @@ function handleEnvelope(envelope) {
   }
 }
 
+function formatPlanLabel(plan) {
+  const value = typeof plan === 'string' ? plan.trim() : '';
+  if (!value) return '';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function joinSentences(left, right) {
+  const head = String(left ?? '').trimEnd();
+  const tail = String(right ?? '').trimStart();
+  if (!head) return tail;
+  if (!tail) return head;
+  if (/[.!?…。．]$/.test(head)) return `${head} ${tail}`;
+  return `${head}. ${tail}`;
+}
+
 function renderProviderStatus(provider) {
   if (!providerStatusEl || !provider) return;
   lastProviderStatus = provider;
   providerStatusEl.removeAttribute('data-i18n');
   const vars = {};
-  if (provider.plan) vars.plan = provider.plan;
+  if (provider.plan) vars.plan = formatPlanLabel(provider.plan);
   if (provider.account?.email) vars.email = provider.account.email;
   const text = t(`provider.status.${provider.provider}.${provider.status}`, vars);
   if (text.startsWith('provider.status.')) {
     providerStatusEl.textContent = t('provider.status.fallback');
   } else if (provider.status === 'missing') {
     const next = t('provider.status.missing.next');
-    providerStatusEl.textContent = next.startsWith('provider.status.') ? text : [text, next].join(' ');
+    providerStatusEl.textContent = next.startsWith('provider.status.') ? text : joinSentences(text, next);
   } else {
     providerStatusEl.textContent = text;
   }
@@ -1114,7 +1138,7 @@ function candidateErcSource() {
 function applyBlockedReason(erc) {
   if (patchRejectionCode) return { key: 'patch.unverified.body', text: t('patch.unverified.body') };
   if (candidateErcStale()) return { key: 'patch.apply.blocked-stale', text: t('patch.apply.blocked-stale') };
-  if (erc.failed) return { key: 'patch.apply.blocked-erc', text: t('patch.apply.blocked-erc', { count: erc.count }) };
+  if (erc.failed) return ercFailedCopy(erc);
   if (erc.skipped) return { key: 'patch.apply.skipped', text: t('patch.apply.skipped') };
   return { key: 'patch.apply.blocked-missing', text: t('patch.apply.blocked-missing') };
 }
@@ -1140,6 +1164,20 @@ function inspectionErcSource() {
   return null;
 }
 
+function violationReviewCount(source) {
+  if (!source || typeof source !== 'object') return 0;
+  const layers = [source];
+  const nested = source.erc && typeof source.erc === 'object' ? source.erc : null;
+  if (nested) layers.push(nested);
+  const deep = nested?.erc && typeof nested.erc === 'object' ? nested.erc : null;
+  if (deep) layers.push(deep);
+  let count = 0;
+  for (const layer of layers) {
+    if (Array.isArray(layer.violations)) count = Math.max(count, layer.violations.length);
+  }
+  return count;
+}
+
 function classifyPanelErc(source) {
   const verdict = globalThis.chatpcbErcVerdict(source);
   const messages = verdict.failed || verdict.skipped ? collectErcMessages(source) : [];
@@ -1149,8 +1187,27 @@ function classifyPanelErc(source) {
     failed: verdict.failed === true,
     missing: verdict.missing === true,
     count: verdict.errorCount,
+    reviewCount: violationReviewCount(source),
     messages
   };
+}
+
+function ercSummaryCopy(erc) {
+  if (Number(erc?.count) === 0 && Number(erc?.reviewCount) > 0) {
+    return { key: 'erc.review-items', text: t('erc.review-items', { count: erc.reviewCount }) };
+  }
+  if (Number(erc?.count) === 0) {
+    return { key: 'erc.incomplete', text: t('erc.incomplete') };
+  }
+  return { key: 'erc.errors', text: t('erc.errors', { count: erc?.count ?? 0 }) };
+}
+
+function ercFailedCopy(erc) {
+  const summary = ercSummaryCopy(erc);
+  if (summary.key === 'erc.errors') {
+    return { key: 'patch.apply.blocked-erc', text: t('patch.apply.blocked-erc', { count: erc?.count ?? 0 }) };
+  }
+  return summary;
 }
 
 function ercBlockState() {
@@ -1245,7 +1302,7 @@ function renderErcBox(erc, active) {
   title.textContent = t('erc.title');
   const summary = document.createElement('span');
   summary.textContent = erc.failed
-    ? t('erc.errors', { count: erc.count })
+    ? ercSummaryCopy(erc).text
     : erc.skipped
       ? t('erc.skipped')
       : t('erc.passed');
@@ -1258,10 +1315,12 @@ function renderErcBox(erc, active) {
   }
   patchErcEl.setAttribute('role', 'alert');
   const list = document.createElement('ul');
-  const items = erc.messages.length ? erc.messages : [t('patch.apply.blocked-erc', { count: erc.count })];
+  const items = erc.messages.length ? erc.messages : [ercFailedCopy(erc).text];
+  const koreanUi = window.chatpcbI18n?.getLang?.() === 'ko';
   for (const message of items) {
     const item = document.createElement('li');
     item.textContent = localizeDaemonText(message);
+    if (koreanUi && !/[가-힣]/.test(item.textContent)) item.lang = 'en';
     list.append(item);
   }
   patchErcEl.append(list);
@@ -1374,7 +1433,7 @@ function askChatpcbToFixErc() {
   const erc = ercBlockState();
   const detail = erc.messages.length
     ? erc.messages.join('\n')
-    : t('patch.apply.blocked-erc', { count: erc.count });
+    : ercFailedCopy(erc).text;
   promptEl.value = `${t('patch.fix')}\n${detail}`;
   if (!promptEl.disabled) promptEl.focus();
 }
@@ -1391,6 +1450,7 @@ function confirmRemovalApply() {
   hideRemovalConfirm();
   appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
   renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.summary' });
+  focusRequestResultHeading();
   const id = `patch_approve_${Date.now()}`;
   pendingCalls.set(id, 'schematic.patch.approve');
   sendToolCall({
@@ -1721,16 +1781,38 @@ function syncWorkflow() {
   scrollConversationToLatest();
 }
 
+function requestResultHeading() {
+  return document.querySelector('#request-result-heading');
+}
+
+function setRequestStatusText(text) {
+  const heading = requestResultHeading();
+  if (heading) {
+    heading.removeAttribute('data-i18n');
+    heading.textContent = text;
+    return;
+  }
+  requestStatusEl.removeAttribute('data-i18n');
+  requestStatusEl.textContent = text;
+}
+
+function focusRequestResultHeading() {
+  const heading = requestResultHeading();
+  if (!heading) return;
+  heading.tabIndex = -1;
+  heading.focus({ focusVisible: true });
+}
+
 function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '' }) {
   requestStatusEl.dataset.state = state;
   requestStatusEl.removeAttribute('data-i18n');
   if (summaryKey) {
     requestStatusKey = summaryKey;
     requestStatusVars = summaryVars ?? null;
-    requestStatusEl.textContent = t(summaryKey, summaryVars);
+    setRequestStatusText(t(summaryKey, summaryVars));
   } else {
     requestStatusKey = null;
-    requestStatusEl.textContent = summary;
+    setRequestStatusText(summary);
   }
   requestTechnicalDetailEl.textContent = technicalDetail;
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;
@@ -1760,6 +1842,11 @@ function handleProgressDelta(payload = {}) {
   });
 }
 
+function sameProgressLine(title, body) {
+  const normalize = (value) => String(value ?? '').replace(/[\s.。…]+$/u, '').trim();
+  return normalize(title) !== '' && normalize(title) === normalize(body);
+}
+
 function appendProgress(payload = {}) {
   if (!requestProgressEl) return;
   const stage = payload.stage ?? 'provider';
@@ -1781,7 +1868,8 @@ function appendProgress(payload = {}) {
   title.textContent = titleText;
   body.append(title);
   const progressText = payload.text ? localizeDaemonText(payload.text) : '';
-  if (progressText) {
+  const showProgressBody = progressText && !sameProgressLine(titleText, progressText);
+  if (showProgressBody) {
     const text = document.createElement('p');
     text.textContent = progressText;
     body.append(text);
@@ -1793,7 +1881,7 @@ function appendProgress(payload = {}) {
   }
   item.scrollIntoView({ block: 'nearest' });
   lastProgressStage = stage;
-  lastProgressText = progressText || titleText;
+  lastProgressText = showProgressBody ? progressText : titleText;
   syncWorkflow();
 }
 
@@ -2539,6 +2627,7 @@ function updateChatGPTAuthVisibility() {
     return;
   }
   if (chatgptAuthCardEl) chatgptAuthCardEl.hidden = true;
+  if (!(chatGptUiEnabled && chatGptSignedIn === true)) setChatGPTPlanVisible(false);
 }
 
 function refreshChatGPTAuthStatus() {
@@ -2707,7 +2796,16 @@ function chatGPTButton(className, label, onClick) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = className;
-  button.textContent = label;
+  if (className.split(/\s+/).includes('chatgpt-sign-in-btn')) {
+    const logo = document.createElement('img');
+    logo.src = 'assets/chatgpt-logo-white.svg';
+    logo.alt = '';
+    logo.width = 21;
+    logo.height = 21;
+    logo.setAttribute('aria-hidden', 'true');
+    button.append(logo);
+  }
+  button.append(document.createTextNode(label));
   button.addEventListener('click', onClick);
   return button;
 }
@@ -2759,6 +2857,7 @@ function renderChatGPTAuth() {
   const isChatGPT = providerEl.value === 'chatgpt';
   if (!isChatGPT) {
     chatgptAuthCardEl.hidden = true;
+    if (!(chatGptUiEnabled && chatGptSignedIn === true)) setChatGPTPlanVisible(false);
     if (!activeRequestId) setRequestBusy(false);
     return;
   }
@@ -2823,7 +2922,7 @@ function renderChatGPTAuth() {
   } else if (state === 'signed_in') {
     const account = chatgptAuthState.account || {};
     const email = typeof account.email === 'string' ? account.email : '';
-    const plan = chatgptAuthState.plan ? String(chatgptAuthState.plan) : '';
+    const plan = formatPlanLabel(chatgptAuthState.plan);
     const title = document.createElement('h2');
     title.id = 'chatgpt-auth-title';
     title.tabIndex = -1;
@@ -2833,12 +2932,12 @@ function renderChatGPTAuth() {
     accountLine.textContent = plan
       ? t('auth.chatgpt.signed-in.account', { email, plan })
       : email;
-    const usage = document.createElement('p');
-    usage.textContent = t('auth.chatgpt.signed-in.usage');
     const actions = document.createElement('div');
     actions.className = 'chatgpt-auth-actions';
     actions.append(chatGPTButton('chatgpt-secondary-btn', t('auth.chatgpt.sign-out'), signOutChatGPT));
-    chatgptAuthCardEl.append(title, accountLine, usage, actions);
+    chatgptAuthCardEl.append(title, accountLine);
+    appendChatGPTUsage(chatgptAuthCardEl);
+    chatgptAuthCardEl.append(actions);
     if (!activeRequestId) setRequestBusy(false);
   } else if (state === 'error') {
     chatgptAuthCardEl.className = 'chatgpt-auth-card error';
@@ -2870,12 +2969,86 @@ function renderChatGPTAuth() {
     setRequestBusy(true);
   }
 
+  const statusLine = chatgptAuthStatusLine();
+  chatgptAuthCardEl.append(statusLine);
+  publishLiveStatus(statusLine, chatGPTAuthStatusMessage());
+  setChatGPTPlanVisible(state === 'signed_in');
+
   const titleEl = chatgptAuthCardEl.querySelector('h2[tabindex="-1"]');
   if (titleEl && state !== 'signed_out') {
     setTimeout(() => {
       if (titleEl.isConnected) titleEl.focus();
     }, 100);
   }
+}
+
+function chatgptAuthStatusLine() {
+  if (!chatgptAuthStatusEl) {
+    chatgptAuthStatusEl = document.createElement('p');
+    chatgptAuthStatusEl.id = 'chatgpt-auth-status';
+    chatgptAuthStatusEl.className = 'sr-only';
+    chatgptAuthStatusEl.setAttribute('role', 'status');
+    chatgptAuthStatusEl.setAttribute('aria-live', 'polite');
+  }
+  return chatgptAuthStatusEl;
+}
+
+function chatGPTAuthStatusMessage() {
+  const state = chatgptAuthState.state;
+  const code = chatgptAuthState.code;
+  if (state === 'waiting') {
+    const time = formatChatGPTAuthExpiry(chatgptAuthState.expiresAt);
+    return time
+      ? [t('auth.chatgpt.waiting.title'), t('auth.chatgpt.waiting.expires', { time })].join(' ')
+      : t('auth.chatgpt.waiting.title');
+  }
+  if (state === 'signed_in') {
+    const plan = formatPlanLabel(chatgptAuthState.plan);
+    return plan
+      ? [t('auth.chatgpt.signed-in.title'), plan].join(' ')
+      : t('auth.chatgpt.signed-in.title');
+  }
+  if (state === 'error' && code) {
+    if (code === 'cancelled' || code === 'access_denied') return t('auth.chatgpt.error.cancelled');
+    if (code === 'timeout') return t('auth.chatgpt.error.timeout');
+    if (code === 'not_eligible') return t('auth.chatgpt.error.not-eligible.title');
+    if (code === 'usage_limit') return t('auth.chatgpt.error.usage-limit.title');
+    if (code === 'open_failed') return t('auth.chatgpt.error.open-failed');
+    return t('auth.chatgpt.error.route');
+  }
+  return [t('auth.chatgpt.intro.title'), t('auth.chatgpt.intro.body')].join(' ');
+}
+
+function publishLiveStatus(line, message) {
+  if (!line || !message) return;
+  if (line.dataset.pending === message || line.textContent === message) return;
+  line.dataset.pending = message;
+  line.textContent = '';
+  setTimeout(() => {
+    if (!line.isConnected || line.dataset.pending !== message) return;
+    line.textContent = message;
+  }, 50);
+}
+
+function appendChatGPTUsage(parent) {
+  const paragraph = document.createElement('p');
+  const template = t('auth.chatgpt.signed-in.usage');
+  const marker = '{usage}';
+  const splitAt = template.indexOf(marker);
+  if (splitAt < 0) {
+    paragraph.textContent = template;
+    parent.append(paragraph);
+    return;
+  }
+  const before = template.slice(0, splitAt);
+  const after = template.slice(splitAt + marker.length);
+  if (before) paragraph.append(document.createTextNode(before));
+  const usage = document.createElement('span');
+  usage.lang = 'en';
+  usage.textContent = t('auth.chatgpt.usage-label');
+  paragraph.append(usage);
+  if (after) paragraph.append(document.createTextNode(after));
+  parent.append(paragraph);
 }
 
 function updateLiveRegion(payload) {
@@ -2889,8 +3062,9 @@ function updateLiveRegion(payload) {
       ? [t('auth.chatgpt.waiting.title'), t('auth.chatgpt.waiting.expires', { time })].join(' ')
       : t('auth.chatgpt.waiting.title');
   } else if (state === 'signed_in') {
-    message = payload.plan
-      ? [t('auth.chatgpt.signed-in.title'), String(payload.plan)].join(' ')
+    const plan = formatPlanLabel(payload.plan);
+    message = plan
+      ? [t('auth.chatgpt.signed-in.title'), plan].join(' ')
       : t('auth.chatgpt.signed-in.title');
   } else if (state === 'signed_out') {
     message = [t('auth.chatgpt.signed-out.title'), t('auth.chatgpt.signed-out.body')].join(' ');

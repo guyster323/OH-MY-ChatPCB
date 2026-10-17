@@ -93,6 +93,7 @@ h3 { font-size: var(--fs-xs); }
 .muted, .inspection-label, #connection-status, #provider-status, #request-status, #workflow-caption, #kicad-fallback, #patch-approval-lead, #apply-why {
   color: var(--muted);
 }
+#request-result-heading { font-size: inherit; font-weight: inherit; line-height: inherit; }
 .meta, .badge, #provider-status, #connection-status, .inspection-label, time, details {
   font-size: var(--fs-xs);
 }
@@ -475,12 +476,7 @@ button[aria-disabled="true"], .btn[aria-disabled="true"], #approve-patch-button[
 }
 .apply-without-erc-confirm p { margin: 0; font-size: var(--fs-xs); line-height: 1.45; }
 .apply-without-erc-confirm .row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.apply-without-erc-confirm #cancel-apply-without-erc {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-.apply-without-erc-confirm #confirm-apply-without-erc {
+.btn-quiet-danger {
   background: var(--danger-bg);
   border-color: transparent;
   color: var(--danger);
@@ -618,7 +614,7 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   border-radius: 12px;
   background: var(--siwc-bg);
   color: var(--siwc-fg);
-  font-family: "SIWC Inter", Inter, sans-serif;
+  font-family: Inter, system-ui, sans-serif;
   font-size: 15px;
   font-weight: 500;
   line-height: 18px;
@@ -693,16 +689,23 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
 .chatgpt-sign-in-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 12px;
   height: 45px;
+  width: 242px;
+  max-width: 100%;
   padding: 0 20px;
   border: 0;
   border-radius: 12px;
   background: var(--siwc-bg);
   color: var(--siwc-fg);
-  font-family: "SIWC Inter", Inter, sans-serif;
+  font-family: Inter, system-ui, sans-serif;
   font-size: 15px;
   font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0;
 }
+.chatgpt-sign-in-btn img { width: 21px; height: 21px; flex: none; display: block; }
 .chatgpt-auth-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .chatgpt-secondary-btn {
   background: var(--surface);
@@ -721,3 +724,16 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   vertical-align: -1px;
 }
 @keyframes chatpcb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .chatgpt-auth-card .spinner { animation: none; }
+}
+[data-theme="dark"] .chatgpt-sign-in-btn,
+[data-theme="dark"] .chatgpt-auth-card {
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chatgpt-sign-in-btn,
+  :root:not([data-theme="light"]) .chatgpt-auth-card {
+    box-shadow: 0 0 0 1px var(--border-strong);
+  }
+}

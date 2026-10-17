@@ -266,14 +266,54 @@ async function waitForSwitchOfferDecision(page, decision) {
   }, decision);
 }
 
-test('sign-in button stays English with lang=en in ko and shows no logo placeholder', async (t) => {
+test('sign-in button stays English with lang=en and shows the official logo', async (t) => {
   const opened = await openChatGPTWaiting(t, { locale: 'ko-KR', startResult: waiting });
   if (!opened) return;
   const { page, context, pageErrors, button } = opened;
   try {
+    await page.setViewportSize({ width: 420, height: 800 });
     assert.equal((await button.innerText()).trim(), 'Continue with ChatGPT');
     assert.equal(await button.getAttribute('lang'), 'en');
-    assert.equal(await page.locator('.chatgpt-logo-placeholder').count(), 0);
+    const logo = button.locator('img');
+    assert.equal(await logo.count(), 1);
+    assert.match(await logo.getAttribute('src'), /assets\/chatgpt-logo-white\.svg$/);
+    assert.equal(await logo.getAttribute('alt'), '');
+    assert.equal(await logo.getAttribute('aria-hidden'), 'true');
+    assert.equal(await logo.getAttribute('width'), '21');
+    assert.equal(await logo.getAttribute('height'), '21');
+    const metrics = await button.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const image = node.querySelector('img');
+      const imageStyle = image ? getComputedStyle(image) : null;
+      return {
+        height: style.height,
+        width: style.width,
+        maxWidth: style.maxWidth,
+        padding: style.padding,
+        gap: style.gap,
+        radius: style.borderRadius,
+        lineHeight: style.lineHeight,
+        fontSize: style.fontSize,
+        fontWeight: String(style.fontWeight),
+        fontFamily: style.fontFamily,
+        imageWidth: imageStyle?.width ?? '',
+        imageHeight: imageStyle?.height ?? ''
+      };
+    });
+    assert.equal(metrics.height, '45px');
+    assert.equal(metrics.width, '242px');
+    assert.equal(metrics.maxWidth, '100%');
+    assert.equal(metrics.padding, '0px 20px');
+    assert.equal(metrics.gap, '12px');
+    assert.equal(metrics.radius, '12px');
+    assert.equal(metrics.lineHeight, '18px');
+    assert.equal(metrics.fontSize, '15px');
+    assert.equal(metrics.fontWeight, '500');
+    assert.equal(metrics.fontFamily.includes('SIWC'), false, metrics.fontFamily);
+    assert.match(metrics.fontFamily, /Inter/);
+    assert.match(metrics.fontFamily, /system-ui/);
+    assert.equal(metrics.imageWidth, '21px');
+    assert.equal(metrics.imageHeight, '21px');
     assert.equal((await page.locator('#chatgpt-auth-card').innerText()).includes('LOGO?'), false);
     assert.match(await page.locator('#chatgpt-auth-card').innerText(), /ChatGPT 요금제로 ChatPCB 사용하기/);
     assert.match(await page.locator('#chatgpt-auth-card').innerText(), /ChatPCB에는 비밀번호를 입력하지 마세요/);
@@ -396,9 +436,18 @@ test('waiting card shows when the sign-in link expires', async (t) => {
         hour: 'numeric',
         minute: '2-digit'
       }).format(new Date(window.__authExpiresAt));
-      return `이 로그인 링크는 ${time}에 만료됩니다.`;
+      return `이 로그인 링크는 ${time}에 만료돼요.`;
     });
     assert.equal((await expiry.innerText()).trim(), expected);
+    const live = page.locator('#chatgpt-auth-status');
+    await page.waitForFunction((expiryText) => {
+      const line = document.querySelector('#chatgpt-auth-status');
+      return line?.getAttribute('role') === 'status'
+        && line.getAttribute('aria-live') === 'polite'
+        && (line.textContent ?? '').includes(expiryText);
+    }, expected);
+    assert.equal(await live.getAttribute('role'), 'status');
+    assert.equal(await live.getAttribute('aria-live'), 'polite');
     assert.match(await page.locator('#chatgpt-auth-card').innerText(), /브라우저에서 로그인을 마쳐 주세요/);
     assert.deepEqual(pageErrors, []);
   } finally {
@@ -453,7 +502,7 @@ test('sign-out refreshes the chatgpt signed-in provider label', async (t) => {
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (plus)');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (Plus)');
     const signOut = page.locator('#chatgpt-auth-card button', { hasText: /Sign out|sign-out/ });
     await signOut.click();
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
@@ -549,7 +598,7 @@ test('login card waits for locale text and never shows raw i18n keys', async (t)
     assert.equal(afterLoad.includes('auth.chatgpt.'), false);
     assert.match(afterLoad, /You'll sign in using your system browser/);
     assert.equal(await page.evaluate(() => window.__rawI18nSeen.length), 0);
-    assert.equal(await page.locator('#connection-status').innerText(), 'Connected');
+    assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
     assert.deepEqual(pageErrors, []);
   } finally {
     releaseLocales?.();
@@ -563,7 +612,7 @@ test('daemon connection label stays separate from ChatGPT sign-in status', async
   const { page, context, pageErrors } = opened;
   try {
     const connection = page.locator('#connection-status');
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === '연결됨');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === '데몬 연결됨');
     assert.equal(await connection.getAttribute('data-role'), 'daemon');
     assert.equal(await connection.getAttribute('data-state'), 'ok');
     assert.equal(await connection.evaluate((node) => node.classList.contains('daemon-connection')), true);
@@ -571,15 +620,22 @@ test('daemon connection label stays separate from ChatGPT sign-in status', async
     assert.equal(before.includes('ChatGPT'), false);
     await page.waitForFunction(() => document.querySelector('#chatgpt-auth-title')?.textContent === 'ChatGPT에 연결됨');
     assert.notEqual(await page.locator('#chatgpt-auth-title').innerText(), before);
-    assert.equal(await page.locator('#provider-status').innerText(), 'ChatGPT: 연결됨 (plus)');
+    assert.equal(await page.locator('#provider-status').innerText(), 'ChatGPT: 연결됨 (Plus)');
+    const signedInPlan = page.locator('#chatgpt-plan');
+    assert.equal(await signedInPlan.isHidden(), false);
+    assert.equal(await signedInPlan.getAttribute('inert'), null);
+    assert.match(await signedInPlan.innerText(), /Using ChatGPT plan/);
+    assert.match(await signedInPlan.innerText(), /Manage usage/);
     const signOut = page.locator('#chatgpt-auth-card button', { hasText: /로그아웃|Sign out/ });
     await signOut.click();
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: 로그인 필요');
-    assert.equal(await connection.innerText(), '연결됨');
+    assert.equal(await signedInPlan.isHidden(), true);
+    assert.equal(await signedInPlan.getAttribute('inert'), '');
+    assert.equal(await connection.innerText(), '데몬 연결됨');
     assert.equal(await connection.getAttribute('data-state'), 'ok');
     await page.locator('.chatgpt-sign-in-btn').click();
     await page.waitForFunction(() => (document.querySelector('#chatgpt-auth-title')?.textContent ?? '').includes('브라우저에서 로그인을 마쳐 주세요'));
-    assert.equal(await connection.innerText(), '연결됨');
+    assert.equal(await connection.innerText(), '데몬 연결됨');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -626,7 +682,7 @@ test('missing manifest approval uses plain language on the card and in technical
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Connected');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
     await page.locator('#project-name').fill('Sensor board');
     await page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
     await page.getByRole('status', { name: 'Active project' }).waitFor();
@@ -646,7 +702,7 @@ test('missing manifest approval uses plain language on the card and in technical
     );
     assert.equal((await detail.evaluate((node) => node.textContent)).includes('manifest'), false);
     assert.equal(await page.locator('#patch-approval-technical-details').isHidden(), false);
-    assert.equal(await page.locator('#connection-status').innerText(), 'Connected');
+    assert.equal(await page.locator('#connection-status').innerText(), 'Daemon connected');
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -663,7 +719,7 @@ test('draft card shows the generator source and profile parts', async (t) => {
   if (!opened) return;
   const { page, context, pageErrors } = opened;
   try {
-    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Connected');
+    await page.waitForFunction(() => document.querySelector('#connection-status')?.textContent === 'Daemon connected');
     await page.evaluate(() => {
       window.__draftSource = { provider: 'chatgpt', via: 'provider' };
       window.__draftParts = [
@@ -715,7 +771,14 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
         })
       });
     });
-    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (plus)');
+    await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (Plus)');
+    const plan = page.locator('#chatgpt-plan');
+    assert.equal(await plan.isHidden(), false);
+    assert.equal(await plan.getAttribute('inert'), null);
+    assert.match(await plan.innerText(), /Using ChatGPT plan/);
+    assert.match(await plan.innerText(), /Manage usage/);
+    const usage = page.locator('#chatgpt-auth-card span[lang="en"]');
+    assert.equal((await usage.allInnerTexts()).includes('Usage'), true);
     const afterSignIn = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     assert.ok(afterSignIn > before);
     await page.evaluate(() => {
@@ -731,6 +794,8 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
       });
     });
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
+    assert.equal(await plan.isHidden(), true);
+    assert.equal(await plan.getAttribute('inert'), '');
     const afterSignOut = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     assert.ok(afterSignOut > afterSignIn);
     assert.deepEqual(pageErrors, []);
@@ -940,7 +1005,7 @@ async function openApprovalPanel(t, locale) {
     approvalFlow: true
   });
   if (!opened) return null;
-  const connected = locale.startsWith('ko') ? '연결됨' : 'Connected';
+  const connected = locale.startsWith('ko') ? '데몬 연결됨' : 'Daemon connected';
   await opened.page.waitForFunction((label) => (
     document.querySelector('#connection-status')?.textContent === label
   ), connected);
@@ -990,7 +1055,7 @@ test('removed-part confirm copy exists in English and Korean', async () => {
   assert.equal(ko['patch.remove.cancel'], '적용하지 않기');
   assert.equal(ko['patch.remove.confirm'], '이 부품을 빼고 적용');
   assert.equal(ko['patch.remove.title'], '기존 부품을 빼고 적용할까요?');
-  assert.equal(ko['patch.remove.lead'], '이 초안은 기존 부품을 스키매틱에서 뺍니다. 적용하면 이 부품이 삭제됩니다.');
+  assert.equal(ko['patch.remove.lead'], '이 초안은 기존 부품을 스키매틱에서 빼요. 적용하면 아래 부품이 삭제돼요.');
   assert.equal(en['patch.apply.progress'], 'Adding it to the schematic…');
   assert.equal(en['patch.apply.summary'], 'Applying the circuit draft…');
   assert.equal(ko['patch.apply.progress'], '스키매틱에 넣는 중…');
@@ -1069,6 +1134,10 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
     await page.waitForFunction(() => document.activeElement?.id === 'cancel-apply-remove-components');
     assert.equal(await page.locator('#cancel-apply-remove-components').innerText(), en['patch.remove.cancel']);
     assert.equal(await page.locator('#confirm-apply-remove-components').innerText(), en['patch.remove.confirm']);
+    assert.equal(await page.locator('#cancel-apply-remove-components').evaluate((node) => node.classList.contains('btn-primary')), true);
+    assert.equal(await page.locator('#confirm-apply-remove-components').evaluate((node) => node.classList.contains('btn-quiet-danger')), true);
+    assert.equal(await page.locator('#cancel-apply-without-erc').evaluate((node) => node.classList.contains('btn-primary')), true);
+    assert.equal(await page.locator('#confirm-apply-without-erc').evaluate((node) => node.classList.contains('btn-quiet-danger')), true);
     assert.equal(await page.locator('#apply-remove-components-lead').innerText(), en['patch.remove.lead']);
     assert.equal(await dialog.getAttribute('aria-labelledby'), 'apply-remove-components-title');
     assert.equal(await page.locator('#apply-remove-components-title').innerText(), en['patch.remove.title']);
@@ -1123,6 +1192,67 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
   }
 });
 
+test('confirming removal keeps focus on the status heading for mouse and keyboard', async (t) => {
+  for (const locale of ['en-US', 'ko-KR']) {
+    for (const theme of ['light', 'dark']) {
+      for (const input of ['mouse', 'keyboard']) {
+        const opened = await openApprovalPanel(t, locale);
+        if (!opened) return;
+        const { page, context, pageErrors } = opened;
+        try {
+          await page.evaluate((next) => {
+            document.documentElement.dataset.theme = next;
+          }, theme);
+          await sendRemovalPreview(page);
+          await page.waitForFunction(() => {
+            const node = document.querySelector('#apply-remove-components-confirm');
+            return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
+          });
+          if (input === 'keyboard') {
+            await page.keyboard.press('Tab');
+            await page.waitForFunction(() => document.activeElement?.id === 'confirm-apply-remove-components');
+            await page.keyboard.press('Enter');
+          } else {
+            await page.locator('#confirm-apply-remove-components').click();
+          }
+          await page.waitForFunction(() => {
+            const status = document.querySelector('#request-status');
+            const active = document.activeElement;
+            if (!status || !active || active === document.body) return false;
+            const nested = [...status.querySelectorAll('h1, h2, h3, h4')].find((node) => node.tabIndex === -1);
+            const heading = nested || (status.matches('h1, h2, h3, h4') && status.tabIndex === -1 ? status : null);
+            return Boolean(heading) && active === heading;
+          }, null, { timeout: 3000 });
+          const focus = await page.evaluate(() => {
+            const status = document.querySelector('#request-status');
+            const active = document.activeElement;
+            const nested = [...(status?.querySelectorAll('h1, h2, h3, h4') ?? [])].find((node) => node.tabIndex === -1);
+            const heading = nested || (status?.matches('h1, h2, h3, h4') && status.tabIndex === -1 ? status : null);
+            const rect = heading?.getBoundingClientRect();
+            return {
+              theme: document.documentElement.dataset.theme,
+              activeIsBody: active === document.body,
+              focusedIsHeading: Boolean(heading) && active === heading,
+              tabIndex: heading ? heading.tabIndex : null,
+              visible: Boolean(rect && rect.width > 0 && rect.height > 0),
+              text: heading?.textContent ?? ''
+            };
+          });
+          assert.equal(focus.theme, theme, `${locale}/${theme}/${input}`);
+          assert.equal(focus.activeIsBody, false, `${locale}/${theme}/${input}`);
+          assert.equal(focus.focusedIsHeading, true, `${locale}/${theme}/${input}`);
+          assert.equal(focus.tabIndex, -1, `${locale}/${theme}/${input}`);
+          assert.equal(focus.visible, true, `${locale}/${theme}/${input}`);
+          assert.equal(focus.text.length > 0, true, `${locale}/${theme}/${input}`);
+          assert.deepEqual(pageErrors, []);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+  }
+});
+
 test('confirming removed parts sends allowRemovedComponents with the exact refs', async (t) => {
   const opened = await openApprovalPanel(t, 'en-US');
   if (!opened) return;
@@ -1150,7 +1280,9 @@ test('confirming removed parts sends allowRemovedComponents with the exact refs'
     assert.deepEqual(calls[0].args.allowRemovedComponents, REMOVED_PARTS.map((part) => part.ref));
     const running = await page.evaluate(() => window.__applyRunning);
     assert.equal(running.includes(en['patch.apply.summary']), true, JSON.stringify(running));
-    assert.equal((await page.locator('#request-progress').innerText()).includes(en['patch.apply.progress']), true);
+    const removalApply = page.locator('#request-progress li[data-stage="apply"]').last();
+    assert.equal((await removalApply.locator('strong').innerText()).trim(), en['progress.apply']);
+    assert.equal(await removalApply.locator('p').count(), 0);
     const done = en['patch.apply.done'].replaceAll('{refs}', REMOVED_PARTS.map((part) => part.ref).join(', '));
     await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, done);
     const progressText = await page.locator('#request-progress').innerText();
@@ -1359,7 +1491,9 @@ test('normal Apply is blocked when stale, expired, disabled, or busy, and sends 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].args.approved, true);
     assert.equal(Object.hasOwn(calls[0].args, 'allowRemovedComponents'), false);
-    assert.equal((await page.locator('#request-progress').innerText()).includes(en['patch.apply.progress']), true);
+    const applyItem = page.locator('#request-progress li[data-stage="apply"]').last();
+    assert.equal((await applyItem.locator('strong').innerText()).trim(), en['progress.apply']);
+    assert.equal(await applyItem.locator('p').count(), 0);
     await page.locator('#approve-patch-button').dispatchEvent('click');
     assert.equal((await approvedApplyCalls(page)).length, 1);
 
@@ -1374,6 +1508,61 @@ test('normal Apply is blocked when stale, expired, disabled, or busy, and sends 
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
+  }
+});
+
+test('ERC summary avoids a zero error count when violations exist or the result is incomplete', async (t) => {
+  const cases = [
+    {
+      locale: 'en-US',
+      erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }] },
+      summary: 'ERC found 1 items to review.'
+    },
+    {
+      locale: 'ko-KR',
+      erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }] },
+      summary: 'ERC 결과에 확인할 항목 1개가 있어요'
+    },
+    {
+      locale: 'en-US',
+      erc: { ok: false, errorCount: 0 },
+      summary: 'The ERC result is incomplete. Run ERC again.'
+    },
+    {
+      locale: 'ko-KR',
+      erc: { ok: false, errorCount: 0 },
+      summary: 'ERC 결과가 불완전해요. ERC를 다시 실행해 주세요.'
+    }
+  ];
+  for (const item of cases) {
+    const opened = await openApprovalPanel(t, item.locale);
+    if (!opened) return;
+    const { page, context, pageErrors } = opened;
+    try {
+      await page.evaluate((erc) => {
+        window.__candidateErc = erc;
+      }, item.erc);
+      await sendPlainPreview(page, 'ESP32-S3 sensor board erc');
+      await page.waitForFunction(() => document.querySelector('#patch-erc')?.hidden === false);
+      const shown = await page.evaluate(() => {
+        const summary = document.querySelector('#patch-erc .erc-h span:nth-child(2)');
+        const why = document.querySelector('#apply-why');
+        return {
+          summary: summary?.textContent ?? '',
+          why: why?.textContent ?? '',
+          erc: document.querySelector('#patch-erc')?.innerText ?? ''
+        };
+      });
+      assert.equal(shown.summary, item.summary, `${item.locale} summary ${shown.summary}`);
+      assert.equal(shown.why, item.summary, `${item.locale} why ${shown.why}`);
+      assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.summary), false, shown.summary);
+      assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.why), false, shown.why);
+      assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.erc), false, shown.erc);
+      if (item.erc.violations) assert.match(shown.erc, /Pin 3 of U2/);
+      assert.deepEqual(pageErrors, []);
+    } finally {
+      await context.close();
+    }
   }
 });
 

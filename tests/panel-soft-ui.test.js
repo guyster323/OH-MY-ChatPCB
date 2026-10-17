@@ -193,7 +193,7 @@ test('en and ko panel locales have the same keys', async () => {
   assert.equal(en['patch.ready'], 'Patch preview is ready for approval.');
   assert.equal(en['provider.pending'], 'Provider pending');
   assert.equal(en['connection.connecting'], 'Connecting');
-  assert.equal(en['connection.connected'], 'Connected');
+  assert.equal(en['connection.connected'], 'Daemon connected');
   for (const key of ['request.idle', 'patch.ready', 'provider.pending', 'connection.connecting', 'connection.connected']) {
     assert.notEqual(ko[key], en[key], key);
     assert.match(ko[key], /[가-힣]/, key);
@@ -758,7 +758,9 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
           await window.chatpcbI18n.setLang(nextLang);
           return { missing, available, switched };
         }, lang);
-        const missingCopy = `${locale['provider.status.codex.missing']} ${locale['provider.status.missing.next']}`;
+        const missingHead = String(locale['provider.status.codex.missing'] ?? '').trimEnd();
+        const missingTail = String(locale['provider.status.missing.next'] ?? '').trimStart();
+        const missingCopy = /[.!?…。．]$/.test(missingHead) ? `${missingHead} ${missingTail}` : `${missingHead}. ${missingTail}`;
         assert.equal(providerLine.missing, missingCopy, `${theme}/${lang} provider missing`);
         if (lang === 'en') assert.match(providerLine.missing, /Install it and sign in, or choose another provider/);
         if (lang === 'ko') {
