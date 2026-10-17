@@ -32,10 +32,16 @@ function patchFailure(code, message, plan) {
   };
 }
 
-function candidateAllowsApply(plan) {
+function candidateAllowsApply(plan, { allowSkippedErc = false } = {}) {
   const required = plan.requiredValidation ?? {};
   const verification = plan.candidateVerification ?? {};
-  if (required.erc && verification.erc?.status !== 'passed') return false;
+  if (required.erc && verification.erc?.status !== 'passed') {
+    const erc = verification.erc ?? {};
+    const errorCount = Number(erc.erc?.errorCount ?? erc.errorCount ?? 0);
+    const failed = erc.status === 'failed' || erc.ok === false || (Number.isFinite(errorCount) && errorCount > 0);
+    const skipped = erc.skipped === true && !failed;
+    if (!(allowSkippedErc && skipped)) return false;
+  }
   if (required.drc && verification.drc?.status !== 'passed') return false;
   return true;
 }
@@ -226,7 +232,8 @@ export async function applySchematicPatch({
   mutexRegistry,
   journal,
   collectSnapshotImpl,
-  fsImpl
+  fsImpl,
+  allowSkippedErc = false
 } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
@@ -291,7 +298,7 @@ export async function applySchematicPatch({
     return patchFailure('PATCH_STALE', 'Patch preview no longer matches the project artifacts.', plan);
   }
 
-  if (!candidateAllowsApply(plan)) {
+  if (!candidateAllowsApply(plan, { allowSkippedErc })) {
     if (ownsPlan) await disposeNativeProposal(plan);
     return {
       requiresApproval: false,

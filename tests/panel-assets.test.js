@@ -21,7 +21,10 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(html, /id="inspection-drc"/);
   assert.match(html, /id="approve-patch-button"/);
   assert.match(html, /id="request-progress"/);
-  assert.match(html, /스키매틱에 적용/);
+  assert.match(html, /Apply to schematic/);
+  assert.match(html, /id="apply-why"/);
+  assert.match(html, /id="fix-patch-button"/);
+  assert.match(html, /aria-label="Approve"/);
   assert.match(html, /sprites\/preview\.png/);
   assert.match(html, /id="kicad-link"/);
   assert.match(html, /id="recheck-kicad-button"/);
@@ -45,16 +48,23 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /hostPathMatchesActive/);
   assert.match(script, /startConflictWatch/);
   assert.match(script, /visibilitychange/);
-  assert.match(script, /Circuit request is required/);
+  const en = JSON.parse(await readFile('apps/panel/locales/en.json', 'utf8'));
+  const ko = JSON.parse(await readFile('apps/panel/locales/ko.json', 'utf8'));
+  assert.equal(en['request.prompt-required'], 'Circuit request is required.');
   assert.match(script, /operation === 'clarify'/);
   assert.match(script, /linkState !== 'unlinked'/);
-  assert.match(script, /KiCad changes need attention/);
+  assert.match(en['request.kicad-dirty'], /KiCad changes need attention/);
   assert.match(script, /showModal/);
   assert.match(script, /hostPathMatchesActive\(pendingHostStatus\.projectPath\)/);
   assert.match(script, /dataset\.help/);
   assert.match(script, /option\.help/);
   assert.match(script, /dataset\.recommended/);
-  assert.match(html, /status-dock/);
+  assert.match(html, /id="tools-menu"/);
+  assert.match(html, /aria-controls="tools-menu"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /aria-haspopup/);
+  assert.doesNotMatch(html, /role="menu"/);
+  assert.doesNotMatch(html, /role="menuitem"/);
   assert.match(html, /workflow-board/);
   assert.match(html, /data-step="circuit.concept"/);
   assert.match(html, /data-step="layout.route"/);
@@ -75,7 +85,7 @@ test('WebView panel provides named-project creation and Send-only request contro
   assert.match(script, /appendProgress/);
   assert.match(script, /new-project-again/);
   assert.match(script, /offerNativeDraft/);
-  assert.match(script, /이 구성으로 초안 만들기/);
+  assert.equal(ko['draft.create'], '이 구성으로 초안 만들기');
   assert.match(script, /schematic\.generate/);
 });
 

@@ -41,12 +41,19 @@ export function normalizeEvidenceManifest(raw) {
 }
 
 export function evidenceFreshness({ manifest, projectDigest }) {
-  if (!manifest) return { status: 'missing', reason: 'No ChatPCB manifest exists.' };
-  if (manifest.schemaVersion === 1) return { status: 'legacy-unverified', reason: 'Schema version 1 has no artifact-bound evidence.' };
+  // `code` is the stable id the panel localizes. `reason` stays for older callers.
+  if (!manifest) return { status: 'missing', code: 'NO_MANIFEST', reason: 'No ChatPCB manifest exists.' };
+  if (manifest.schemaVersion === 1) return { status: 'legacy-unverified', code: 'LEGACY_SCHEMA', reason: 'Schema version 1 has no artifact-bound evidence.' };
   const recorded = manifest.artifacts.length > 0 ? projectDigestForArtifacts(manifest.artifacts) : null;
-  if (!recorded) return { status: 'missing', reason: 'Schema version 2 has no project digest.' };
-  if (recorded !== projectDigest) return { status: 'stale', reason: `Evidence digest ${recorded} does not match saved project digest ${projectDigest}.` };
-  return { status: 'current', reason: 'Evidence matches the saved project artifacts.' };
+  if (!recorded) return { status: 'missing', code: 'NO_DIGEST', reason: 'Schema version 2 has no project digest.' };
+  if (recorded !== projectDigest) {
+    return {
+      status: 'stale',
+      code: 'DIGEST_MISMATCH',
+      reason: `Evidence digest ${recorded} does not match saved project digest ${projectDigest}.`
+    };
+  }
+  return { status: 'current', code: 'MATCH', reason: 'Evidence matches the saved project artifacts.' };
 }
 
 export function projectDigestForArtifacts(artifacts) {
