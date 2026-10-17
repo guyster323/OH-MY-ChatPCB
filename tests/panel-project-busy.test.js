@@ -80,7 +80,7 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
     assert.equal(await page.getByRole('button', { name: 'Send' }).isEnabled(), true);
 
     await page.getByRole('button', { name: panelLocale['draft.create'] }).click();
-    await page.getByText(panelLocale['request.preview-ready']).waitFor();
+    await page.locator('#request-result-heading', { hasText: panelLocale['request.preview-ready'] }).waitFor();
     await page.waitForFunction(() => {
       const button = document.querySelector('#approve-patch-button');
       return button && button.disabled === false;

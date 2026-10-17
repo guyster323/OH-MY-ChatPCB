@@ -820,6 +820,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
             background: style.backgroundColor,
             fontSize: style.fontSize,
             fontWeight: style.fontWeight,
+            whiteSpace: style.whiteSpace,
+            labelWhiteSpace: getComputedStyle(el.querySelector('span')).whiteSpace,
             text: el.innerText.trim(),
             lang: el.lang
           };
@@ -830,6 +832,8 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         assert.equal(button.background, 'rgb(0, 0, 0)', `${theme}/${lang} ChatGPT button background`);
         assert.equal(button.fontSize, '15px', `${theme}/${lang} ChatGPT button font size`);
         assert.equal(button.fontWeight, '500', `${theme}/${lang} ChatGPT button weight`);
+        assert.equal(button.whiteSpace, 'nowrap', `${theme}/${lang} ChatGPT button nowrap`);
+        assert.equal(button.labelWhiteSpace, 'nowrap', `${theme}/${lang} ChatGPT label nowrap`);
         assert.equal(button.text, 'Continue with ChatGPT', `${theme}/${lang} ChatGPT button text`);
         assert.equal(button.lang, 'en', `${theme}/${lang} ChatGPT button lang`);
 

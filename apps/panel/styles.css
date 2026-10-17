@@ -619,7 +619,9 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   font-weight: 500;
   line-height: 18px;
   letter-spacing: 0;
+  white-space: nowrap;
 }
+.siwc-btn span { white-space: nowrap; }
 .siwc-btn img { width: 21px; height: 21px; flex: none; display: block; }
 .tools { padding: var(--sp-2) var(--sp-4); }
 .tools summary { min-height: 28px; display: flex; align-items: center; cursor: pointer; font-size: var(--fs-sm); font-weight: 600; }
@@ -704,6 +706,7 @@ pre { overflow: auto; margin: 0; padding: var(--sp-4); border-radius: var(--r-sm
   font-weight: 500;
   line-height: 18px;
   letter-spacing: 0;
+  white-space: nowrap;
 }
 .chatgpt-sign-in-btn img { width: 21px; height: 21px; flex: none; display: block; }
 .chatgpt-auth-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }

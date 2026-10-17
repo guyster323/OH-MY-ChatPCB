@@ -123,6 +123,8 @@ let chatGptSignedIn = null;
 let patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null, evidenceDigest: null };
 let removalConfirmArmed = false;
 let syncingRemoval = false;
+let removalClosedForFocus = false;
+let approvalStatusFocusTimer = 0;
 let chatgptAuthState = { state: 'signed_out', attemptId: null, authUrl: null };
 let chatgptAuthKnown = false;
 let chatgptAuthPoll = null;
@@ -792,8 +794,10 @@ function requestOutcome(result) {
 function renderApplyFailure(verdict) {
   const code = verdict?.code || 'APPLY_REJECTED';
   const reasonKey = PATCH_FAILURE_KEYS[code] || 'patch.apply.failed.unknown';
-  const summary = joinSentences(t(reasonKey, { code }), t('patch.apply.failed.recheck'));
+  const summary = joinSentences(t(reasonKey), t('patch.apply.failed.recheck'));
   renderRequestStatus({ state: 'failed', summary });
+  if (requestStatusEl) requestStatusEl.dataset.reasonCode = code;
+  console.warn(code);
   appendProgress({ stage: 'fail', text: summary });
 }
 
@@ -804,7 +808,9 @@ function renderProviderStatus(provider) {
   const vars = {};
   if (provider.plan) vars.plan = formatPlanLabel(provider.plan);
   if (provider.account?.email) vars.email = provider.account.email;
-  const text = t(`provider.status.${provider.provider}.${provider.status}`, vars);
+  const text = provider.provider === 'chatgpt' && provider.status === 'signed-in' && !vars.plan
+    ? t('provider.status.chatgpt.signed-in.no-plan', vars)
+    : t(`provider.status.${provider.provider}.${provider.status}`, vars);
   if (text.startsWith('provider.status.')) {
     providerStatusEl.textContent = t('provider.status.fallback');
   } else if (provider.status === 'missing') {
@@ -815,6 +821,8 @@ function renderProviderStatus(provider) {
   }
   if (provider.status) providerStatusEl.dataset.status = provider.status;
   else delete providerStatusEl.dataset.status;
+  const chatgptOption = providerEl?.querySelector('option[value="chatgpt"]');
+  if (chatgptOption) chatgptOption.disabled = provider.provider === 'chatgpt' && provider.status === 'signed-in';
 }
 
 function activateProject(project) {
@@ -1132,6 +1140,11 @@ function notePreviewDigest(result) {
 
 function releaseStaleApproval() {
   const dialogWasOpen = Boolean(applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden);
+  const focusWasInDialog = Boolean(applyRemoveConfirmEl?.contains(document.activeElement))
+    || document.activeElement === approvePatchButtonEl
+    || document.activeElement === patchApprovalStatusEl;
+  const shouldFocus = dialogWasOpen || focusWasInDialog || removalClosedForFocus;
+  removalClosedForFocus = false;
   removalConfirmArmed = false;
   clearPatchApproval('patch.stale');
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
@@ -1140,10 +1153,7 @@ function releaseStaleApproval() {
     patchApprovalStatusEl.dataset.state = 'stale';
     setPatchStatus('patch.stale');
   }
-  if (dialogWasOpen) {
-    prepareDisabledApplyForFocus();
-    focusApplyButton();
-  }
+  if (shouldFocus) focusPatchApprovalStatusNow();
 }
 
 function renderInspectionFailure() {
@@ -1352,7 +1362,9 @@ function classifyPanelErc(source) {
 
 function ercSummaryCopy(erc) {
   if (Number(erc?.count) === 0 && Number(erc?.reviewCount) > 0) {
-    return { key: 'erc.review-items', text: t('erc.review-items', { count: erc.reviewCount }) };
+    const count = erc.reviewCount;
+    const key = count === 1 ? 'erc.review-items.one' : 'erc.review-items.other';
+    return { key, text: t(key, { count }) };
   }
   if (Number(erc?.count) === 0) {
     return { key: 'erc.incomplete', text: t('erc.incomplete') };
@@ -1472,8 +1484,12 @@ function renderErcBox(erc, active) {
     return;
   }
   patchErcEl.setAttribute('role', 'alert');
+  const fallback = erc.messages.length ? null : ercFailedCopy(erc);
+  const items = erc.messages.length
+    ? erc.messages
+    : (fallback?.key === 'erc.incomplete' ? [] : [fallback.text]);
+  if (items.length === 0) return;
   const list = document.createElement('ul');
-  const items = erc.messages.length ? erc.messages : [ercFailedCopy(erc).text];
   const koreanUi = window.chatpcbI18n?.getLang?.() === 'ko';
   for (const message of items) {
     const item = document.createElement('li');
@@ -1508,12 +1524,19 @@ function updatePatchApprovalCard() {
   hideApplyWithoutErcConfirm();
   if (active && !evidenceBlocked && !canApply) {
     const blocked = applyBlockedReason(erc);
+    const repeatedOnCard = blocked.key === 'erc.incomplete';
     approvePatchButtonEl.setAttribute('aria-disabled', 'true');
-    approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
+    if (repeatedOnCard) approvePatchButtonEl.removeAttribute('aria-describedby');
+    else approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
     if (applyWhyEl) {
-      applyWhyEl.hidden = false;
-      applyWhyEl.dataset.reason = blocked.key;
-      applyWhyEl.textContent = blocked.text;
+      applyWhyEl.hidden = repeatedOnCard;
+      if (repeatedOnCard) {
+        applyWhyEl.removeAttribute('data-reason');
+        applyWhyEl.replaceChildren();
+      } else {
+        applyWhyEl.dataset.reason = blocked.key;
+        applyWhyEl.textContent = blocked.text;
+      }
     }
     warnApplyBlock(blocked.key);
   } else {
@@ -1965,15 +1988,28 @@ function setRequestStatusText(text) {
   requestStatusEl.textContent = text;
 }
 
+function requestStatusLive() {
+  return document.querySelector('#request-status-live');
+}
+
 function focusRequestResultHeading() {
   const heading = requestResultHeading();
   if (!heading) return;
+  const live = requestStatusLive();
+  if (live) live.textContent = '';
   heading.tabIndex = -1;
   heading.focus({ focusVisible: true });
 }
 
+function publishRequestLive(text) {
+  const live = requestStatusLive();
+  if (!live || live.textContent === text) return;
+  live.textContent = text;
+}
+
 function renderRequestStatus({ state, summary, summaryKey, summaryVars, technicalDetail = '' }) {
   requestStatusEl.dataset.state = state;
+  delete requestStatusEl.dataset.reasonCode;
   requestStatusEl.removeAttribute('data-i18n');
   if (summaryKey) {
     requestStatusKey = summaryKey;
@@ -1985,6 +2021,7 @@ function renderRequestStatus({ state, summary, summaryKey, summaryVars, technica
   }
   requestTechnicalDetailEl.textContent = technicalDetail;
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;
+  publishRequestLive(requestResultHeading()?.textContent ?? requestStatusEl.textContent);
   syncWorkflow();
 }
 
@@ -2622,6 +2659,7 @@ function presentRemovalConfirm() {
   if (!applyGateOpen()) return;
   const parts = patchApprovalState.removedComponents;
   if (!applyRemoveConfirmEl || !parts?.length) return;
+  cancelApprovalStatusFocus();
   applyRemovalConfirmCopy();
   if (applyRemovePartsEl) {
     applyRemovePartsEl.replaceChildren();
@@ -2660,14 +2698,41 @@ function focusApplyButton() {
   button.focus();
 }
 
-function prepareDisabledApplyForFocus() {
-  const button = approvePatchButtonEl;
-  if (!button?.disabled) return;
-  button.disabled = false;
-  button.setAttribute('aria-disabled', 'true');
+function focusPatchApprovalStatus() {
+  const status = patchApprovalStatusEl;
+  if (!status) return;
+  if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
+  status.hidden = false;
+  status.tabIndex = -1;
+  status.focus({ focusVisible: true });
+}
+
+function cancelApprovalStatusFocus() {
+  if (approvalStatusFocusTimer) {
+    clearTimeout(approvalStatusFocusTimer);
+    approvalStatusFocusTimer = 0;
+  }
+}
+
+function scheduleApprovalStatusFocus() {
+  if (approvalStatusFocusTimer) return;
+  approvalStatusFocusTimer = setTimeout(() => {
+    approvalStatusFocusTimer = 0;
+    removalClosedForFocus = false;
+    if (applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden) return;
+    if (!approvePatchButtonEl?.disabled) return;
+    focusPatchApprovalStatus();
+  }, 0);
+}
+
+function focusPatchApprovalStatusNow() {
+  cancelApprovalStatusFocus();
+  removalClosedForFocus = false;
+  focusPatchApprovalStatus();
 }
 
 function dismissRemovalConfirmForClosedGate() {
+  const busy = patchApplyBusy();
   hideRemovalConfirm();
   const reason = applyGateClosedStatus();
   if (patchApprovalCardEl && patchApprovalState.patchId) patchApprovalCardEl.hidden = false;
@@ -2676,7 +2741,15 @@ function dismissRemovalConfirmForClosedGate() {
     patchApprovalStatusEl.dataset.state = reason.state;
     setPatchStatus(reason.key);
   }
-  prepareDisabledApplyForFocus();
+  if (busy) {
+    focusApplyButton();
+    return;
+  }
+  if (approvePatchButtonEl?.disabled) {
+    removalClosedForFocus = true;
+    scheduleApprovalStatusFocus();
+    return;
+  }
   focusApplyButton();
 }
 
@@ -3195,15 +3268,30 @@ function renderChatGPTAuth() {
 
   const statusLine = chatgptAuthStatusLine();
   chatgptAuthCardEl.append(statusLine);
-  publishLiveStatus(statusLine, chatGPTAuthStatusMessage());
+  const statusMessage = chatGPTAuthStatusMessage();
+  const titleEl = chatgptAuthCardEl.querySelector('h2[tabindex="-1"]');
+  const focusTitle = Boolean(titleEl && state !== 'signed_out');
+  const liveMessage = focusTitle ? liveTextBesides(statusMessage, titleEl.textContent) : statusMessage;
+  if (liveMessage) publishLiveStatus(statusLine, liveMessage);
+  else {
+    delete statusLine.dataset.pending;
+    statusLine.textContent = '';
+  }
   setChatGPTPlanVisible(state === 'signed_in');
 
-  const titleEl = chatgptAuthCardEl.querySelector('h2[tabindex="-1"]');
-  if (titleEl && state !== 'signed_out') {
+  if (focusTitle) {
     setTimeout(() => {
       if (titleEl.isConnected) titleEl.focus();
     }, 100);
   }
+}
+
+function liveTextBesides(message, spoken) {
+  const full = String(message ?? '').trim();
+  const head = String(spoken ?? '').trim();
+  if (!full || !head || full === head) return '';
+  if (full.startsWith(head)) return full.slice(head.length).replace(/^[\s·|]+/, '').trim();
+  return full;
 }
 
 function chatgptAuthStatusLine() {

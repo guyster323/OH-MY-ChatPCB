@@ -99,6 +99,12 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
       };
       new MutationObserver(note).observe(document, { subtree: true, childList: true, characterData: true });
     }
+    function chatgptPlanFields() {
+      if (Object.hasOwn(window, '__chatgptPlan')) {
+        return window.__chatgptPlan ? { plan: window.__chatgptPlan } : {};
+      }
+      return { plan: 'plus' };
+    }
     class FakeSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
       constructor() {
@@ -131,7 +137,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
         }
         if (call.name === 'auth.chatgpt.status') {
           if (window.__chatgptSignedIn) {
-            result = { state: 'signed_in', account: { email: 'ada@ex.com', name: 'Ada' }, plan: 'plus' };
+            result = { state: 'signed_in', account: { email: 'ada@ex.com', name: 'Ada' }, ...chatgptPlanFields() };
           } else {
             const started = window.__sent.some((entry) => entry.name === 'auth.chatgpt.start');
             result = started && window.__authExpiresAt
@@ -142,7 +148,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
         if (call.name === 'provider.status') {
           const provider = call.args?.provider ?? 'codex';
           result = provider === 'chatgpt' && window.__chatgptSignedIn
-            ? { provider, status: 'signed-in', account: { email: 'ada@ex.com', name: 'Ada' }, plan: 'plus' }
+            ? { provider, status: 'signed-in', account: { email: 'ada@ex.com', name: 'Ada' }, ...chatgptPlanFields() }
             : { provider, status: 'signed-out' };
         }
         if (call.name === 'auth.chatgpt.reopen') {
@@ -488,6 +494,12 @@ test('waiting card shows when the sign-in link expires', async (t) => {
     }, expected);
     assert.equal(await live.getAttribute('role'), 'status');
     assert.equal(await live.getAttribute('aria-live'), 'polite');
+    assert.equal((await live.innerText()).includes('브라우저에서 로그인을 마쳐 주세요'), false);
+    const titleInsideLive = await page.evaluate(() => {
+      const title = document.querySelector('#chatgpt-auth-title');
+      return Boolean(title?.closest('[aria-live], [role="status"], [role="alert"]'));
+    });
+    assert.equal(titleInsideLive, false);
     assert.match(await page.locator('#chatgpt-auth-card').innerText(), /브라우저에서 로그인을 마쳐 주세요/);
     assert.deepEqual(pageErrors, []);
   } finally {
@@ -812,6 +824,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
       });
     });
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (Plus)');
+    assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.disabled === true), true);
     const plan = page.locator('#chatgpt-plan');
     assert.equal(await plan.isHidden(), false);
     assert.equal(await plan.getAttribute('inert'), null);
@@ -834,6 +847,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
       });
     });
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
+    assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.disabled === true), false);
     assert.equal(await plan.isHidden(), true);
     assert.equal(await plan.getAttribute('inert'), '');
     const afterSignOut = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
@@ -841,6 +855,41 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
+  }
+});
+
+test('signed-in ChatGPT omits parentheses when no plan is reported', async (t) => {
+  const cases = [
+    { locale: 'en-US', signedOut: 'ChatGPT: sign-in needed', connected: 'ChatGPT: connected' },
+    { locale: 'ko-KR', signedOut: 'ChatGPT: 로그인 필요', connected: 'ChatGPT: 연결됨' }
+  ];
+  for (const item of cases) {
+    const opened = await openChatGPTWaiting(t, { locale: item.locale, startResult: waiting });
+    if (!opened) return;
+    const { page, context, pageErrors } = opened;
+    try {
+      await page.waitForFunction((text) => document.querySelector('#provider-status')?.textContent === text, item.signedOut);
+      await page.evaluate(() => {
+        window.__chatgptPlan = '';
+        window.__chatgptSignedIn = true;
+        window.__daemonSocket.emit('message', {
+          data: JSON.stringify({
+            version: 1,
+            id: 'auth_changed_no_plan',
+            type: 'auth.chatgpt.changed',
+            createdAt: new Date().toISOString(),
+            payload: { state: 'signed_in', account: { email: 'ada@ex.com', name: 'Ada' } }
+          })
+        });
+      });
+      await page.waitForFunction((text) => document.querySelector('#provider-status')?.textContent === text, item.connected);
+      const status = await page.locator('#provider-status').innerText();
+      assert.equal(status.includes('()'), false, status);
+      assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.disabled === true), true);
+      assert.deepEqual(pageErrors, []);
+    } finally {
+      await context.close();
+    }
   }
 });
 
@@ -1248,6 +1297,17 @@ test('confirming removal keeps focus on the status heading for mouse and keyboar
             const node = document.querySelector('#apply-remove-components-confirm');
             return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
           });
+          await page.evaluate(() => {
+            window.__requestFocusAnnounce = null;
+            document.querySelector('#request-result-heading')?.addEventListener('focus', () => {
+              const heading = document.activeElement;
+              const live = document.querySelector('#request-status-live');
+              window.__requestFocusAnnounce = {
+                insideLive: Boolean(heading?.closest('[aria-live], [role="status"], [role="alert"]')),
+                liveText: live?.textContent ?? ''
+              };
+            }, { once: true });
+          });
           if (input === 'keyboard') {
             await page.keyboard.press('Tab');
             await page.waitForFunction(() => document.activeElement?.id === 'confirm-apply-remove-components');
@@ -1284,6 +1344,20 @@ test('confirming removal keeps focus on the status heading for mouse and keyboar
           assert.equal(focus.tabIndex, -1, `${locale}/${theme}/${input}`);
           assert.equal(focus.visible, true, `${locale}/${theme}/${input}`);
           assert.equal(focus.text.length > 0, true, `${locale}/${theme}/${input}`);
+          const announce = await page.evaluate(() => window.__requestFocusAnnounce);
+          assert.equal(announce?.insideLive, false, `${locale}/${theme}/${input} heading is inside a live region`);
+          assert.equal(announce?.liveText ?? '', '', `${locale}/${theme}/${input} live region repeated the focused heading`);
+          const settled = await page.evaluate(() => {
+            const heading = document.querySelector('#request-result-heading');
+            const live = document.querySelector('#request-status-live');
+            return {
+              liveRole: live?.getAttribute('role') ?? '',
+              liveText: live?.textContent ?? '',
+              heading: heading?.textContent ?? ''
+            };
+          });
+          assert.equal(settled.liveRole, 'status', `${locale}/${theme}/${input} live role`);
+          assert.equal(settled.liveText, settled.heading, `${locale}/${theme}/${input} later status was not announced`);
           assert.deepEqual(pageErrors, []);
         } finally {
           await context.close();
@@ -1454,7 +1528,8 @@ test('stale, expired, or disabled removal preview does not open confirm or send 
     await page.evaluate(() => { document.querySelector('#approve-patch-button').disabled = true; });
     await page.waitForFunction(() => (
       document.querySelector('#apply-remove-components-confirm')?.hidden === true
-      && document.activeElement?.id === 'approve-patch-button'
+      && document.activeElement?.id === 'patch-approval-status'
+      && document.querySelector('#approve-patch-button')?.disabled === true
     ));
     assert.equal(await page.locator('#patch-approval-status').innerText(), en['patch.apply.blocked-disabled']);
     assert.deepEqual(await approvedApplyCalls(page), []);
@@ -1574,7 +1649,7 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     {
       id: 'NO_SUCH_CODE',
       result: { applied: false, validation: { ok: true }, reason: { code: 'NO_SUCH_CODE' } },
-      text: en['patch.apply.failed.unknown'].replaceAll('{code}', 'NO_SUCH_CODE')
+      text: en['patch.apply.failed.unknown']
     },
     {
       id: 'missing-applied',
@@ -1582,7 +1657,17 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       text: en['patch.apply.failed.missing']
     }
   ];
+  const warnings = [];
+  page.on('console', (message) => {
+    if (message.type() === 'warning') warnings.push(message.text());
+  });
   try {
+    assert.equal(en['patch.apply.failed.recheck'], 'Preview the change again.');
+    assert.equal(ko['patch.apply.failed.recheck'], '변경을 다시 미리보기 해 주세요.');
+    assert.equal(en['patch.apply.failed.missing'], "Couldn't confirm whether it was applied.");
+    assert.equal(ko['patch.apply.failed.missing'], '적용 여부를 확인하지 못했어요.');
+    assert.equal(en['patch.apply.failed.unknown'].includes('{code}'), false);
+    assert.equal(ko['patch.apply.failed.unknown'].includes('{code}'), false);
     assert.equal(await page.locator('#active-project').isVisible(), true);
     const created = await page.locator('#request-status').innerText();
     assert.equal(created.includes('Completed'), false);
@@ -1608,8 +1693,13 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
         && document.querySelector('#request-status')?.textContent?.includes(needle)
       ), item.text);
       const status = await page.locator('#request-status').innerText();
+      const reasonCode = item.result.reason?.code || 'APPLIED_MISSING';
       assert.equal(status.includes(item.text), true, status);
       assert.equal(status.includes(en['patch.apply.failed.recheck']), true, status);
+      assert.equal(status.includes(reasonCode), false, status);
+      assert.equal(status.includes(`(${reasonCode})`), false, status);
+      assert.equal(await page.locator('#request-status').getAttribute('data-reason-code'), reasonCode);
+      assert.equal(warnings.includes(reasonCode), true, warnings.join(' | '));
       assert.equal(status.includes('Completed'), false, status);
       assert.equal(status.includes('Generated project'), false, status);
       assert.notEqual(await page.locator('[data-step="circuit.draft"]').getAttribute('data-state'), 'done');
@@ -1645,6 +1735,9 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       document.querySelector('#apply-remove-components-confirm')?.hidden === true
       && document.querySelector('#patch-approval-status')?.textContent === busy
     ), en['request.project-busy']);
+    const busyFocus = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName || '');
+    assert.notEqual(busyFocus, 'patch-approval-status', busyFocus);
+    assert.notEqual(busyFocus, 'BODY', busyFocus);
     await page.evaluate(() => {
       window.__holdRequest = false;
       window.__heldRequest.emit();
@@ -1705,6 +1798,58 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
   }
 });
 
+test('closed apply gate moves focus to the approval status instead of body', async (t) => {
+  const { en, ko } = await removalConfirmCopy();
+  for (const locale of ['en-US', 'ko-KR']) {
+    for (const theme of ['light', 'dark']) {
+      const opened = await openApprovalPanel(t, locale);
+      if (!opened) return;
+      const { page, context, pageErrors } = opened;
+      const copy = locale.startsWith('ko') ? ko : en;
+      try {
+        await page.evaluate((next) => {
+          document.documentElement.dataset.theme = next;
+        }, theme);
+        await sendRemovalPreview(page);
+        await page.waitForFunction(() => {
+          const dialog = document.querySelector('#apply-remove-components-confirm');
+          return dialog && dialog.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
+        });
+        await page.evaluate(() => { window.__inspectionDigest = 'ffffeeee1111'; });
+        await page.evaluate(() => {
+          window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+        });
+        await page.waitForFunction((stale) => (
+          document.querySelector('#apply-remove-components-confirm')?.hidden === true
+          && document.querySelector('#patch-approval-status')?.textContent === stale
+          && document.activeElement?.id === 'patch-approval-status'
+        ), copy['patch.stale']);
+        const focus = await page.evaluate(() => {
+          const active = document.activeElement;
+          const status = document.querySelector('#patch-approval-status');
+          const button = document.querySelector('#approve-patch-button');
+          return {
+            activeId: active?.id || active?.tagName || '',
+            activeIsBody: active === document.body,
+            activeIsStatus: active === status,
+            tabIndex: status?.tabIndex ?? null,
+            insideLive: Boolean(status?.closest('[aria-live], [role="status"], [role="alert"]')),
+            applyDisabled: button?.disabled === true
+          };
+        });
+        assert.equal(focus.activeIsBody, false, `${locale}/${theme} focus is ${focus.activeId}`);
+        assert.equal(focus.activeIsStatus, true, `${locale}/${theme} focus is ${focus.activeId}`);
+        assert.equal(focus.tabIndex, -1, `${locale}/${theme} status tabindex`);
+        assert.equal(focus.insideLive, false, `${locale}/${theme} status is inside a live region`);
+        assert.equal(focus.applyDisabled, true, `${locale}/${theme} Apply stays disabled`);
+        assert.deepEqual(pageErrors, []);
+      } finally {
+        await context.close();
+      }
+    }
+  }
+});
+
 test('Korean apply failures use the same reason codes', async (t) => {
   const opened = await openApprovalPanel(t, 'ko-KR');
   if (!opened) return;
@@ -1720,6 +1865,8 @@ test('Korean apply failures use the same reason codes', async (t) => {
     await page.waitForFunction((needle) => document.querySelector('#request-status')?.textContent?.includes(needle), ko['patch.apply.failed.PATCH_STALE']);
     const status = await page.locator('#request-status').innerText();
     assert.equal(status.includes(ko['patch.apply.failed.recheck']), true, status);
+    assert.equal(status.includes('PATCH_STALE'), false, status);
+    assert.equal(await page.locator('#request-status').getAttribute('data-reason-code'), 'PATCH_STALE');
     assert.equal(status.includes('완료'), false, status);
     assert.equal(status.includes('프로젝트를 생성했어요'), false, status);
     assert.equal(await page.locator('#request-status').getAttribute('data-state'), 'failed');
@@ -1734,22 +1881,38 @@ test('ERC summary avoids a zero error count when violations exist or the result 
     {
       locale: 'en-US',
       erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }] },
-      summary: 'ERC found 1 items to review.'
+      summary: 'ERC found 1 item to review.',
+      once: false
+    },
+    {
+      locale: 'en-US',
+      erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }, { message: 'Pin 5 of U2 is not driven' }] },
+      summary: 'ERC found 2 items to review.',
+      once: false
     },
     {
       locale: 'ko-KR',
       erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }] },
-      summary: 'ERC 결과에 확인할 항목 1개가 있어요'
+      summary: 'ERC 결과에 확인할 항목 1개가 있어요.',
+      once: false
+    },
+    {
+      locale: 'ko-KR',
+      erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }, { message: 'Pin 5 of U2 is not driven' }] },
+      summary: 'ERC 결과에 확인할 항목 2개가 있어요.',
+      once: false
     },
     {
       locale: 'en-US',
       erc: { ok: false, errorCount: 0 },
-      summary: 'The ERC result is incomplete. Run ERC again.'
+      summary: 'The ERC result is incomplete. Run ERC again.',
+      once: true
     },
     {
       locale: 'ko-KR',
       erc: { ok: false, errorCount: 0 },
-      summary: 'ERC 결과가 불완전해요. ERC를 다시 실행해 주세요.'
+      summary: 'ERC 결과가 불완전해요. ERC를 다시 실행해 주세요.',
+      once: true
     }
   ];
   for (const item of cases) {
@@ -1765,14 +1928,23 @@ test('ERC summary avoids a zero error count when violations exist or the result 
       const shown = await page.evaluate(() => {
         const summary = document.querySelector('#patch-erc .erc-h span:nth-child(2)');
         const why = document.querySelector('#apply-why');
+        const card = document.querySelector('#patch-approval-card')?.innerText ?? '';
         return {
           summary: summary?.textContent ?? '',
           why: why?.textContent ?? '',
-          erc: document.querySelector('#patch-erc')?.innerText ?? ''
+          whyHidden: why?.hidden === true,
+          erc: document.querySelector('#patch-erc')?.innerText ?? '',
+          cardCount: card.split(summary?.textContent ?? '\u0000').length - 1
         };
       });
       assert.equal(shown.summary, item.summary, `${item.locale} summary ${shown.summary}`);
-      assert.equal(shown.why, item.summary, `${item.locale} why ${shown.why}`);
+      if (item.once) {
+        assert.equal(shown.why, '', `${item.locale} why repeated ${shown.why}`);
+        assert.equal(shown.whyHidden, true, `${item.locale} why visible`);
+        assert.equal(shown.cardCount, 1, `${item.locale} card repeated ${shown.cardCount} times`);
+      } else {
+        assert.equal(shown.why, item.summary, `${item.locale} why ${shown.why}`);
+      }
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.summary), false, shown.summary);
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.why), false, shown.why);
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.erc), false, shown.erc);
