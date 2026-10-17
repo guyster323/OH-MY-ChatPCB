@@ -14,6 +14,7 @@ import {
   renderProjectSymbolTable,
   renderSpiceFixture
 } from '../kicad/project-generator.js';
+import { isLoneMilliResistorSuffix } from '../kicad/resistor-ohms.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { assertInspectionTree, assertUnlinkedAncestors } from './inspection-copy.js';
 import { assertSafeProjectDir } from './project-workspace.js';
@@ -29,20 +30,43 @@ export async function generateMcuPeripheralProject({
   }
 
   const guard = allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {};
-  // Reject escapes, dangling links, and untrusted symlink ancestors before mkdir.
+  // Reject escapes, dangling links, and untrusted symlink ancestors before any directory is created.
   assertSafeProjectDir(projectDir, guard);
   await assertUnlinkedAncestors(projectDir, guard);
-  await mkdir(projectDir, { recursive: true });
-  // Re-check the tree that now exists, including workspace confinement, before writing.
-  await assertInspectionTree(projectDir, guard);
   const conversation = await loadCircuitConversation(projectDir).catch(() => null);
   const drafted = applyDiscreteLedSpec(applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation));
   return writeGeneratedProject({
     projectDir,
-    spec: drafted,
+    spec: stampLoneMilliStatusResistor(drafted, prompt),
     projectName,
     allowedWorkspaceRoot
   });
+}
+
+// A lone m (4m7, 1m) is not a value. Put it on the status LED resistor so SPICE
+// throws before writeGeneratedProject creates the directory. 10mA and 4M7 do not match.
+function loneMilliResistorToken(prompt) {
+  const text = String(prompt ?? '').normalize('NFKC');
+  const pattern = /(?<![\w.])(\d+m\d+|\d+(?:\.\d+)?\s*m)(?![\w])/g;
+  for (const match of text.matchAll(pattern)) {
+    if (isLoneMilliResistorSuffix(match[1])) return match[1].replace(/\s+/g, '');
+  }
+  return null;
+}
+
+function stampLoneMilliStatusResistor(spec, prompt) {
+  const peripherals = Array.isArray(spec?.peripherals) ? spec.peripherals : null;
+  if (!peripherals?.some((item) => item?.kind === 'status-led')) return spec;
+  const token = loneMilliResistorToken(prompt);
+  if (!token) return spec;
+  let found = false;
+  const next = peripherals.map((item) => {
+    if (item?.kind !== 'status-led-resistor') return item;
+    found = true;
+    return { ...item, value: token };
+  });
+  if (!found) next.push({ kind: 'status-led-resistor', value: token });
+  return { ...spec, peripherals: next };
 }
 
 export async function writeGeneratedProject({

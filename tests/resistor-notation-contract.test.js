@@ -3,7 +3,14 @@ import test from 'node:test';
 
 import { parseResistorOhms } from '../src/kicad/resistor-ohms.js';
 import { spiceResistorOhms } from '../src/kicad/project-generator.js';
-import { classifyExistingProjectRequest } from '../src/workflow/existing-project-edit.js';
+import { parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
+import { tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
+import {
+  applyExistingProjectEdit,
+  classifyExistingProjectRequest,
+  resistorUnitlessMessage,
+  resistorValueAmbiguousMessage
+} from '../src/workflow/existing-project-edit.js';
 
 // Rows from /workspace/r2/lint/c8b-notation.mjs and lint-plan.md §2-1.
 // A leading sign is part of the resistor value. ± before a percent is tolerance.
@@ -167,6 +174,7 @@ test('a unitless number is ohms only when one clean resistor target is named', (
   const accepted = [
     ['LED 저항 330으로', 330, '330Ω'],
     ['change the LED resistor to 330', 330, '330Ω'],
+    ['change R1 to 470', 470, '470Ω'],
     ['R3 330으로', 330, '330Ω'],
     ['LED resistor 4700', 4700, '4.7k'],
     ['set R3 to 1000000', 1_000_000, '1M']
@@ -197,11 +205,275 @@ test('a unitless number is ohms only when one clean resistor target is named', (
   assert.match(low.message ?? '', /1Ω to 10MΩ/);
   assert.match(low.message ?? '', /1Ω~10MΩ/);
 
-  for (const prompt of ['LED 저항 0603', '330으로 바꿔줘', 'LED 330']) {
+  const unitHint = resistorUnitlessMessage();
+  for (const prompt of ['330으로 바꿔줘', 'LED 330', 'LED 저항 330 470']) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
     assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', prompt);
     assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, unitHint, prompt);
   }
+
+  const packageOnly = classifyExistingProjectRequest('LED 저항 0603', SPEC);
+  assert.equal(packageOnly.mode, 'refuse');
+  assert.equal(packageOnly.code, undefined);
+  assert.equal(packageOnly.message, undefined);
+  for (const prompt of ['LED 저항 1.000', 'LED 저항 -10', 'LED 저항 4,7', 'LED 저항 +330']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', prompt);
+    assert.equal(decision.message?.includes('Add a unit'), false, prompt);
+  }
+});
+
+const MINUS_SIGN = '\u2212';
+
+function resistanceValues(prompt) {
+  return tokenizeQuantities(prompt).tokens
+    .filter((token) => token.kind === 'resistance')
+    .map((token) => token.value);
+}
+
+// One row, three entry points. `differs` is the intentional gap between them.
+const SHARED_ROWS = [
+  {
+    id: '4m7',
+    token: '4m7',
+    parse: null,
+    editPrompt: 'change R1 to 4m7',
+    edit: { code: 'RESISTOR_VALUE_INVALID', hint: /Use M for megaohms/ },
+    scanPrompt: '4m7',
+    scan: { unparseable: true, fault: 'milli', resistance: [] },
+    discretePrompt: 'LED 5V 4m7',
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor', hint: /Use M for megaohms/ }
+  },
+  {
+    id: '2m2',
+    token: '2m2',
+    parse: null,
+    editPrompt: 'LED 저항 2m2',
+    edit: { code: 'RESISTOR_VALUE_INVALID', hint: /메가옴은 M을 써 주세요/ },
+    scanPrompt: '2m2',
+    scan: { unparseable: true, fault: 'milli', resistance: [] },
+    discretePrompt: '5V에 LED 2m2 저항',
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor', hint: /메가옴은 M을 써 주세요/, korean: true }
+  },
+  {
+    id: 'signed-10',
+    token: '-10 ohm',
+    parse: null,
+    editPrompt: 'change R1 to -10 ohm',
+    edit: { code: 'RESISTOR_VALUE_INVALID' },
+    scanPrompt: '-10 ohm',
+    scan: { unparseable: true, fault: 'invalid', resistance: [] },
+    discretePrompt: 'LED 5V -10 ohm',
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor', hint: /not valid/ }
+  },
+  {
+    id: 'unicode-minus',
+    token: `${MINUS_SIGN}10`,
+    parse: null,
+    editPrompt: `change R1 to ${MINUS_SIGN}10`,
+    edit: { code: 'RESISTOR_VALUE_INVALID' },
+    scanPrompt: `${MINUS_SIGN}10`,
+    scan: { unparseable: true, fault: 'invalid', resistance: [] },
+    discretePrompt: `LED 5V ${MINUS_SIGN}10`,
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor' },
+    differs: 'The new-project path used to drop U+2212 and ask whether 10 was a resistor. The sign is now part of the value on every path.'
+  },
+  {
+    id: 'plus-minus-ohm',
+    token: '±10 ohm',
+    parse: null,
+    editPrompt: 'change R1 to ±10 ohm',
+    edit: { code: 'RESISTOR_VALUE_INVALID' },
+    scanPrompt: '±10 ohm',
+    scan: { unparseable: true, fault: 'invalid', resistance: [] },
+    discretePrompt: 'LED 5V ±10 ohm',
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor' }
+  },
+  {
+    id: 'plus-330',
+    token: '+330',
+    parse: null,
+    editPrompt: 'LED 저항 +330',
+    edit: { code: 'RESISTOR_VALUE_INVALID' },
+    scanPrompt: '+330',
+    scan: { unparseable: true, fault: 'invalid', resistance: [] },
+    discretePrompt: 'LED 5V +330',
+    discrete: { refused: true, code: 'discrete-led-invalid-resistor' },
+    differs: 'parseResistorOhms("+330") is null. The tokenizer must not keep the bare E24 tail 330.'
+  },
+  {
+    id: 'tolerance',
+    token: '330Ω ±5%',
+    parse: null,
+    editPrompt: 'change R1 to 330Ω ±5%',
+    edit: { ohms: 330 },
+    scanPrompt: '330Ω ±5%',
+    scan: { unparseable: false, fault: null, resistance: [330] },
+    discretePrompt: 'LED 5V 330Ω ±5%',
+    discrete: { refused: false, ohms: 330, explicit: true },
+    differs: '± followed by % is a tolerance. The value parsers see the whole string and return null; the edit and new-project paths keep 330Ω.'
+  },
+  {
+    id: 'tolerance-only',
+    token: '±5%',
+    parse: null,
+    scanPrompt: '±5%',
+    scan: { unparseable: false, fault: null, resistance: [] },
+    discretePrompt: 'LED 5V ±5%',
+    discrete: { refused: false, ohms: 300, explicit: false },
+    differs: 'A tolerance with no resistor value is not a signed resistor. The new-project path keeps the calculated series resistor.'
+  },
+  {
+    id: 'zero',
+    token: '0',
+    parse: 0,
+    spice: null,
+    editPrompt: 'change R1 to 0',
+    edit: { code: 'RESISTOR_VALUE_INVALID', hint: /1Ω to 10MΩ/ },
+    scanPrompt: 'LED 5V 0',
+    scan: { unparseable: false, fault: null, resistance: [0] },
+    discretePrompt: 'LED 5V 0',
+    discrete: { refused: true, code: 'discrete-led-resistor-too-small' },
+    differs: 'parseResistorOhms("0") is "0" so the token stays visible. SPICE returns null. The edit path refuses by range. The new-project path refuses below 1Ω. Bare 0 is not dropped and is not the 300Ω default.'
+  },
+  {
+    id: 'zero-r',
+    token: '0R',
+    parse: 0,
+    spice: null,
+    editPrompt: 'change R1 to 0R',
+    edit: { code: 'RESISTOR_VALUE_INVALID', hint: /1Ω to 10MΩ/ },
+    scanPrompt: '0R',
+    scan: { unparseable: false, fault: null, resistance: [0] },
+    discretePrompt: 'LED 5V 0R',
+    discrete: { refused: true, code: 'discrete-led-resistor-too-small' },
+    differs: 'parseResistorOhms("0R") is "0". Every entry point refuses it by the 1Ω–10MΩ rule. The new-project code stays discrete-led-resistor-too-small.'
+  },
+  {
+    id: 'bare-e24',
+    token: '330',
+    parse: 330,
+    editPrompt: 'LED 330',
+    edit: { code: 'RESISTOR_VALUE_INVALID', hint: /Add a unit/ },
+    scanPrompt: 'LED 330',
+    scan: { unparseable: false, fault: null, resistance: [330] },
+    discretePrompt: 'LED 330',
+    discrete: { refused: false, ohms: 330, explicit: true },
+    differs: 'Bare E24 integers of at least 100 are a resistor on the new-project path (#20). The edit path has no resistor target here, so the same digits stay unitless and are refused with the unit hint.'
+  },
+  {
+    id: 'unitless-target',
+    token: '470',
+    parse: 470,
+    editPrompt: 'change R1 to 470',
+    edit: { ohms: 470 },
+    scanPrompt: '470',
+    scan: { unparseable: false, fault: null, resistance: [470] },
+    discretePrompt: 'LED 5V 470',
+    discrete: { refused: false, ohms: 470, explicit: true },
+    differs: 'The edit path accepts one clean unitless number only when a resistor target is named. The new-project path accepts bare 470 because it is an E24 value (#20). Applying the edit still writes the status-LED series resistor, not schematic R1.'
+  },
+  {
+    id: 'two-unitless',
+    token: '330',
+    editPrompt: 'LED 저항 330 470',
+    edit: { code: 'RESISTOR_VALUE_INVALID', hint: /Add a unit/ },
+    discretePrompt: 'LED 5V 330 470',
+    discrete: { refused: true, code: 'discrete-led-ambiguous-resistor' },
+    differs: 'Two unitless numbers on the edit path ask for a unit. On the new-project path both are E24 resistors, so the request asks which series resistor.'
+  },
+  {
+    id: 'two-values',
+    token: '330Ω',
+    parse: 330,
+    editPrompt: 'set R3 330Ω 680Ω',
+    edit: { code: 'RESISTOR_VALUE_AMBIGUOUS', message: resistorValueAmbiguousMessage('R3', ['330Ω', '680Ω']) },
+    discretePrompt: 'LED 5V 330Ω 680Ω',
+    discrete: { refused: true, code: 'discrete-led-ambiguous-resistor' },
+    differs: 'Two valued tokens and no transition marker: the edit path asks which value the named ref should use. The new-project path asks which series resistor (discrete-led-ambiguous-resistor). Nothing is edited.'
+  }
+];
+
+function assertSharedRow(row) {
+  if (Object.prototype.hasOwnProperty.call(row, 'parse')) {
+    const parsed = asNumber(parseResistorOhms(row.token));
+    if (row.parse == null) assert.equal(parsed, null, row.id);
+    else assert.ok(close(parsed, row.parse), `${row.id} parse ${parsed}`);
+    const spice = asNumber(spiceResistorOhms(row.token));
+    const spiceExpected = Object.prototype.hasOwnProperty.call(row, 'spice') ? row.spice : row.parse;
+    if (spiceExpected == null) assert.equal(spice, null, `${row.id} spice`);
+    else assert.ok(close(spice, spiceExpected), `${row.id} spice ${spice}`);
+  }
+  if (row.edit) {
+    const decision = classifyExistingProjectRequest(row.editPrompt, SPEC);
+    if (row.edit.ohms != null) {
+      assert.equal(decision.mode, 'merge', row.id);
+      assert.equal(decision.edit?.kind, 'resistor', row.id);
+      assert.ok(close(decision.edit?.ohms, row.edit.ohms), `${row.id} edit ${decision.edit?.ohms}`);
+    } else {
+      assert.equal(decision.mode, 'refuse', row.id);
+      assert.equal(decision.code, row.edit.code, row.id);
+      assert.equal(decision.edit, undefined, row.id);
+      if (row.edit.hint) assert.match(decision.message ?? '', row.edit.hint, row.id);
+      if (row.edit.message) assert.equal(decision.message, row.edit.message, row.id);
+    }
+  }
+  if (row.scan) {
+    const scan = tokenizeQuantities(row.scanPrompt);
+    assert.equal(scan.unparseable, row.scan.unparseable, row.id);
+    assert.equal(scan.resistorFault ?? null, row.scan.fault, row.id);
+    assert.deepEqual(resistanceValues(row.scanPrompt), row.scan.resistance, row.id);
+  }
+  if (row.discrete) {
+    const led = parseDiscreteLedRequest(row.discretePrompt);
+    assert.ok(led, row.id);
+    const blocker = led.reviewBlockers[0];
+    if (row.discrete.refused) {
+      assert.equal(led.refused, true, row.id);
+      assert.equal(led.resistanceOhms, null, row.id);
+      assert.equal(led.resistorValue, null, row.id);
+      assert.equal(blocker?.code, row.discrete.code, `${row.id} ${blocker?.code}`);
+      if (row.discrete.hint) assert.match(`${blocker?.en}\n${blocker?.ko}`, row.discrete.hint, row.id);
+      if (row.discrete.korean) assert.equal(blocker?.message, blocker?.ko, row.id);
+      assert.equal(led.resistorExplicit, false, row.id);
+    } else {
+      assert.equal(led.refused, false, `${row.id} ${blocker?.code} ${blocker?.en}`);
+      assert.ok(close(led.resistanceOhms, row.discrete.ohms), `${row.id} ${led.resistanceOhms}`);
+      assert.equal(led.resistorExplicit, row.discrete.explicit, row.id);
+    }
+  }
+  if (row.differs) assert.equal(row.differs.length > 0, true, row.id);
+}
+
+test('one resistor contract covers the parser, the edit path, and the new-project path', () => {
+  for (const row of SHARED_ROWS) assertSharedRow(row);
+});
+
+test('a unitless ohms edit still writes the status LED series resistor', () => {
+  const spec = {
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '1k' },
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω' }
+      ]
+    },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '330' }
+    ]
+  };
+  const decision = classifyExistingProjectRequest('change R1 to 470', spec);
+  assert.equal(decision.mode, 'merge');
+  assert.equal(decision.edit?.ohms, 470);
+  assert.equal(decision.edit?.label, '470Ω');
+  const next = applyExistingProjectEdit(spec, decision.edit);
+  assert.equal(next.schematic.components.find((part) => part.ref === 'R1').value, '1k');
+  assert.equal(next.schematic.components.find((part) => part.ref === 'R3').value, '470Ω');
+  assert.equal(next.peripherals.find((part) => part.kind === 'status-led-resistor').value, '470');
 });
 
 test('three digits after one dot are ambiguous with or without a prefix', () => {

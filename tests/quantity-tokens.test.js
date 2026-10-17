@@ -60,9 +60,48 @@ test('a lone m is not a resistor value', () => {
   for (const prompt of ['4m7', '2m2', '1m', '4.7m', '4.7m ohm']) {
     assert.equal(parseResistorOhms(prompt), null, prompt);
     const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.unparseable, true, prompt);
+    assert.equal(scan.resistorFault, 'milli', prompt);
     assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
     assert.equal(scan.tokens.some((token) => token.value === 4_700_000), false, prompt);
   }
+});
+
+test('a leading sign is not stripped from a resistor token', () => {
+  const minus = '\u2212';
+  for (const prompt of ['-10 ohm', `${minus}10`, '±10 ohm', '+330', '-10', '+10k']) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.unparseable, true, prompt);
+    assert.equal(scan.resistorFault, 'invalid', prompt);
+    assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
+  }
+
+  const tolerance = tokenizeQuantities('330Ω ±5%');
+  assert.equal(tolerance.unparseable, false);
+  assert.equal(tolerance.resistorFault ?? null, null);
+  assert.equal(tolerance.tokens.find((token) => token.kind === 'resistance').value, 330);
+
+  const percentOnly = tokenizeQuantities('±5%');
+  assert.equal(percentOnly.unparseable, false);
+  assert.equal(percentOnly.tokens.some((token) => token.kind === 'resistance'), false);
+
+  const current = tokenizeQuantities('-20mA');
+  assert.equal(current.unparseable, false);
+  assert.equal(current.tokens[0].unit, 'mA');
+  assert.equal(current.tokens[0].value, -20);
+});
+
+test('a bare zero stays a resistor token', () => {
+  const scan = tokenizeQuantities('LED 5V 0');
+  assert.equal(scan.unparseable, false);
+  assert.equal(scan.resistorFault ?? null, null);
+  const resistor = scan.tokens.find((token) => token.kind === 'resistance');
+  assert.equal(resistor?.value, 0);
+  assert.equal(resistor?.raw, '0');
+
+  const current = tokenizeQuantities('0mA').tokens[0];
+  assert.equal(current.unit, 'mA');
+  assert.equal(current.value, 0);
 });
 
 test('an ambiguous thousands dot is not read as a resistor', () => {

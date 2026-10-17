@@ -157,7 +157,7 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
   // Nouns that name the same part ("the I2C connector", "상태 LED") and do not
   // split a list. "상태" is the status adjective in "상태 LED".
   targetListModifiers: Object.freeze([
-    Object.freeze({ id: 'en-noun', re: String.raw`\b(?:connector|header|resistor|part|component)\b` }),
+    Object.freeze({ id: 'en-noun', re: String.raw`\b(?:connector|header|resistor|part|component|status)\b` }),
     Object.freeze({ id: 'ko-noun', re: '커넥터|헤더|저항|부품|상태' })
   ]),
   // One Korean particle between a part and the join ("LED를 그리고 I2C").
@@ -277,6 +277,53 @@ export function resistorValueOutOfRangeMessage() {
   return `${en}\n${ko}`;
 }
 
+// 0, 1, 3, 6, 7, 8 have a batchim. Ω is read 옴, so 330Ω takes 과.
+const VALUE_BATCHIM_DIGITS = new Set(['0', '1', '3', '6', '7', '8']);
+const VALUE_BATCHIM_LATIN = new Set(['l', 'm', 'n', 'r', 'z']);
+
+function valueHasBatchim(value) {
+  const text = String(value ?? '').trim();
+  const last = text.at(-1) ?? '';
+  if (!last) return false;
+  const code = last.codePointAt(0);
+  if (code >= 0xAC00 && code <= 0xD7A3) return (code - 0xAC00) % 28 !== 0;
+  if (last >= '0' && last <= '9') return VALUE_BATCHIM_DIGITS.has(last);
+  if (last === 'Ω' || last === 'Ω' || last === '%') return true;
+  if (/[A-Za-z]/.test(last)) return VALUE_BATCHIM_LATIN.has(last.toLowerCase());
+  return false;
+}
+
+function koreanOhmChoice(labels) {
+  if (labels.length <= 1) return labels.join('');
+  let text = String(labels[0] ?? '');
+  for (let index = 1; index < labels.length; index += 1) {
+    text += `${valueHasBatchim(labels[index - 1]) ? '과' : '와'} ${labels[index]}`;
+  }
+  return text;
+}
+
+function englishOhmChoice(labels) {
+  if (labels.length <= 1) return labels.join('');
+  if (labels.length === 2) return `${labels[0]} or ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')}, or ${labels.at(-1)}`;
+}
+
+export function resistorValueAmbiguousMessage(ref, labels) {
+  const listed = englishOhmChoice(labels);
+  const en = ref
+    ? `Which value should ${ref} use: ${listed}? Nothing was changed.`
+    : `Which value should the resistor use: ${listed}? Nothing was changed.`;
+  const koTarget = ref ?? '저항';
+  const ko = `${koTarget}에 ${koreanOhmChoice(labels)} 중 어느 값을 쓸까요? 아무것도 바꾸지 않았어요.`;
+  return `${en}\n${ko}`;
+}
+
+export function resistorUnitlessMessage() {
+  const en = 'Add a unit (Ω, k, M), e.g. 330Ω. Nothing was changed.';
+  const ko = '단위(Ω, k, M)를 붙여 주세요. 예: 330Ω. 아무것도 바꾸지 않았어요.';
+  return `${en}\n${ko}`;
+}
+
 export function mixedRemovalAndEditMessage() {
   const en = 'Please ask for one change at a time: the removal or the resistor value. Nothing was changed.';
   const ko = '한 번에 한 가지만 요청해 주세요. 부품 빼기와 저항 값 바꾸기 중 하나만요. 아무것도 바꾸지 않았어요.';
@@ -320,7 +367,7 @@ function classifySeparateIntent(editText, intentText, spec) {
   if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  if (fromUser?.kind === 'invalid') return invalidResistor(fromUser.reason);
+  if (fromUser?.kind === 'invalid') return invalidResistor(fromUser);
   if (fromUser) return { mode: 'merge', edit: fromUser };
   if (removal.kind === 'unclear') return unclearRemoval();
   if (isFullDesignPrompt(intentText)) return { mode: 'regenerate', prompt: intentText };
@@ -334,7 +381,7 @@ function classifyEditText(text, spec) {
   if (isMixedRemovalAndEdit(removal, resistor)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  if (resistor?.kind === 'invalid') return invalidResistor(resistor.reason);
+  if (resistor?.kind === 'invalid') return invalidResistor(resistor);
   if (resistor) return { mode: 'merge', edit: resistor };
   if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
@@ -385,12 +432,23 @@ function unclearRemoval() {
   };
 }
 
-function invalidResistor(reason) {
+function invalidResistor(result) {
+  const reason = typeof result === 'string' ? result : result?.reason;
+  if (reason === 'ambiguous') {
+    const labels = (result?.values ?? []).map((amount) => formatResistorLabel(amount.ohmsText));
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_VALUE_AMBIGUOUS',
+      message: resistorValueAmbiguousMessage(result?.ref ?? null, labels)
+    };
+  }
   const message = reason === 'range'
     ? resistorValueOutOfRangeMessage()
     : reason === 'milli'
       ? resistorMilliSuffixMessage()
-      : resistorValueInvalidMessage();
+      : reason === 'unitless'
+        ? resistorUnitlessMessage()
+        : resistorValueInvalidMessage();
   return {
     mode: 'refuse',
     code: 'RESISTOR_VALUE_INVALID',
@@ -1589,9 +1647,14 @@ function resistorEdit(amount) {
   };
 }
 
+function namedResistorRef(text) {
+  const match = /\b[Rr]\d+\b/.exec(text);
+  return match ? match[0].toUpperCase() : null;
+}
+
 // A resistor edit is read only from this text. Candidates go through
 // parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
-// without a transition marker, or a token the parser rejects, are invalid.
+// without a transition marker ask which value. A token the parser rejects is invalid.
 function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const pullupOnly = /pull-?up|풀업|\bcc\d\b/i.test(normalized) && !/led|상태|직렬/i.test(normalized);
@@ -1611,11 +1674,29 @@ function interpretResistor(text) {
   const chosen = destinationAmount(normalized, parsed.valid);
   if (chosen) return resistorEdit(chosen);
   const distinct = new Set(parsed.valid.map((amount) => amount.ohmsText));
-  if (distinct.size > 1) return { kind: 'invalid', valued: true };
+  if (distinct.size > 1) {
+    const values = [];
+    const seen = new Set();
+    for (const amount of parsed.valid) {
+      if (seen.has(amount.ohmsText)) continue;
+      seen.add(amount.ohmsText);
+      values.push(amount);
+    }
+    return {
+      kind: 'invalid',
+      reason: 'ambiguous',
+      valued: true,
+      values,
+      ref: namedResistorRef(normalized)
+    };
+  }
   if (distinct.size === 1) return resistorEdit(parsed.valid[parsed.valid.length - 1]);
 
   const unitless = unitlessResistor(normalized, tokens);
   if (unitless) return unitless;
+
+  const cleanBare = tokens.filter((token) => isBareUnitlessToken(token) && isCleanUnitless(token.raw.trim()));
+  if (cleanBare.length > 0) return { kind: 'invalid', reason: 'unitless', valued: true };
 
   const asked = aboutLed && /(?:으로|로(?!부터|서|써)|->|→|\bto\b|바꿔|변경)/u.test(normalized);
   if (asked) return { kind: 'invalid' };
@@ -1651,7 +1732,7 @@ function unitlessResistor(text, tokens) {
   if (!namesResistorTarget(text, tokens)) return null;
   const candidates = tokens.filter((token) => isBareUnitlessToken(token));
   if (candidates.length === 0) return null;
-  if (candidates.length > 1) return { kind: 'invalid', valued: true };
+  if (candidates.length > 1) return { kind: 'invalid', reason: 'unitless', valued: true };
   const raw = candidates[0].raw.trim();
   if (!isCleanUnitless(raw)) return { kind: 'invalid', valued: true };
   const result = classifyResistorValue(raw);

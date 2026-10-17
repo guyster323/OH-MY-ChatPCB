@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { renderSpiceFixture, spiceResistorOhms } from '../src/kicad/project-generator.js';
 import { normalizeCircuitSpec } from '../src/runtime/circuit-spec.js';
-import { writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
+import { generateMcuPeripheralProject, writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
 
 test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
   const cases = [
@@ -115,6 +115,31 @@ test('SPICE_RESISTOR_INVALID leaves project files uncreated and unchanged', asyn
     for (const projectDir of [fresh, existing]) {
       await assert.rejects(
         () => writeGeneratedProject({ projectDir, spec: projectSpec('abc'), projectName: 'bad_spice' }),
+        (error) => {
+          assert.equal(error.code, 'SPICE_RESISTOR_INVALID');
+          return true;
+        }
+      );
+    }
+    assert.equal(existsSync(fresh), false);
+    assert.deepEqual(await readdir(existing), ['sentinel.txt']);
+    assert.equal(await readFile(path.join(existing, 'sentinel.txt'), 'utf8'), 'keep-me');
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
+test('generateMcuPeripheralProject creates the directory only after SPICE validation', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'chatpcb-spice-mkdir-'));
+  const fresh = path.join(parent, 'fresh');
+  const existing = path.join(parent, 'existing');
+  await mkdir(existing);
+  await writeFile(path.join(existing, 'sentinel.txt'), 'keep-me');
+  const prompt = 'STM32 board with a status LED and a 4m7 resistor';
+  try {
+    for (const projectDir of [fresh, existing]) {
+      await assert.rejects(
+        () => generateMcuPeripheralProject({ projectDir, prompt, projectName: 'bad_spice' }),
         (error) => {
           assert.equal(error.code, 'SPICE_RESISTOR_INVALID');
           return true;

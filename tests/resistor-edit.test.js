@@ -320,21 +320,33 @@ test('mixed sentences keep only real resistor tokens', () => {
     'LED 저항 1/4W로',
     'change the LED resistor to 5.k',
     'LED resistor 5.k',
-    'LED resistor 330 and 470 ohm',
-    'LED 저항 330하고 470옴',
     'LED resistor 1.0.0k',
     'LED resistor 10kk',
     'LED resistor 1,000 ohm',
     'LED resistor 1.000 ohm',
     'LED resistor 4.700 ohm',
     'LED resistor 1.000Ω',
-    'LED resistor -10 ohm',
-    'set R3 330Ω 680Ω'
+    'LED resistor -10 ohm'
   ]) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
     assert.equal(decision.mode, 'refuse', prompt);
     assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', prompt);
     assert.equal(decision.edit, undefined, prompt);
+  }
+
+  const ambiguous = [
+    ['set R3 330Ω 680Ω', 'Which value should R3 use: 330Ω or 680Ω? Nothing was changed.\nR3에 330Ω과 680Ω 중 어느 값을 쓸까요? 아무것도 바꾸지 않았어요.'],
+    ['LED resistor 330 ohm or 680 ohm', 'Which value should the resistor use: 330Ω or 680Ω? Nothing was changed.\n저항에 330Ω과 680Ω 중 어느 값을 쓸까요? 아무것도 바꾸지 않았어요.'],
+    ['LED 저항 330옴 680옴', 'Which value should the resistor use: 330Ω or 680Ω? Nothing was changed.\n저항에 330Ω과 680Ω 중 어느 값을 쓸까요? 아무것도 바꾸지 않았어요.'],
+    ['LED resistor 330 and 470 ohm', 'Which value should the resistor use: 330Ω or 470Ω? Nothing was changed.\n저항에 330Ω과 470Ω 중 어느 값을 쓸까요? 아무것도 바꾸지 않았어요.'],
+    ['LED 저항 330하고 470옴', 'Which value should the resistor use: 330Ω or 470Ω? Nothing was changed.\n저항에 330Ω과 470Ω 중 어느 값을 쓸까요? 아무것도 바꾸지 않았어요.']
+  ];
+  for (const [prompt, message] of ambiguous) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, message, prompt);
   }
 });
 

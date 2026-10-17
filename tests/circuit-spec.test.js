@@ -719,6 +719,7 @@ test('fullwidth digits, glued counts, word pcs, and sub-ohm resistors', () => {
     ['LED 5V 0R', /0R/, /0Ω은/],
     ['LED 5V 0Ω', /0Ω/, /0Ω은/],
     ['LED 5V 0 ohm', /0 ohm/, /0Ω은/],
+    ['LED 5V 0', /0 \(0Ω\)/, /0Ω은/],
     ['LED 5V 0.5Ω', /0\.5Ω/, /0\.5Ω은/],
     ['LED 5V R47', /R47/, /0\.47Ω은/],
     ['엘이디 0Ω', /0Ω/, /0Ω은/],
@@ -2145,6 +2146,9 @@ test('every discrete LED message is one language and Korean has no English words
     'LED 5V 20uA',
     'LED 0 pcs',
     'LED 0Ω',
+    'LED 5V 4m7',
+    '5V에 LED 2m2 저항',
+    'LED 5V -10 ohm',
     '엘이디 0Ω',
     'LED Vf 0',
     'LED',
@@ -2204,6 +2208,7 @@ test('every discrete LED message is one language and Korean has no English words
     'discrete-led-ambiguous-resistor',
     'discrete-led-invalid-count',
     'discrete-led-resistor-too-small',
+    'discrete-led-invalid-resistor',
     'discrete-led',
     'discrete-led-red',
     'discrete-led-green',
@@ -2542,10 +2547,18 @@ function strayKoreanAscii(text) {
     'V', 'mV', 'kV', 'A', 'mA', 'LED', 'RGB', 'WS2812', 'WS2811', 'SK6812', 'APA102',
     'PWM', 'ERC', 'E24', 'KiCad', 'GND', 'VCC'
   ]);
-  return (String(text).match(/[A-Za-z][A-Za-z0-9]*/g) ?? []).filter((word) => {
-    if (allowed.has(word)) return false;
-    return !(word.length === 1 && /[kKmMgGvVaArR]/.test(word));
-  });
+  const found = [];
+  const pattern = /[A-Za-z][A-Za-z0-9]*/g;
+  for (const match of String(text).matchAll(pattern)) {
+    const word = match[0];
+    if (allowed.has(word)) continue;
+    if (word.length === 1 && /[kKmMgGvVaArR]/.test(word)) continue;
+    // "4M7" is a resistor code. The letter run starts after a digit.
+    const before = match.index > 0 ? text[match.index - 1] : '';
+    if (/[0-9.]/.test(before) && /^[kKmMrR]\d*$/.test(word)) continue;
+    found.push(word);
+  }
+  return found;
 }
 
 test('normalizes USB data nets to KiCad-safe profile names', () => {
