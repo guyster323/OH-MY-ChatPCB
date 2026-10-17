@@ -22,12 +22,14 @@ const projectName = 'STM32 센서 보드 01';
 // TODO(#17): the panel's ERC card shows "0 errors, 0 warnings" after apply fails ERC.
 const prompt = 'STM32와 I2C 센서 커넥터, 리셋 버튼, 상태 LED가 있는 회로를 만들어줘';
 const protocolFailurePrompt = 'Simulate a provider protocol failure.';
-const rollbackPrompt = 'Simulate a validation rollback.';
+// An existing project previews a named part edit. This sentence is sent once.
+const rollbackPrompt = 'Change the status LED series resistor to 680 ohm.';
 const zeroCountFailurePrompt = 'Simulate a zero-count validation failure.';
 const skippedValidationPrompt = 'Simulate a skipped validation.';
 const unavailableValidationPrompt = 'Simulate unavailable validation tooling.';
 const delayedSwitchPrompt = 'Simulate a delayed request while switching projects.';
-const previewPrompt = 'Simulate an approval-required patch preview.';
+// A full board description still previews on an existing project, including after Apply.
+const previewPrompt = 'Create an STM32 board with a USB connector, 3.3V regulator, I2C sensor header, reset button, and status LED.';
 let validationMode = 'passed';
 let providerRequestCount = 0;
 let inspectionDigest = 'a'.repeat(64);
