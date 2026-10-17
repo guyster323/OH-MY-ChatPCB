@@ -105,6 +105,12 @@ const REPLIES = [
   }
 ];
 
+function without(source, key) {
+  const copy = { ...source };
+  delete copy[key];
+  return copy;
+}
+
 function shapesFor(success) {
   return [
     ['success', success, true],
@@ -112,11 +118,27 @@ function shapesFor(success) {
     ['null', null, false],
     ['ok-false', { ...success, ok: false }, false],
     ['error', { ...success, error: { code: 'NOPE', message: 'nope' } }, false],
-    ['unknown', { unexpected: true }, false],
+    ['unexpected', { unexpected: true }, false],
     ['applied-string', { ...success, applied: 'true' }, false],
-    ['applied-number', { ...success, applied: 1 }, false]
+    ['applied-number', { ...success, applied: 1 }, false],
+    ['rolled-back', { ...success, rolledBack: true }, false]
   ];
 }
+
+const KINDS = ['project-create', 'project-request', 'project-generate', 'patch-apply', 'inspect', 'auth', 'status'];
+
+// Preview successes are valid project-request replies. Every other pair is cross-kind.
+const ACCEPTED_KINDS = {
+  'project-create': ['project-create'],
+  'project-request': ['project-request'],
+  'project-request preview': ['project-request', 'project-generate'],
+  'project-generate': ['project-request', 'project-generate'],
+  'removal preview': ['project-request', 'project-generate'],
+  'patch-apply': ['patch-apply'],
+  inspect: ['inspect'],
+  auth: ['auth'],
+  status: ['status']
+};
 
 test('daemon replies accept only the daemon success shape', () => {
   assert.equal(typeof normalize, 'function');
@@ -146,6 +168,61 @@ test('daemon replies accept only the daemon success shape', () => {
   assert.equal(outcome(looseGenerate).ok, false);
   assert.equal(outcome(null).ok, false);
   assert.equal(outcome({ ok: false, applied: true }).ok, false);
+
+  const byLabel = Object.fromEntries(REPLIES.map((reply) => [reply.label ?? reply.kind, reply.success]));
+  const omissions = [
+    ['project-create', 'displayName', without(byLabel['project-create'], 'displayName')],
+    ['project-create', 'slug', without(byLabel['project-create'], 'slug')],
+    ['project-create', 'projectDir', without(byLabel['project-create'], 'projectDir')],
+    ['project-request', 'operation', without(byLabel['project-request'], 'operation')],
+    ['project-request', 'applied', without(byLabel['project-request'], 'applied')],
+    ['project-request', 'requiresApproval', without(byLabel['project-request'], 'requiresApproval')],
+    ['project-request', 'conversation', without(byLabel['project-request'], 'conversation')],
+    ['project-request', 'conversation-null', { ...byLabel['project-request'], conversation: null }],
+    ['project-request', 'preview patchId', without(byLabel['project-request preview'], 'patchId')],
+    ['project-request', 'preview files', without(byLabel['project-request preview'], 'files')],
+    ['project-request', 'preview applied', without(byLabel['project-request preview'], 'applied')],
+    ['project-request', 'preview requiresApproval', without(byLabel['project-request preview'], 'requiresApproval')],
+    ['project-generate', 'patchId', without(byLabel['project-generate'], 'patchId')],
+    ['project-generate', 'files', without(byLabel['project-generate'], 'files')],
+    ['project-generate', 'applied', without(byLabel['project-generate'], 'applied')],
+    ['project-generate', 'requiresApproval', without(byLabel['project-generate'], 'requiresApproval')],
+    ['project-generate', 'removal patchId', without(byLabel['removal preview'], 'patchId')],
+    ['project-generate', 'removal files', without(byLabel['removal preview'], 'files')],
+    ['project-generate', 'removal applied', without(byLabel['removal preview'], 'applied')],
+    ['project-generate', 'removal requiresApproval', without(byLabel['removal preview'], 'requiresApproval')],
+    ['patch-apply', 'applied', without(byLabel['patch-apply'], 'applied')],
+    ['inspect', 'ok', without(byLabel.inspect, 'ok')],
+    ['inspect', 'projectDigest', { ...byLabel.inspect, inspection: {} }],
+    ['auth', 'state', without(byLabel.auth, 'state')],
+    ['status', 'provider', without(byLabel.status, 'provider')],
+    ['status', 'status', without(byLabel.status, 'status')]
+  ];
+  for (const [kind, name, value] of omissions) {
+    const verdict = normalize(value, kind);
+    assert.equal(verdict.ok, false, `${kind} missing ${name}`);
+    assert.equal(verdict.kind, kind, `${kind} missing ${name} kind`);
+    assert.equal(outcome(value).ok, false, `${kind} missing ${name} outcome`);
+  }
+
+  for (const reply of REPLIES) {
+    const label = reply.label ?? reply.kind;
+    const accepted = ACCEPTED_KINDS[label];
+    assert.ok(accepted, label);
+    for (const kind of KINDS) {
+      const verdict = normalize(reply.success, kind);
+      assert.equal(verdict.ok, accepted.includes(kind), `${label} fed to ${kind}`);
+      assert.equal(verdict.kind, kind, `${label} fed to ${kind} kind`);
+    }
+  }
+
+  for (const kind of ['nope', '', undefined]) {
+    for (const reply of REPLIES) {
+      const label = reply.label ?? reply.kind;
+      assert.equal(normalize(reply.success, kind).ok, false, `${label} unknown kind ${String(kind)}`);
+    }
+    assert.equal(normalize({ unexpected: true }, kind).ok, false, `unexpected unknown kind ${String(kind)}`);
+  }
 });
 
 test('focus helper does not rewrite the Apply button', async () => {

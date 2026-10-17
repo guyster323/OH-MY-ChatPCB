@@ -92,6 +92,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
     }, 'apply');
     assert.equal(passed.disabled, false);
     assert.equal(passed.ariaDisabled, null);
+    assert.equal(passed.describedBy, null);
     assert.equal(passed.overrideHidden, true);
     assert.equal(passed.whyHidden, true);
     assert.equal(passed.sent.length, 1);
@@ -114,10 +115,21 @@ test('panel apply follows the recorded ERC result', async (t) => {
     }, 'apply');
     assert.equal(failed.disabled, false);
     assert.equal(failed.ariaDisabled, 'true');
+    assert.equal(failed.describedBy, 'apply-why');
     assert.equal(failed.overrideHidden, true);
     assert.equal(failed.whyText, en['patch.apply.blocked-erc'].replace('{count}', '2'));
     assert.equal(failed.ercRole, 'alert');
     assert.deepEqual(failed.sent, []);
+
+    const incomplete = await showPatch(page, {
+      validation: { ok: false, errorCount: 0 }
+    });
+    assert.equal(incomplete.disabled, false);
+    assert.equal(incomplete.ariaDisabled, 'true');
+    assert.equal(incomplete.describedBy, 'patch-erc');
+    assert.equal(incomplete.whyHidden, true);
+    assert.equal(incomplete.ercText.includes(en['erc.incomplete']), true, incomplete.ercText);
+    assert.deepEqual(incomplete.sent, []);
 
     const skipped = await showPatch(page, {
       validation: {
@@ -128,6 +140,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
     }, 'apply');
     assert.equal(skipped.disabled, false);
     assert.equal(skipped.ariaDisabled, 'true');
+    assert.equal(skipped.describedBy, 'apply-why');
     assert.equal(skipped.overrideHidden, false);
     assert.equal(skipped.overrideText, en['patch.apply.without-erc']);
     assert.equal(skipped.whyText, en['patch.apply.skipped']);
@@ -318,6 +331,9 @@ test('panel apply follows the recorded ERC result', async (t) => {
     assert.equal(mismatched.freshnessText, 'stale');
     assert.equal(mismatched.freshnessTitle, en['inspection.freshness.mismatch']);
     assert.equal(mismatched.freshnessTitle.includes('abc'), false);
+    assert.equal(mismatched.disabled, true);
+    assert.equal(mismatched.ariaDisabled, null);
+    assert.equal(mismatched.describedBy, null);
 
     const removed = [{ ref: 'J2', value: 'CONN', libId: 'Device:Conn' }];
     const passingPreview = {
@@ -449,6 +465,7 @@ function showPatch(page, state, click) {
     };
     return {
       ariaDisabled: button.getAttribute('aria-disabled'),
+      describedBy: button.getAttribute('aria-describedby'),
       disabled: button.disabled,
       whyHidden: why.hidden,
       whyText: why.textContent,

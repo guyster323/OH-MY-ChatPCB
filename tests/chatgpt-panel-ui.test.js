@@ -1658,7 +1658,8 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     {
       id: 'EXISTING_COMPONENTS_REMOVED',
       result: { applied: false, validation: { ok: true }, reason: { code: 'EXISTING_COMPONENTS_REMOVED' } },
-      text: en['patch.apply.failed.EXISTING_COMPONENTS_REMOVED']
+      text: en['patch.apply.failed.EXISTING_COMPONENTS_REMOVED'],
+      uncertain: true
     },
     {
       id: 'PATCH_EXPIRED',
@@ -1673,25 +1674,29 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     {
       id: 'missing-applied',
       result: { validation: { ok: true }, operation: 'patched' },
-      text: en['patch.apply.failed.missing']
+      text: en['patch.apply.failed.missing'],
+      uncertain: true
     },
     {
       id: 'canceled',
       result: { canceled: true, applied: false },
       text: en['patch.apply.failed.unknown'],
-      code: 'APPLY_REJECTED'
+      code: 'APPLY_REJECTED',
+      uncertain: true
     },
     {
       id: 'applied-string',
       result: { applied: 'true', validation: { ok: true } },
       text: en['patch.apply.failed.unknown'],
-      code: 'APPLY_REJECTED'
+      code: 'APPLY_REJECTED',
+      uncertain: true
     },
     {
       id: 'applied-number',
       result: { applied: 1, validation: { ok: true } },
       text: en['patch.apply.failed.unknown'],
-      code: 'APPLY_REJECTED'
+      code: 'APPLY_REJECTED',
+      uncertain: true
     }
   ];
   const warnings = [];
@@ -1746,6 +1751,18 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       assert.notEqual(await page.locator('[data-step="circuit.draft"]').getAttribute('data-state'), 'done');
       const reloads = await page.evaluate(() => window.__hostMessages.filter((message) => message?.type === 'project.reload'));
       assert.deepEqual(reloads, []);
+      if (item.uncertain) {
+        const applies = (await approvedApplyCalls(page)).length;
+        await page.waitForFunction(() => {
+          const button = document.querySelector('#approve-patch-button');
+          const card = document.querySelector('#patch-approval-card');
+          return button?.disabled === true
+            && button.getAttribute('aria-disabled') == null
+            && card?.hidden === true;
+        });
+        await page.locator('#approve-patch-button').dispatchEvent('click');
+        assert.equal((await approvedApplyCalls(page)).length, applies, `${item.id} must not reuse the approval`);
+      }
     }
 
     await page.evaluate(() => { window.__patchApplyResult = null; });
@@ -2063,12 +2080,14 @@ test('ERC summary avoids a zero error count when violations exist or the result 
         const summary = document.querySelector('#patch-erc .erc-h span:nth-child(2)');
         const why = document.querySelector('#apply-why');
         const card = document.querySelector('#patch-approval-card')?.innerText ?? '';
+        const button = document.querySelector('#approve-patch-button');
         return {
           summary: summary?.textContent ?? '',
           why: why?.textContent ?? '',
           whyHidden: why?.hidden === true,
           erc: document.querySelector('#patch-erc')?.innerText ?? '',
-          cardCount: card.split(summary?.textContent ?? '\u0000').length - 1
+          cardCount: card.split(summary?.textContent ?? '\u0000').length - 1,
+          describedBy: button?.getAttribute('aria-describedby') ?? ''
         };
       });
       assert.equal(shown.summary, item.summary, `${item.locale} summary ${shown.summary}`);
@@ -2076,8 +2095,10 @@ test('ERC summary avoids a zero error count when violations exist or the result 
         assert.equal(shown.why, '', `${item.locale} why repeated ${shown.why}`);
         assert.equal(shown.whyHidden, true, `${item.locale} why visible`);
         assert.equal(shown.cardCount, 1, `${item.locale} card repeated ${shown.cardCount} times`);
+        assert.equal(shown.describedBy, 'patch-erc', `${item.locale} describedBy ${shown.describedBy}`);
       } else {
         assert.equal(shown.why, item.summary, `${item.locale} why ${shown.why}`);
+        assert.equal(shown.describedBy, 'apply-why', `${item.locale} describedBy ${shown.describedBy}`);
       }
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.summary), false, shown.summary);
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.why), false, shown.why);

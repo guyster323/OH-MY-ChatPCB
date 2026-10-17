@@ -655,8 +655,18 @@ function handleEnvelope(envelope) {
     const verdict = normalizeDaemonReply(result, 'patch-apply');
     if (!verdict.ok) {
       const code = verdict.code;
-      if (code === 'PATCH_STALE' || code === 'PATCH_EXPIRED' || code === 'PATCH_APPROVAL_EXPIRED') {
+      const approvalGone = code === 'PATCH_STALE' || code === 'PATCH_EXPIRED' || code === 'PATCH_APPROVAL_EXPIRED';
+      // Missing, non-boolean, canceled, or removal-rejected applies do not say
+      // whether this approval is still usable. Drop it so Apply cannot retry it.
+      const uncertain = result.canceled === true
+        || result.cancelled === true
+        || code === 'EXISTING_COMPONENTS_REMOVED'
+        || code === 'APPLIED_MISSING'
+        || code === 'APPLY_REJECTED';
+      if (approvalGone) {
         clearPatchApproval(code === 'PATCH_STALE' ? 'patch.stale' : 'patch.expired');
+      } else if (uncertain) {
+        clearPatchApproval();
       }
       renderApplyFailure(verdict);
       inspectActiveProject();
@@ -1131,7 +1141,6 @@ function releaseStaleApproval() {
     patchApprovalStatusEl.dataset.state = 'stale';
     setPatchStatus('patch.stale');
   }
-  if (shouldFocus) focusPatchApprovalStatusNow();
 }
 
 function renderInspectionFailure() {
@@ -1520,8 +1529,8 @@ function updatePatchApprovalDetails() {
     const blocked = applyBlockedReason(erc);
     const repeatedOnCard = blocked.key === 'erc.incomplete';
     approvePatchButtonEl.setAttribute('aria-disabled', 'true');
-    if (repeatedOnCard) approvePatchButtonEl.removeAttribute('aria-describedby');
-    else approvePatchButtonEl.setAttribute('aria-describedby', 'apply-why');
+    // Incomplete ERC is already the text of #patch-erc. Point at that instead of repeating it.
+    approvePatchButtonEl.setAttribute('aria-describedby', repeatedOnCard ? 'patch-erc' : 'apply-why');
     if (applyWhyEl) {
       applyWhyEl.hidden = repeatedOnCard;
       if (repeatedOnCard) {
@@ -2543,12 +2552,8 @@ function patchApplyBusy() {
 function applyGateOpen() {
   const gate = patchApprovalGate();
   const evidenceOpen = Boolean(activeProject) && gate.active && gate.approvedEvidence;
-  if (!evidenceOpen) {
-    if (approvePatchButtonEl && !approvePatchButtonEl.disabled && approvePatchButtonEl.getAttribute('aria-disabled') !== 'true') {
-      approvePatchButtonEl.disabled = true;
-    }
-    return false;
-  }
+  // Disabled is owned by the approval render. This gate only refuses the action.
+  if (!evidenceOpen) return false;
   if (approvePatchButtonEl?.disabled) return false;
   if (approvePatchButtonEl?.getAttribute('aria-disabled') === 'true') return false;
   if (ercBlockState().passed !== true) return false;
@@ -2736,12 +2741,6 @@ function scheduleApprovalStatusFocus() {
     if (!approvePatchButtonEl?.disabled) return;
     focusPatchApprovalStatus();
   }, 0);
-}
-
-function focusPatchApprovalStatusNow() {
-  cancelApprovalStatusFocus();
-  removalClosedForFocus = false;
-  focusPatchApprovalStatus();
 }
 
 function dismissRemovalConfirmForClosedGate() {
