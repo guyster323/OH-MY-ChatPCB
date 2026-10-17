@@ -25,7 +25,8 @@ const protocolFailurePrompt = 'Simulate a provider protocol failure.';
 const rollbackPrompt = 'Change the status LED series resistor to 680 ohm.';
 const zeroCountFailurePrompt = 'Simulate a zero-count validation failure.';
 const skippedValidationPrompt = 'Simulate a skipped validation.';
-const unavailableValidationPrompt = 'Simulate unavailable validation tooling.';
+// After Apply the project has a spec. A full board description still regenerates, and the sentence keeps the fake-validator sentinel.
+const unavailableValidationPrompt = 'Simulate unavailable validation tooling on an STM32 board with a USB connector, 3.3V regulator, and I2C sensor header.';
 const delayedSwitchPrompt = 'Simulate a delayed request while switching projects.';
 // A full board description still previews on an existing project, including after Apply.
 const previewPrompt = 'Create an STM32 board with a USB connector, 3.3V regulator, I2C sensor header, reset button, and status LED.';
