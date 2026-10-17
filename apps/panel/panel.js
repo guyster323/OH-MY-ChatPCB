@@ -1854,7 +1854,9 @@ function classifyInspect(payload, flight) {
   const digest = typeof result.inspection?.projectDigest === 'string'
     ? result.inspection.projectDigest
     : (typeof result.evidenceDigest?.projectDigest === 'string' ? result.evidenceDigest.projectDigest : '');
-  // No transaction record yet. An unchanged project is not proof the apply failed.
+  // No transaction record yet. The after digest is decided first, so a no-change
+  // patch (before === after) still counts as applied. Any other digest, including
+  // a before-only match, stays unconfirmed. An unchanged project is not a failed apply.
   if (typeof flight.afterDigest === 'string' && flight.afterDigest.length > 0 && digest === flight.afterDigest) return 'applied';
   return 'unknown';
 }

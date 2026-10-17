@@ -1911,6 +1911,43 @@ test('closed apply gate moves focus to the approval status instead of body', asy
   }
 });
 
+test('closing a removal dialog focuses the approval status once', async (t) => {
+  const { en } = await removalConfirmCopy();
+  const opened = await openApprovalPanel(t, 'en-US');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => (
+      document.querySelector('#apply-remove-components-confirm')?.hidden === false
+      && document.activeElement?.id === 'cancel-apply-remove-components'
+    ));
+    await page.evaluate(() => {
+      const status = document.querySelector('#patch-approval-status');
+      const focus = status.focus.bind(status);
+      window.__approvalStatusFocusCalls = 0;
+      status.focus = (...args) => {
+        window.__approvalStatusFocusCalls += 1;
+        return focus(...args);
+      };
+    });
+    await page.evaluate(() => { window.__inspectionDigest = 'ffffeeee1111'; });
+    await page.evaluate(() => {
+      window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+    });
+    await page.waitForFunction((stale) => (
+      document.querySelector('#patch-approval-status')?.textContent === stale
+      && document.activeElement?.id === 'patch-approval-status'
+    ), en['patch.stale']);
+    await page.waitForTimeout(50);
+    const calls = await page.evaluate(() => window.__approvalStatusFocusCalls);
+    assert.equal(calls, 1, `approval status focus() was called ${calls} times`);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test('a delayed inspect keeps focus on the approval status', async (t) => {
   const { en, ko } = await removalConfirmCopy();
   for (const locale of ['en-US', 'ko-KR']) {

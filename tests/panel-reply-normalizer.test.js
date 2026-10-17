@@ -169,6 +169,21 @@ test('daemon replies accept only the daemon success shape', () => {
   assert.equal(outcome(null).ok, false);
   assert.equal(outcome({ ok: false, applied: true }).ok, false);
 
+  // requiresApproval:false is a preview success only for a removal. A non-removal
+  // with the same flag is a failure for every preview kind.
+  const nonRemovalFalseApproval = {
+    requiresApproval: false,
+    applied: false,
+    patchId: 'sha256:preview',
+    files: { 'board.kicad_sch': '(kicad_sch)' }
+  };
+  for (const kind of ['project-request', 'project-generate']) {
+    const verdict = normalize(nonRemovalFalseApproval, kind);
+    assert.equal(verdict.ok, false, `non-removal requiresApproval false ${kind}`);
+    assert.equal(verdict.kind, kind, `non-removal requiresApproval false ${kind} kind`);
+  }
+  assert.equal(outcome(nonRemovalFalseApproval).ok, false, 'non-removal requiresApproval false outcome');
+
   const byLabel = Object.fromEntries(REPLIES.map((reply) => [reply.label ?? reply.kind, reply.success]));
   const omissions = [
     ['project-create', 'displayName', without(byLabel['project-create'], 'displayName')],

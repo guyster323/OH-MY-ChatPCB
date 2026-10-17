@@ -100,12 +100,12 @@ async function openPanel(browser, port, lang = 'en') {
   return { page, pageErrors };
 }
 
-async function showReady(page, timeoutMs = 30000) {
-  await page.evaluate(({ preview, timeoutMs: nextTimeout }) => {
+async function showReady(page, timeoutMs = 30000, preview = passedPreview) {
+  await page.evaluate(({ preview: nextPreview, timeoutMs: nextTimeout }) => {
     window.__chatpcbApproveTimeoutMs = nextTimeout;
     window.__sent.length = 0;
-    window.__chatpcbTest.showPatch(preview);
-  }, { preview: passedPreview, timeoutMs });
+    window.__chatpcbTest.showPatch(nextPreview);
+  }, { preview, timeoutMs });
   await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
 }
 
@@ -544,6 +544,100 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
       assert.deepEqual(silentInspect.pageErrors, []);
     } finally {
       await silentInspect.page.close();
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+async function settleEmptyTransactionInspect(page, body, ok) {
+  await clickApply(page);
+  const statusCall = await waitForCall(page, 'project.transaction.status');
+  await emitResult(page, statusCall.id, { transactions: [] });
+  const inspectCall = await waitForCall(page, 'project.inspect');
+  await emitResult(page, inspectCall.id, body, ok);
+  return inspectCall;
+}
+
+test('inspect reconcile confirms only the after digest, in that order', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const neither = {
+    manifest: { freshness: { status: 'current' } },
+    inspection: { projectDigest: 'digest-other' },
+    evidenceDigest: { projectDigest: 'digest-other', matches: false }
+  };
+  const samePreview = { ...passedPreview, evidenceDigest: 'digest-same', afterDigest: 'digest-same' };
+
+  try {
+    const mismatched = await openPanel(browser, port);
+    try {
+      await showReady(mismatched.page, 40);
+      await installHost(mismatched.page);
+      const inspectCall = await settleEmptyTransactionInspect(mismatched.page, neither, true);
+      assert.equal(inspectCall.args.expectedDigest, 'digest-before');
+      await mismatched.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+      const text = await requestText(mismatched.page);
+      assert.equal(text, en['patch.apply.unconfirmed'], text);
+      assert.equal(text.includes(en['patch.apply.applied']), false, text);
+      assert.equal(text.includes(en['patch.apply.failed.recheck']), false, text);
+      assert.deepEqual((await completionSnapshot(mismatched.page)).reloads, []);
+      assert.deepEqual(mismatched.pageErrors, []);
+    } finally {
+      await mismatched.page.close();
+    }
+
+    const rejected = await openPanel(browser, port);
+    try {
+      await showReady(rejected.page, 40);
+      await installHost(rejected.page);
+      await settleEmptyTransactionInspect(rejected.page, {
+        manifest: { freshness: { status: 'current' } },
+        inspection: { projectDigest: 'digest-after' },
+        evidenceDigest: { projectDigest: 'digest-after', matches: false }
+      }, false);
+      await rejected.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+      const text = await requestText(rejected.page);
+      assert.equal(text, en['patch.apply.unconfirmed'], text);
+      assert.equal(text.includes(en['patch.apply.applied']), false, text);
+      assert.deepEqual((await completionSnapshot(rejected.page)).reloads, []);
+      assert.deepEqual(rejected.pageErrors, []);
+    } finally {
+      await rejected.page.close();
+    }
+
+    const unchanged = await openPanel(browser, port);
+    try {
+      await showReady(unchanged.page, 40, samePreview);
+      await installHost(unchanged.page);
+      const inspectCall = await settleEmptyTransactionInspect(unchanged.page, {
+        manifest: { freshness: { status: 'current' } },
+        inspection: { projectDigest: 'digest-same' },
+        evidenceDigest: { projectDigest: 'digest-same', matches: true }
+      }, true);
+      assert.equal(inspectCall.args.expectedDigest, 'digest-same');
+      await unchanged.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      const text = await requestText(unchanged.page);
+      assert.equal(text, en['patch.apply.applied'], text);
+      assert.equal(text.includes(en['patch.apply.unconfirmed']), false, text);
+      assert.equal(text.includes(en['patch.apply.failed.recheck']), false, text);
+      assert.deepEqual((await completionSnapshot(unchanged.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual(unchanged.pageErrors, []);
+    } finally {
+      await unchanged.page.close();
     }
   } finally {
     await new Promise((resolveClose) => server.close(resolveClose));
