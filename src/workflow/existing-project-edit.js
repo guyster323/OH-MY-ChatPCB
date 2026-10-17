@@ -42,10 +42,20 @@ function parseExistingProjectEdit(text) {
   return parseResistorEdit(text);
 }
 
+// "don't remove" / "삭제하지 마" keeps the named part. A delete word counts only
+// after those negated phrases are removed.
+function stripNegatedDeletions(text) {
+  return String(text)
+    .replace(/\b(?:do\s+not|don't|never)\s+(?:remove|delete)\b/gi, ' ')
+    .replace(/(?:삭제|제거)(?:\s*[은는을를])?\s*하\s*지(?:\s*는)?\s*[마말][^\s.]*/g, ' ')
+    .replace(/지우\s*지(?:\s*는)?\s*[마말][^\s.]*/g, ' ');
+}
+
 function parseDeletion(text) {
-  if (!DELETE_WORDS.test(text)) return null;
+  const actionable = stripNegatedDeletions(text);
+  if (!DELETE_WORDS.test(actionable)) return null;
   const targets = [];
-  if (/\bi2c\b|아이\s*2\s*씨|아이씨/i.test(text)) targets.push('i2c');
+  if (/\bi2c\b|아이\s*2\s*씨|아이씨/i.test(actionable)) targets.push('i2c');
   if (targets.length === 0) return null;
   return { kind: 'delete', targets };
 }

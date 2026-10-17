@@ -1180,6 +1180,7 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
     delete args.cancel;
     delete args.patchId;
     delete args.expectedPatchId;
+    delete args.allowRemovedComponents;
     if (selection !== undefined) args.context = selection;
   }
   if (name === 'schematic.generate' && selection !== undefined) {
