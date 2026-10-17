@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
 import { createEnvelope, parseEnvelope } from './envelope.js';
+import { attachWebSocketFrameHandler, encodeServerFrame } from './ws-frames.js';
 import { parseProviderMessage, runProviderProcess } from './provider-process.js';
 import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
 import { callChatGPTResponses } from './providers/chatgpt-provider.js';
@@ -1279,36 +1280,14 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     clients.add(socket);
     sendWebSocketJson(socket, createEnvelope('system.status', { ok: true, service: 'chatpcb-agentd' }));
 
-    socket.on('data', async (buffer) => {
-      const text = decodeWebSocketText(buffer);
-      if (!text) return;
-
-      try {
-        const envelope = parseEnvelope(text);
-        if (envelope.type === 'tool.call') {
-          const callCtx = {
-            ...resolvedDispatchOptions,
-            progressRequestId: envelope.payload.id,
-            emit: (type, payload) => sendWebSocketJson(socket, createEnvelope(type, payload))
-          };
-          sendWebSocketJson(
-            socket,
-            createEnvelope('tool.result', {
-              id: envelope.payload.id,
-              ...(await dispatchToolCall(envelope.payload, callCtx))
-            })
-          );
-        } else if (envelope.type === 'chat.message') {
-          sendWebSocketJson(
-            socket,
-            createEnvelope('agent.delta', {
-              text: 'ChatPCB daemon is online. Send a tool.call envelope to generate, validate, or simulate.'
-            })
-          );
-        }
-      } catch (error) {
-        sendWebSocketJson(socket, createEnvelope('tool.result', failure('BAD_ENVELOPE', error.message)));
+    let enqueue;
+    const frames = attachWebSocketFrameHandler(socket, {
+      onMessage: (_opcode, payload) => {
+        scheduleSocketMessage(socket, payload, resolvedDispatchOptions, enqueue);
       }
+    });
+    enqueue = createSocketMessageQueue(() => {
+      frames.close(1013, 'Pending message limit exceeded.');
     });
 
     socket.on('close', () => clients.delete(socket));
@@ -1620,53 +1599,105 @@ function createWebSocketAccept(key) {
     .digest('base64');
 }
 
-function sendWebSocketJson(socket, payload) {
-  const text = JSON.stringify(payload);
-  const data = Buffer.from(text);
-  let header;
+// provider.cancel must run while an earlier tool call on this socket is still
+// awaiting. Queueing it behind that call would wait for the invoke it aborts.
+// It does not count toward MAX_PENDING_SOCKET_MESSAGES.
+//
+// The cap includes the message that is running. One more message closes the
+// socket with 1013 (Try Again Later): the backlog is temporary overload, and
+// the peer can open a new connection. 1008 would describe a policy violation;
+// 1013 tells the peer to retry.
+export const MAX_PENDING_SOCKET_MESSAGES = 64;
 
-  if (data.length < 126) {
-    header = Buffer.from([0x81, data.length]);
-  } else if (data.length <= 0xffff) {
-    header = Buffer.from([0x81, 126, data.length >> 8, data.length & 0xff]);
-  } else {
-    header = Buffer.alloc(10);
-    header[0] = 0x81;
-    header[1] = 127;
-    header.writeBigUInt64BE(BigInt(data.length), 2);
-  }
-
-  socket.write(Buffer.concat([header, data]));
+function createSocketMessageQueue(onOverflow) {
+  let tail = Promise.resolve();
+  let pending = 0;
+  let overflowed = false;
+  return (task) => {
+    if (overflowed || pending >= MAX_PENDING_SOCKET_MESSAGES) {
+      if (!overflowed) {
+        overflowed = true;
+        onOverflow();
+      }
+      return;
+    }
+    pending += 1;
+    tail = tail.then(task).catch((error) => {
+      console.error('ChatPCB websocket handler failed:', error);
+    }).finally(() => {
+      pending -= 1;
+    });
+  };
 }
 
-function decodeWebSocketText(buffer) {
-  if (buffer.length < 2) return '';
-  const opcode = buffer[0] & 0x0f;
-  if (opcode === 0x8) return '';
+function scheduleSocketMessage(socket, payload, dispatchOptions, enqueue) {
+  const text = payload.toString('utf8');
+  if (!text) return;
 
-  let offset = 2;
-  let length = buffer[1] & 0x7f;
-  if (length === 126) {
-    length = buffer.readUInt16BE(offset);
-    offset += 2;
-  } else if (length === 127) {
-    throw new Error('Large websocket frames are not supported by the ChatPCB v1 daemon.');
+  let envelope;
+  try {
+    envelope = parseEnvelope(text);
+  } catch (error) {
+    enqueue(async () => {
+      sendWebSocketJson(socket, createEnvelope('tool.result', failure('BAD_ENVELOPE', error.message)));
+    });
+    return;
   }
 
-  const masked = (buffer[1] & 0x80) !== 0;
-  let mask;
-  if (masked) {
-    mask = buffer.subarray(offset, offset + 4);
-    offset += 4;
-  }
-
-  const data = Buffer.from(buffer.subarray(offset, offset + length));
-  if (masked) {
-    for (let index = 0; index < data.length; index += 1) {
-      data[index] ^= mask[index % 4];
+  const task = async () => {
+    try {
+      await handleSocketEnvelope(socket, envelope, dispatchOptions);
+    } catch (error) {
+      sendWebSocketJson(socket, createEnvelope('tool.result', {
+        id: envelope.payload?.id,
+        ...failure('BAD_ENVELOPE', error.message)
+      }));
     }
+  };
+
+  if (envelope.type === 'tool.call' && envelope.payload?.name === 'provider.cancel') {
+    task().catch((error) => {
+      console.error('ChatPCB websocket handler failed:', error);
+    });
+    return;
   }
 
-  return data.toString('utf8');
+  enqueue(task);
+}
+
+async function handleSocketEnvelope(socket, envelope, dispatchOptions) {
+  if (envelope.type === 'tool.call') {
+    const callCtx = {
+      ...dispatchOptions,
+      progressRequestId: envelope.payload.id,
+      emit: (type, payload) => sendWebSocketJson(socket, createEnvelope(type, payload))
+    };
+    sendWebSocketJson(
+      socket,
+      createEnvelope('tool.result', {
+        id: envelope.payload.id,
+        ...(await dispatchToolCall(envelope.payload, callCtx))
+      })
+    );
+    return;
+  }
+
+  if (envelope.type === 'chat.message') {
+    sendWebSocketJson(
+      socket,
+      createEnvelope('agent.delta', {
+        text: 'ChatPCB daemon is online. Send a tool.call envelope to generate, validate, or simulate.'
+      })
+    );
+  }
+}
+
+function sendWebSocketJson(socket, payload) {
+  if (!socket || socket.destroyed || socket.writableEnded) return;
+  try {
+    socket.write(encodeServerFrame(0x1, Buffer.from(JSON.stringify(payload))));
+  } catch (error) {
+    console.error('ChatPCB websocket send failed:', error);
+  }
 }
 
