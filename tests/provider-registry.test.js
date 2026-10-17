@@ -1,3 +1,4 @@
+import './setup/isolate-home.mjs';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,17 +14,19 @@ import {
   PROMPT_FILE_PLACEHOLDER
 } from '../src/runtime/provider-registry.js';
 
-test('provider registry declares codex, claude, copilot, and grok adapters', () => {
+test('provider registry declares codex, claude, copilot, grok, and chatgpt adapters', () => {
   const providers = listProviderDefinitions();
 
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ['codex', 'claude', 'copilot', 'grok']
+    ['codex', 'claude', 'copilot', 'grok', 'chatgpt']
   );
   assert.equal(getProviderDefinition('codex').command, 'codex');
   assert.equal(getProviderDefinition('claude').command, 'claude');
   assert.equal(getProviderDefinition('copilot').command, 'gh');
   assert.equal(getProviderDefinition('grok').command, 'grok');
+  assert.equal(getProviderDefinition('chatgpt').command, null);
+  assert.equal(getProviderDefinition('chatgpt').requiresAuth, true);
 });
 
 test('provider availability uses injectable command probing', async () => {
