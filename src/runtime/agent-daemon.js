@@ -288,6 +288,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
   }
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call?.args?.prompt);
+    if (error?.code === 'PROJECT_EXISTS') return failure('PROJECT_EXISTS', error.message);
     throw error;
   }
 }
