@@ -40,6 +40,11 @@ function promptFrom(request) {
   return request?.prompt;
 }
 
+function userPromptFrom(request) {
+  if (!request || typeof request !== 'object') return undefined;
+  return typeof request.userPrompt === 'string' ? request.userPrompt : undefined;
+}
+
 function decodeUtf8(bytes, relativePath) {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -400,7 +405,7 @@ export async function createNativeProposal({
     throwIfAborted(signal);
 
     const existingSpec = await readChatPcbManifest(candidateDir);
-    const decision = classifyExistingProjectRequest(prompt, existingSpec);
+    const decision = classifyExistingProjectRequest(prompt, existingSpec, userPromptFrom(request));
     let proposed;
     if (decision.mode === 'refuse') {
       throw coded('PROVIDER_NO_PATCH', modifyRefusalMessage());
@@ -411,7 +416,11 @@ export async function createNativeProposal({
         edit: decision.edit
       });
     } else {
-      proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
+      proposed = await generateProjectImpl({
+        projectDir: candidateDir,
+        prompt: decision.prompt ?? prompt,
+        projectName
+      });
     }
     throwIfAborted(signal);
     if (conversationBytes?.length) {

@@ -181,6 +181,7 @@ function mapApplyResult(result, plan) {
 export async function createSchematicPatchPlan({
   projectDir,
   prompt,
+  userPrompt,
   projectName = 'chatpcb_mcu_peripheral',
   validateProjectImpl = validateProject,
   validateBoardImpl = validateBoard,
@@ -192,7 +193,7 @@ export async function createSchematicPatchPlan({
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
-    request: { prompt },
+    request: { prompt, ...(typeof userPrompt === 'string' ? { userPrompt } : {}) },
     projectName,
     context,
     signal,

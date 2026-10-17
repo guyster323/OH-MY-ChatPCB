@@ -242,6 +242,60 @@ async function assertNegatedRemovalKeepsI2c(prompt) {
   }
 }
 
+function codexPatchRewrite(modelPrompt) {
+  return {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => ({
+      exitCode: 0,
+      stderr: '',
+      events: [
+        createEnvelope('tool.call', {
+          id: 'call_rewritten_patch',
+          name: 'schematic.patch',
+          args: { prompt: modelPrompt }
+        })
+      ]
+    })
+  };
+}
+
+async function withBoardResistor(ohms, fn) {
+  const { projectDir, generated } = await generatedStm32Project();
+  const prompt = `Change the status LED series resistor to ${ohms} ohm.`;
+  const plan = await createSchematicPatchPlan({
+    projectDir,
+    prompt,
+    projectName: 'stm32_i2c',
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
+  try {
+    const applied = await applySchematicPatch({
+      projectDir,
+      prompt,
+      approved: true,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan,
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc,
+      verifyAppliedProjectImpl: passingVerify
+    });
+    assert.equal(applied.applied, true, JSON.stringify(applied.reason));
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    assert.match(schematic, new RegExp(String(ohms)));
+    assert.match(schematic, /I2C_CONNECTOR/);
+    await fn({ projectDir, generated });
+  } finally {
+    await disposeSchematicPatchPlan(plan);
+    await rm(projectDir, { force: true, recursive: true });
+  }
+}
+
 async function generatedStm32Project() {
   const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-modify-'));
   const generated = await generateMcuPeripheralProject({
@@ -538,17 +592,9 @@ test('provider-emitted allowRemovedComponents cannot authorize an I2C removal', 
         ]
       })
     });
-    assert.equal(preview.ok, true, preview.error?.message);
-    assert.equal(preview.result.applied, false);
-    assert.equal(hasI2c(preview.result.components), false);
-    assertBlockedRemoval(preview.result);
-    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
-    const approved = await dispatchToolCall({
-      name: 'schematic.patch',
-      args: { projectDir, approved: true, patchId: preview.result.patchId }
-    }, services);
-    assert.equal(approved.ok, true, approved.error?.message);
-    assertBlockedRemoval(approved.result);
+    assert.equal(preview.ok, false);
+    assert.equal(preview.error?.code, 'PROVIDER_NO_PATCH');
+    assert.match(await readFile(generated.files.schematic, 'utf8'), /I2C_CONNECTOR/);
     assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
   } finally {
     services.patchApprovalRegistry.disposeAll();
@@ -557,7 +603,7 @@ test('provider-emitted allowRemovedComponents cannot authorize an I2C removal', 
   }
 });
 
-test('model-written schematic.patch prompt remove I2C blocks Apply without an override', async () => {
+test('model-written schematic.patch prompt cannot remove I2C when the user kept it', async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();
   const before = await readFile(generated.files.schematic, 'utf8');
@@ -591,21 +637,134 @@ test('model-written schematic.patch prompt remove I2C blocks Apply without an ov
       })
     });
     assert.equal(preview.ok, true, preview.error?.message);
-    assert.equal(hasI2c(preview.result.components), false);
-    assertBlockedRemoval(preview.result);
+    assert.equal(hasI2c(preview.result.components), true, JSON.stringify(preview.result.components));
+    assert.equal(hasOhm680(preview.result.components), true, JSON.stringify(preview.result.components));
+    assert.equal(removalBlocker(preview.result.review), null);
     const approved = await dispatchToolCall({
       name: 'schematic.patch',
       args: { projectDir, approved: true, patchId: preview.result.patchId }
     }, services);
-    assert.equal(approved.ok, true, approved.error?.message);
-    assertBlockedRemoval(approved.result);
-    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+    assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+    assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    assert.match(schematic, /I2C_CONNECTOR/);
+    assert.match(schematic, /680/);
+    assert.notEqual(schematic, before);
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
+
+test('English resistor edit applies 680 ohm on a board that already has the resistor', async () => {
+  const services = await transactionServices();
+  try {
+    await withBoardResistor(330, async ({ projectDir, generated }) => {
+      const before = await readFile(generated.files.schematic, 'utf8');
+      const preview = await dispatchToolCall({
+        id: 'call_en_680',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir,
+          prompt: "Change it to 680 ohm. Don't delete the I2C."
+        }
+      }, {
+        ...services,
+        ...codexPatchRewrite('Change the status LED resistor R3 from 330Ω to 680Ω. Do not delete the I2C.')
+      });
+      assert.equal(preview.ok, true, preview.error?.message);
+      assert.equal(preview.error?.code, undefined);
+      assert.equal(hasI2c(preview.result.components), true, JSON.stringify(preview.result.components));
+      assert.equal(hasOhm680(preview.result.components), true, JSON.stringify(preview.result.components));
+      assert.equal(removalBlocker(preview.result.review), null);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: preview.result.patchId }
+      }, services);
+      assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      assert.match(schematic, /I2C_CONNECTOR/);
+      assert.match(schematic, /680/);
+      assert.equal(schematic.includes('330Ω'), false);
+      assert.notEqual(schematic, before);
+    });
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('Korean keep-I2C edit applies 680 ohm when the model rewrites the negation', async () => {
+  const services = await transactionServices();
+  try {
+    await withBoardResistor(330, async ({ projectDir, generated }) => {
+      const before = await readFile(generated.files.schematic, 'utf8');
+      const preview = await dispatchToolCall({
+        id: 'call_ko_680',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir,
+          prompt: '680옴으로 바꿔줘. I2C는 삭제하지 마'
+        }
+      }, {
+        ...services,
+        ...codexPatchRewrite('기존 프로젝트에서 상태 LED D1의 전류 제한 저항 R3 값만 330Ω에서 680Ω으로 변경하는 편집을 미리보기로 준비하세요. I2C는 절대 삭제하거나 변경하지 마세요.')
+      });
+      assert.equal(preview.ok, true, preview.error?.message);
+      assert.equal(hasI2c(preview.result.components), true, JSON.stringify(preview.result.components));
+      assert.equal(hasOhm680(preview.result.components), true, JSON.stringify(preview.result.components));
+      assert.equal(removalBlocker(preview.result.review), null);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: preview.result.patchId }
+      }, services);
+      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      assert.match(schematic, /I2C_CONNECTOR/);
+      assert.match(schematic, /680/);
+      assert.notEqual(schematic, before);
+    });
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+for (const prompt of ['Delete the I2C connector', 'Remove the I2C connector', 'I2C 커넥터 삭제']) {
+  test(`rewritten tool text still proposes removal for ${prompt}`, async () => {
+    const services = await transactionServices();
+    const { projectDir, generated } = await generatedStm32Project();
+    const before = await readFile(generated.files.schematic, 'utf8');
+    try {
+      const preview = await dispatchToolCall({
+        id: 'call_delete_rewrite',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, {
+        ...services,
+        ...codexPatchRewrite('Delete J2 from the existing project.')
+      });
+      assert.equal(preview.ok, true, preview.error?.message);
+      assert.equal(hasI2c(preview.result.components), false, prompt);
+      assertBlockedRemoval(preview.result);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: preview.result.patchId }
+      }, services);
+      assert.equal(approved.ok, true, approved.error?.message);
+      assertBlockedRemoval(approved.result);
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+    } finally {
+      services.patchApprovalRegistry.disposeAll();
+      await rm(projectDir, { force: true, recursive: true });
+      await rm(services.stateRoot, { force: true, recursive: true });
+    }
+  });
+}
 
 test('allowRemovedComponents exact set applies and a mismatch stays blocked', async () => {
   const prompt = 'Like an ESP32 board, change the status LED resistor to 680 ohm on this STM32 board.';

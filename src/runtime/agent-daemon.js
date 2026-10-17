@@ -315,6 +315,7 @@ async function dispatchSchematicPatch(args, ctx) {
     return previewNativeChange({
       projectDir,
       prompt: args.prompt,
+      userPrompt: args.userPrompt,
       projectName: args.projectName,
       context: args.context ?? args.selection
     }, ctx);
@@ -1181,6 +1182,8 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
     delete args.patchId;
     delete args.expectedPatchId;
     delete args.allowRemovedComponents;
+    // A model must not supply the removal source. The client request is set below.
+    delete args.userPrompt;
     if (selection !== undefined) args.context = selection;
   }
   if (name === 'schematic.generate' && selection !== undefined) {
@@ -1201,12 +1204,16 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
     // on project.request). A rewritten tool prompt can drop a connector or a
     // debug header and leave a missing-swd blocker. Native generation and
     // project.request already keep this prompt, so direct provider.invoke does too.
-    // An existing-project patch may still use a non-empty model prompt: that path
-    // asks for a complete description of the edited board.
+    // An existing-project patch may keep a non-empty model prompt for the edit
+    // text ("from 330Ω to 680Ω"). Removal is classified only from the caller
+    // prompt, passed separately as userPrompt.
     if (name === 'schematic.generate' || !forceProjectDir) {
       args.prompt = prompt;
     } else if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
       args.prompt = prompt;
+    }
+    if (name === 'schematic.patch' && forceProjectDir) {
+      args.userPrompt = prompt;
     }
   }
   if (name === 'project.inspect' && analyzerAdapters !== undefined) {
@@ -1345,7 +1352,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
   };
 }
 
-async function previewNativeChange({ projectDir, prompt, projectName, context }, ctx) {
+async function previewNativeChange({ projectDir, prompt, userPrompt, projectName, context }, ctx) {
   emitProgress(ctx, {
     stage: 'preview',
     sprite: 'draft',
@@ -1371,6 +1378,7 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
     plan = await runWithProjectLock(ctx, projectDir, () => createSchematicPatchPlan({
       projectDir,
       prompt,
+      userPrompt,
       projectName,
       context,
       validateProjectImpl: ctx.validateProjectImpl,

@@ -64,6 +64,22 @@ const CASES = [
   { prompt: 'keep I2C, set LED resistor 680 ohm', mode: 'resistor:680', positive: [], negated: [] },
   { prompt: 'I2C 제거 말고 LED 저항 680옴', mode: 'resistor:680', positive: [], negated: ['i2c'] },
   { prompt: "Change the status LED series resistor to 680 ohm. don't remove I2C.", mode: 'resistor:680', positive: [], negated: ['i2c'] },
+  // One negation covers a coordinated "remove or change" / "삭제하거나 변경" phrase.
+  { prompt: 'I2C는 삭제하거나 변경하지 마세요', mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: 'I2C는 삭제하거나 변경하지 마', mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: 'I2C는 삭제나 변경 하지 마', mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: "don't remove or change I2C", mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: "do not change or remove I2C", mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: '기존 프로젝트에서 상태 LED D1의 전류 제한 저항 R3 값만 330Ω에서 680Ω으로 변경하는 편집을 미리보기로 준비하세요. I2C는 절대 삭제하거나 변경하지 마세요.', mode: 'resistor:680', positive: [], negated: ['i2c'] },
+  // The destination value is the one at to / -> / 으로, otherwise the last value.
+  { prompt: 'change R3 from 330Ω to 680Ω', mode: 'resistor:680', positive: [], negated: [] },
+  { prompt: 'R3 330 ohm -> 680 ohm', mode: 'resistor:680', positive: [], negated: [] },
+  { prompt: 'LED 저항 330옴에서 680옴으로', mode: 'resistor:680', positive: [], negated: [] },
+  { prompt: '상태 LED 저항 R3(현재 330Ω)의 값만 680Ω으로 변경하세요', mode: 'resistor:680', positive: [], negated: [] },
+  { prompt: 'set R3 330Ω 680Ω', mode: 'resistor:680', positive: [], negated: [] },
+  { prompt: 'Delete the I2C connector', mode: 'delete:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'Remove the I2C connector', mode: 'delete:i2c', positive: ['i2c'], negated: [] },
+  { prompt: 'I2C 커넥터 삭제', mode: 'delete:i2c', positive: ['i2c'], negated: [] },
   // Even count of negation markers stays affirmative: "don't not remove" removes I2C.
   { prompt: "don't not remove I2C", mode: 'delete:i2c', positive: ['i2c'], negated: [] },
   { prompt: 'remove I2C', mode: 'delete:i2c', positive: ['i2c'], negated: [] },
@@ -98,6 +114,47 @@ test('deletion intent binds each removal verb to the part in its clause', () => 
   }
 });
 
+test('removal intent follows the original prompt when the tool text was rewritten', () => {
+  const kept = classifyExistingProjectRequest(
+    'remove I2C',
+    SPEC,
+    '680옴으로 바꿔줘. I2C는 삭제하지 마'
+  );
+  assert.equal(modeOf(kept), 'resistor:680');
+
+  const rewrittenKeep = classifyExistingProjectRequest(
+    '기존 프로젝트에서 R3 값만 330Ω에서 680Ω으로 변경하세요. I2C는 삭제하거나 변경하지 마세요.',
+    SPEC,
+    '680옴으로 바꿔줘. I2C는 삭제하지 마'
+  );
+  assert.equal(modeOf(rewrittenKeep), 'resistor:680');
+  assert.deepEqual(targets(classifyDeletionIntents('680옴으로 바꿔줘. I2C는 삭제하지 마'), false), []);
+
+  for (const prompt of ['Delete the I2C connector', 'Remove the I2C connector', 'I2C 커넥터 삭제']) {
+    const decision = classifyExistingProjectRequest('Delete J2 from the existing project.', SPEC, prompt);
+    assert.equal(modeOf(decision), 'delete:i2c', prompt);
+  }
+
+  // A rewritten prompt that is not an edit still regenerates from the tool text.
+  const toolBoard = 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.';
+  const regenerated = classifyExistingProjectRequest(toolBoard, SPEC, 'Add reset button and status LED.');
+  assert.equal(regenerated.mode, 'regenerate');
+  assert.equal(regenerated.prompt, undefined);
+
+  const clientBoard = 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.';
+  const fromClient = classifyExistingProjectRequest('Add a status LED.', SPEC, clientBoard);
+  assert.equal(fromClient.mode, 'regenerate');
+  assert.equal(fromClient.prompt, clientBoard);
+
+  // Removal still comes only from the client, even when the tool text is a full board.
+  const removal = classifyExistingProjectRequest(
+    'STM32 board with USB-C power and UART header.',
+    SPEC,
+    'Delete the I2C connector'
+  );
+  assert.equal(modeOf(removal), 'delete:i2c');
+});
+
 test('deletion checks share one positive and negative vocabulary', () => {
   const positive = DELETION_INTENT_VOCABULARY.positiveVerbs.map((verb) => verb.id);
   assert.deepEqual(positive, ['remove', 'delete', '삭제', '제거', '지워', '지우']);
@@ -113,6 +170,11 @@ test('deletion checks share one positive and negative vocabulary', () => {
     DELETION_INTENT_VOCABULARY.clauseSeparators.some((sep) => sep.id === 'malgo' && sep.negatesLeft),
     true
   );
+  assert.ok(DELETION_INTENT_VOCABULARY.coordinators.some((item) => item.id === 'or'));
+  assert.ok(DELETION_INTENT_VOCABULARY.coordinators.some((item) => item.id === 'hageona'));
+  assert.ok(DELETION_INTENT_VOCABULARY.coordinators.some((item) => item.id === 'na'));
+  assert.ok(DELETION_INTENT_VOCABULARY.coordinatedVerbs.some((item) => item.id === 'change'));
+  assert.ok(DELETION_INTENT_VOCABULARY.coordinatedVerbs.some((item) => item.id === '변경'));
   for (const verb of DELETION_INTENT_VOCABULARY.positiveVerbs) {
     const sample = {
       remove: 'remove I2C',
