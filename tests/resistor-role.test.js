@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   applyExistingProjectEdit,
+  applyMergedProjectEdit,
   classifyExistingProjectRequest,
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
@@ -250,4 +254,147 @@ test('the same LED resistor value is refused before anything is edited', () => {
   assert.equal(byRole.code, 'RESISTOR_VALUE_UNCHANGED');
   assert.equal(byRole.message, resistorValueUnchangedMessage('R5', '330Ω'));
   assert.equal(renamed.schematic.components[0].value, '330Ω');
+});
+
+// R5 is the LED series resistor by role and libId. R3 is an I2C pull-up.
+function renumberedLedSpec() {
+  return {
+    sourcePrompt: 'existing',
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'R3', libId: 'Device:R', value: '4.7k', role: 'i2c-sda-pullup' },
+        { ref: 'R5', libId: 'ChatPCB:LED_RESISTOR', value: '330', role: 'status-led-resistor' },
+        { ref: 'C1', libId: 'Device:C', value: '100n' },
+        { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED', role: 'status-led' }
+      ]
+    },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '330Ω' },
+      { kind: 'i2c-sensor-header' }
+    ],
+    boardProfile: {
+      productionParts: [
+        { ref: 'R3', role: 'i2c-sda-pullup', libId: 'Device:R', value: '4.7k' },
+        { ref: 'R5', role: 'status-led-resistor', libId: 'ChatPCB:LED_RESISTOR', value: '330' }
+      ]
+    }
+  };
+}
+
+function schematicSymbol(ref, libId, value, at) {
+  return [
+    `  (symbol (lib_id "${libId}") (at ${at} 0 0)`,
+    `    (property "Reference" "${ref}" (at ${at} 0 0))`,
+    `    (property "Value" "${value}" (at ${at} 0 0)))`
+  ].join('\n');
+}
+
+test('a renumbered LED resistor is the only part the value is written to', async () => {
+  const spec = renumberedLedSpec();
+  const unsupported = resistorRefUnsupportedMessage('R5');
+  const refused = classifyExistingProjectRequest('change R3 to 680Ω', spec);
+  assert.equal(refused.mode, 'refuse');
+  assert.equal(refused.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(refused.edit, undefined);
+  assert.equal(refused.message, unsupported);
+  assert.match(refused.message, /\(R5\)/);
+  assert.equal(componentValue(spec, 'R3'), '4.7k');
+  assert.equal(componentValue(spec, 'R5'), '330');
+
+  for (const prompt of ['LED 저항 680Ω으로', 'change R5 to 680Ω']) {
+    const before = renumberedLedSpec();
+    const decision = classifyExistingProjectRequest(prompt, before);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.ref, 'R5', prompt);
+    const next = applyExistingProjectEdit(before, decision.edit);
+    assert.equal(componentValue(next, 'R5'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R3'), '4.7k', prompt);
+    assert.equal(componentValue(before, 'R5'), '330', prompt);
+    assert.equal(next.peripherals.find((item) => item.kind === 'status-led-resistor').value, '680', prompt);
+    const pullup = next.boardProfile.productionParts.find((part) => part.ref === 'R3');
+    const series = next.boardProfile.productionParts.find((part) => part.ref === 'R5');
+    assert.equal(pullup.value, '4.7k', prompt);
+    assert.equal(series.value, '680Ω', prompt);
+  }
+
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-r5-led-'));
+  const stored = renumberedLedSpec();
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    schematicSymbol('R3', 'Device:R', '4.7k', 0),
+    schematicSymbol('R5', 'ChatPCB:LED_RESISTOR', '330', 10),
+    schematicSymbol('D1', 'ChatPCB:STATUS_LED', 'STATUS_LED', 20),
+    ')'
+  ].join('\n');
+  const spice = ['* renumbered', 'R3 v3v3 sda 4700', 'RLED v3v3 led 330', '.end', ''].join('\n');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(stored, null, 2)}\n`);
+  await writeFile(path.join(projectDir, 'board.kicad_sch'), schematic);
+  await writeFile(path.join(projectDir, 'board_simulation.cir'), spice);
+  try {
+    const blocked = classifyExistingProjectRequest('change R3 to 680Ω', stored);
+    assert.equal(blocked.code, 'RESISTOR_REF_UNSUPPORTED');
+    assert.equal(await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8'), schematic);
+    assert.equal(await readFile(path.join(projectDir, 'board_simulation.cir'), 'utf8'), spice);
+
+    for (const prompt of ['LED 저항 680Ω으로', 'change R5 to 680Ω']) {
+      await writeFile(path.join(projectDir, 'board.kicad_sch'), schematic);
+      await writeFile(path.join(projectDir, 'board_simulation.cir'), spice);
+      await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(renumberedLedSpec(), null, 2)}\n`);
+      const decision = classifyExistingProjectRequest(prompt, renumberedLedSpec());
+      await applyMergedProjectEdit({
+        projectDir,
+        existingSpec: renumberedLedSpec(),
+        edit: decision.edit
+      });
+      const written = await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8');
+      const netlist = await readFile(path.join(projectDir, 'board_simulation.cir'), 'utf8');
+      assert.equal(schematicRefValue(written, 'R5'), '680Ω', prompt);
+      assert.equal(schematicRefValue(written, 'R3'), '4.7k', prompt);
+      assert.match(netlist, /^RLED v3v3 led 680$/m, prompt);
+      assert.match(netlist, /^R3 v3v3 sda 4700$/m, prompt);
+      const saved = JSON.parse(await readFile(path.join(projectDir, 'board.chatpcb.json'), 'utf8'));
+      assert.equal(saved.schematic.components.find((part) => part.ref === 'R5').value, '680Ω', prompt);
+      assert.equal(saved.schematic.components.find((part) => part.ref === 'R3').value, '4.7k', prompt);
+    }
+  } finally {
+    await rm(projectDir, { force: true, recursive: true });
+  }
+});
+
+function schematicRefValue(schematic, ref) {
+  const match = schematic.match(new RegExp(`\\(property "Reference" "${ref}"[\\s\\S]*?\\(property "Value" "([^"]*)"`));
+  return match?.[1] ?? null;
+}
+
+test('a non-resistor ref is not edited as the LED resistor', () => {
+  const spec = renumberedLedSpec();
+  const unsupported = resistorRefUnsupportedMessage('R5');
+  const rows = [
+    ['change C1 to 470Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change D1 to 680Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['J2 저항 680옴으로', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('J2')]
+  ];
+  for (const [prompt, code, message] of rows) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, code, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R5'), '330', prompt);
+  }
+
+  const withHeader = renumberedLedSpec();
+  withHeader.schematic.components.push({ ref: 'J2', libId: 'Connector_Generic:Conn_01x04', value: 'I2C_CONNECTOR', role: 'i2c-sensor-header' });
+  const namedHeader = classifyExistingProjectRequest('J2 저항 680옴으로', withHeader);
+  assert.equal(namedHeader.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(namedHeader.message, unsupported);
+  assert.equal(withHeader.schematic.components.find((part) => part.ref === 'J2').value, 'I2C_CONNECTOR');
+  assert.equal(componentValue(withHeader, 'R5'), '330');
 });

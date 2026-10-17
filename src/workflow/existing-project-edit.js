@@ -516,14 +516,14 @@ function finishResistor(text, spec, resistor) {
   if (resistor.kind === 'invalid' && resistor.reason !== 'unit-required') {
     return invalidResistor(resistor);
   }
-  const gated = resistorRefDecision(text, spec);
+  const gated = resistorRefDecision(text, spec, resistor);
   if (gated) return gated;
   const foreign = foreignRoleDecision(text, spec, resistor);
   if (foreign) return foreign;
   if (resistor.kind === 'invalid') return invalidResistor(resistor);
   const unchanged = unchangedResistor(spec, resistor);
   if (unchanged) return unchanged;
-  return { mode: 'merge', edit: resistor };
+  return { mode: 'merge', edit: { ...resistor, ref: seriesResistorRef(spec) } };
 }
 
 function invalidResistor(result) {
@@ -1582,19 +1582,6 @@ const FOREIGN_ROLE = /\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|\bUSB\b|\bBOOT\d*\b|\bre
 const PULL_ROLE = /pull[\s-]?downs?|pull[\s-]?ups?|풀업|풀다운/iu;
 const OHM_VALUE_IN_CLAUSE = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[rRkK])\b|\d+(?:\.\d+)?\s*[kKmM]\d*\b|\d+\s*[rR]\d+/iu;
 
-function editTargetResistorRefs(text) {
-  const normalized = String(text ?? '').normalize('NFKC');
-  const refs = resistorReferenceTokens(normalized);
-  if (refs.length < 2) return refs;
-  const masked = maskGuardObjects(normalized);
-  const visible = new Set();
-  for (const match of masked.matchAll(/\bR\d+\b/giu)) visible.add(match[0].toUpperCase());
-  const targets = refs.filter((ref) => visible.has(ref));
-  // Every ref sat in a keep phrase. Ask, instead of guessing which one changes.
-  if (targets.length === 0) return refs;
-  return targets;
-}
-
 function maskGuardObjects(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const chars = normalized.split('');
@@ -1755,17 +1742,45 @@ function currentSeriesOhms(spec) {
   return null;
 }
 
-function resistorRefDecision(text, spec) {
-  const refs = editTargetResistorRefs(text);
-  if (refs.length >= 2) {
-    return {
-      mode: 'refuse',
-      code: 'RESISTOR_REF_AMBIGUOUS',
-      message: resistorRefAmbiguousMessage(refs)
-    };
+function designatorPattern() {
+  return /\b[A-Za-z]{1,3}\d+\b/gu;
+}
+
+function componentDesignators(text) {
+  const normalized = String(text ?? '').normalize('NFKC');
+  const seen = new Set();
+  const refs = [];
+  for (const match of normalized.matchAll(designatorPattern())) {
+    const ref = match[0].toUpperCase();
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    refs.push(ref);
   }
-  if (refs.length !== 1) return null;
-  const token = refs[0];
+  return refs;
+}
+
+// Keep phrases hide the part they name. One visible designator is the target.
+function editTargetDesignators(text) {
+  const normalized = String(text ?? '').normalize('NFKC');
+  const refs = componentDesignators(normalized);
+  if (refs.length < 2) return refs;
+  const masked = maskGuardObjects(normalized);
+  const visible = new Set();
+  for (const match of masked.matchAll(designatorPattern())) visible.add(match[0].toUpperCase());
+  const targets = refs.filter((ref) => visible.has(ref));
+  if (targets.length === 0) return refs;
+  return targets;
+}
+
+function ambiguousResistorRefs(refs) {
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_REF_AMBIGUOUS',
+    message: resistorRefAmbiguousMessage(refs)
+  };
+}
+
+function refusedDesignator(spec, token) {
   const record = refRecord(spec, token);
   if (!record) {
     const shown = displayRef(spec, token);
@@ -1784,6 +1799,26 @@ function resistorRefDecision(text, spec) {
     };
   }
   return null;
+}
+
+function resistorRefDecision(text, spec, resistor) {
+  const refs = editTargetDesignators(text);
+  const rRefs = refs.filter((ref) => /^R\d+$/.test(ref));
+  const others = refs.filter((ref) => !/^R\d+$/.test(ref));
+  if (rRefs.length >= 2) return ambiguousResistorRefs(rRefs);
+  // "상태 LED D1의 저항 R3" names the LED and the resistor. The R-ref is the target.
+  if (rRefs.length === 1) {
+    const decided = refusedDesignator(spec, rRefs[0]);
+    if (decided) return decided;
+    return null;
+  }
+  // A unitless number still asks for a unit. A real value on C1, D1, or J2 does not.
+  if (resistor?.kind !== 'resistor') return null;
+  if (others.length > 1) return ambiguousResistorRefs(others);
+  if (others.length !== 1) return null;
+  const token = others[0];
+  if (!refRecord(spec, token) && foreignRoleKind(maskGuardObjects(text))) return null;
+  return refusedDesignator(spec, token);
 }
 
 const DEDICATED_REMOVAL_ROLES = new Set([
@@ -2133,7 +2168,7 @@ function interpretResistor(text) {
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   const named = namedRefs[0] ?? null;
-  if (!aboutLed && !change && !named) return null;
+  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0) return null;
 
   const tokens = scanResistorTokens(normalized);
   markNonResistorQuantities(tokens, normalized);
@@ -2308,9 +2343,21 @@ export function applyExistingProjectEdit(spec, edit) {
   return next;
 }
 
+function seriesEditRef(spec, edit) {
+  const named = edit?.ref ? String(edit.ref) : '';
+  if (named) return named;
+  return seriesResistorRef(spec);
+}
+
+function componentIsSeriesTarget(spec, component, ref) {
+  if (ref) return String(component?.ref ?? '') === ref;
+  return isEditableLedSeriesResistor(spec, component);
+}
+
 function applyResistorToSpec(spec, edit) {
   const label = edit.label;
   const ohmsText = edit.ohmsText;
+  const ref = seriesEditRef(spec, edit);
   const peripherals = Array.isArray(spec.peripherals) ? spec.peripherals : [];
   let foundResistor = false;
   spec.peripherals = peripherals.map((peripheral) => {
@@ -2325,21 +2372,18 @@ function applyResistorToSpec(spec, edit) {
   });
   if (!foundResistor) spec.peripherals.push({ kind: 'status-led-resistor', value: ohmsText });
   for (const component of spec.schematic?.components ?? []) {
-    if (isStatusLedResistor(component)) component.value = label;
+    if (componentIsSeriesTarget(spec, component, ref)) component.value = label;
   }
   if (Array.isArray(spec.boardProfile?.productionParts)) {
     spec.boardProfile = {
       ...spec.boardProfile,
       productionParts: spec.boardProfile.productionParts.map((part) => (
-        part?.role === 'status-led-resistor' ? { ...part, value: label } : part
+        componentIsSeriesTarget(spec, part, ref) || (!ref && part?.role === 'status-led-resistor')
+          ? { ...part, value: label }
+          : part
       ))
     };
   }
-}
-
-function isStatusLedResistor(component) {
-  if (component?.libId === 'ChatPCB:LED_RESISTOR') return true;
-  return component?.ref === 'R3';
 }
 
 function applyDeletionToSpec(spec, targets) {
@@ -2379,19 +2423,21 @@ export async function applyMergedProjectEdit({ projectDir, existingSpec, edit })
     return writeGeneratedProject({ projectDir, spec: next, projectName });
   }
   if (edit.kind === 'resistor') {
-    if (await schematicHasReference(projectDir, projectName, 'R3')) {
+    const ref = seriesEditRef(next, edit) || seriesEditRef(existingSpec, edit);
+    if (ref && await schematicHasReference(projectDir, projectName, ref)) {
       return writeResistorEdit({
         projectDir,
         spec: next,
         label: edit.label,
-        ohmsText: edit.ohmsText
+        ohmsText: edit.ohmsText,
+        ref
       });
     }
     // Fixture boards draw the LED without a series resistor until this edit asks for one.
     // Regeneration stores the exact ohms text, then the symbol and footprint values
-    // are patched back to the lossless label.
+    // are patched back to the lossless label on the ref the generator assigned.
     const generated = await writeGeneratedProject({ projectDir, spec: next, projectName });
-    await presentResistorLabel(generated, edit.label);
+    await presentResistorLabel(generated, edit.label, seriesResistorRef(generated.spec));
     return generated;
   }
   throw editError(modifyRefusalMessage());
@@ -2414,35 +2460,42 @@ async function projectBaseName(projectDir) {
   return specName.slice(0, -'.chatpcb.json'.length);
 }
 
-async function presentResistorLabel(generated, label) {
-  const schematic = await readFile(generated.files.schematic, 'utf8');
-  const updatedSchematic = replaceReferenceValue(schematic, 'R3', label);
-  if (updatedSchematic !== schematic) await writeFile(generated.files.schematic, updatedSchematic, 'utf8');
-  if (generated.files.board) {
-    await writeOptionalValue(generated.files.board, (text) => replaceReferenceValue(text, 'R3', label));
+async function presentResistorLabel(generated, label, ref) {
+  const target = ref || seriesResistorRef(generated.spec);
+  if (target) {
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    const updatedSchematic = replaceReferenceValue(schematic, target, label);
+    if (updatedSchematic !== schematic) await writeFile(generated.files.schematic, updatedSchematic, 'utf8');
+    if (generated.files.board) {
+      await writeOptionalValue(generated.files.board, (text) => replaceReferenceValue(text, target, label));
+    }
   }
   const spec = generated.spec;
   if (!spec || typeof spec !== 'object') return;
   for (const component of spec.schematic?.components ?? []) {
-    if (isStatusLedResistor(component)) component.value = label;
+    if (componentIsSeriesTarget(spec, component, target)) component.value = label;
   }
   if (Array.isArray(spec.boardProfile?.productionParts)) {
     spec.boardProfile.productionParts = spec.boardProfile.productionParts.map((part) => (
-      part?.role === 'status-led-resistor' ? { ...part, value: label } : part
+      componentIsSeriesTarget(spec, part, target) || (!target && part?.role === 'status-led-resistor')
+        ? { ...part, value: label }
+        : part
     ));
   }
   await writeFile(generated.files.spec, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
 }
 
-async function writeResistorEdit({ projectDir, spec, label, ohmsText }) {
+async function writeResistorEdit({ projectDir, spec, label, ohmsText, ref }) {
+  const target = ref || seriesEditRef(spec, { ref });
+  if (!target) throw editError(modifyRefusalMessage());
   const projectName = await projectBaseName(projectDir);
   const files = projectFiles(projectDir, projectName);
   const schematicPath = files.schematic;
   const schematic = await readFile(schematicPath, 'utf8');
-  const updatedSchematic = replaceReferenceValue(schematic, 'R3', label);
+  const updatedSchematic = replaceReferenceValue(schematic, target, label);
   if (updatedSchematic === schematic) throw editError(modifyRefusalMessage());
   await writeFile(schematicPath, updatedSchematic, 'utf8');
-  await writeOptionalValue(path.join(projectDir, `${projectName}.kicad_pcb`), (text) => replaceReferenceValue(text, 'R3', label));
+  await writeOptionalValue(path.join(projectDir, `${projectName}.kicad_pcb`), (text) => replaceReferenceValue(text, target, label));
   if (ohmsText) {
     await writeOptionalValue(files.spice, (text) => text.replace(
       /^(RLED\s+\S+\s+\S+\s+)\d+(?:\.\d+)?/m,

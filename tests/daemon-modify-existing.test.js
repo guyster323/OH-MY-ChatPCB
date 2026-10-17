@@ -1372,7 +1372,7 @@ test('a named resistor that is not the LED series resistor never calls the provi
     ['change R4 to 470', 'RESISTOR_REF_UNSUPPORTED', supported],
     ['change R9 to 470', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')],
     ['change R1 and R3 to 470', 'RESISTOR_REF_AMBIGUOUS', resistorRefAmbiguousMessage(['R1', 'R3'])],
-    ['change R1 to 4m7', 'RESISTOR_VALUE_INVALID', null]
+    ['change R3 to 4m7', 'RESISTOR_VALUE_INVALID', null]
   ];
   try {
     for (const [index, [prompt, code, message]] of rows.entries()) {
@@ -1394,6 +1394,80 @@ test('a named resistor that is not the LED series resistor never calls the provi
       assert.equal(schematicRefValue(schematic, 'R3'), '330Ω', prompt);
       assert.equal(schematicRefValue(schematic, 'R4'), r4Before, prompt);
       assert.equal(schematicRefValue(schematic, 'R4'), '4.7k', prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('a non-resistor ref never calls the provider', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-non-r-ref-'));
+  const spec = {
+    sourcePrompt: 'existing',
+    mcu: { family: 'STM32' },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '330' }
+    ],
+    schematic: {
+      components: [
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '330Ω', role: 'status-led-resistor' },
+        { ref: 'C1', libId: 'Device:C', value: '100n' },
+        { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED', role: 'status-led' }
+      ]
+    }
+  };
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "ChatPCB:LED_RESISTOR") (at 0 0 0)',
+    '    (property "Reference" "R3" (at 0 0 0))',
+    '    (property "Value" "330Ω" (at 0 0 0)))',
+    '  (symbol (lib_id "Device:C") (at 10 0 0)',
+    '    (property "Reference" "C1" (at 10 0 0))',
+    '    (property "Value" "100n" (at 10 0 0)))',
+    '  (symbol (lib_id "ChatPCB:STATUS_LED") (at 20 0 0)',
+    '    (property "Reference" "D1" (at 20 0 0))',
+    '    (property "Value" "STATUS_LED" (at 20 0 0))))'
+  ].join('\n');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(path.join(projectDir, 'board.kicad_sch'), schematic);
+  let called = false;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      called = true;
+      throw new Error('provider must not be called');
+    }
+  };
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  const rows = [
+    ['change C1 to 470Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change D1 to 680Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['J2 저항 680옴으로', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('J2')]
+  ];
+  try {
+    for (const [index, [prompt, code, message]] of rows.entries()) {
+      const preview = await dispatchToolCall({
+        id: `call_non_r_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(called, false, prompt);
+      assert.equal(preview.ok, false, `${prompt} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.error?.code, code, prompt);
+      assert.equal(preview.error?.message, message, prompt);
+      assert.equal(await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8'), schematic, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '330Ω', prompt);
+      assert.equal(schematicRefValue(await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8'), 'C1'), '100n', prompt);
+      assert.equal(schematicRefValue(await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8'), 'D1'), 'STATUS_LED', prompt);
     }
   } finally {
     services.patchApprovalRegistry.disposeAll();

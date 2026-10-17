@@ -93,7 +93,7 @@ test('lowercase m is refused and uppercase M is mega', () => {
   assertParsed('4.7M', 4.7e6);
   assertParsed('1meg', 1e6);
 
-  for (const prompt of ['change R1 to 4m7', 'LED 저항 1m', 'change R1 to 4.7m ohm', 'change R1 to 4.7m']) {
+  for (const prompt of ['change R3 to 4m7', 'LED 저항 1m', 'change R3 to 4.7m ohm', 'change R3 to 4.7m']) {
     assertEdit(prompt, null, { hint: true });
   }
   assertEdit('change R3 to 4M7', 4.7e6);
@@ -105,12 +105,12 @@ test('thousands separators are not resistor values', () => {
     assertParsed(input, null);
   }
   for (const prompt of [
-    'change R1 to 1,000 ohm',
-    'change R1 to 1.000 ohm',
-    'change R1 to 2.200 ohm',
-    'change R1 to 1 000 ohm',
-    'change R1 to 1.000.000 ohm',
-    'change R1 to 4,7k'
+    'change R3 to 1,000 ohm',
+    'change R3 to 1.000 ohm',
+    'change R3 to 2.200 ohm',
+    'change R3 to 1 000 ohm',
+    'change R3 to 1.000.000 ohm',
+    'change R3 to 4,7k'
   ]) {
     assertEdit(prompt, null);
   }
@@ -137,18 +137,18 @@ test('a leading sign on a resistor value is refused', () => {
   }
 
   for (const prompt of [
-    'change R1 to +10',
-    'change R1 to +10 ohm',
-    `change R1 to ${PLUS_MINUS}10 ohm`,
-    `change R1 to ${MINUS}10`,
-    `change R1 to ${EN_DASH}10`,
-    `change R1 to ${FULLWIDTH_HYPHEN}10`,
-    'change R1 to -10 ohm',
-    `change R1 to ${MINUS}10 ohm`,
-    `change R1 to ${EN_DASH}10 ohm`,
-    `change R1 to ${FULLWIDTH_HYPHEN}10 ohm`,
-    `change R1 to ${MINUS}10k`,
-    'change R1 to +10k',
+    'change R3 to +10',
+    'change R3 to +10 ohm',
+    `change R3 to ${PLUS_MINUS}10 ohm`,
+    `change R3 to ${MINUS}10`,
+    `change R3 to ${EN_DASH}10`,
+    `change R3 to ${FULLWIDTH_HYPHEN}10`,
+    'change R3 to -10 ohm',
+    `change R3 to ${MINUS}10 ohm`,
+    `change R3 to ${EN_DASH}10 ohm`,
+    `change R3 to ${FULLWIDTH_HYPHEN}10 ohm`,
+    `change R3 to ${MINUS}10k`,
+    'change R3 to +10k',
     `LED 저항 ${MINUS}330옴`,
     'LED 저항 +330옴'
   ]) {
@@ -166,12 +166,12 @@ test('a tolerance percent is not a sign on the resistor value', () => {
 
 test('the edit entry keeps 1Ω and 10MΩ and refuses the outside', () => {
   for (const prompt of [
-    'change R1 to 0R5',
-    'change R1 to R47',
-    'change R1 to 0.5 ohm',
-    'change R1 to 10.1M',
-    'change R1 to 22M',
-    'change R1 to 1G'
+    'change R3 to 0R5',
+    'change R3 to R47',
+    'change R3 to 0.5 ohm',
+    'change R3 to 10.1M',
+    'change R3 to 22M',
+    'change R3 to 1G'
   ]) {
     assertEdit(prompt, null);
   }
@@ -273,7 +273,7 @@ const SHARED_ROWS = [
     id: '4m7',
     token: '4m7',
     parse: null,
-    editPrompt: 'change R1 to 4m7',
+    editPrompt: 'change R3 to 4m7',
     edit: { code: 'RESISTOR_VALUE_INVALID', hint: /Use M for megaohms/ },
     scanPrompt: '4m7',
     scan: { unparseable: true, fault: 'milli', resistance: [] },
@@ -295,7 +295,7 @@ const SHARED_ROWS = [
     id: 'signed-10',
     token: '-10 ohm',
     parse: null,
-    editPrompt: 'change R1 to -10 ohm',
+    editPrompt: 'change R3 to -10 ohm',
     edit: { code: 'RESISTOR_VALUE_INVALID' },
     scanPrompt: '-10 ohm',
     scan: { unparseable: true, fault: 'invalid', resistance: [] },
@@ -306,7 +306,7 @@ const SHARED_ROWS = [
     id: 'unicode-minus',
     token: `${MINUS_SIGN}10`,
     parse: null,
-    editPrompt: `change R1 to ${MINUS_SIGN}10`,
+    editPrompt: `change R3 to ${MINUS_SIGN}10`,
     edit: { code: 'RESISTOR_VALUE_INVALID' },
     scanPrompt: `${MINUS_SIGN}10`,
     scan: { unparseable: true, fault: 'invalid', resistance: [] },
@@ -318,7 +318,7 @@ const SHARED_ROWS = [
     id: 'plus-minus-ohm',
     token: '±10 ohm',
     parse: null,
-    editPrompt: 'change R1 to ±10 ohm',
+    editPrompt: 'change R3 to ±10 ohm',
     edit: { code: 'RESISTOR_VALUE_INVALID' },
     scanPrompt: '±10 ohm',
     scan: { unparseable: true, fault: 'invalid', resistance: [] },
@@ -364,7 +364,7 @@ const SHARED_ROWS = [
     token: '0',
     parse: null,
     spice: null,
-    editPrompt: 'change R1 to 0',
+    editPrompt: 'change R3 to 0',
     edit: { code: 'RESISTOR_VALUE_INVALID', hint: /1Ω to 10MΩ/ },
     scanPrompt: 'LED 5V 0',
     scan: { unparseable: true, fault: 'invalid', resistance: [] },
@@ -377,7 +377,7 @@ const SHARED_ROWS = [
     token: '0R',
     parse: null,
     spice: null,
-    editPrompt: 'change R1 to 0R',
+    editPrompt: 'change R3 to 0R',
     edit: { code: 'RESISTOR_VALUE_INVALID', hint: /1Ω to 10MΩ/ },
     scanPrompt: '0R',
     scan: { unparseable: true, fault: 'invalid', resistance: [] },
@@ -588,15 +588,16 @@ test('a named resistor edit changes only the LED series resistor', () => {
   };
   const unsupported = resistorRefUnsupportedMessage('R3');
   const rows = [
+    // Unitless on the wrong ref: the ref is reported before a missing unit.
     ['change R1 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['R1 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['저항 R1 470으로 바꿔줘', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['R1 470Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['저항 R1 470Ω으로 바꿔줘', 'RESISTOR_REF_UNSUPPORTED', unsupported],
     ['change R1 to 1k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['change R4 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['change the I2C pull-up R4 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['change r4 to 470', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['change R9 to 470', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')],
-    ['change r9 to 470', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')]
+    ['change R4 to 470Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change the I2C pull-up R4 to 470Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change r4 to 470Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change R9 to 470Ω', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')],
+    ['change r9 to 470Ω', 'RESISTOR_REF_NOT_FOUND', resistorRefNotFoundMessage('R9')]
   ];
   for (const [prompt, code, message] of rows) {
     const before = structuredClone(spec);
@@ -697,20 +698,30 @@ test('a named resistor edit changes only the LED series resistor', () => {
   assert.equal(sameRef.edit, undefined);
   assert.equal(sameRef.message, resistorUnitRequiredMessage('470'));
 
-  const milli = classifyExistingProjectRequest('change R1 to 4m7', spec);
-  assert.equal(milli.code, 'RESISTOR_VALUE_INVALID');
-  assert.match(milli.message ?? '', /Use M for megaohms/);
-  const milliTwo = classifyExistingProjectRequest('change R1 and R3 to 4m7', spec);
-  assert.equal(milliTwo.code, 'RESISTOR_VALUE_INVALID');
-  assert.match(milliTwo.message ?? '', /Use M for megaohms/);
   assert.equal(componentValue(spec, 'R3'), '330Ω');
+});
+
+test('a bad value on the wrong ref is reported as the value, and a valid value as the ref', () => {
+  // Value check wins, so these two rows are the priority cases. The value rows above name R3.
+  const milli = classifyExistingProjectRequest('change R1 to 4m7', SPEC);
+  assert.equal(milli.mode, 'refuse');
+  assert.equal(milli.code, 'RESISTOR_VALUE_INVALID');
+  assert.equal(milli.edit, undefined);
+  assert.match(milli.message ?? '', /Use M for megaohms/);
+  const zero = classifyExistingProjectRequest('change R1 to 0', SPEC);
+  assert.equal(zero.code, 'RESISTOR_VALUE_INVALID');
+  assert.match(zero.message ?? '', /1Ω to 10MΩ/);
+  const refOnly = classifyExistingProjectRequest('change R1 to 470Ω', SPEC);
+  assert.equal(refOnly.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(refOnly.message, resistorRefUnsupportedMessage('R3'));
+  assert.equal(componentValue(SPEC, 'R3'), '123Ω');
 });
 
 test('three digits after one dot are ambiguous with or without a prefix', () => {
   for (const input of ['1.000k', '1.000옴', '1.000Ω', '4.700k']) assertParsed(input, null);
   assertEdit('LED resistor 1.000k', null);
   assertEdit('LED 저항 1.000옴', null);
-  assertEdit('change R1 to 1.000k', null);
+  assertEdit('change R3 to 1.000k', null);
 });
 
 test('non-E-series labels round-trip through a form the parser accepts', () => {
