@@ -22,6 +22,9 @@ const SPEC = { sourcePrompt: 'existing' };
 // - "LED 삭제하고 I2C는 남겨", "LED 삭제하고 나서 I2C는 유지", and
 //   "LED는 삭제하지만 I2C는 남겨" were refusals. A single clean LED removal
 //   with I2C only kept is removal-candidate:LED.
+// - "LED 또는 I2C 삭제", "remove LED and I2C", "LED 삭제하고 I2C도", and the
+//   other conjunction lists were one removal candidate. Two or more removal
+//   targets in one list now ask which part. I2C is not chosen.
 const CONTRACT = [
   { prompt: 'I2C 삭제하지 마', outcome: 'refuse-clarify', ask: true },
   { prompt: 'I2C 커넥터는 삭제하지 마세요', outcome: 'refuse-clarify', ask: true },
@@ -113,6 +116,26 @@ const CONTRACT = [
   { prompt: 'I2C 지우면 안 돼', outcome: 'refuse-clarify', ask: true },
   { prompt: 'keep I2C and remove the LED', outcome: 'removal-candidate:LED' },
   { prompt: 'remove LED but keep I2C', outcome: 'removal-candidate:LED' },
+  { prompt: 'remove I2C but keep LED', outcome: 'removal-candidate:i2c' },
+  // "and" inside a word is not a conjunction ("standard", "bandgap", "command").
+  { prompt: 'remove the standard LED', outcome: 'removal-candidate:LED' },
+  { prompt: 'delete the bandgap LED', outcome: 'removal-candidate:LED' },
+  { prompt: 'remove the command LED', outcome: 'removal-candidate:LED' },
+  // Two removal targets joined by a conjunction or list. Ask which part.
+  { prompt: 'LED 또는 I2C 삭제', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED 그리고 I2C 삭제', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED 삭제하고 I2C도', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'remove LED and I2C', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'remove LED, I2C', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'remove both LED and I2C', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'remove LED or I2C', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED/I2C 삭제', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED랑 I2C 삭제', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED와 I2C 삭제', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED하고 I2C 삭제', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'LED 및 I2C 제거', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'remove LED & I2C', outcome: 'refuse-clarify', ask: true },
+  { prompt: 'delete the LED and the I2C connector', outcome: 'refuse-clarify', ask: true },
   { prompt: 'remove not I2C but LED', outcome: 'refuse-clarify', ask: true },
   { prompt: 'remove I2C? no, keep it', outcome: 'refuse-clarify', ask: true },
   { prompt: 'remove I2C. actually keep it', outcome: 'refuse-clarify', ask: true },
@@ -166,6 +189,24 @@ test('deletion intent contract is fail-closed', () => {
     if (row.outcome === 'refuse-clarify' && !row.ask) {
       assert.equal(decision.code, undefined, row.prompt);
     }
+  }
+});
+
+// intentional fail-closed: asks instead of removing
+const FAIL_CLOSED_ASKS = [
+  { prompt: "I don't need I2C, remove it" },
+  { prompt: 'I2C는 필요 없으니 삭제' },
+  { prompt: "don't change the LED, remove I2C" }
+];
+
+test('intentional fail-closed: asks instead of removing', () => {
+  for (const row of FAIL_CLOSED_ASKS) {
+    const decision = classifyExistingProjectRequest(row.prompt, SPEC);
+    assert.equal(outcomeOf(decision), 'refuse-clarify', row.prompt);
+    assert.equal(decision.code, 'REMOVAL_INTENT_UNCLEAR', row.prompt);
+    assert.equal(removesI2c(decision), false, row.prompt);
+    assert.match(decision.message, /which part to remove/i, row.prompt);
+    assert.match(decision.message, /제거할 부품/, row.prompt);
   }
 });
 
@@ -250,6 +291,11 @@ test('deletion checks share one positive and negative vocabulary', () => {
   assert.ok(DELETION_INTENT_VOCABULARY.coordinators.some((item) => item.id === 'or'));
   assert.ok(DELETION_INTENT_VOCABULARY.coordinators.some((item) => item.id === 'hageona'));
   assert.ok(DELETION_INTENT_VOCABULARY.coordinators.some((item) => item.id === 'na'));
+  const joins = DELETION_INTENT_VOCABULARY.targetListJoins.map((item) => item.id);
+  for (const id of ['and', 'or', 'both', 'amp', 'comma', 'slash', 'ttoneun', 'geurigo', 'hago', 'irang', 'rang', 'wa', 'gwa', 'mit']) {
+    assert.ok(joins.includes(id), id);
+  }
+  assert.ok(DELETION_INTENT_VOCABULARY.alsoAttachments.some((item) => item.id === 'hago-do'));
   assert.ok(DELETION_INTENT_VOCABULARY.coordinatedVerbs.some((item) => item.id === 'change'));
   assert.ok(DELETION_INTENT_VOCABULARY.coordinatedVerbs.some((item) => item.id === '변경'));
   for (const verb of DELETION_INTENT_VOCABULARY.positiveVerbs) {

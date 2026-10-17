@@ -88,6 +88,48 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: '수정', lang: 'ko', re: '수정' })
   ]),
   coordinators: DELETION_COORDINATORS,
+  // Joins two removal targets into one list ("LED and I2C", "LED 또는 I2C",
+  // "LED/I2C"). English joins are whole words, so "standard" and "command"
+  // are not the conjunction "and". afterComma allows "LED, and I2C".
+  targetListJoins: Object.freeze([
+    Object.freeze({ id: 'comma', re: ',' }),
+    Object.freeze({ id: 'and', re: String.raw`\band\b`, afterComma: true }),
+    Object.freeze({ id: 'or', re: String.raw`\bor\b`, afterComma: true }),
+    Object.freeze({ id: 'both', re: String.raw`\bboth\b` }),
+    Object.freeze({ id: 'amp', re: '&' }),
+    Object.freeze({ id: 'slash', re: '/' }),
+    Object.freeze({ id: 'ttoneun', re: '또는', afterComma: true }),
+    Object.freeze({ id: 'geurigo', re: '그리고', afterComma: true }),
+    Object.freeze({ id: 'mit', re: '및', afterComma: true }),
+    Object.freeze({ id: 'hago', re: String.raw`하고(?![가-힣])` }),
+    Object.freeze({ id: 'irang', re: String.raw`이랑(?![가-힣])` }),
+    Object.freeze({ id: 'rang', re: String.raw`랑(?![가-힣])` }),
+    Object.freeze({ id: 'wa', re: String.raw`와(?![가-힣])` }),
+    Object.freeze({ id: 'gwa', re: String.raw`과(?![가-힣])` })
+  ]),
+  targetListFillers: Object.freeze([
+    Object.freeze({ id: 'the', re: String.raw`\bthe\b` }),
+    Object.freeze({ id: 'a', re: String.raw`\ba\b` }),
+    Object.freeze({ id: 'an', re: String.raw`\ban\b` }),
+    Object.freeze({ id: 'both', re: String.raw`\bboth\b` })
+  ]),
+  // One Korean particle between a part and the join ("LED를 그리고 I2C").
+  listParticles: '[은는이가을를]',
+  // "삭제하고 I2C도": group 1 is the span before the also-particle 도.
+  alsoAttachments: Object.freeze([
+    Object.freeze({
+      id: 'hago-do',
+      re: String.raw`하고(?![가-힣])\s*([^.!?,]{0,24}?)도(?![가-힣])`
+    })
+  ]),
+  // A resistor value or an edit verb on the other side of a comma is not a
+  // second removal target ("remove I2C, LED resistor 680 ohm").
+  valueCues: Object.freeze([
+    Object.freeze({ id: 'ohm', re: String.raw`ohms?|Ω|옴` }),
+    Object.freeze({ id: 'set', re: String.raw`\bset\b` }),
+    Object.freeze({ id: 'update', re: String.raw`\bupdate\b` }),
+    Object.freeze({ id: 'swap', re: '바꿔' })
+  ]),
   // After a Korean verb stem. A particle (은/는/을/를) may sit in between.
   koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|면\s*안|할\s*필요\s*없|금지|말고|하지\s*않도록|안\s*함|안\s*해도|지(?:\s*는)?\s*[마말])`,
   clauseSeparators: Object.freeze([
@@ -443,7 +485,7 @@ function findMentions(text) {
         re.lastIndex += 1;
         continue;
       }
-      found.push({ id: target.id, index: match.index });
+      found.push({ id: target.id, index: match.index, length: match[0].length });
     }
   }
   return found;
@@ -735,6 +777,130 @@ function applyMultiTargetBlock(intents, normalized) {
   }
 }
 
+function removalPartIds(target) {
+  if (target === 'led-resistor') return ['led', 'resistor'];
+  if (target === 'i2c' || target === 'led' || target === 'resistor') return [target];
+  return [];
+}
+
+function listGapPattern() {
+  const vocab = DELETION_INTENT_VOCABULARY;
+  const byLength = (left, right) => right.re.length - left.re.length;
+  const words = vocab.targetListJoins
+    .filter((item) => item.id !== 'comma')
+    .sort(byLength)
+    .map((item) => item.re);
+  const afterComma = vocab.targetListJoins
+    .filter((item) => item.afterComma)
+    .sort(byLength)
+    .map((item) => item.re);
+  const fillers = vocab.targetListFillers.map((item) => item.re);
+  return new RegExp(
+    `^(?:${vocab.listParticles}\\s*)?(?:,\\s*(?:${afterComma.join('|')})?|(?:${words.join('|')}))(?:\\s+(?:${fillers.join('|')}))*\\s*$`,
+    'iu'
+  );
+}
+
+function clauseRemainder(text, endIndex) {
+  const rest = text.slice(endIndex);
+  const match = rest.match(/,|(?<!\d)\.(?!\d)|[!?]/u);
+  return match ? rest.slice(0, match.index) : rest;
+}
+
+// Digits, ohm units, keep cues, and edit verbs mean the other mention is not
+// a second removal object. "connector" and a removal verb still are.
+function tailRejectsCoRemoval(tail) {
+  if (/\d/u.test(tail)) return true;
+  if (hasPartScopeCue(tail)) return true;
+  if (hasCue(tail, DELETION_INTENT_VOCABULARY.coordinatedVerbs)) return true;
+  if (hasCue(tail, DELETION_INTENT_VOCABULARY.valueCues)) return true;
+  return false;
+}
+
+function sortedPartMentions(text) {
+  return findMentions(text)
+    .filter((item) => item.id === 'i2c' || item.id === 'led' || item.id === 'resistor')
+    .sort((left, right) => left.index - right.index || right.length - left.length);
+}
+
+function listJoinedPartIds(text) {
+  const mentions = sortedPartMentions(text);
+  const gap = listGapPattern();
+  const joined = new Set();
+  for (let leftIndex = 0; leftIndex < mentions.length; leftIndex += 1) {
+    const left = mentions[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < mentions.length; rightIndex += 1) {
+      const right = mentions[rightIndex];
+      if (right.index < left.index + left.length || left.id === right.id) continue;
+      const between = text.slice(left.index + left.length, right.index);
+      if (!gap.test(between.trim())) continue;
+      if (tailRejectsCoRemoval(clauseRemainder(text, right.index + right.length))) continue;
+      joined.add(left.id);
+      joined.add(right.id);
+    }
+  }
+  return joined;
+}
+
+function residueOutsideMentions(text) {
+  const mentions = findMentions(text).sort((left, right) => left.index - right.index);
+  let rest = '';
+  let cursor = 0;
+  for (const mention of mentions) {
+    if (mention.index < cursor) continue;
+    rest += text.slice(cursor, mention.index);
+    cursor = mention.index + (mention.length ?? 0);
+  }
+  return rest + text.slice(cursor);
+}
+
+function alsoAttachedPartIds(text) {
+  const ids = new Set();
+  for (const entry of DELETION_INTENT_VOCABULARY.alsoAttachments) {
+    const re = new RegExp(entry.re, 'giu');
+    for (const match of text.matchAll(re)) {
+      const span = match[1] ?? '';
+      // "I2C" contains a digit. Judge the words around the part, not the name.
+      const residue = residueOutsideMentions(span);
+      if (hasPartScopeCue(span) || hasVerbScopeCue(residue) || tailRejectsCoRemoval(residue)) continue;
+      const after = clauseRemainder(text, match.index + match[0].length);
+      if (hasPartScopeCue(after) || tailRejectsCoRemoval(after)) continue;
+      for (const mention of findMentions(span)) {
+        if (mention.id === 'i2c' || mention.id === 'led' || mention.id === 'resistor') ids.add(mention.id);
+      }
+    }
+  }
+  return ids;
+}
+
+// A list of two removal targets is not one candidate. A keep on the other
+// side ("remove I2C but keep LED", "LED 삭제하고 I2C는 남겨") is not a list.
+// A resistor value on the other side of a comma is not a second removal
+// ("remove I2C, LED resistor 680 ohm" stays an I2C removal).
+function applyListedRemovalBlock(intents, text) {
+  const positive = [];
+  const positiveIds = new Set();
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive') continue;
+    positive.push(intent);
+    for (const id of removalPartIds(intent.target)) positiveIds.add(id);
+  }
+  if (positiveIds.size === 0) return;
+  const joined = listJoinedPartIds(text);
+  let listed = false;
+  if (joined.size >= 2) {
+    for (const id of positiveIds) {
+      if (joined.has(id)) listed = true;
+    }
+  }
+  let also = false;
+  for (const id of alsoAttachedPartIds(text)) {
+    if (!positiveIds.has(id)) also = true;
+  }
+  if (!listed && !also) return;
+  for (const intent of positive) blockIntent(intent, 'multi');
+}
+
 function removalIsUnclear(intents, actionable) {
   if (actionable.length > 1) return true;
   if (intents.some((intent) => intent.question || intent.corrected || intent.multi)) return true;
@@ -746,8 +912,8 @@ function removalIsUnclear(intents, actionable) {
 }
 
 // Fail closed. A removal candidate exists only when one part is the clear
-// object of a removal verb and no negation, keep, question, correction, or
-// second candidate makes that reading unsafe.
+// object of a removal verb and no negation, keep, question, correction, list,
+// or second candidate makes that reading unsafe.
 function removalDecision(text) {
   const normalized = stripQuotedMentions(normalizeDeletionText(text));
   const intents = classifyDeletionIntents(text);
@@ -755,6 +921,7 @@ function removalDecision(text) {
   applyPartScope(intents, normalized);
   applyTrailingCorrection(intents, normalized);
   applyMultiTargetBlock(intents, normalized);
+  applyListedRemovalBlock(intents, normalized);
   const actionable = [];
   for (const intent of intents) {
     if (intent.polarity !== 'positive') continue;
