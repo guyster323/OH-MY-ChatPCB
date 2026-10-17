@@ -44,5 +44,9 @@
   "approval.no-manifest": "부품 목록은 스키매틱에 적용한 뒤 확인됩니다.",
   "approval.no-manifest-detail": "파일을 쓰기 전에 패치가 현재 파일과 일치하는지도 확인합니다.",
   "source.chatgpt": "ChatGPT로 생성",
-  "source.native": "내장 생성기"
+  "source.native": "내장 생성기",
+  "patch.remove.title": "기존 부품을 빼고 적용할까요?",
+  "patch.remove.lead": "이 초안은 기존 부품을 스키매틱에서 뺍니다. 적용하면 이 부품이 삭제됩니다.",
+  "patch.remove.cancel": "적용하지 않기",
+  "patch.remove.confirm": "이 부품을 빼고 적용"
 }

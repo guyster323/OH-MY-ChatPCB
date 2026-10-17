@@ -151,6 +151,14 @@
             <button id="approve-patch-button" type="button" disabled aria-label="Approve">스키매틱에 적용</button>
             <button id="cancel-patch-button" type="button" disabled aria-label="Cancel">적용하지 않기</button>
           </div>
+          <div id="apply-remove-components-confirm" class="apply-remove-components-confirm" role="alertdialog" aria-describedby="apply-remove-components-parts" aria-label="Remove existing parts?" hidden>
+            <p id="apply-remove-components-lead">This draft removes existing parts. Applying deletes them from the schematic.</p>
+            <ul id="apply-remove-components-parts" class="patch-parts"></ul>
+            <div class="patch-approval-actions">
+              <button id="cancel-apply-remove-components" type="button">Don't apply</button>
+              <button id="confirm-apply-remove-components" type="button">Apply and remove these parts</button>
+            </div>
+          </div>
         </section>
         <form id="composer" class="composer">
           <label>

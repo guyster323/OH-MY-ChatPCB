@@ -34,6 +34,7 @@ async function loadI18n(localeName = 'en') {
   i18nReady = true;
   renderDaemonConnection();
   renderChatGPTAuth();
+  applyRemovalConfirmCopy();
 }
 
 function daemonConnectionLabel() {
@@ -207,6 +208,11 @@ const patchApprovalTechnicalDetailsEl = document.querySelector('#patch-approval-
 const patchApprovalTechnicalDetailEl = document.querySelector('#patch-approval-technical-detail');
 const approvePatchButtonEl = document.querySelector('#approve-patch-button');
 const cancelPatchButtonEl = document.querySelector('#cancel-patch-button');
+const applyRemoveConfirmEl = document.querySelector('#apply-remove-components-confirm');
+const applyRemoveLeadEl = document.querySelector('#apply-remove-components-lead');
+const applyRemovePartsEl = document.querySelector('#apply-remove-components-parts');
+const cancelApplyRemoveButtonEl = document.querySelector('#cancel-apply-remove-components');
+const confirmApplyRemoveButtonEl = document.querySelector('#confirm-apply-remove-components');
 const kiCadLinkCardEl = document.querySelector('#kicad-link-card');
 const kiCadLinkEl = document.querySelector('#kicad-link');
 const openKiCadButtonEl = document.querySelector('#open-kicad-button');
@@ -226,7 +232,7 @@ let activeRequestProjectDir = null;
 let pendingHostStatus = null;
 let conflictWatch = null;
 let inspectionState = { projectDir: null, requestId: null, result: null };
-let patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
+let patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null };
 let lastRequestResult = null;
 let lastProgressStage = null;
 let lastProgressText = '';
@@ -278,6 +284,14 @@ openKiCadButtonEl.addEventListener('click', openInKiCad);
 recheckKiCadButtonEl.addEventListener('click', () => refreshHostProjectStatus());
 approvePatchButtonEl.addEventListener('click', approvePatch);
 cancelPatchButtonEl.addEventListener('click', cancelPatch);
+cancelApplyRemoveButtonEl?.addEventListener('click', cancelRemovalConfirm);
+confirmApplyRemoveButtonEl?.addEventListener('click', confirmRemovalApply);
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  event.preventDefault();
+  cancelRemovalConfirm();
+});
 for (const button of document.querySelectorAll('.dock-btn[data-open]')) {
   button.addEventListener('click', () => {
     const dialog = document.getElementById(button.dataset.open);
@@ -800,6 +814,17 @@ function renderProjectRequest(result) {
     });
     return;
   }
+  // A removal preview is not an approval yet. Apply stays closed until the dialog confirms these refs.
+  if (existingComponentsRemoved(result) && result.patchId) {
+    setPatchApproval(result);
+    appendProgress({ stage: 'warn', text: t('patch.remove.lead') });
+    renderRequestStatus({ state: 'ready', summary: t('patch.remove.lead') });
+    renderReview(result.review);
+    renderArtifacts(result.files);
+    renderValidation({ ...result.validation, completedAt: new Date().toISOString() });
+    presentRemovalConfirm();
+    return;
+  }
   if (result?.requiresApproval && result.patchId) {
     setPatchApproval(result);
     appendProgress({ stage: 'ready', text: '미리보기가 끝났어요. 적용을 누르면 파일이 바뀝니다.' });
@@ -926,7 +951,12 @@ function clearDraftEvidence() {
 
 function setPatchApproval(preview) {
   clearPatchApproval();
-  patchApprovalState = { patchId: preview.patchId, expiresAt: preview.expiresAt, timeout: null };
+  patchApprovalState = {
+    patchId: preview.patchId,
+    expiresAt: preview.expiresAt,
+    timeout: null,
+    removedComponents: existingComponentsRemoved(preview)
+  };
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
   const delay = Number(preview.expiresAt) - Date.now();
   if (Number.isFinite(delay) && delay > 0) {
@@ -947,11 +977,13 @@ function setPatchApprovalTechnicalDetail(text) {
 
 function clearPatchApproval(message = 'No patch preview active.') {
   if (patchApprovalState.timeout) clearTimeout(patchApprovalState.timeout);
-  patchApprovalState = { patchId: null, expiresAt: null, timeout: null };
+  patchApprovalState = { patchId: null, expiresAt: null, timeout: null, removedComponents: null };
   patchApprovalStatusEl.dataset.state = 'idle';
   patchApprovalStatusEl.textContent = message;
   clearDraftEvidence();
   setPatchApprovalTechnicalDetail('');
+  hideRemovalConfirm();
+  if (applyRemovePartsEl) applyRemovePartsEl.replaceChildren();
   approvePatchButtonEl.disabled = true;
   cancelPatchButtonEl.disabled = true;
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = message === 'No patch preview active.';
@@ -988,7 +1020,89 @@ function renderPatchApproval() {
   patchApprovalStatusEl.textContent = 'Patch preview is ready for approval.';
 }
 
+function existingComponentsRemoved(preview) {
+  if (!preview || preview.applied === true) return null;
+  const blockers = preview.review?.findings?.blockers ?? [];
+  const blocker = blockers.find((finding) => (
+    finding?.code === 'existing-components-removed'
+    || finding?.id === 'existing-components-removed'
+    || finding?.code === 'EXISTING_COMPONENTS_REMOVED'
+  ));
+  if (preview.reason?.code !== 'EXISTING_COMPONENTS_REMOVED' && !blocker) return null;
+  const listed = [preview.removedComponents, preview.reason?.removedComponents, blocker?.removedComponents]
+    .find((value) => Array.isArray(value) && value.length > 0) ?? [];
+  const parts = [];
+  for (const part of listed) {
+    if (!part || typeof part.ref !== 'string' || part.ref.length === 0) continue;
+    parts.push({
+      ref: part.ref,
+      value: part.value ?? '',
+      libId: part.libId ?? ''
+    });
+  }
+  return parts.length > 0 ? parts : null;
+}
+
+function applyRemovalConfirmCopy() {
+  if (applyRemoveLeadEl) applyRemoveLeadEl.textContent = t('patch.remove.lead');
+  if (cancelApplyRemoveButtonEl) cancelApplyRemoveButtonEl.textContent = t('patch.remove.cancel');
+  if (confirmApplyRemoveButtonEl) confirmApplyRemoveButtonEl.textContent = t('patch.remove.confirm');
+  if (applyRemoveConfirmEl) applyRemoveConfirmEl.setAttribute('aria-label', t('patch.remove.title'));
+}
+
+function hideRemovalConfirm() {
+  if (applyRemoveConfirmEl) applyRemoveConfirmEl.hidden = true;
+}
+
+function presentRemovalConfirm() {
+  const parts = patchApprovalState.removedComponents;
+  if (!applyRemoveConfirmEl || !parts?.length) return;
+  applyRemovalConfirmCopy();
+  if (applyRemovePartsEl) {
+    applyRemovePartsEl.replaceChildren();
+    for (const part of parts) {
+      const item = document.createElement('li');
+      item.textContent = `${part.ref} · ${part.value ?? ''} · ${part.libId ?? ''}`;
+      applyRemovePartsEl.append(item);
+    }
+  }
+  applyRemoveConfirmEl.hidden = false;
+  cancelApplyRemoveButtonEl?.focus();
+}
+
+function cancelRemovalConfirm() {
+  if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  hideRemovalConfirm();
+  approvePatchButtonEl?.focus();
+}
+
+function confirmRemovalApply() {
+  if (!applyRemoveConfirmEl || applyRemoveConfirmEl.hidden) return;
+  if (!activeProject || !patchApprovalState.patchId) return;
+  const allowRemovedComponents = (patchApprovalState.removedComponents ?? []).map((part) => part.ref);
+  if (allowRemovedComponents.length === 0) return;
+  hideRemovalConfirm();
+  appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
+  renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });
+  const id = `patch_approve_${Date.now()}`;
+  pendingCalls.set(id, 'schematic.patch.approve');
+  sendToolCall({
+    id,
+    name: 'schematic.patch',
+    args: {
+      projectDir: activeProject.projectDir,
+      approved: true,
+      patchId: patchApprovalState.patchId,
+      allowRemovedComponents
+    }
+  });
+}
+
 function approvePatch() {
+  if (patchApprovalState.removedComponents?.length) {
+    presentRemovalConfirm();
+    return;
+  }
   if (!activeProject || approvePatchButtonEl.disabled || !patchApprovalState.patchId) return;
   appendProgress({ stage: 'apply', text: '스키매틱에 넣는 중…' });
   renderRequestStatus({ state: 'running', summary: 'Applying the circuit draft…' });

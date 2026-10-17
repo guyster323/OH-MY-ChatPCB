@@ -179,6 +179,10 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
           };
           if (window.__draftSource) result.source = window.__draftSource;
           if (Array.isArray(window.__draftParts)) result.components = window.__draftParts;
+          // Removal previews set requiresApproval false and carry removedComponents.
+          if (window.__removalPreview && typeof window.__removalPreview === 'object') {
+            Object.assign(result, window.__removalPreview);
+          }
         }
         const payload = { id: call.id, ok, result };
         if (error) payload.error = error;
@@ -882,6 +886,203 @@ test('a different ChatGPT account is offered the switch once', async (t) => {
     assert.equal(flat.includes('bob@ex.com'), false);
     assert.equal(flat.includes('user_cara'), false);
     assert.equal(await page.locator('#provider').inputValue(), 'grok');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+const REMOVED_PARTS = [
+  { ref: 'J2', value: 'I2C_CONNECTOR', libId: 'ChatPCB:I2C_CONNECTOR' },
+  { ref: 'R3', value: '1k', libId: 'Device:R' }
+];
+
+function removalConfirmCopy() {
+  return Promise.all([
+    readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'),
+    readFile(path.join(panelRoot, 'locales/ko.json'), 'utf8')
+  ]).then(([en, ko]) => ({
+    en: JSON.parse(en),
+    ko: JSON.parse(ko)
+  }));
+}
+
+async function openApprovalPanel(t, locale) {
+  const opened = await openChatGPTWaiting(t, {
+    locale,
+    startResult: waiting,
+    leaveProvider: true,
+    approvalFlow: true
+  });
+  if (!opened) return null;
+  const connected = locale.startsWith('ko') ? '데몬 연결됨' : 'Daemon connected';
+  await opened.page.waitForFunction((label) => (
+    document.querySelector('#connection-status')?.textContent === label
+  ), connected);
+  await opened.page.locator('#project-name').fill('Sensor board');
+  await opened.page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
+  await opened.page.getByRole('status', { name: 'Active project' }).waitFor();
+  return opened;
+}
+
+async function sendRemovalPreview(page, parts = REMOVED_PARTS) {
+  await page.evaluate((removed) => {
+    window.__removalPreview = {
+      requiresApproval: false,
+      approved: false,
+      applied: false,
+      removedComponents: removed,
+      reason: {
+        code: 'EXISTING_COMPONENTS_REMOVED',
+        removedComponents: removed
+      }
+    };
+  }, parts);
+  await page.locator('#prompt').fill('Remove the I2C connector from this board');
+  await page.locator('#composer').getByRole('button', { name: 'Send' }).click();
+}
+
+function approvedApplyCalls(page) {
+  return page.evaluate(() => window.__sent.filter((call) => (
+    call.name === 'schematic.patch' && call.args?.approved === true
+  )));
+}
+
+async function describedRemovalText(page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector('#apply-remove-components-confirm');
+    const ids = (dialog?.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    return ids.map((id) => document.getElementById(id)?.textContent ?? '').join('\n');
+  });
+}
+
+test('removed-part confirm copy exists in English and Korean', async () => {
+  const { en, ko } = await removalConfirmCopy();
+  assert.equal(en['patch.remove.cancel'], "Don't apply");
+  assert.equal(en['patch.remove.confirm'], 'Apply and remove these parts');
+  assert.equal(en['patch.remove.title'], 'Remove existing parts?');
+  assert.equal(en['patch.remove.lead'], 'This draft removes existing parts. Applying deletes them from the schematic.');
+  assert.equal(ko['patch.remove.cancel'], '적용하지 않기');
+  assert.equal(ko['patch.remove.confirm'], '이 부품을 빼고 적용');
+  assert.equal(ko['patch.remove.title'], '기존 부품을 빼고 적용할까요?');
+  assert.equal(ko['patch.remove.lead'], '이 초안은 기존 부품을 스키매틱에서 뺍니다. 적용하면 이 부품이 삭제됩니다.');
+  for (const key of ['patch.remove.cancel', 'patch.remove.confirm', 'patch.remove.title', 'patch.remove.lead']) {
+    assert.notEqual(ko[key], en[key], key);
+  }
+});
+
+test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply', async (t) => {
+  const opened = await openApprovalPanel(t, 'en-US');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  const { en } = await removalConfirmCopy();
+  try {
+    await page.locator('#prompt').fill('ESP32-S3 sensor board');
+    await page.locator('#composer').getByRole('button', { name: 'Send' }).click();
+    await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
+    assert.equal(await page.locator('#apply-remove-components-confirm').isVisible(), false);
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction(() => document.querySelector('#patch-approval-card')?.hidden === true);
+    const plain = await approvedApplyCalls(page);
+    assert.equal(plain.length, 1);
+    assert.equal(Object.hasOwn(plain[0].args, 'allowRemovedComponents'), false);
+
+    await sendRemovalPreview(page);
+    const dialog = page.locator('#apply-remove-components-confirm');
+    await page.waitForFunction(() => {
+      const node = document.querySelector('#apply-remove-components-confirm');
+      return node && node.hidden === false;
+    });
+    assert.equal(await dialog.isVisible(), true);
+    assert.equal(await dialog.getAttribute('role'), 'alertdialog');
+    const describedBy = await dialog.getAttribute('aria-describedby');
+    assert.ok(describedBy);
+    const describedText = await describedRemovalText(page);
+    for (const part of REMOVED_PARTS) {
+      assert.equal(describedText.includes(part.ref), true, describedText);
+      assert.equal(describedText.includes(String(part.value)), true, describedText);
+      assert.equal(describedText.includes(part.libId), true, describedText);
+    }
+    await page.waitForFunction(() => document.activeElement?.id === 'cancel-apply-remove-components');
+    assert.equal(await page.locator('#cancel-apply-remove-components').innerText(), en['patch.remove.cancel']);
+    assert.equal(await page.locator('#confirm-apply-remove-components').innerText(), en['patch.remove.confirm']);
+    assert.equal(await page.locator('#apply-remove-components-lead').innerText(), en['patch.remove.lead']);
+    assert.equal(await dialog.getAttribute('aria-label'), en['patch.remove.title']);
+
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    assert.equal((await approvedApplyCalls(page)).length, 1);
+
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction(() => {
+      const node = document.querySelector('#apply-remove-components-confirm');
+      return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
+    });
+    assert.equal((await approvedApplyCalls(page)).length, 1);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    assert.equal((await approvedApplyCalls(page)).length, 1);
+
+    await page.locator('#approve-patch-button').click();
+    await page.waitForFunction(() => {
+      const node = document.querySelector('#apply-remove-components-confirm');
+      return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
+    });
+    await page.locator('#cancel-apply-remove-components').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    assert.equal((await approvedApplyCalls(page)).length, 1);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('confirming removed parts sends allowRemovedComponents with the exact refs', async (t) => {
+  const opened = await openApprovalPanel(t, 'en-US');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  try {
+    await sendRemovalPreview(page);
+    await page.waitForFunction(() => {
+      const node = document.querySelector('#apply-remove-components-confirm');
+      return node && node.hidden === false && document.activeElement?.id === 'cancel-apply-remove-components';
+    });
+    await page.locator('#confirm-apply-remove-components').click();
+    const calls = await approvedApplyCalls(page);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args.approved, true);
+    assert.equal(calls[0].args.patchId, 'sha256:preview');
+    assert.deepEqual(calls[0].args.allowRemovedComponents, REMOVED_PARTS.map((part) => part.ref));
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test('removed-part confirm dialog is localized in Korean', async (t) => {
+  const opened = await openApprovalPanel(t, 'ko-KR');
+  if (!opened) return;
+  const { page, context, pageErrors } = opened;
+  const { ko } = await removalConfirmCopy();
+  try {
+    await sendRemovalPreview(page);
+    await page.waitForFunction((cancelText) => {
+      const dialog = document.querySelector('#apply-remove-components-confirm');
+      const cancel = document.querySelector('#cancel-apply-remove-components');
+      return dialog && dialog.hidden === false && cancel?.textContent === cancelText && document.activeElement === cancel;
+    }, ko['patch.remove.cancel']);
+    assert.equal(await page.locator('#confirm-apply-remove-components').innerText(), ko['patch.remove.confirm']);
+    assert.equal(await page.locator('#apply-remove-components-lead').innerText(), ko['patch.remove.lead']);
+    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-label'), ko['patch.remove.title']);
+    const describedText = await describedRemovalText(page);
+    for (const part of REMOVED_PARTS) {
+      assert.equal(describedText.includes(part.ref), true, describedText);
+      assert.equal(describedText.includes(String(part.value)), true, describedText);
+      assert.equal(describedText.includes(part.libId), true, describedText);
+    }
+    await page.locator('#cancel-apply-remove-components').click();
+    await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+    assert.deepEqual(await approvedApplyCalls(page), []);
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
