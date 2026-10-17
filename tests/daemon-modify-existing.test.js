@@ -555,7 +555,7 @@ for (const prompt of [
   });
 }
 
-for (const prompt of ['I2C 지워줘', 'I2C 커넥터 지워']) {
+for (const prompt of ['I2C 지워줘', 'I2C 커넥터 지워', 'drop the I2C connector', 'I2C 빼줘']) {
   test(`positive delete ${prompt} stays blocked without allowRemovedComponents`, async () => {
     await assertApplyStaysBlocked(prompt);
   });

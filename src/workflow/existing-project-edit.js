@@ -39,10 +39,12 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
   positiveVerbs: Object.freeze([
     Object.freeze({ id: 'remove', lang: 'en', re: String.raw`\bremove\b` }),
     Object.freeze({ id: 'delete', lang: 'en', re: String.raw`\bdelete\b` }),
+    Object.freeze({ id: 'drop', lang: 'en', re: String.raw`\bdrop\b` }),
     Object.freeze({ id: '삭제', lang: 'ko', re: '삭제' }),
     Object.freeze({ id: '제거', lang: 'ko', re: '제거' }),
     Object.freeze({ id: '지워', lang: 'ko', re: '지워' }),
-    Object.freeze({ id: '지우', lang: 'ko', re: '지우' })
+    Object.freeze({ id: '지우', lang: 'ko', re: '지우' }),
+    Object.freeze({ id: '빼', lang: 'ko', re: '(?<![가-힣])빼' })
   ]),
   // `n't` and `not` are separate so "don't not" counts as two markers.
   negationMarkers: Object.freeze([
@@ -76,6 +78,18 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: '남겨', re: '남겨' }),
     Object.freeze({ id: '남기', re: '남기' }),
     Object.freeze({ id: '유지', re: '유지' })
+  ]),
+  // A later clause can take a removal back: "remove I2C. jk", "삭제 노노", "... NOT".
+  correctionCues: Object.freeze([
+    Object.freeze({ id: 'nono', re: String.raw`(?<![가-힣])노노(?![가-힣])` }),
+    Object.freeze({
+      id: 'nn',
+      // NFKC turns compatibility jamo ㄴ into choseong ᄂ, so both forms count.
+      re: String.raw`(?<![\u1100-\u11FF\u3131-\u318E])(?:\u3134\u3134|\u1102\u1102)(?![\u1100-\u11FF\u3131-\u318E])`
+    }),
+    Object.freeze({ id: 'jk', re: String.raw`\bjk\b` }),
+    Object.freeze({ id: 'just-kidding', re: String.raw`\bjust\s+kidding\b` }),
+    Object.freeze({ id: 'trailing-not', re: String.raw`(?:\.{3}|…)\s*not\b` })
   ]),
   // Mapped to ASCII ' after NFKC. U+00B4's NFKC form is a space plus U+0301.
   apostrophes: '\u2018\u2019\u201A\u201B\u2032\u2035\u02BC\u02BB\u0060\u00B4\uFF07\u02B9\u02CA\u02CB\uA78C\u055A\u0301',
@@ -131,7 +145,7 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: 'swap', re: '바꿔' })
   ]),
   // After a Korean verb stem. A particle (은/는/을/를) may sit in between.
-  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|면\s*안|할\s*필요\s*없|금지|말고|하지\s*않도록|안\s*함|안\s*해도|지(?:\s*는)?\s*[마말])`,
+  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|면\s*안|할\s*필요\s*없|금지|말고|하지\s*않도록|안\s*함|안\s*해도|지(?:\s*는)?\s*[마말]|마(?![가-힣]))`,
   clauseSeparators: Object.freeze([
     Object.freeze({ id: 'and-then', re: String.raw`\band\s+then\b`, negatesLeft: false }),
     Object.freeze({ id: 'and', re: String.raw`\band\b`, negatesLeft: false }),
@@ -260,15 +274,17 @@ function isFullDesignPrompt(text) {
 // matched. `"remove I2C" is not what I want` therefore has no removal verb.
 // Double quotes always count. A balanced '...' pair counts when it is not a
 // contraction such as don't or shouldn't.
-// NFKC runs first. U+00B4 decomposes to a space plus combining acute, so that
-// residue is folded back to an apostrophe before the other apostrophe-like
-// characters are mapped.
+// Format characters (Cf: ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft hyphen) are
+// removed before NFKC, so they cannot hide a negation. U+00B4 then decomposes
+// to a space plus combining acute, and that residue is folded back to an
+// apostrophe before the other apostrophe-like characters are mapped.
 function normalizeDeletionText(text) {
   const apostrophes = [...DELETION_INTENT_VOCABULARY.apostrophes]
     .filter((ch) => ch !== '\u0301')
     .map((ch) => (/[-\\\]^]/.test(ch) ? `\\${ch}` : ch))
     .join('');
   return String(text ?? '')
+    .replace(/\p{Cf}/gu, '')
     .normalize('NFKC')
     .replace(/([A-Za-z])[ \u00A0]\u0301([A-Za-z])/gu, "$1'$2")
     .replace(/([A-Za-z])\u0301([A-Za-z])/gu, "$1'$2")
@@ -640,13 +656,16 @@ export function classifyDeletionIntents(text) {
     const mentioned = explicitPart(clause.text);
     if (mentioned) previousExplicit = mentioned;
   }
+  applySameTargetGuard(intents, normalized);
+  applyCorrectionCues(intents, normalized);
   return intents;
 }
 
 function verbScopeCues() {
   return [
     ...DELETION_INTENT_VOCABULARY.negationMarkers,
-    ...DELETION_INTENT_VOCABULARY.koreanBlockingCues
+    ...DELETION_INTENT_VOCABULARY.koreanBlockingCues,
+    ...DELETION_INTENT_VOCABULARY.correctionCues
   ];
 }
 
@@ -748,6 +767,68 @@ function applyPartScope(intents, normalized) {
     if (intent.polarity === 'positive' && blocked.has(intent.target)) {
       blockIntent(intent, 'corrected');
     }
+  }
+}
+
+// Bare 안/말/않 are left out. "제거 말고 LED" must not guard the LED.
+const SAME_TARGET_SYLLABLE_CUES = new Set(['안', '말', '않']);
+
+function sameTargetGuardCues() {
+  return [
+    ...DELETION_INTENT_VOCABULARY.negationMarkers,
+    ...DELETION_INTENT_VOCABULARY.partScopeCues,
+    ...DELETION_INTENT_VOCABULARY.koreanBlockingCues.filter((cue) => !SAME_TARGET_SYLLABLE_CUES.has(cue.id))
+  ];
+}
+
+function nearestMentionByCenter(mentions, index, length) {
+  const center = index + length / 2;
+  return mentions.reduce((best, item) => {
+    if (!best) return item;
+    const itemCenter = item.index + item.length / 2;
+    const bestCenter = best.index + best.length / 2;
+    return Math.abs(itemCenter - center) < Math.abs(bestCenter - center) ? item : best;
+  }, null);
+}
+
+function guardedPartIds(text) {
+  const mentions = findMentions(text);
+  const clauses = splitClauses(text);
+  const guarded = new Set();
+  for (const cue of sameTargetGuardCues()) {
+    const re = new RegExp(cue.re, 'giu');
+    for (const match of text.matchAll(re)) {
+      const clause = clauses.find((item) => (
+        match.index >= item.start && match.index < item.start + item.text.length
+      ));
+      const pool = clause
+        ? mentions.filter((item) => item.index >= clause.start && item.index < clause.start + clause.text.length)
+        : [];
+      if (pool.length === 0) continue;
+      const id = resolveMentionId(mentions, nearestMentionByCenter(pool, match.index, match[0].length));
+      if (id) guarded.add(id);
+    }
+  }
+  return guarded;
+}
+
+// A negation or keep anywhere in the request binds the nearest part.
+// "Don't touch I2C. Now remove it" is not a delete. The same cue does not
+// block a different part ("Don't touch I2C. Remove the LED").
+function applySameTargetGuard(intents, text) {
+  const guarded = guardedPartIds(text);
+  if (guarded.size === 0) return;
+  for (const intent of intents) {
+    if (intent.polarity !== 'positive') continue;
+    if (removalPartIds(intent.target).some((id) => guarded.has(id))) blockIntent(intent, 'guarded');
+  }
+}
+
+// "jk", "노노", and "... NOT" cancel every removal, including one in an earlier clause.
+function applyCorrectionCues(intents, text) {
+  if (!hasCue(text, DELETION_INTENT_VOCABULARY.correctionCues)) return;
+  for (const intent of intents) {
+    if (intent.polarity === 'positive') blockIntent(intent, 'corrected');
   }
 }
 
@@ -935,40 +1016,84 @@ function removalDecision(text) {
   return { kind: 'none' };
 }
 
-// Longest slice that parseResistorOhms accepts. A following ASCII letter or
-// digit means the slice is a prefix of an unparseable token ("10kk", "500mA",
-// "3.3V"), so it is not a value. Korean particles after Ω/옴 stay outside the
-// slice ("680Ω으로", "1kΩ으로").
+const RESISTOR_SIGN = /[+\-\u2212\u00B1]/u;
+const FOREIGN_GLUED_UNIT = /^(?:ma|ua|µa|na|mv|kv|vdc|vac|hz|khz|mhz|[vawfh])$/iu;
+const SPACED_FOREIGN_UNIT = /^\s+(?:mA|uA|µA|nA|mV|kV|VDC|VAC|Hz|kHz|MHz|[VAWFH])\b/iu;
+const SPACED_RESISTOR_UNIT = /^\s+(?:kΩ|k옴|ohms?|meg|Ω|옴|[rRkKmM])(?![A-Za-z])/iu;
+
+// The whole token, including a sign, thousands separators, and the unit, is
+// handed to parseResistorOhms. A prefix the parser would accept ("1" from
+// "1,000", "10" from "-10") is not a value. A token the parser rejects fails
+// the edit. Percent and current or voltage units are not resistors.
 function scanResistorTokens(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const valid = [];
-  const startRe = /(?<![\p{L}\p{N}_])\d/gu;
-  let start = startRe.exec(normalized);
-  while (start) {
-    const index = start.index;
-    const window = normalized.slice(index, index + 48);
-    let chosen = null;
-    for (let len = window.length; len >= 1; len -= 1) {
-      const raw = window.slice(0, len).trimEnd();
-      if (!raw || /[,;]/.test(raw)) continue;
-      const parsed = parseResistorOhms(raw);
-      const ohms = parsed == null ? null : Number(parsed);
-      if (!(ohms > 0)) continue;
-      const end = index + raw.length;
-      const next = normalized[end] ?? '';
-      if (/[A-Za-z0-9.]/.test(next)) continue;
-      chosen = { ohms, index, end };
-      break;
-    }
-    if (chosen) {
-      valid.push(chosen);
-      startRe.lastIndex = chosen.end;
-    }
-    start = startRe.exec(normalized);
-  }
   const invalid = [];
-  for (const match of normalized.matchAll(new RegExp(INVALID_OHM_TOKEN, 'giu'))) invalid.push(match[0]);
+  const spans = [];
+  const startRe = /(?<![\p{L}\p{N}_.,])\d/gu;
+  let found = startRe.exec(normalized);
+  while (found) {
+    const token = readResistorToken(normalized, found.index);
+    if (token.kind === 'valid') {
+      valid.push({ ohms: token.ohms, index: token.index, end: token.end });
+      spans.push(token);
+    } else if (token.kind === 'invalid') {
+      invalid.push(token.raw);
+      spans.push(token);
+    }
+    startRe.lastIndex = token.end > found.index ? token.end : found.index + 1;
+    found = startRe.exec(normalized);
+  }
+  for (const match of normalized.matchAll(new RegExp(INVALID_OHM_TOKEN, 'giu'))) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const covered = spans.some((span) => start < span.end && end > span.index);
+    if (!covered) invalid.push(match[0]);
+  }
   return { normalized, valid, invalid };
+}
+
+function readResistorToken(text, digitIndex) {
+  let index = digitIndex;
+  if (digitIndex > 0 && RESISTOR_SIGN.test(text[digitIndex - 1])) {
+    const before = digitIndex > 1 ? text[digitIndex - 2] : '';
+    if (!before || !/[\p{L}\p{N}]/u.test(before)) index = digitIndex - 1;
+  }
+  let end = digitIndex;
+  while (end < text.length && /\d/u.test(text[end])) {
+    end += 1;
+    if (end + 1 < text.length && /[.,]/u.test(text[end]) && /\d/u.test(text[end + 1])) end += 1;
+  }
+  const percent = /^\s*%/u.exec(text.slice(end));
+  if (percent) return { kind: 'skip', end: end + percent[0].length };
+
+  let glued = '';
+  while (end < text.length && /[A-Za-zΩ옴]/u.test(text[end])) {
+    glued += text[end];
+    end += 1;
+  }
+  if (/^[rRkKmM]$/u.test(glued) && end < text.length && /\d/u.test(text[end])) {
+    while (end < text.length && /\d/u.test(text[end])) end += 1;
+    while (end < text.length && /[A-Za-zΩ옴]/u.test(text[end])) {
+      glued += text[end];
+      end += 1;
+    }
+  }
+  if (glued && FOREIGN_GLUED_UNIT.test(glued)) return { kind: 'skip', end };
+
+  let tokenEnd = end;
+  if (!glued) {
+    const rest = text.slice(end);
+    const foreign = SPACED_FOREIGN_UNIT.exec(rest);
+    if (foreign) return { kind: 'skip', end: end + foreign[0].length };
+    const unit = SPACED_RESISTOR_UNIT.exec(rest);
+    if (unit) tokenEnd = end + unit[0].length;
+  }
+  const raw = text.slice(index, tokenEnd);
+  const parsed = parseResistorOhms(raw);
+  const ohms = parsed == null ? null : Number(parsed);
+  if (ohms > 0) return { kind: 'valid', index, end: tokenEnd, ohms };
+  return { kind: 'invalid', index, end: tokenEnd, raw };
 }
 
 // Destination sits after "to" / "->" and before "으로" / "로".
@@ -1006,10 +1131,11 @@ function interpretResistor(text) {
   const aboutLed = /led|저항|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   if (!aboutLed && !change) return null;
+  if (scanned.invalid.length > 0) return { kind: 'invalid' };
   const ohms = destinationOhms(normalized, scanned.valid);
   if (ohms != null) return { kind: 'resistor', ohms, label: formatResistorLabel(ohms) };
   const asked = aboutLed && /(?:으로|로(?!부터|서|써)|->|→|\bto\b|바꿔|변경)/u.test(normalized);
-  if (asked || scanned.invalid.length > 0) return { kind: 'invalid' };
+  if (asked) return { kind: 'invalid' };
   return null;
 }
 
@@ -1179,11 +1305,11 @@ function escapeRegExp(value) {
 }
 
 function spiceOhms(label) {
-  const text = String(label ?? '').trim();
-  const kilo = text.match(/^(\d+(?:\.\d+)?)\s*k/i);
-  if (kilo) return String(Math.round(Number(kilo[1]) * 1000));
-  const ohms = text.match(/^(\d+(?:\.\d+)?)/);
-  return ohms ? String(Math.round(Number(ohms[1]))) : null;
+  const parsed = parseResistorOhms(label);
+  if (parsed == null) return null;
+  const ohms = Number(parsed);
+  if (!(ohms > 0)) return null;
+  return String(ohms);
 }
 
 export function removedComponents(beforeSpec, afterSpec) {

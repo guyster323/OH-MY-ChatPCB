@@ -1,3 +1,5 @@
+import { parseResistorOhms } from '../kicad/resistor-ohms.js';
+
 // Quantities in an LED prompt. `value` is normalized: volts, ohms, milliamps,
 // or a count. `unit` is the notation that was recognized (mV, VAC, ohm, …).
 // A voltage range's value is its maximum.
@@ -177,10 +179,10 @@ function resistanceMultiplier(letter) {
 }
 
 function rkmToOhms(whole, fraction, letter) {
-  const multiplier = resistanceMultiplier(letter);
-  if (!multiplier) return null;
-  const scale = 10 ** fraction.length;
-  return (Number(whole) * scale + Number(fraction)) * multiplier / scale;
+  const parsed = parseResistorOhms(`${whole}${letter}${fraction}`);
+  if (parsed == null) return null;
+  const ohms = Number(parsed);
+  return ohms > 0 ? ohms : null;
 }
 
 function isPotentiometer(prompt, start, end) {

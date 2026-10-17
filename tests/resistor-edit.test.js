@@ -24,6 +24,41 @@ function schematicRefValue(schematic, ref) {
   return match?.[1] ?? null;
 }
 
+test('a resistor token the shared parser rejects is not applied', () => {
+  for (const prompt of [
+    'LED resistor to 1,000 ohm',
+    'LED resistor to -10 ohm',
+    'LED resistor to 1.0.0k',
+    'LED resistor to 10kk',
+    'change the LED resistor from 680 to 1,000 ohm'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+});
+
+test('plain resistor values still apply', () => {
+  for (const [prompt, ohms] of [
+    ['LED resistor to 680 ohm', 680],
+    ['LED resistor 4k7', 4700],
+    ['LED resistor to 1kΩ', 1000],
+    ['LED resistor 10kΩ ±5%', 10000],
+    ['change LED resistor to 680 ohm at 3.3V', 680]
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+  }
+
+  const current = classifyExistingProjectRequest('LED resistor 500mA', SPEC);
+  assert.equal(current.mode, 'refuse');
+  assert.equal(current.code, undefined);
+  assert.equal(current.edit, undefined);
+});
+
 test('resistor notation uses the same values the SPICE parser accepts', () => {
   const rows = [
     ['LED 저항 1k', 1000],
@@ -82,24 +117,32 @@ test('invalid resistor text previews no patch and leaves the schematic unchanged
     });
     const before = await readFile(generated.files.schematic, 'utf8');
     assert.match(before, /I2C_CONNECTOR/);
-    await assert.rejects(
-      () => createSchematicPatchPlan({
-        projectDir,
-        prompt: REWRITE_EXAMPLE,
-        userPrompt: 'LED 저항 abc옴으로',
-        projectName: 'stm32_i2c',
-        validateProjectImpl: passingErc,
-        validateBoardImpl: passingDrc
-      }),
-      (error) => {
-        assert.equal(error.code, 'RESISTOR_VALUE_INVALID');
-        assert.match(error.message, /680Ω/);
-        assert.match(error.message, /4\.7kΩ/);
-        assert.match(error.message, /저항 값/);
-        return true;
-      }
-    );
-    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+    for (const userPrompt of [
+      'LED 저항 abc옴으로',
+      'LED resistor to 1,000 ohm',
+      'LED resistor to -10 ohm',
+      'LED resistor to 1.0.0k',
+      'LED resistor to 10kk'
+    ]) {
+      await assert.rejects(
+        () => createSchematicPatchPlan({
+          projectDir,
+          prompt: REWRITE_EXAMPLE,
+          userPrompt,
+          projectName: 'stm32_i2c',
+          validateProjectImpl: passingErc,
+          validateBoardImpl: passingDrc
+        }),
+        (error) => {
+          assert.equal(error.code, 'RESISTOR_VALUE_INVALID', userPrompt);
+          assert.match(error.message, /680Ω/);
+          assert.match(error.message, /4\.7kΩ/);
+          assert.match(error.message, /저항 값/);
+          return true;
+        }
+      );
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before, userPrompt);
+    }
   } finally {
     await rm(projectDir, { force: true, recursive: true });
   }
@@ -146,6 +189,44 @@ test('sequential resistor edits apply 330, then 680, then 1k and keep I2C', asyn
     }
   } finally {
     await Promise.all(plans.map((plan) => disposeSchematicPatchPlan(plan)));
+    await rm(projectDir, { force: true, recursive: true });
+  }
+});
+
+test('an RKM fraction is written to the schematic and the SPICE line', async () => {
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-resistor-rkm-'));
+  const prompt = 'LED resistor 1R5';
+  let plan;
+  try {
+    const generated = await generateMcuPeripheralProject({
+      projectDir,
+      prompt: STM32_USER_PROMPT,
+      projectName: 'stm32_i2c'
+    });
+    plan = await createSchematicPatchPlan({
+      projectDir,
+      prompt,
+      projectName: 'stm32_i2c',
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc
+    });
+    const applied = await applySchematicPatch({
+      projectDir,
+      prompt,
+      approved: true,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan,
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc,
+      verifyAppliedProjectImpl: passingVerify
+    });
+    assert.equal(applied.applied, true, JSON.stringify(applied.reason));
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    assert.equal(schematicRefValue(schematic, 'R3'), '1.5Ω');
+    const spice = await readFile(generated.files.spice, 'utf8');
+    assert.match(spice, /^RLED\s+\S+\s+\S+\s+1\.5$/m);
+  } finally {
+    if (plan) await disposeSchematicPatchPlan(plan);
     await rm(projectDir, { force: true, recursive: true });
   }
 });
