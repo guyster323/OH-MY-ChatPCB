@@ -17,6 +17,7 @@ const CASES = [
   { prompt: 'I2C 커넥터는 삭제하지 마세요', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'I2C 지우지 마', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: "don't remove I2C", mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: 'dont remove I2C', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'do not delete the I2C connector', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: "keep I2C, don't remove it", mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'Don\u2019t remove the I2C connector', mode: 'refuse', positive: [], negated: ['i2c'] },
@@ -24,6 +25,7 @@ const CASES = [
   { prompt: "shouldn't remove I2C", mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'should not remove I2C', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'do not ever remove I2C', mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: "don't ever remove I2C", mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'never remove I2C', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'no need to remove I2C', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: "don't, please, remove I2C", mode: 'refuse', positive: [], negated: ['i2c'] },
@@ -37,6 +39,7 @@ const CASES = [
   { prompt: 'I2C 삭제는 하지 말아 주세요', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'I2C 삭제하면 안 돼', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'I2C 삭제하면 안돼', mode: 'refuse', positive: [], negated: ['i2c'] },
+  { prompt: 'I2C 제거 안 해도 돼', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'I2C 삭제 금지', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'I2C 제거 말고', mode: 'refuse', positive: [], negated: ['i2c'] },
   { prompt: 'I2C를 삭제하지 않도록', mode: 'refuse', positive: [], negated: ['i2c'] },
@@ -55,6 +58,8 @@ const CASES = [
   { prompt: 'LED 삭제하고 나서 I2C는 유지', mode: 'refuse', positive: ['led'], negated: [] },
   { prompt: 'LED는 삭제하지만 I2C는 남겨', mode: 'refuse', positive: ['led'], negated: [] },
   { prompt: 'I2C 제거 말고 LED 삭제', mode: 'refuse', positive: ['led'], negated: ['i2c'] },
+  // The negated clause keeps I2C. The other clause's removal target is only the LED.
+  { prompt: 'I2C 삭제하지 말고 LED 삭제', mode: 'refuse', positive: ['led'], negated: ['i2c'] },
   { prompt: 'reset 버튼 삭제. I2C 커넥터는 유지하세요.', mode: 'refuse', positive: [], negated: [] },
   { prompt: 'I2C는 버리지 말고 LED 저항 680옴', mode: 'resistor:680', positive: [], negated: [] },
   { prompt: 'I2C 없애지 말고 LED 저항 680옴', mode: 'resistor:680', positive: [], negated: [] },
@@ -162,8 +167,10 @@ test('deletion checks share one positive and negative vocabulary', () => {
   assert.ok(negative.includes('never'));
   assert.ok(negative.includes('no-need-to'));
   assert.ok(negative.includes("n't"));
+  assert.ok(negative.includes('dont'));
   assert.ok(negative.includes('not'));
   assert.match(DELETION_INTENT_VOCABULARY.koreanNegationSuffix, /금지/);
+  assert.ok(DELETION_INTENT_VOCABULARY.koreanNegationSuffix.includes(String.raw`안\s*해도`));
   assert.match(DELETION_INTENT_VOCABULARY.koreanNegationSuffix, /말고/);
   assert.match(DELETION_INTENT_VOCABULARY.koreanNegationSuffix, /않도록/);
   assert.equal(

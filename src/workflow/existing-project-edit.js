@@ -49,6 +49,7 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
     Object.freeze({ id: 'need-to-not', re: String.raw`(?:\b(?:do|does)\s+not|n't)\s+need\s+to\b` }),
     Object.freeze({ id: 'never', re: String.raw`\bnever\b` }),
     Object.freeze({ id: "n't", re: String.raw`n't\b` }),
+    Object.freeze({ id: 'dont', re: String.raw`\bdont\b` }),
     Object.freeze({ id: 'not', re: String.raw`\bnot\b` })
   ]),
   // Not removal verbs. They share one negation with a removal verb:
@@ -61,7 +62,7 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
   ]),
   coordinators: DELETION_COORDINATORS,
   // After a Korean verb stem. A particle (은/는/을/를) may sit in between.
-  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|금지|말고|하지\s*않도록|안\s*함|지(?:\s*는)?\s*[마말])`,
+  koreanNegationSuffix: String.raw`(?:\s*[은는을를])?\s*(?:하\s*지(?:\s*는)?\s*[마말]|하면\s*안|금지|말고|하지\s*않도록|안\s*함|안\s*해도|지(?:\s*는)?\s*[마말])`,
   clauseSeparators: Object.freeze([
     Object.freeze({ id: 'and-then', re: String.raw`\band\s+then\b`, negatesLeft: false }),
     Object.freeze({ id: 'but', re: String.raw`\bbut\b`, negatesLeft: false }),

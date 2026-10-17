@@ -1161,7 +1161,7 @@ function cancelProvider(args = {}, providerControllers) {
   };
 }
 
-function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection, prompt } = {}) {
+export function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection, prompt } = {}) {
   const args = {
     ...(payload.args ?? {})
   };

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
+import { dispatchToolCall, withProjectContext } from '../src/runtime/agent-daemon.js';
 import { saveCredentials } from '../src/runtime/auth/chatgpt-auth.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
@@ -212,13 +212,33 @@ async function assertApplyStaysBlocked(prompt) {
   });
 }
 
-async function assertNegatedRemovalKeepsI2c(prompt) {
+// keep-refused: nothing to edit, so the request must refuse. A plan is a failure.
+// edit-applied: the value edit must be in the plan (680Ω and I2C). Refusal is a failure.
+// removal-candidate: I2C removal must be proposed and Apply must stay blocked. Refusal is a failure.
+async function assertNegationOutcome(prompt, outcome) {
   const { projectDir, generated } = await generatedStm32Project();
   const before = await readFile(generated.files.schematic, 'utf8');
   const beforeSpec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
   assert.match(before, /I2C_CONNECTOR/);
   let plan;
   try {
+    if (outcome === 'keep-refused') {
+      await assert.rejects(
+        () => createSchematicPatchPlan({
+          projectDir,
+          prompt,
+          projectName: 'stm32_i2c',
+          validateProjectImpl: passingErc,
+          validateBoardImpl: passingDrc
+        }),
+        (error) => {
+          assert.equal(error.code, 'PROVIDER_NO_PATCH', `${prompt}: ${error.message}`);
+          return true;
+        }
+      );
+      return;
+    }
+
     plan = await createSchematicPatchPlan({
       projectDir,
       prompt,
@@ -226,15 +246,36 @@ async function assertNegatedRemovalKeepsI2c(prompt) {
       validateProjectImpl: passingErc,
       validateBoardImpl: passingDrc
     });
-    assert.equal(hasI2c(plan.components), true, prompt);
-    assert.equal(removalBlocker(plan.review), null, JSON.stringify(plan.review?.findings?.blockers ?? null));
-    const afterRefs = new Set((plan.proposed?.spec?.schematic?.components ?? []).map((component) => component?.ref));
-    for (const component of beforeSpec.schematic?.components ?? []) {
-      assert.ok(afterRefs.has(component.ref), `${prompt} removed ${component.ref}`);
+
+    if (outcome === 'edit-applied') {
+      assert.equal(hasI2c(plan.components), true, JSON.stringify(plan.components));
+      assert.equal(hasOhm680(plan.components), true, JSON.stringify(plan.components));
+      assert.equal(removalBlocker(plan.review), null, JSON.stringify(plan.review?.findings?.blockers ?? null));
+      const afterRefs = new Set((plan.proposed?.spec?.schematic?.components ?? []).map((component) => component?.ref));
+      for (const component of beforeSpec.schematic?.components ?? []) {
+        assert.ok(afterRefs.has(component.ref), `${prompt} removed ${component.ref}`);
+      }
+      return;
     }
-  } catch (error) {
-    if (plan) throw error;
-    assert.equal(error.code, 'PROVIDER_NO_PATCH', `${prompt}: ${error.message}`);
+
+    if (outcome === 'removal-candidate') {
+      assert.equal(plan.components.some((component) => component.ref === 'J2'), false, JSON.stringify(plan.components));
+      assert.equal(plan.components.some((component) => component.ref === 'D1'), true, JSON.stringify(plan.components));
+      const preview = await applySchematicPatch({
+        projectDir,
+        prompt,
+        approved: false,
+        patchPlan: plan
+      });
+      assertBlockedRemoval(preview);
+      assert.deepEqual(preview.removedComponents.map((item) => item.ref), ['J2']);
+      const blocked = await applyApproved(projectDir, prompt, plan);
+      assertBlockedRemoval(blocked);
+      assert.deepEqual(blocked.removedComponents.map((item) => item.ref), ['J2']);
+      return;
+    }
+
+    assert.fail(`Unknown negation outcome ${outcome}`);
   } finally {
     if (plan) await disposeSchematicPatchPlan(plan);
     assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
@@ -493,7 +534,7 @@ for (const prompt of [
   'I2C 지우지 마'
 ]) {
   test(`negated Korean removal keeps I2C (${prompt})`, async () => {
-    await assertNegatedRemovalKeepsI2c(prompt);
+    await assertNegationOutcome(prompt, 'keep-refused');
   });
 }
 
@@ -503,7 +544,7 @@ for (const prompt of [
   "keep I2C, don't remove it"
 ]) {
   test(`negated English removal keeps I2C (${prompt})`, async () => {
-    await assertNegatedRemovalKeepsI2c(prompt);
+    await assertNegationOutcome(prompt, 'keep-refused');
   });
 }
 
@@ -519,40 +560,49 @@ for (const prompt of [
   'I2C 남기고 LED 저항 삭제'
 ]) {
   test(`mixed removal keeps I2C (${prompt})`, async () => {
-    await assertNegatedRemovalKeepsI2c(prompt);
+    await assertNegationOutcome(prompt, 'keep-refused');
   });
 }
 
 test('a resistor edit that says not to remove I2C keeps I2C and changes the resistor', async () => {
-  const prompt = "Change the status LED series resistor to 680 ohm. don't remove I2C.";
-  const { projectDir, generated } = await generatedStm32Project();
-  const before = await readFile(generated.files.schematic, 'utf8');
-  let plan;
-  try {
-    plan = await createSchematicPatchPlan({
-      projectDir,
-      prompt,
-      projectName: 'stm32_i2c',
-      validateProjectImpl: passingErc,
-      validateBoardImpl: passingDrc
-    });
-    assert.equal(hasI2c(plan.components), true, JSON.stringify(plan.components));
-    assert.equal(hasOhm680(plan.components), true, JSON.stringify(plan.components));
-    assert.equal(removalBlocker(plan.review), null);
-    assert.match(before, /I2C_CONNECTOR/);
-    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
-  } finally {
-    if (plan) await disposeSchematicPatchPlan(plan);
-    await rm(projectDir, { force: true, recursive: true });
-  }
+  await assertNegationOutcome(
+    "Change the status LED series resistor to 680 ohm. don't remove I2C.",
+    'edit-applied'
+  );
+});
+
+test("don't remove the LED, remove I2C is an I2C removal candidate", async () => {
+  await assertNegationOutcome("don't remove the LED, remove I2C", 'removal-candidate');
 });
 
 test('reset 버튼 삭제 in a separate sentence does not remove I2C', async () => {
-  await assertNegatedRemovalKeepsI2c('reset 버튼 삭제. I2C 커넥터는 유지하세요.');
+  await assertNegationOutcome('reset 버튼 삭제. I2C 커넥터는 유지하세요.', 'keep-refused');
 });
 
 test('casual Like an ESP32 board mention blocks Apply without an override', async () => {
   await assertApplyStaysBlocked('Like an ESP32 board, change the status LED resistor to 680 ohm on this STM32 board.');
+});
+
+test('withProjectContext strips allowRemovedComponents from a provider schematic.patch', () => {
+  const toolCall = withProjectContext({
+    id: 'call_model_patch_override',
+    name: 'schematic.patch',
+    args: {
+      prompt: 'remove the I2C connector',
+      approved: true,
+      patchId: 'patch-from-model',
+      allowRemovedComponents: ['J2', 'R4', 'R5']
+    }
+  }, '/tmp/chatpcb-existing-project', true, {
+    prompt: 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.'
+  });
+
+  assert.equal(toolCall.name, 'schematic.patch');
+  assert.equal(Object.hasOwn(toolCall.args, 'allowRemovedComponents'), false);
+  assert.equal(JSON.stringify(toolCall.args).includes('allowRemovedComponents'), false);
+  assert.equal(JSON.stringify(toolCall.args).includes('J2'), false);
+  assert.equal(toolCall.args.prompt, 'remove the I2C connector');
+  assert.equal(toolCall.args.userPrompt, 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.');
 });
 
 test('provider-emitted allowRemovedComponents cannot authorize an I2C removal', async () => {
