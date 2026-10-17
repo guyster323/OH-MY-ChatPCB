@@ -66,8 +66,8 @@ function grokPayloadSchema(name) {
 
 function grokArgsSchema(name) {
   // previewNativeChange reads prompt and, for schematic.patch, optional projectName.
-  // Approval controls (approved, cancel, patchId) are stripped in withProjectContext
-  // and are not provider arguments.
+  // Approval controls (approved, cancel, patchId, allowRemovedComponents) are stripped
+  // in withProjectContext and are not provider arguments.
   if (name === ToolName.SCHEMATIC_PATCH) {
     return {
       type: 'object',

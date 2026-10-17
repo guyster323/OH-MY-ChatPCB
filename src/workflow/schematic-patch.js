@@ -95,7 +95,7 @@ function removalOverrideDecision(allowRemovedComponents, removedRefList) {
 function removalFailure(plan, mismatch) {
   const blocker = findRemovalBlocker(plan);
   const removedComponents = Array.isArray(blocker?.removedComponents) ? blocker.removedComponents : [];
-  const baseMessage = blocker?.message ?? 'Existing components were removed. Apply stays closed until the client confirms this exact set. 기존 부품이 빠졌습니다. 클라이언트가 이 목록을 그대로 확인하기 전에는 적용할 수 없습니다.';
+  const baseMessage = blocker?.message ?? 'Existing components were removed. Apply stays closed until the client confirms this exact set. 기존 부품이 빠졌어요. 클라이언트가 이 목록을 그대로 확인하기 전에는 적용할 수 없어요.';
   return {
     requiresApproval: false,
     approved: true,
@@ -187,6 +187,7 @@ function mapApplyResult(result, plan) {
 export async function createSchematicPatchPlan({
   projectDir,
   prompt,
+  userPrompt,
   projectName = 'chatpcb_mcu_peripheral',
   validateProjectImpl = validateProject,
   validateBoardImpl = validateBoard,
@@ -198,7 +199,7 @@ export async function createSchematicPatchPlan({
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
-    request: { prompt },
+    request: { prompt, ...(typeof userPrompt === 'string' ? { userPrompt } : {}) },
     projectName,
     context,
     signal,

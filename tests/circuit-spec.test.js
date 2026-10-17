@@ -715,13 +715,18 @@ test('fullwidth digits, glued counts, word pcs, and sub-ohm resistors', () => {
     assert.equal(parsed.supplyVolts, 5, prompt);
   }
 
+  for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0', '엘이디 0Ω']) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-invalid-resistor', prompt);
+    assert.match(parsed.reviewBlockers[0].en, /not valid/);
+    assert.match(parsed.reviewBlockers[0].ko, /올바르지 않아요/);
+  }
+
   const tooSmall = [
-    ['LED 5V 0R', /0R/, /0Ω은/],
-    ['LED 5V 0Ω', /0Ω/, /0Ω은/],
-    ['LED 5V 0 ohm', /0 ohm/, /0Ω은/],
     ['LED 5V 0.5Ω', /0\.5Ω/, /0\.5Ω은/],
     ['LED 5V R47', /R47/, /0\.47Ω은/],
-    ['엘이디 0Ω', /0Ω/, /0Ω은/],
     ['엘이디 R47', /R47/, /0\.47Ω은/]
   ];
   for (const [prompt, english, korean] of tooSmall) {
@@ -1589,9 +1594,6 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     ['R1=330', [{ value: 330, unit: 'ohm', raw: 'R1=330' }]],
     ['R1 330', [{ value: 330, unit: 'ohm', raw: 'R1 330' }]],
     ['R47', [{ value: 0.47, unit: 'ohm', raw: 'R47' }]],
-    ['0R', [{ value: 0, unit: 'ohm', raw: '0R' }]],
-    ['0Ω', [{ value: 0, unit: 'ohm', raw: '0Ω' }]],
-    ['0 ohm', [{ value: 0, unit: 'ohm', raw: '0 ohm' }]],
     ['0.5Ω', [{ value: 0.5, unit: 'ohm', raw: '0.5Ω' }]],
     ['LEDx3', [{ value: 3, unit: 'count', raw: 'LEDx3' }]],
     ['LED×3', [{ value: 3, unit: 'count', raw: 'LED×3' }]],
@@ -2145,6 +2147,11 @@ test('every discrete LED message is one language and Korean has no English words
     'LED 5V 20uA',
     'LED 0 pcs',
     'LED 0Ω',
+    'LED 5V R47',
+    '엘이디 R47',
+    'LED 5V 4m7',
+    '5V에 LED 2m2 저항',
+    'LED 5V -10 ohm',
     '엘이디 0Ω',
     'LED Vf 0',
     'LED',
@@ -2204,6 +2211,7 @@ test('every discrete LED message is one language and Korean has no English words
     'discrete-led-ambiguous-resistor',
     'discrete-led-invalid-count',
     'discrete-led-resistor-too-small',
+    'discrete-led-invalid-resistor',
     'discrete-led',
     'discrete-led-red',
     'discrete-led-green',
@@ -2542,10 +2550,18 @@ function strayKoreanAscii(text) {
     'V', 'mV', 'kV', 'A', 'mA', 'LED', 'RGB', 'WS2812', 'WS2811', 'SK6812', 'APA102',
     'PWM', 'ERC', 'E24', 'KiCad', 'GND', 'VCC'
   ]);
-  return (String(text).match(/[A-Za-z][A-Za-z0-9]*/g) ?? []).filter((word) => {
-    if (allowed.has(word)) return false;
-    return !(word.length === 1 && /[kKmMgGvVaArR]/.test(word));
-  });
+  const found = [];
+  const pattern = /[A-Za-z][A-Za-z0-9]*/g;
+  for (const match of String(text).matchAll(pattern)) {
+    const word = match[0];
+    if (allowed.has(word)) continue;
+    if (word.length === 1 && /[kKmMgGvVaArR]/.test(word)) continue;
+    // "4M7" is a resistor code. The letter run starts after a digit.
+    const before = match.index > 0 ? text[match.index - 1] : '';
+    if (/[0-9.]/.test(before) && /^[kKmMrR]\d*$/.test(word)) continue;
+    found.push(word);
+  }
+  return found;
 }
 
 test('normalizes USB data nets to KiCad-safe profile names', () => {

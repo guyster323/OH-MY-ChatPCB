@@ -21,6 +21,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
+import { blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -260,7 +261,12 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call.args?.prompt);
         const extra = { conversation: error.conversation };
         if (error?.technicalDetail) extra.technicalDetail = error.technicalDetail;
-        const failed = failure(error.code ?? 'PROVIDER_FAILED', error.message, extra);
+        // A failed snapshot restore appends the kept path after the guidance line.
+        // Leave that whole message intact so the path is not dropped.
+        const message = typeof error?.snapshotPath === 'string'
+          ? error.message
+          : messageForLocale(error.message, call.args?.locale);
+        const failed = failure(error.code ?? 'PROVIDER_FAILED', message, extra);
         if (typeof error?.snapshotPath === 'string') failed.error.snapshotPath = error.snapshotPath;
         if (typeof error?.backupPath === 'string') failed.error.backupPath = error.backupPath;
         return failed;
@@ -289,6 +295,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
   }
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call?.args?.prompt);
+    if (error?.code === 'PROJECT_EXISTS') return failure('PROJECT_EXISTS', error.message);
     throw error;
   }
 }
@@ -333,6 +340,7 @@ async function dispatchSchematicPatch(args, ctx) {
     return previewNativeChange({
       projectDir,
       prompt: args.prompt,
+      userPrompt: args.userPrompt,
       projectName: args.projectName,
       context: args.context ?? args.selection
     }, ctx);
@@ -718,6 +726,27 @@ async function requestProject(call, ctx) {
     let keepSnapshot = false;
     const fsOps = resolveSnapshotFs(ctx);
     try {
+      // Guidance is only for a direct modify of an existing project. A conversation
+      // that is ready to generate is not one. An unreadable manifest is not a
+      // refusal either: fall through so a provider failure can still restore the
+      // project or roll the swap back.
+      if (hasSpec && !awaitingInput) {
+        let existingSpec = null;
+        try {
+          existingSpec = await readChatPcbManifest(projectDir);
+        } catch {
+          // CHATPCB_MANIFEST_INVALID and other read failures keep the prior path.
+        }
+        if (existingSpec) {
+          const decision = classifyExistingProjectRequest(generatePrompt, existingSpec, prompt);
+          // Counts, pins, frequencies, colors, and questions still reach the provider.
+          if (decision.mode === 'refuse' && decision.code && blocksBeforeProvider(prompt, decision)) {
+            const refused = new Error(decision.message);
+            refused.code = decision.code;
+            throw refused;
+          }
+        }
+      }
       snapshot = hasSpec ? await snapshotProject(projectDir, fsOps) : null;
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
       providerResult = await invokeProvider({
@@ -1192,7 +1221,7 @@ function cancelProvider(args = {}, providerControllers) {
   };
 }
 
-function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection, prompt } = {}) {
+export function withProjectContext(payload, projectDir, forceProjectDir = false, { analyzerAdapters, selection, prompt } = {}) {
   const args = {
     ...(payload.args ?? {})
   };
@@ -1205,6 +1234,8 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
   delete args.transactionId;
   delete args.proposalId;
   delete args.rollback;
+  // Panel language is not a model argument. The client locale stays on project.request.
+  delete args.locale;
 
   let name = payload.name;
   if (name === 'schematic.patch') {
@@ -1212,6 +1243,9 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
     delete args.cancel;
     delete args.patchId;
     delete args.expectedPatchId;
+    delete args.allowRemovedComponents;
+    // A model must not supply the removal source. The client request is set below.
+    delete args.userPrompt;
     if (selection !== undefined) args.context = selection;
   }
   if (name === 'schematic.generate' && selection !== undefined) {
@@ -1232,12 +1266,16 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
     // on project.request). A rewritten tool prompt can drop a connector or a
     // debug header and leave a missing-swd blocker. Native generation and
     // project.request already keep this prompt, so direct provider.invoke does too.
-    // An existing-project patch may still use a non-empty model prompt: that path
-    // asks for a complete description of the edited board.
+    // An existing-project patch may keep a non-empty model prompt for the edit
+    // text ("from 330Ω to 680Ω"). Removal is classified only from the caller
+    // prompt, passed separately as userPrompt.
     if (name === 'schematic.generate' || !forceProjectDir) {
       args.prompt = prompt;
     } else if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
       args.prompt = prompt;
+    }
+    if (name === 'schematic.patch' && forceProjectDir) {
+      args.userPrompt = prompt;
     }
   }
   if (name === 'project.inspect' && analyzerAdapters !== undefined) {
@@ -1354,7 +1392,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
   };
 }
 
-async function previewNativeChange({ projectDir, prompt, projectName, context }, ctx) {
+async function previewNativeChange({ projectDir, prompt, userPrompt, projectName, context }, ctx) {
   emitProgress(ctx, {
     stage: 'preview',
     sprite: 'draft',
@@ -1380,6 +1418,7 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
     plan = await runWithProjectLock(ctx, projectDir, () => createSchematicPatchPlan({
       projectDir,
       prompt,
+      userPrompt,
       projectName,
       context,
       validateProjectImpl: ctx.validateProjectImpl,
