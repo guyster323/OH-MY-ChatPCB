@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { collectTransactionInventory, transactionArtifactKind } from '../evidence/transaction-inventory.js';
-import { assertInspectionTree, copyInspectionTree } from './inspection-copy.js';
 import { proposalSource } from './native-proposal-source.js';
+import { assertInspectionTree, copyInspectionTree } from './inspection-copy.js';
 import { assertSafeProjectDir, isInside } from './project-workspace.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';

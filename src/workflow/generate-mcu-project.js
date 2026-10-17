@@ -37,6 +37,32 @@ export async function generateMcuPeripheralProject({
   await assertInspectionTree(projectDir, guard);
   const conversation = await loadCircuitConversation(projectDir).catch(() => null);
   const drafted = applyDiscreteLedSpec(applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation));
+  return writeGeneratedProject({
+    projectDir,
+    spec: drafted,
+    projectName,
+    allowedWorkspaceRoot
+  });
+}
+
+export async function writeGeneratedProject({
+  projectDir,
+  spec: drafted,
+  projectName = 'chatpcb_mcu_peripheral',
+  allowedWorkspaceRoot
+}) {
+  if (!projectDir) {
+    throw new Error('projectDir is required.');
+  }
+  if (!drafted || typeof drafted !== 'object') {
+    throw new Error('spec is required.');
+  }
+
+  const guard = allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {};
+  assertSafeProjectDir(projectDir, guard);
+  await assertUnlinkedAncestors(projectDir, guard);
+  await mkdir(projectDir, { recursive: true });
+  await assertInspectionTree(projectDir, guard);
   const schematic = buildMcuSchematicAst(drafted);
   const spec = attachDiscretePartManifest(drafted, schematic);
   const baseName = sanitizeProjectName(projectName);

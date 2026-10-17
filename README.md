@@ -197,6 +197,20 @@ $env:CHATPCB_PROVIDER_TIMEOUT_MS = "300000"
 $env:CHATPCB_GROK_TIMEOUT_MS = "420000"
 ```
 
+## ChatGPT
+
+OpenAI dynamic client registration issues an `oaiapp_` client id for this app. OpenAI expects that client id to be reused on the next sign-in, together with this machine's host id. Sign-out keeps the credentials file so the next sign-in can send the same client id. It does not start a new registration.
+
+After sign-out the file holds only that registration. When each value was stored, the keys are exactly:
+
+- `client_id` — the issued `oaiapp_` client id
+- `ext_agent_host_id` — this machine's host id
+- `issuer` — the OpenAI issuer
+- `saved_at` — when the registration was saved
+- `last_used_at` — when the registration was last used
+
+A key that was never stored is absent. No other key remains. Access tokens, refresh tokens, ID tokens, email, name, account, and subject are removed, and the next authorize request does not send `id_token_hint` or `login_hint`.
+
 ## Browser UI verification
 
 Run this command for the closest repeatable check to a user operating the current panel:

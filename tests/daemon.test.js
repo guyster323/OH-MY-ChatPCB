@@ -466,7 +466,7 @@ test('daemon lists provider definitions through provider.list', async () => {
   assert.equal(result.ok, true);
   assert.deepEqual(
     result.result.providers.map((provider) => provider.id),
-    ['codex', 'claude', 'copilot', 'grok']
+    ['codex', 'claude', 'copilot', 'grok', 'chatgpt']
   );
 });
 
@@ -753,7 +753,7 @@ test('daemon candidate validation rejection does not delete the project director
       {
         id: 'call_project_request_restore_dir',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
+        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.' }
       },
       {
         ...providerOptions({
@@ -857,7 +857,7 @@ test('daemon confines provider-emitted project paths to the active project.reque
   }
 });
 
-test('daemon ignores disallowed provider-emitted project.create calls and falls back to native preview during project.request', async () => {
+test('daemon ignores disallowed provider-emitted project.create calls and refuses with PROVIDER_NO_PATCH during project.request', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-request-'));
   const outside = await mkdtemp(path.join(tmpdir(), 'chatpcb-project-create-outside-'));
 
@@ -888,9 +888,11 @@ test('daemon ignores disallowed provider-emitted project.create calls and falls 
         ]
       })
     );
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
-    assert.equal(result.result.operation, 'patched');
+    // Short modify on an applied board stays fail-closed. Regenerating from
+    // "Add a reset button" would drop parts the request did not restate.
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     await assert.rejects(() => readdir(path.join(outside, 'Escaped-Board')), { code: 'ENOENT' });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -940,15 +942,16 @@ test('daemon retries with corrective note when provider emits only disallowed ca
       }
     );
 
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     assert.equal(callCount, 2);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
-test('daemon ignores disallowed schematic.generate on existing project and falls back', async () => {
+test('daemon ignores disallowed schematic.generate on existing project and refuses with PROVIDER_NO_PATCH', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-generate-disallowed-'));
 
   try {
@@ -979,9 +982,9 @@ test('daemon ignores disallowed schematic.generate on existing project and falls
       })
     );
 
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
-    assert.equal(result.result.operation, 'patched');
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
@@ -1344,7 +1347,7 @@ test('daemon keeps existing project artifacts when candidate ERC validation fail
       {
         id: 'call_project_request_rollback',
         name: 'project.request',
-        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power and UART header.' }
+        args: { provider: 'codex', projectDir: root, prompt: 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.' }
       },
       {
         ...providerOptions({
@@ -1463,7 +1466,7 @@ test('daemon normalizes provider patch controls to an approval-gated preview', a
   }
 });
 
-test('daemon ignores disallowed provider calls with inspect and succeeds via fallback', async () => {
+test('daemon ignores disallowed provider calls with inspect and refuses with PROVIDER_NO_PATCH', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-provider-exception-restore-'));
 
   try {
@@ -1498,8 +1501,9 @@ test('daemon ignores disallowed provider calls with inspect and succeeds via fal
         validateBoardImpl: passingDrc
       }
     );
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     assert.equal(callCount, 2);
 
     assert.equal(await readFile(generated.files.spec, 'utf8'), before);
@@ -1538,7 +1542,7 @@ test('daemon ignores disallowed calls after patch preview and succeeds without r
               createEnvelope('tool.call', {
                 id: 'call_patch_then_fail',
                 name: 'schematic.patch',
-                args: { prompt: 'STM32 board with USB-C power and UART header.' }
+                args: { prompt: 'STM32 board with USB-C power, I2C connector, UART header, reset button, and LED.' }
               }),
               createEnvelope('tool.call', {
                 id: 'call_provider_forbidden_create',
@@ -2625,7 +2629,7 @@ test('daemon websocket transports approved patch results with large diffs', asyn
               name: 'schematic.patch',
               args: {
                 projectDir: root,
-                prompt: 'RP2040 board with USB-C power, I2C connector, reset button, and status LED.',
+                prompt: 'RP2040 board with USB-C power, I2C connector, UART debug header, reset button, and status LED.',
                 approved: false
               }
             }
@@ -3409,7 +3413,7 @@ test('native schematic.generate of the same discrete LED prompt keeps LED, 330 o
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
-test('daemon ignores disallowed calls from real child process provider and retries with fallback', async () => {
+test('daemon ignores disallowed calls from real child process provider and refuses with PROVIDER_NO_PATCH', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'chatpcb-integration-disallowed-'));
 
   try {
@@ -3450,9 +3454,9 @@ test('daemon ignores disallowed calls from real child process provider and retri
       }
     );
 
-    assert.equal(result.ok, true);
-    assert.equal(result.result.requiresApproval, true);
-    assert.equal(result.result.operation, 'patched');
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'PROVIDER_NO_PATCH');
+    assert.match(result.error.message, /could not be applied/);
     assert.equal(callCount, 2);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });

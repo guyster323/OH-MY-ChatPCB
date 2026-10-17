@@ -6,8 +6,9 @@ import path from 'node:path';
 
 import { KNOWN_CHATPCB_TOOLS, PROVIDER_ALLOWED_TOOLS, ToolName } from '../shared/constants.js';
 import { createEnvelope, parseEnvelope } from './envelope.js';
-import { runProviderProcess } from './provider-process.js';
+import { parseProviderMessage, runProviderProcess } from './provider-process.js';
 import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
+import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
 import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
@@ -21,6 +22,7 @@ import { validateBoard } from '../workflow/validate-board.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
+import { createChatGPTAuthManager, maskSecrets } from './auth/chatgpt-auth.js';
 
 const knownChatPcbTools = new Set(KNOWN_CHATPCB_TOOLS);
 
@@ -198,6 +200,48 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     case 'provider.list':
       return ok({ providers: listProviderDefinitions() });
 
+    case 'auth.chatgpt.status':
+      return ok(await chatGptAuthManager(ctx).getAuthStatus());
+
+    case 'auth.chatgpt.start': {
+      const manager = ctx.chatgptAuthManager;
+      if (!manager) return failure('NO_AUTH_SESSION', 'ChatGPT auth is not initialized');
+      try {
+        return ok(await manager.startAuth(call.args, (type, payload) => {
+          if (typeof ctx.emit === 'function') ctx.emit(type, payload);
+        }));
+      } catch (error) {
+        return failure(error.code || 'AUTH_START_FAILED', error.message);
+      }
+    }
+
+    case 'auth.chatgpt.reopen': {
+      const manager = ctx.chatgptAuthManager;
+      if (!manager) return failure('NO_AUTH_SESSION', 'No active auth session');
+      try {
+        const reopened = await manager.reopenAuth(call.args);
+        if (reopened?.ok === false) {
+          const error = reopened.error;
+          const message = typeof error === 'string' ? error : (error?.message || 'Could not open browser');
+          const code = typeof error === 'object' && error?.code ? error.code : 'open_failed';
+          return failure(code, message, { authUrl: reopened.authUrl || error?.authUrl });
+        }
+        if (reopened?.error) return failure('NO_AUTH_SESSION', reopened.error);
+        return ok(reopened);
+      } catch (error) {
+        return failure(error.code || 'open_failed', error.message || 'Could not open browser', { authUrl: error.authUrl });
+      }
+    }
+
+    case 'auth.chatgpt.cancel': {
+      const manager = ctx.chatgptAuthManager;
+      if (!manager) return ok({ state: 'signed_out' });
+      return ok(await manager.cancelAuth(call.args));
+    }
+
+    case 'auth.chatgpt.signOut':
+      return ok(await chatGptAuthManager(ctx).signOut());
+
     case 'provider.invoke': {
       const invocationId = call.args?.invocationId ?? call.id;
       try {
@@ -290,6 +334,7 @@ async function dispatchSchematicPatch(args, ctx) {
       approved: true,
       expectedPatchId: args.patchId,
       patchPlan: plan,
+      allowRemovedComponents: args.allowRemovedComponents,
       validateProjectImpl,
       validateBoardImpl,
       verifyAppliedProjectImpl,
@@ -398,20 +443,48 @@ async function invokeProvider(call, ctx) {
     let alreadyStreamed = false;
     let transcript;
     try {
-      transcript = await runProviderProcessImpl({
-        command: availability.resolvedPath || availability.command || definition.command,
-        args: buildProviderLaunchArgs(definition, launchContext),
-        input,
-        timeoutMs: definition.timeoutMs,
-        allowedToolNames: PROVIDER_ALLOWED_TOOLS,
-        signal: controller.signal,
-        providerId: definition.id,
-        usePromptFile: definition.usePromptFile === true,
-        onEvent: (event) => {
-          alreadyStreamed = true;
-          emitProviderEvent(ctx, event);
+      if (provider === 'chatgpt') {
+        let response;
+        const modifyExisting = projectExists === true && allowGenerate === false;
+        try {
+          response = await callChatGPTResponses({
+            prompt: input,
+            signal: controller.signal,
+            model: args.model,
+            allowedTools: modifyExisting ? promptTools : PROVIDER_ALLOWED_TOOLS,
+            toolChoice: modifyExisting ? ToolName.SCHEMATIC_PATCH : 'auto',
+            maxTurns: 4,
+            executeTool: (toolCall) => executeChatGptReadOnlyTool(toolCall, ctx, projectDir, args.selection)
+          });
+        } catch (error) {
+          // stderr is what the daemon launcher appends to daemon.log.
+          console.error(maskSecrets(error?.message || 'ChatGPT request failed'));
+          throw error;
         }
-      });
+        const events = parseProviderMessage(response.text, PROVIDER_ALLOWED_TOOLS);
+        transcript = {
+          exitCode: 0,
+          events,
+          stderr: '',
+          tracePath: null,
+          readOnlyResults: response.readOnlyResults ?? []
+        };
+      } else {
+        transcript = await runProviderProcessImpl({
+          command: availability.resolvedPath || availability.command || definition.command,
+          args: buildProviderLaunchArgs(definition, launchContext),
+          input,
+          timeoutMs: definition.timeoutMs,
+          allowedToolNames: PROVIDER_ALLOWED_TOOLS,
+          signal: controller.signal,
+          providerId: definition.id,
+          usePromptFile: definition.usePromptFile === true,
+          onEvent: (event) => {
+            alreadyStreamed = true;
+            emitProviderEvent(ctx, event);
+          }
+        });
+      }
     } catch (error) {
       // Unknown tool names reject the child transcript. Keep the parsed events
       // so a known tool from the same process still reaches DISALLOWED_TOOL.
@@ -430,9 +503,31 @@ async function invokeProvider(call, ctx) {
 
     const toolResults = [];
     const disallowedCalls = [];
+    const loopResults = new Map((transcript.readOnlyResults ?? []).map((item) => [item.id, item]));
     for (const event of transcript.events) {
       throwIfProviderRunAborted(providerControllers, invocationId, controller);
       if (event.type !== 'tool.call') continue;
+
+      const loopResult = loopResults.get(event.payload.id);
+      if (loopResult && READ_ONLY_PROVIDER_TOOLS.has(event.payload.name)) {
+        const output = loopResult.output ?? {};
+        if (output.ok === false) {
+          toolResults.push({
+            id: event.payload.id,
+            ok: false,
+            error: output.error ?? { code: 'TOOL_FAILED', message: 'Read-only tool failed' },
+            name: event.payload.name
+          });
+        } else {
+          toolResults.push({
+            id: event.payload.id,
+            ok: true,
+            result: output.result ?? output,
+            name: event.payload.name
+          });
+        }
+        continue;
+      }
 
       if (!knownChatPcbTools.has(event.payload.name)) {
         toolResults.push({
@@ -470,7 +565,8 @@ async function invokeProvider(call, ctx) {
         ...(await dispatchToolCall(toolCall, providerDispatchContext(
           ctx,
           proposalSource({ provider: definition.id, via: 'provider' })
-        )))
+        ))),
+        name: toolCall.name
       });
     }
     throwIfProviderRunAborted(providerControllers, invocationId, controller);
@@ -558,9 +654,11 @@ async function requestProject(call, ctx) {
   const generatePrompt = hasSpec && !awaitingInput
     ? prompt
     : (conversation?.generatePrompt ?? prompt);
+  if (conversation) ctx.pendingConversation = conversation;
   if (shouldClarify && conversation) {
     ctx.pendingConversationBytes = Buffer.from(serializeCircuitConversation(conversation));
   }
+  ctx.persistLiveConversation = args.provider === 'chatgpt';
 
   const callerHolds = typeof ctx.projectMutexRegistry.callerHolds === 'function'
     ? await ctx.projectMutexRegistry.callerHolds({ projectDir })
@@ -614,6 +712,18 @@ async function requestProject(call, ctx) {
 
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
       let preview = firstPreview ?? lastMutatingResult(providerResult.toolResults);
+      if (!preview && hasSpec && args.provider === 'chatgpt' && providerReturnedOnlyReadOnly(providerResult)) {
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        providerResult = await invokeProvider({
+          ...call,
+          args: {
+            ...args,
+            prompt: `${generatePrompt}\n\n${SCHEMATIC_PATCH_NUDGE}`
+          }
+        }, providerCtx);
+        throwIfProviderCancelled(ctx.providerControllers, invocationId);
+        preview = lastMutatingResult(providerResult.toolResults);
+      }
       let usedBuiltinDraft = false;
       if (!preview) {
         throwIfProviderCancelled(ctx.providerControllers, invocationId);
@@ -650,6 +760,13 @@ async function requestProject(call, ctx) {
       }
 
       throwIfProviderCancelled(ctx.providerControllers, invocationId);
+      logChatGptRequestDecision(args.provider, providerResult);
+      if (conversation && preview?.source) {
+        conversation.lastSource = {
+          provider: preview.source.provider ?? null,
+          via: preview.source.via ?? null
+        };
+      }
       if (preview?.requiresApproval) {
         emitProgress(ctx, {
           stage: 'ready',
@@ -837,15 +954,93 @@ async function disposeProvisionalPlans(plans, registry, projectDir) {
   }
 }
 
-function lastMutatingResult(toolResults) {
-  return toolResults.findLast((toolResult) => (
+function lastMutatingTool(toolResults) {
+  return [...(toolResults ?? [])].reverse().find((toolResult) => (
     toolResult.ok && (toolResult.result?.files || toolResult.result?.requiresApproval === true)
-  ))?.result ?? null;
+  )) ?? null;
+}
+
+function lastMutatingResult(toolResults) {
+  return lastMutatingTool(toolResults)?.result ?? null;
+}
+
+const READ_ONLY_PROVIDER_TOOLS = new Set([
+  ToolName.PROJECT_INSPECT,
+  ToolName.VALIDATE_ERC,
+  ToolName.VALIDATE_DRC,
+  ToolName.SIMULATE_SPICE
+]);
+const SCHEMATIC_PATCH_NUDGE = 'Call schematic.patch now for this existing project. Put the requested change in args.prompt. Do not call project.inspect or another read-only tool again.';
+
+function providerReturnedOnlyReadOnly(providerResult) {
+  const calls = (providerResult?.events ?? []).filter((event) => event?.type === 'tool.call');
+  if (calls.length === 0) return false;
+  return calls.every((event) => READ_ONLY_PROVIDER_TOOLS.has(event?.payload?.name));
+}
+
+async function executeChatGptReadOnlyTool(call, ctx, projectDir, selection) {
+  const name = call?.name;
+  try {
+    if (name === ToolName.SIMULATE_SPICE) {
+      const result = await simulateProject({
+        projectDir,
+        ngspicePath: ctx.ngspicePath,
+        ...(ctx.runCommandImpl ? { runCommandImpl: ctx.runCommandImpl } : {})
+      });
+      return { ok: true, result: publicSimulateResult(result) };
+    }
+    if (READ_ONLY_PROVIDER_TOOLS.has(name) && name !== ToolName.SIMULATE_SPICE) {
+      const inspect = ctx.inspectProjectImpl ?? inspectProject;
+      const result = await inspect({
+        projectDir,
+        kicadCliPath: ctx.kicadCliPath,
+        ...(ctx.allowedWorkspaceRoot ? { allowedWorkspaceRoot: ctx.allowedWorkspaceRoot } : {}),
+        validateProjectImpl: ctx.validateProjectImpl,
+        validateBoardImpl: ctx.validateBoardImpl,
+        ...(selection !== undefined ? { selection } : {})
+      });
+      return { ok: true, result };
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'DISALLOWED_TOOL',
+        message: `${name ?? 'tool'} is not executed inside the provider loop`
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: { code: error?.code ?? 'TOOL_FAILED', message: error?.message ?? 'Tool failed' }
+    };
+  }
+}
+
+function chatGptFallbackReason(providerResult) {
+  const calls = (providerResult?.events ?? []).filter((event) => event?.type === 'tool.call');
+  if (calls.length === 0) return 'provider returned no tool call';
+  const failed = [...(providerResult.toolResults ?? [])].reverse().find((result) => result?.ok === false);
+  const message = failed?.error?.message;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  return 'provider returned no mutating tool call';
+}
+
+function logChatGptRequestDecision(provider, providerResult) {
+  if (provider !== 'chatgpt') return;
+  const mutating = lastMutatingTool(providerResult?.toolResults);
+  const line = mutating
+    ? `provider chatgpt: tool call ${mutating.name || 'tool'} via provider`
+    : `provider chatgpt: fell back to native: ${chatGptFallbackReason(providerResult)}`;
+  console.error(maskSecrets(line));
 }
 
 async function projectHasSpec(projectDir) {
   const entries = await readdir(path.resolve(projectDir), { withFileTypes: true });
   return entries.some((entry) => entry.isFile() && entry.name.endsWith('.chatpcb.json'));
+}
+
+function chatGptAuthManager(ctx) {
+  return ctx.chatgptAuthManager ?? createChatGPTAuthManager();
 }
 
 async function providerLaunchContext({
@@ -856,7 +1051,7 @@ async function providerLaunchContext({
   inspectionContext,
   inspectResult
 }) {
-  if (provider !== 'grok') return { projectDir };
+  if (provider !== 'grok' && provider !== 'chatgpt') return { projectDir };
 
   let exists = projectExists === true;
   if (allowGenerate === false) exists = true;
@@ -1000,8 +1195,16 @@ function withProjectContext(payload, projectDir, forceProjectDir = false, { anal
   if (projectDir && (forceProjectDir || !args.projectDir)) {
     args.projectDir = projectDir;
   }
-  if (forceProjectDir && typeof prompt === 'string' && prompt.trim() && (name === 'schematic.generate' || name === 'schematic.patch')) {
-    if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
+  if (typeof prompt === 'string' && prompt.trim() && (name === 'schematic.generate' || name === 'schematic.patch')) {
+    // The caller prompt is the user request (or the conversation generate prompt
+    // on project.request). A rewritten tool prompt can drop a connector or a
+    // debug header and leave a missing-swd blocker. Native generation and
+    // project.request already keep this prompt, so direct provider.invoke does too.
+    // An existing-project patch may still use a non-empty model prompt: that path
+    // asks for a complete description of the edited board.
+    if (name === 'schematic.generate' || !forceProjectDir) {
+      args.prompt = prompt;
+    } else if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) {
       args.prompt = prompt;
     }
   }
@@ -1025,8 +1228,16 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     stateRoot: dispatchOptions.transactionStateRoot
   });
   const reconciledProjects = dispatchOptions.reconciledProjects ?? new Set();
+  const chatgptAuthManager = dispatchOptions.chatgptAuthManager ?? createChatGPTAuthManager({
+    clientId: dispatchOptions.chatgptClientId,
+    spawnImpl: dispatchOptions.browserSpawnImpl,
+    portStart: dispatchOptions.chatgptPortStart,
+    portAttempts: dispatchOptions.chatgptPortAttempts,
+    timeoutMs: dispatchOptions.chatgptAuthTimeoutMs
+  });
   const resolvedDispatchOptions = {
     ...dispatchOptions,
+    chatgptAuthManager,
     providerControllers,
     patchApprovalRegistry,
     projectMutexRegistry,
@@ -1121,11 +1332,13 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     server,
     close: () =>
       new Promise((resolve, reject) => {
-        for (const client of clients) {
-          client.destroy();
-        }
-        patchApprovalRegistry.disposeAll();
-        server.close((error) => (error ? reject(error) : resolve()));
+        Promise.resolve(chatgptAuthManager.cancelAll?.()).catch(() => {}).finally(() => {
+          for (const client of clients) {
+            client.destroy();
+          }
+          patchApprovalRegistry.disposeAll();
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
       }),
     clients
   };
@@ -1137,6 +1350,21 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
     sprite: 'draft',
     text: progressCopy(prompt, '로컬에서 회로 초안을 그리는 중.', 'Drawing a local schematic draft.')
   });
+  let conversationBytes = ctx.pendingConversationBytes;
+  if (ctx.pendingConversation && ctx.designSource) {
+    const source = proposalSource(ctx.designSource);
+    ctx.pendingConversation.lastSource = {
+      provider: source.provider ?? null,
+      via: source.via ?? null
+    };
+    conversationBytes = Buffer.from(serializeCircuitConversation(ctx.pendingConversation));
+    ctx.pendingConversationBytes = conversationBytes;
+    // ChatGPT shows lastSource before Apply. Write it before the proposal snapshot
+    // so the conversation artifact digest already includes those bytes.
+    if (ctx.persistLiveConversation === true) {
+      await saveCircuitConversation(projectDir, ctx.pendingConversation);
+    }
+  }
   let plan;
   try {
     plan = await runWithProjectLock(ctx, projectDir, () => createSchematicPatchPlan({
@@ -1146,7 +1374,7 @@ async function previewNativeChange({ projectDir, prompt, projectName, context },
       context,
       validateProjectImpl: ctx.validateProjectImpl,
       validateBoardImpl: ctx.validateBoardImpl,
-      conversationBytes: ctx.pendingConversationBytes,
+      conversationBytes,
       source: ctx.designSource ?? proposalSource()
     }));
   } catch (error) {
@@ -1441,3 +1669,4 @@ function decodeWebSocketText(buffer) {
 
   return data.toString('utf8');
 }
+
