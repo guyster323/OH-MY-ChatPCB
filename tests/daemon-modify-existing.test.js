@@ -1625,3 +1625,158 @@ test('coded native refusal uses the client locale and ignores a model locale', a
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
+
+test('the pre-provider gate lets counts, pins, colors, and questions reach the provider', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-gate-reach-'));
+  const spec = {
+    sourcePrompt: 'existing board',
+    mcu: { family: 'STM32' },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '1000' }
+    ],
+    schematic: {
+      components: [
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '1k' }
+      ]
+    }
+  };
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "ChatPCB:LED_RESISTOR") (at 0 0 0)',
+    '    (property "Reference" "R3" (at 0 0 0))',
+    '    (property "Value" "1k" (at 0 0 0))))'
+  ].join('\n');
+  const schematicPath = path.join(projectDir, 'board.kicad_sch');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(schematicPath, schematic);
+  const reach = [
+    'add 2 LEDs',
+    'use 2 LEDs',
+    'add 3 status LEDs',
+    'LED 2개 추가',
+    'LED 4개 추가',
+    'LED 2개',
+    'status LED on pin 13',
+    'LED를 GPIO 4번에 연결',
+    'LED 1 Hz',
+    'LED blink 1Hz',
+    'change LED color to red',
+    'LED 색 바꿔줘',
+    'change LED to green',
+    'LED를 0805로',
+    'LED 전류 5mA로',
+    'LED 핀 GPIO15로',
+    'why is R3 330?',
+    'R3가 뭐야?',
+    'what does R3 do?',
+    'add a decoupling cap',
+    'change MCU to ESP32-S3',
+    'rename net',
+    'add test point',
+    'make the board smaller',
+    'use 3.3V',
+    'I2C at 400kHz',
+    'USB-C 5V 3A',
+    '0603 package',
+    'R3 전력 0.25W',
+    'LED 저항 5V',
+    'LED current 2mA',
+    'LED on GPIO2',
+    'LED 저항 3.3V 기준으로',
+    'LED 저항 2개',
+    'LED 저항 2019년형'
+  ];
+  const either = [
+    'LED 3개 저항 330',
+    'LED 저항 330, LED 2개'
+  ];
+  let calls = 0;
+  let bareDir = null;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      calls += 1;
+      const error = new Error('provider-reached');
+      error.code = 'PROVIDER_REACHED';
+      throw error;
+    }
+  };
+  try {
+    for (const [index, prompt] of reach.entries()) {
+      calls = 0;
+      const preview = await dispatchToolCall({
+        id: `call_gate_reach_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(calls, 1, prompt);
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, 'PROVIDER_REACHED', `${prompt} ${preview.error?.code} ${preview.error?.message ?? ''}`);
+      assert.equal(await readFile(schematicPath, 'utf8'), schematic, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '1k', prompt);
+    }
+    for (const [index, prompt] of either.entries()) {
+      calls = 0;
+      const preview = await dispatchToolCall({
+        id: `call_gate_either_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(await readFile(schematicPath, 'utf8'), schematic, prompt);
+      assert.equal(schematicRefValue(await readFile(schematicPath, 'utf8'), 'R3'), '1k', prompt);
+      if (calls === 0) {
+        assert.equal(preview.ok, false, prompt);
+        assert.equal(preview.error?.code, 'RESISTOR_UNIT_REQUIRED', `${prompt} ${preview.error?.message ?? ''}`);
+        assert.match(preview.error?.message ?? '', /Nothing was changed/, prompt);
+      } else {
+        assert.equal(calls, 1, prompt);
+        assert.equal(preview.error?.code, 'PROVIDER_REACHED', prompt);
+      }
+    }
+
+    bareDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-gate-nor3-'));
+    const bareSpec = {
+      sourcePrompt: 'board without R3',
+      mcu: { family: 'STM32' },
+      peripherals: [{ kind: 'status-led' }],
+      schematic: {
+        components: [
+          { ref: 'D1', libId: 'Device:LED', value: 'LED' },
+          { ref: 'R1', libId: 'Device:R', value: '1k' }
+        ]
+      }
+    };
+    const bareSchematic = [
+      '(kicad_sch (version 20250114) (generator chatpcb)',
+      '  (symbol (lib_id "Device:LED") (at 0 0 0)',
+      '    (property "Reference" "D1" (at 0 0 0))',
+      '    (property "Value" "LED" (at 0 0 0))))'
+    ].join('\n');
+    const barePath = path.join(bareDir, 'bare.kicad_sch');
+    await writeFile(path.join(bareDir, 'bare.chatpcb.json'), `${JSON.stringify(bareSpec, null, 2)}\n`);
+    await writeFile(barePath, bareSchematic);
+    for (const [index, prompt] of ['why is R3 330?', 'R3가 뭐야?'].entries()) {
+      calls = 0;
+      const preview = await dispatchToolCall({
+        id: `call_gate_nor3_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: bareDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(calls, 1, prompt);
+      assert.equal(preview.error?.code, 'PROVIDER_REACHED', `${prompt} ${preview.error?.code} ${preview.error?.message ?? ''}`);
+      assert.equal(await readFile(barePath, 'utf8'), bareSchematic, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    if (bareDir) await rm(bareDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});

@@ -21,7 +21,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
+import { blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -739,7 +739,8 @@ async function requestProject(call, ctx) {
         }
         if (existingSpec) {
           const decision = classifyExistingProjectRequest(generatePrompt, existingSpec, prompt);
-          if (decision.mode === 'refuse' && decision.code) {
+          // Counts, pins, frequencies, colors, and questions still reach the provider.
+          if (decision.mode === 'refuse' && decision.code && blocksBeforeProvider(prompt, decision)) {
             const refused = new Error(decision.message);
             refused.code = decision.code;
             throw refused;
