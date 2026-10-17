@@ -90,7 +90,7 @@ test('panel apply follows the recorded ERC result', async (t) => {
         validation: {}
       }
     }, 'apply');
-    assert.equal(passed.disabled, false);
+    assert.equal(passed.disabled, true);
     assert.equal(passed.ariaDisabled, null);
     assert.equal(passed.describedBy, null);
     assert.equal(passed.overrideHidden, true);

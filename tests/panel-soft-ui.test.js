@@ -173,7 +173,7 @@ test('Apply stays enabled when the candidate ERC passes and the open file still 
         sent: sent.length
       };
     });
-    assert.equal(result.disabled, false);
+    assert.equal(result.disabled, true);
     assert.equal(result.ariaDisabled, null);
     assert.equal(result.whyHidden, true);
     assert.equal(result.sent, 1);

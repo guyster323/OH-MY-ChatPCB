@@ -844,6 +844,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
     });
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: connected (Plus)');
     assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.disabled === true), true);
+    assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.textContent), 'ChatGPT');
     const plan = page.locator('#chatgpt-plan');
     assert.equal(await plan.isHidden(), false);
     assert.equal(await plan.getAttribute('inert'), null);
@@ -867,6 +868,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
     });
     await page.waitForFunction(() => document.querySelector('#provider-status')?.textContent === 'ChatGPT: sign-in needed');
     assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.disabled === true), false);
+    assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.textContent), 'ChatGPT (sign-in)');
     assert.equal(await plan.isHidden(), true);
     assert.equal(await plan.getAttribute('inert'), '');
     const afterSignOut = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
@@ -905,6 +907,7 @@ test('signed-in ChatGPT omits parentheses when no plan is reported', async (t) =
       const status = await page.locator('#provider-status').innerText();
       assert.equal(status.includes('()'), false, status);
       assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.disabled === true), true);
+      assert.equal(await page.evaluate(() => document.querySelector('#provider option[value="chatgpt"]')?.textContent), 'ChatGPT');
       assert.deepEqual(pageErrors, []);
     } finally {
       await context.close();
@@ -1970,6 +1973,43 @@ test('a delayed inspect keeps focus on the approval status', async (t) => {
   }
 });
 
+test('a delayed inspect says it is checking instead of saying the preview cannot be applied', async (t) => {
+  const { en, ko } = await removalConfirmCopy();
+  assert.equal(en['patch.inspect.checking'], 'Checking the project files…');
+  assert.equal(ko['patch.inspect.checking'], '프로젝트 파일을 확인하고 있어요.');
+  for (const locale of ['en-US', 'ko-KR']) {
+    const opened = await openApprovalPanel(t, locale);
+    if (!opened) return;
+    const { page, context, pageErrors } = opened;
+    const copy = locale.startsWith('ko') ? ko : en;
+    try {
+      await sendRemovalPreview(page);
+      await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
+      await page.evaluate(() => {
+        window.__statusSamples = [];
+        const status = document.querySelector('#patch-approval-status');
+        const note = () => window.__statusSamples.push(status.textContent);
+        note();
+        new MutationObserver(note).observe(status, { childList: true, characterData: true, subtree: true });
+        window.__inspectionFreshness = 'stale';
+        window.__inspectDelayMs = 500;
+      });
+      await page.evaluate(() => {
+        window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+      });
+      await page.waitForFunction((checking) => (
+        document.querySelector('#patch-approval-status')?.textContent === checking
+      ), copy['patch.inspect.checking'], { timeout: 3000 });
+      const sawBlocked = await page.evaluate((blocked) => window.__statusSamples.includes(blocked), copy['patch.apply.blocked-disabled']);
+      assert.equal(sawBlocked, false, `${locale} flashed the blocked preview`);
+      await page.waitForFunction((stale) => document.querySelector('#patch-approval-status')?.textContent === stale, copy['patch.stale']);
+      assert.deepEqual(pageErrors, []);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
 test('preview project digest is the inspect baseline', async (t) => {
   const opened = await openApprovalPanel(t, 'en-US');
   if (!opened) return;
@@ -2029,6 +2069,12 @@ test('Korean apply failures use the same reason codes', async (t) => {
 
 test('ERC summary avoids a zero error count when violations exist or the result is incomplete', async (t) => {
   const cases = [
+    {
+      locale: 'en-US',
+      erc: { ok: false, errorCount: 0, warningCount: 1, violations: [{ severity: 'warning', description: 'Isolated pin label' }] },
+      summary: 'ERC found 1 item to review.',
+      once: true
+    },
     {
       locale: 'en-US',
       erc: { ok: false, errorCount: 0, violations: [{ message: 'Pin 3 of U2 (EN) is not connected' }] },
@@ -2103,7 +2149,7 @@ test('ERC summary avoids a zero error count when violations exist or the result 
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.summary), false, shown.summary);
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.why), false, shown.why);
       assert.equal(/0 errors|오류 0|ERC 오류 0/.test(shown.erc), false, shown.erc);
-      if (item.erc.violations) assert.match(shown.erc, /Pin 3 of U2/);
+      if (item.erc.violations?.some((entry) => entry.message)) assert.match(shown.erc, /Pin 3 of U2/);
       assert.deepEqual(pageErrors, []);
     } finally {
       await context.close();

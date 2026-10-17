@@ -18,10 +18,39 @@
     return template.replace(/\{(\w+)\}/g, (_, name) => (vars[name] == null ? '' : String(vars[name])));
   }
 
+  // Count 1 uses a sibling key. 0 and 2+ keep the base string. validation.counts
+  // has two counts, so its siblings name which side is singular.
+  const PLURAL_FORMS = [
+    'erc.errors.one',
+    'patch.apply.blocked-erc.one',
+    'erc.current-file.one',
+    'validation.counts.e1.wn',
+    'validation.counts.en.w1',
+    'validation.counts.e1.w1'
+  ];
+
+  function lookup(key) {
+    if (Object.prototype.hasOwnProperty.call(dict, key)) return dict[key];
+    if (cache.en && Object.prototype.hasOwnProperty.call(cache.en, key)) return cache.en[key];
+    return undefined;
+  }
+
+  function pluralKey(key, vars) {
+    if (!vars || typeof vars !== 'object') return key;
+    let candidate = null;
+    if (Object.prototype.hasOwnProperty.call(vars, 'errors') || Object.prototype.hasOwnProperty.call(vars, 'warnings')) {
+      const errors = Number(vars.errors) === 1 ? 'e1' : 'en';
+      const warnings = Number(vars.warnings) === 1 ? 'w1' : 'wn';
+      candidate = `${key}.${errors}.${warnings}`;
+    } else if (Object.prototype.hasOwnProperty.call(vars, 'count') && Number(vars.count) === 1) {
+      candidate = `${key}.one`;
+    }
+    if (candidate && PLURAL_FORMS.includes(candidate) && typeof lookup(candidate) === 'string') return candidate;
+    return key;
+  }
+
   function t(key, vars) {
-    const value = Object.prototype.hasOwnProperty.call(dict, key)
-      ? dict[key]
-      : (cache.en && Object.prototype.hasOwnProperty.call(cache.en, key) ? cache.en[key] : undefined);
+    const value = lookup(pluralKey(key, vars));
     if (typeof value !== 'string') return key;
     return interpolate(value, vars);
   }
