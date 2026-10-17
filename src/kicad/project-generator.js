@@ -224,39 +224,48 @@ function spiceResistorNumber(whole, fraction, multiplier) {
 }
 
 function formatSpiceOhms(ohms) {
-  if (!Number.isFinite(ohms) || ohms < 0) return '1000';
+  if (!Number.isFinite(ohms) || ohms <= 0) return null;
   const rounded = Math.round(ohms);
   if (Math.abs(ohms - rounded) <= 1e-9 * Math.max(1, Math.abs(ohms))) return String(rounded);
   return Number(ohms.toPrecision(12)).toFixed(12).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+// Unparseable text returns null. Callers must fail the netlist instead of guessing 1000 Ω.
 export function spiceResistorOhms(value) {
   const text = String(value ?? '')
     .trim()
     .normalize('NFKC')
     .replace(/(?:\s*(?:Ω|옴|ohms?))$/iu, '')
     .trim();
-  if (!text) return '1000';
+  if (!text) return null;
 
   const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
   if (rkm) {
     const multiplier = spiceResistorScale(rkm[2]);
-    return multiplier == null ? '1000' : formatSpiceOhms(spiceResistorNumber(rkm[1], rkm[3], multiplier));
+    return multiplier == null ? null : formatSpiceOhms(spiceResistorNumber(rkm[1], rkm[3], multiplier));
   }
 
   const leadingR = /^[rR](\d+)$/.exec(text);
   if (leadingR) return formatSpiceOhms(spiceResistorNumber('0', leadingR[1], 1));
 
   const suffixed = /^(\d+(?:\.\d+)?)(?:\s*([A-Za-z]+))?$/.exec(text);
-  if (suffixed) {
-    const multiplier = spiceResistorScale(suffixed[2] ?? '');
-    if (multiplier != null) {
-      const [whole, fraction = ''] = suffixed[1].split('.');
-      return formatSpiceOhms(spiceResistorNumber(whole, fraction, multiplier));
-    }
-  }
+  if (!suffixed) return null;
+  const multiplier = spiceResistorScale(suffixed[2] ?? '');
+  if (multiplier == null) return null;
+  const [whole, fraction = ''] = suffixed[1].split('.');
+  return formatSpiceOhms(spiceResistorNumber(whole, fraction, multiplier));
+}
 
-  return '1000';
+function requireSpiceResistorOhms(value) {
+  const ohms = spiceResistorOhms(value);
+  if (ohms == null) {
+    const error = new Error(
+      `Cannot parse status LED resistor ${JSON.stringify(String(value ?? ''))} for the SPICE netlist. Use a positive resistance such as 330, 4k7, 4.7k, or 1M.`
+    );
+    error.code = 'SPICE_RESISTOR_INVALID';
+    throw error;
+  }
+  return ohms;
 }
 
 export function buildMcuSchematicAst(spec) {
@@ -1043,6 +1052,7 @@ export function renderSpiceFixture(spec) {
 
   const hasLed = spec.peripherals.some((peripheral) => peripheral.kind === 'status-led');
   const hasButton = spec.peripherals.some((peripheral) => peripheral.kind.includes('button'));
+  const ledOhms = hasLed ? requireSpiceResistorOhms(statusLedResistorValue(spec)) : null;
 
   return [
     `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
@@ -1051,7 +1061,7 @@ export function renderSpiceFixture(spec) {
     'RREG vbus v3v3 1',
     'DREG v3v3 0 DCLAMP',
     '.model DCLAMP D(BV=3.3 IBV=1m)',
-    hasLed ? `RLED v3v3 led ${spiceResistorOhms(statusLedResistorValue(spec))}` : '* RLED omitted: no status LED requested',
+    hasLed ? `RLED v3v3 led ${ledOhms}` : '* RLED omitted: no status LED requested',
     hasLed ? 'DLED led 0 DRED' : '* DLED omitted: no status LED requested',
     hasLed ? '.model DRED D(Vfwd=1.9)' : '* LED model omitted',
     hasButton ? 'RBUTTON v3v3 button 10000' : '* RBUTTON omitted: no button requested',
