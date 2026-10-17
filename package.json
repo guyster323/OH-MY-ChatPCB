@@ -8,7 +8,7 @@
     "chatpcb": "./bin/chatpcb-cli.js"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --import ./tests/setup/isolate-home.mjs --test",
     "lint": "eslint . --max-warnings 0",
     "build:tokens": "node ./scripts/panel-tokens/build.mjs",
     "generate:sample": "node ./bin/chatpcb-cli.js generate --project ./workspaces/sample-mcu --prompt \"STM32 board with 3.3V regulator, reset button, I2C sensor connector, UART header, status LED\"",

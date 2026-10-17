@@ -1,0 +1,601 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
+import { saveCredentials } from '../src/runtime/auth/chatgpt-auth.js';
+import { createEnvelope } from '../src/runtime/envelope.js';
+import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
+import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
+import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
+import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
+import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
+import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
+import { isolateHome } from './isolate-home.js';
+
+const passingVerify = async () => ({
+  erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
+  drc: { ok: true, skipped: true }
+});
+const passingDrc = async () => ({ ok: true, skipped: false, executed: true, violations: [], unconnectedItems: [] });
+const passingErc = async () => ({ ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0, byType: {} } });
+
+const STM32_USER_PROMPT = 'Prototype STM32 USB-C 5V sensor board with 3.3V 500mA regulator, I2C sensor connector, UART debug header, SWD, reset button, and status LED.';
+const MODIFY = 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.';
+
+async function transactionServices(extra = {}) {
+  const stateRoot = extra.stateRoot ?? await mkdtemp(path.join(tmpdir(), 'chatpcb-daemon-journal-'));
+  return {
+    stateRoot,
+    patchApprovalRegistry: extra.patchApprovalRegistry ?? createPatchApprovalRegistry(),
+    projectMutexRegistry: extra.projectMutexRegistry ?? createProjectMutexRegistry(),
+    transactionJournal: extra.transactionJournal ?? createTransactionJournal({ stateRoot }),
+    verifyAppliedProjectImpl: extra.verifyAppliedProjectImpl ?? passingVerify,
+    validateProjectImpl: extra.validateProjectImpl ?? passingErc,
+    validateBoardImpl: extra.validateBoardImpl ?? passingDrc,
+    ...extra
+  };
+}
+
+function functionCallSse({ name, callId, argumentsText }) {
+  const item = {
+    type: 'function_call',
+    id: `fc_${callId}`,
+    call_id: callId,
+    name,
+    arguments: argumentsText
+  };
+  const event = { type: 'response.completed', response: { output: [item] } };
+  return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' }
+  });
+}
+
+function modelsResponse() {
+  return new Response(JSON.stringify({ models: [{ slug: 'gpt-x', visibility: 'list' }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}
+
+async function withChatGptHome(fn) {
+  const home = await isolateHome();
+  try {
+    await saveCredentials({
+      client_id: 'oaiapp_TEST',
+      access_token: 'AT',
+      refresh_token: 'RT',
+      expires_in: 3600,
+      issued_at: Date.now(),
+      scope: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct',
+      scopes: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct'.split(' ')
+    });
+    return await fn();
+  } finally {
+    await home.restore();
+  }
+}
+
+function installFetch(handler) {
+  const original = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (target.includes('/v1/models')) return modelsResponse();
+    if (target.includes('/v1/responses')) {
+      const body = init?.body ? String(init.body) : '';
+      bodies.push(body);
+      return handler(body, bodies.length);
+    }
+    return new Response('no', { status: 404 });
+  };
+  return {
+    bodies,
+    restore() {
+      globalThis.fetch = original;
+    }
+  };
+}
+
+function hasI2c(components) {
+  return (components ?? []).some((component) => /I2C_CONNECTOR/.test(`${component.libId ?? ''} ${component.value ?? ''}`));
+}
+
+function hasOhm680(components) {
+  return (components ?? []).some((component) => /680/.test(`${component.ref ?? ''} ${component.value ?? ''} ${component.libId ?? ''}`));
+}
+
+function removalBlocker(review) {
+  const blockers = review?.findings?.blockers ?? [];
+  return blockers.find((finding) => (
+    finding.code === 'existing-components-removed' || finding.id === 'existing-components-removed'
+  )) ?? null;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function assertListsRemoved(removed) {
+  assert.ok(Array.isArray(removed) && removed.length > 0, JSON.stringify(removed));
+  for (const item of removed) {
+    assert.equal(typeof item.ref, 'string');
+    assert.ok(item.ref.length > 0);
+    assert.equal(typeof item.libId, 'string');
+    assert.ok(Object.prototype.hasOwnProperty.call(item, 'value'));
+  }
+  const i2c = removed.find((item) => item.ref === 'J2');
+  assert.ok(i2c, JSON.stringify(removed));
+  assert.equal(i2c.libId, 'ChatPCB:I2C_CONNECTOR');
+  assert.equal(i2c.value, 'I2C_CONNECTOR');
+}
+
+function assertBlockedRemoval(result, { mismatch = false } = {}) {
+  assert.equal(result.applied, false);
+  assert.equal(result.requiresApproval, false);
+  assert.equal(result.reason?.code, 'EXISTING_COMPONENTS_REMOVED');
+  assertListsRemoved(result.removedComponents);
+  assert.deepEqual(result.reason?.removedComponents, result.removedComponents);
+  const blocker = removalBlocker(result.review);
+  assert.ok(blocker, JSON.stringify(result.review?.findings?.blockers ?? null));
+  assert.deepEqual(blocker.removedComponents, result.removedComponents);
+  for (const item of blocker.removedComponents) {
+    assert.match(blocker.en, new RegExp(escapeRegExp(item.ref)));
+    assert.match(blocker.en, new RegExp(escapeRegExp(item.libId)));
+    assert.match(blocker.ko, new RegExp(escapeRegExp(item.ref)));
+    assert.match(blocker.ko, new RegExp(escapeRegExp(item.libId)));
+    if (item.value) {
+      assert.match(blocker.en, new RegExp(escapeRegExp(item.value)));
+      assert.match(blocker.ko, new RegExp(escapeRegExp(item.value)));
+    }
+  }
+  assert.match(blocker.en, /removed/i);
+  assert.match(blocker.ko, /기존/);
+  if (mismatch) {
+    assert.equal(result.reason.mismatch?.code, 'ALLOW_REMOVED_COMPONENTS_MISMATCH');
+    assert.ok(Array.isArray(result.reason.mismatch.missing));
+    assert.ok(Array.isArray(result.reason.mismatch.extra));
+  } else {
+    assert.equal(result.reason.mismatch, undefined);
+  }
+}
+
+async function withRemovalCandidate(prompt, fn) {
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  const plan = await createSchematicPatchPlan({
+    projectDir,
+    prompt,
+    projectName: 'stm32_i2c',
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
+  try {
+    await fn({ projectDir, generated, plan, before, prompt });
+  } finally {
+    await disposeSchematicPatchPlan(plan);
+    await rm(projectDir, { force: true, recursive: true });
+  }
+}
+
+function applyApproved(projectDir, prompt, plan, extra = {}) {
+  return applySchematicPatch({
+    projectDir,
+    prompt,
+    approved: true,
+    expectedPatchId: plan.patchId,
+    patchPlan: plan,
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc,
+    verifyAppliedProjectImpl: passingVerify,
+    ...extra
+  });
+}
+
+async function assertApplyStaysBlocked(prompt) {
+  await withRemovalCandidate(prompt, async ({ projectDir, generated, plan, before }) => {
+    const preview = await applySchematicPatch({
+      projectDir,
+      prompt,
+      approved: false,
+      patchPlan: plan
+    });
+    assertBlockedRemoval(preview);
+    const blocked = await applyApproved(projectDir, prompt, plan);
+    assertBlockedRemoval(blocked);
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+    assert.match(before, /I2C_CONNECTOR/);
+  });
+}
+
+async function generatedStm32Project() {
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-modify-'));
+  const generated = await generateMcuPeripheralProject({
+    projectDir,
+    prompt: STM32_USER_PROMPT,
+    projectName: 'stm32_i2c'
+  });
+  return { projectDir, generated };
+}
+
+test('modify on an applied project keeps I2C when ChatGPT only inspects', async () => {
+  const services = await transactionServices();
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  const fetchStub = installFetch(() => functionCallSse({
+    name: 'project_inspect',
+    callId: 'call_inspect_01',
+    argumentsText: '{}'
+  }));
+  const { projectDir, generated } = await generatedStm32Project();
+  try {
+    await withChatGptHome(async () => {
+      const liveBefore = await readFile(generated.files.schematic, 'utf8');
+      assert.match(liveBefore, /I2C_CONNECTOR/);
+      const result = await dispatchToolCall({
+        id: 'call_mod_inspect',
+        name: 'project.request',
+        args: { provider: 'chatgpt', projectDir, prompt: MODIFY }
+      }, services);
+      const liveAfter = await readFile(generated.files.schematic, 'utf8');
+      assert.match(liveAfter, /I2C_CONNECTOR/);
+      const nudged = fetchStub.bodies.some((body) => /Call schematic\.patch now/.test(body));
+      assert.equal(nudged, true);
+      if (result.ok && hasI2c(result.result?.components)) {
+        assert.equal(hasOhm680(result.result.components), true);
+        assert.equal(result.result.requiresApproval, true);
+        const approved = await dispatchToolCall({
+          name: 'schematic.patch',
+          args: { projectDir, approved: true, patchId: result.result.patchId }
+        }, services);
+        assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+        assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+        const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
+        assert.match(schematic, /I2C_CONNECTOR/);
+        assert.match(schematic, /680/);
+        return;
+      }
+      assert.equal(result.ok, false);
+      assert.match(liveAfter, /I2C_CONNECTOR/);
+      assert.doesNotMatch(liveAfter, /680/);
+      const message = `${result.error?.message ?? ''}`;
+      assert.match(message, /could not be applied|수정 사항을 적용할 수 없습니다/);
+    });
+  } finally {
+    fetchStub.restore();
+    restoreKicadLibraryEnv(previousLibs);
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('inspect then schematic.patch keeps I2C, applies 680 ohm, and leaves sourcePrompt', async () => {
+  const services = await transactionServices();
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  const fetchStub = installFetch((_body, count) => {
+    if (count === 1) {
+      return functionCallSse({ name: 'project_inspect', callId: 'call_inspect_01', argumentsText: '{}' });
+    }
+    return functionCallSse({
+      name: 'schematic_patch',
+      callId: 'call_patch_01',
+      argumentsText: JSON.stringify({ prompt: MODIFY })
+    });
+  });
+  const { projectDir, generated } = await generatedStm32Project();
+  try {
+    await withChatGptHome(async () => {
+      const result = await dispatchToolCall({
+        id: 'call_mod_patch',
+        name: 'project.request',
+        args: { provider: 'chatgpt', projectDir, prompt: MODIFY }
+      }, services);
+      assert.equal(result.ok, true, result.error?.message);
+      assert.equal(hasI2c(result.result.components), true, JSON.stringify(result.result.components));
+      assert.equal(hasOhm680(result.result.components), true, JSON.stringify(result.result.components));
+      assert.equal(result.result.source?.via, 'provider');
+      const first = JSON.parse(fetchStub.bodies[0]);
+      const promptText = first.input.map((item) => item.content ?? '').join('\n');
+      assert.match(promptText, /I2C_CONNECTOR/);
+      assert.equal(promptText.includes('returns results'), false);
+      assert.equal(first.tools.some((tool) => tool.name === 'schematic_generate'), false);
+      assert.equal(first.tools.some((tool) => tool.name === 'project_create'), false);
+      assert.equal(first.tools.some((tool) => tool.name === 'schematic_patch'), true);
+      assert.equal(first.tool_choice?.type, 'function');
+      assert.equal(first.tool_choice?.name, 'schematic_patch');
+      assert.ok(fetchStub.bodies.length >= 2);
+      const second = JSON.parse(fetchStub.bodies[1]);
+      assert.equal(second.input.some((item) => item.type === 'function_call_output'), true);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: result.result.patchId }
+      }, services);
+      assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+      const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
+      assert.match(schematic, /I2C_CONNECTOR/);
+      assert.match(schematic, /680/);
+    });
+  } finally {
+    fetchStub.restore();
+    restoreKicadLibraryEnv(previousLibs);
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('ChatGPT tool loop sends function_call_output and stops after 4 read-only turns', async () => {
+  const fetchStub = installFetch(() => functionCallSse({
+    name: 'project_inspect',
+    callId: `call_inspect_${fetchStub.bodies.length + 1}`,
+    argumentsText: '{}'
+  }));
+  try {
+    await withChatGptHome(async () => {
+      const result = await callChatGPTResponses({
+        prompt: MODIFY,
+        maxTurns: 4,
+        executeTool: async (call) => ({ ok: true, tool: call.name, echoed: true })
+      });
+      assert.equal(fetchStub.bodies.length, 4);
+      for (const [index, body] of fetchStub.bodies.entries()) {
+        const request = JSON.parse(body);
+        const hasOutput = request.input.some((item) => item.type === 'function_call_output');
+        assert.equal(hasOutput, index > 0, `turn ${index + 1}`);
+      }
+      assert.match(result.text, /project\.inspect/);
+      assert.equal(result.text.includes('schematic.patch'), false);
+    });
+  } finally {
+    fetchStub.restore();
+  }
+});
+
+test('removing an existing component blocks Apply unless the request deletes it', async () => {
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  const plan = await createSchematicPatchPlan({
+    projectDir,
+    prompt: 'STM32 board with USB-C power, UART header, reset button, and status LED.',
+    projectName: 'stm32_i2c',
+    validateProjectImpl: passingErc,
+    validateBoardImpl: passingDrc
+  });
+  try {
+    const blocked = await applySchematicPatch({
+      projectDir,
+      prompt: 'STM32 board with USB-C power, UART header, reset button, and status LED.',
+      approved: true,
+      expectedPatchId: plan.patchId,
+      patchPlan: plan,
+      validateProjectImpl: passingErc,
+      validateBoardImpl: passingDrc,
+      verifyAppliedProjectImpl: passingVerify
+    });
+    assert.equal(blocked.applied, false);
+    const blocker = removalBlocker(blocked.review) ?? removalBlocker(plan.review);
+    assert.ok(blocker, JSON.stringify(blocked.reason ?? blocked.review ?? null));
+    const text = `${blocker.en ?? ''}\n${blocker.ko ?? ''}\n${blocker.message ?? ''}`;
+    assert.match(text, /I2C_CONNECTOR|J2/);
+    assert.match(text, /removed|delete/i);
+    assert.match(text, /기존|삭제/);
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+  } finally {
+    await disposeSchematicPatchPlan(plan);
+    await rm(projectDir, { force: true, recursive: true });
+  }
+});
+
+test('explicit delete text does not authorize Apply when I2C is removed', async () => {
+  await assertApplyStaysBlocked('I2C 커넥터 삭제');
+});
+
+test('negated I2C delete blocks Apply without an override', async () => {
+  await assertApplyStaysBlocked('I2C 커넥터는 삭제하지 마세요');
+});
+
+test('other-part delete reset 버튼 삭제 blocks Apply when it drops I2C', async () => {
+  await assertApplyStaysBlocked('reset 버튼 삭제. I2C 커넥터는 유지하세요.');
+});
+
+test('casual Like an ESP32 board mention blocks Apply without an override', async () => {
+  await assertApplyStaysBlocked('Like an ESP32 board, change the status LED resistor to 680 ohm on this STM32 board.');
+});
+
+test('model-written schematic.patch prompt remove I2C blocks Apply without an override', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  try {
+    const preview = await dispatchToolCall({
+      id: 'call_model_remove_i2c',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir,
+        prompt: 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.'
+      }
+    }, {
+      ...services,
+      checkProviderAvailabilityImpl: async ({ provider }) => ({
+        provider,
+        command: 'codex',
+        available: true,
+        status: 'available'
+      }),
+      runProviderProcessImpl: async () => ({
+        exitCode: 0,
+        stderr: '',
+        events: [
+          createEnvelope('tool.call', {
+            id: 'call_model_patch',
+            name: 'schematic.patch',
+            args: { prompt: 'remove I2C' }
+          })
+        ]
+      })
+    });
+    assert.equal(preview.ok, true, preview.error?.message);
+    assert.equal(hasI2c(preview.result.components), false);
+    assertBlockedRemoval(preview.result);
+    const approved = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir, approved: true, patchId: preview.result.patchId }
+    }, services);
+    assert.equal(approved.ok, true, approved.error?.message);
+    assertBlockedRemoval(approved.result);
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('allowRemovedComponents exact set applies and a mismatch stays blocked', async () => {
+  const prompt = 'Like an ESP32 board, change the status LED resistor to 680 ohm on this STM32 board.';
+  await withRemovalCandidate(prompt, async ({ projectDir, generated, plan, before }) => {
+    const preview = await applySchematicPatch({
+      projectDir,
+      prompt,
+      approved: false,
+      patchPlan: plan
+    });
+    assertBlockedRemoval(preview);
+    const refs = preview.removedComponents.map((item) => item.ref);
+    assert.deepEqual([...refs].sort(), ['J2', 'J3', 'J4']);
+
+    const missing = await applyApproved(projectDir, prompt, plan, {
+      allowRemovedComponents: refs.filter((ref) => ref !== 'J2')
+    });
+    assertBlockedRemoval(missing, { mismatch: true });
+    assert.deepEqual(missing.reason.mismatch.missing, ['J2']);
+    assert.deepEqual(missing.reason.mismatch.extra, []);
+
+    const extra = await applyApproved(projectDir, prompt, plan, {
+      allowRemovedComponents: [...refs, 'R99']
+    });
+    assertBlockedRemoval(extra, { mismatch: true });
+    assert.deepEqual(extra.reason.mismatch.missing, []);
+    assert.deepEqual(extra.reason.mismatch.extra, ['R99']);
+
+    const wrong = await applyApproved(projectDir, prompt, plan, {
+      allowRemovedComponents: ['SW1']
+    });
+    assertBlockedRemoval(wrong, { mismatch: true });
+    assert.deepEqual(wrong.reason.mismatch.missing, ['J2', 'J3', 'J4']);
+    assert.deepEqual(wrong.reason.mismatch.extra, ['SW1']);
+
+    const empty = await applyApproved(projectDir, prompt, plan, {
+      allowRemovedComponents: []
+    });
+    assertBlockedRemoval(empty, { mismatch: true });
+    assert.deepEqual(empty.reason.mismatch.missing, ['J2', 'J3', 'J4']);
+    assert.deepEqual(empty.reason.mismatch.extra, []);
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+
+    const applied = await applyApproved(projectDir, prompt, plan, {
+      allowRemovedComponents: [...refs].reverse()
+    });
+    assert.equal(applied.applied, true, JSON.stringify(applied.reason));
+    assert.equal(applied.reason, undefined);
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    assert.equal(schematic.includes('I2C_CONNECTOR'), false);
+  });
+});
+
+test('daemon apply threads allowRemovedComponents and an exact set removes only those parts', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  try {
+    const preview = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir, prompt: 'I2C 커넥터 삭제', projectName: 'stm32_i2c' }
+    }, services);
+    assert.equal(preview.ok, true, preview.error?.message);
+    assertBlockedRemoval(preview.result);
+    const refs = preview.result.removedComponents.map((item) => item.ref);
+    assert.deepEqual(refs, ['J2']);
+
+    const blocked = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir, approved: true, patchId: preview.result.patchId }
+    }, services);
+    assert.equal(blocked.ok, true, blocked.error?.message);
+    assertBlockedRemoval(blocked.result);
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+
+    const approved = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: {
+        projectDir,
+        approved: true,
+        patchId: preview.result.patchId,
+        allowRemovedComponents: refs
+      }
+    }, services);
+    assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+    assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+    assert.equal(approved.result.reason, undefined);
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+    assert.equal(schematic.includes('I2C_CONNECTOR'), false);
+    assert.match(schematic, /UART_HEADER/);
+    assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('allowRemovedComponents is ignored when nothing is removed', async () => {
+  await withRemovalCandidate(MODIFY, async ({ projectDir, generated, plan, before }) => {
+    const applied = await applyApproved(projectDir, MODIFY, plan, {
+      allowRemovedComponents: ['J2', 'R99']
+    });
+    assert.equal(applied.applied, true, JSON.stringify(applied.reason));
+    assert.equal(applied.reason, undefined);
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+    assert.match(schematic, /I2C_CONNECTOR/);
+    assert.match(schematic, /680/);
+    assert.notEqual(schematic, before);
+    assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
+  });
+});
+
+test('PROVIDER_NO_PATCH tells the user to name the part or start a new project', async () => {
+  const { projectDir } = await generatedStm32Project();
+  try {
+    await assert.rejects(
+      () => createSchematicPatchPlan({
+        projectDir,
+        prompt: 'reset 버튼 삭제',
+        projectName: 'stm32_i2c',
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc
+      }),
+      (error) => {
+        assert.equal(error.code, 'PROVIDER_NO_PATCH');
+        assert.match(error.message, /name the part or reference and the value/i);
+        assert.match(error.message, /start a new project/i);
+        assert.match(error.message, /참조 이름과 값/);
+        assert.match(error.message, /새 프로젝트를 시작/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(projectDir, { force: true, recursive: true });
+  }
+});

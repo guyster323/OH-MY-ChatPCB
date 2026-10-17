@@ -556,6 +556,16 @@ function looksLikeEmbeddedToolCall(value) {
   return value.startsWith('{') && /["']type["']\s*:\s*["']tool\.call["']/.test(value);
 }
 
+function asToolNameSet(allowedTools) {
+  return allowedTools instanceof Set ? allowedTools : new Set(allowedTools ?? []);
+}
+
+export function parseProviderMessage(text, allowedToolNames = PROVIDER_ALLOWED_TOOLS) {
+  const events = [];
+  parseProviderMessageText(events, String(text ?? ''), asToolNameSet(allowedToolNames));
+  return events;
+}
+
 async function writeProviderTrace({ traceDir, command, args, cwd, input, transcript }) {
   await mkdir(traceDir, { recursive: true });
   const tracePath = path.join(traceDir, `provider-trace-${Date.now()}-${randomUUID()}.json`);
@@ -603,7 +613,8 @@ function unknownProviderToolError(payload) {
   return error;
 }
 
-function validateProviderToolCall(payload, allowedTools) {
+export function validateProviderToolCall(payload, allowedTools) {
+  const allowed = asToolNameSet(allowedTools);
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Provider tool.call payload must be an object.');
   }
@@ -616,7 +627,7 @@ function validateProviderToolCall(payload, allowedTools) {
     throw new Error(`Unsupported provider tool call: ${payload.name}`);
   }
 
-  if (!allowedTools.has(payload.name) && !knownChatPcbTools.has(payload.name)) {
+  if (!allowed.has(payload.name) && !knownChatPcbTools.has(payload.name)) {
     throw unknownProviderToolError(payload);
   }
 
