@@ -1,14 +1,12 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { LED_SERIES_RESISTOR_RANGE, parseResistorOhms } from '../kicad/resistor-ohms.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
-const INVALID_OHM_TOKEN = String.raw`(?<![\p{L}\p{N}_])[A-Za-z]+\s*(?:Ω|옴|ohms?)(?![\p{L}\p{N}_])`;
-
 // Coordinators are built before the table so the clause split can see them.
 // "하거나" contains 고, but that 고 is not a new clause.
 const DELETION_COORDINATORS = Object.freeze([
@@ -188,6 +186,12 @@ export function resistorValueInvalidMessage() {
   return `${en}\n${ko}`;
 }
 
+export function resistorValueOutOfRangeMessage() {
+  const en = 'The resistor value must be from 1Ω to 10MΩ. Nothing was changed.';
+  const ko = '1Ω~10MΩ 사이 값으로 알려 주세요. 아무것도 바꾸지 않았습니다.';
+  return `${en}\n${ko}`;
+}
+
 export function modifyRefusalMessage() {
   const en = 'The requested change could not be applied onto the existing design. Describe the change more specifically (name the part or reference and the value), or start a new project for a full redesign. The existing circuit was left unchanged.';
   const ko = '수정 사항을 적용할 수 없습니다. 바꿀 부품이나 참조 이름과 값을 구체적으로 적어 주세요. 전체를 다시 설계하려면 새 프로젝트를 시작하세요. 기존 회로는 바꾸지 않았습니다.';
@@ -223,7 +227,7 @@ function classifySeparateIntent(editText, intentText) {
   const removal = removalDecision(intentText);
   if (removal.kind === 'remove') return removalEdit(removal);
   const fromUser = nonRemovalEdit(intentText);
-  if (fromUser?.kind === 'invalid') return invalidResistor();
+  if (fromUser?.kind === 'invalid') return invalidResistor(fromUser.reason);
   if (fromUser) return { mode: 'merge', edit: fromUser };
   if (removal.kind === 'unclear') return unclearRemoval();
   if (isFullDesignPrompt(intentText)) return { mode: 'regenerate', prompt: intentText };
@@ -235,7 +239,7 @@ function classifyEditText(text) {
   const removal = removalDecision(text);
   if (removal.kind === 'remove') return removalEdit(removal);
   const resistor = nonRemovalEdit(text);
-  if (resistor?.kind === 'invalid') return invalidResistor();
+  if (resistor?.kind === 'invalid') return invalidResistor(resistor.reason);
   if (resistor) return { mode: 'merge', edit: resistor };
   if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
@@ -253,11 +257,11 @@ function unclearRemoval() {
   };
 }
 
-function invalidResistor() {
+function invalidResistor(reason) {
   return {
     mode: 'refuse',
     code: 'RESISTOR_VALUE_INVALID',
-    message: resistorValueInvalidMessage()
+    message: reason === 'range' ? resistorValueOutOfRangeMessage() : resistorValueInvalidMessage()
   };
 }
 
@@ -1016,163 +1020,213 @@ function removalDecision(text) {
   return { kind: 'none' };
 }
 
-const RESISTOR_SIGN = /[+\-\u2212\u00B1]/u;
-const FOREIGN_GLUED_UNIT = /^(?:ma|ua|µa|na|mv|kv|vdc|vac|hz|khz|mhz|[vawfh])$/iu;
-const SPACED_FOREIGN_UNIT = /^\s+(?:mA|uA|µA|nA|mV|kV|VDC|VAC|Hz|kHz|MHz|[VAWFH])\b/iu;
-const SPACED_RESISTOR_UNIT = /^\s+(?:kΩ|k옴|ohms?|meg|Ω|옴|[rRkKmM])(?![A-Za-z])/iu;
+// A candidate carries an ohm unit or an RKM/SI suffix. Package codes, wattage,
+// voltage, current, percent, bare numbers, and reference designators are not
+// values. The matched text is parsed only by parseResistorOhms.
+const RESISTOR_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{N}_.])(?:${[
+  String.raw`\d+\s*/\s*\d+\s*[Ww](?![A-Za-z])`,
+  String.raw`[-−]\s*\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
+  String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
+  String.raw`\d+(?:\.\d+)?[eE][+-]?\d+`,
+  String.raw`\d+(?:\.\d+){2,}[A-Za-z]*`,
+  String.raw`\d+\.(?!\d)\s*[A-Za-z]+`,
+  String.raw`[±]?\s*\d+(?:\.\d+)?\s*%`,
+  String.raw`\d+(?:\.\d+)?\s*(?:[mµμuUnN])?[Aa](?![A-Za-z])`,
+  String.raw`\d+(?:\.\d+)?\s*[Vv](?:DC|AC|dc|ac)?(?![A-Za-z])`,
+  String.raw`\d+(?:\.\d+)?\s*[Ww](?![A-Za-z])`,
+  String.raw`\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
+  String.raw`\d+[rRkKmM]\d+[A-Za-z]+`,
+  String.raw`\d+[rRkKmM]\d+`,
+  String.raw`\d+(?:\.\d+)?\s*meg(?![A-Za-z])`,
+  String.raw`\d+(?:\.\d+)?\s*[rRkKmMuUnNpPfFgGtT](?![A-Za-z])`,
+  String.raw`\d+(?:\.\d+)?[A-Za-z]{2,}`,
+  String.raw`[A-Za-z]+(?:\s*(?:Ω|옴|ohms?))(?![A-Za-z])`,
+  String.raw`[A-Za-z]+\d+`,
+  String.raw`\d+(?:\.\d+)?`
+].join('|')})`, 'gu');
+const RESISTOR_PACKAGE = /^(?:0402|0603|0805|1206)$/;
+const RESISTOR_COORDINATOR = /^(?:and|or|하고|와|과|및|그리고)$/iu;
+const OHM_UNIT = /(?:Ω|옴|ohm)/iu;
 
-// The whole token, including a sign, thousands separators, and the unit, is
-// handed to parseResistorOhms. A prefix the parser would accept ("1" from
-// "1,000", "10" from "-10") is not a value. A token the parser rejects fails
-// the edit. Percent and current or voltage units are not resistors.
 function scanResistorTokens(text) {
-  const normalized = String(text ?? '').normalize('NFKC');
+  const tokens = [];
+  RESISTOR_TOKEN.lastIndex = 0;
+  for (const match of text.matchAll(RESISTOR_TOKEN)) {
+    const raw = match[0];
+    const ignored = isIgnoredResistorToken(raw);
+    tokens.push({
+      raw,
+      index: match.index,
+      end: match.index + raw.length,
+      attempt: !ignored
+    });
+  }
+  return tokens;
+}
+
+function isIgnoredResistorToken(raw) {
+  if (/^[rR]\d{2,}$/.test(raw)) return false;
+  if (/^[rR]\d$/.test(raw)) return true;
+  if (/^[A-Za-z]+\d+$/.test(raw)) return true;
+  if (RESISTOR_PACKAGE.test(raw)) return true;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return true;
+  if (/^\d+\s*\/\s*\d+\s*[Ww]$/.test(raw)) return true;
+  if (/^\d+(?:\.\d+)?\s*[Ww]$/.test(raw)) return true;
+  if (/^\d+(?:\.\d+)?\s*(?:[mµμuUnN])?[Aa]$/.test(raw)) return true;
+  if (/^\d+(?:\.\d+)?\s*[Vv](?:DC|AC|dc|ac)?$/.test(raw)) return true;
+  if (/^[±]?\s*\d+(?:\.\d+)?\s*%$/.test(raw)) return true;
+  return false;
+}
+
+// "330 and 470 ohm" names two values. A bare number joined only by and/or/하고
+// to an ohm-unit value becomes a candidate. Package codes and "to" do not.
+function promoteCoordinatedBareValues(tokens, text) {
+  const ohmValues = tokens.filter((token) => token.attempt && OHM_UNIT.test(token.raw));
+  for (const token of tokens) {
+    if (token.attempt || !/^\d+(?:\.\d+)?$/.test(token.raw) || RESISTOR_PACKAGE.test(token.raw)) continue;
+    for (const other of ohmValues) {
+      const left = token.index < other.index ? token : other;
+      const right = token.index < other.index ? other : token;
+      if (!RESISTOR_COORDINATOR.test(text.slice(left.end, right.index).trim())) continue;
+      token.attempt = true;
+      break;
+    }
+  }
+}
+
+// R47 is a value. R12 in "R12 330Ω" is the reference that precedes that value.
+function dropLeadingDesignators(tokens) {
+  const attempts = tokens.filter((token) => token.attempt);
+  for (const token of attempts) {
+    if (!/^[rR]\d{2,}$/.test(token.raw)) continue;
+    if (attempts.some((other) => other !== token && other.index > token.index)) token.attempt = false;
+  }
+}
+
+function classifyResistorAttempts(tokens) {
   const valid = [];
-  const invalid = [];
-  const spans = [];
-  const startRe = /(?<![\p{L}\p{N}_.,])\d/gu;
-  let found = startRe.exec(normalized);
-  while (found) {
-    const token = readResistorToken(normalized, found.index);
-    if (token.kind === 'valid') {
-      valid.push({ ohms: token.ohms, index: token.index, end: token.end });
-      spans.push(token);
-    } else if (token.kind === 'invalid') {
-      invalid.push(token.raw);
-      spans.push(token);
+  let malformed = false;
+  let outOfRange = false;
+  for (const token of tokens) {
+    if (!token.attempt) continue;
+    const ohmsText = parseResistorOhms(token.raw);
+    if (ohmsText == null) {
+      malformed = true;
+      continue;
     }
-    startRe.lastIndex = token.end > found.index ? token.end : found.index + 1;
-    found = startRe.exec(normalized);
+    const ohms = Number(ohmsText);
+    if (!(ohms >= LED_SERIES_RESISTOR_RANGE.min && ohms <= LED_SERIES_RESISTOR_RANGE.max)) {
+      outOfRange = true;
+      continue;
+    }
+    valid.push({ ohms, ohmsText, index: token.index, end: token.end });
   }
-  for (const match of normalized.matchAll(new RegExp(INVALID_OHM_TOKEN, 'giu'))) {
-    const start = match.index ?? 0;
-    const end = start + match[0].length;
-    const covered = spans.some((span) => start < span.end && end > span.index);
-    if (!covered) invalid.push(match[0]);
-  }
-  return { normalized, valid, invalid };
+  return { valid, malformed, outOfRange };
 }
 
-function readResistorToken(text, digitIndex) {
-  let index = digitIndex;
-  if (digitIndex > 0 && RESISTOR_SIGN.test(text[digitIndex - 1])) {
-    const before = digitIndex > 1 ? text[digitIndex - 2] : '';
-    if (!before || !/[\p{L}\p{N}]/u.test(before)) index = digitIndex - 1;
-  }
-  let end = digitIndex;
-  while (end < text.length && /\d/u.test(text[end])) {
-    end += 1;
-    if (end + 1 < text.length && /[.,]/u.test(text[end]) && /\d/u.test(text[end + 1])) end += 1;
-  }
-  const percent = /^\s*%/u.exec(text.slice(end));
-  if (percent) return { kind: 'skip', end: end + percent[0].length };
-
-  let glued = '';
-  while (end < text.length && /[A-Za-zΩ옴]/u.test(text[end])) {
-    glued += text[end];
-    end += 1;
-  }
-  if (/^[rRkKmM]$/u.test(glued) && end < text.length && /\d/u.test(text[end])) {
-    while (end < text.length && /\d/u.test(text[end])) end += 1;
-    while (end < text.length && /[A-Za-zΩ옴]/u.test(text[end])) {
-      glued += text[end];
-      end += 1;
-    }
-  }
-  if (glued && FOREIGN_GLUED_UNIT.test(glued)) return { kind: 'skip', end };
-
-  let tokenEnd = end;
-  if (!glued) {
-    const rest = text.slice(end);
-    const foreign = SPACED_FOREIGN_UNIT.exec(rest);
-    if (foreign) return { kind: 'skip', end: end + foreign[0].length };
-    const unit = SPACED_RESISTOR_UNIT.exec(rest);
-    if (unit) tokenEnd = end + unit[0].length;
-  }
-  const raw = text.slice(index, tokenEnd);
-  const parsed = parseResistorOhms(raw);
-  const ohms = parsed == null ? null : Number(parsed);
-  if (ohms > 0) return { kind: 'valid', index, end: tokenEnd, ohms };
-  return { kind: 'invalid', index, end: tokenEnd, raw };
-}
-
-// Destination sits after "to" / "->" and before "으로" / "로".
-// With no marker, the last amount is the new value.
-function destinationOhms(text, amounts) {
-  if (amounts.length === 0) return null;
+// "to" / "->" take the next value. "으로" / "로" take the value glued to them.
+// 로부터 / 로서 / 로써 are sources. No marker leaves the choice to the caller.
+function destinationAmount(text, amounts) {
   let chosen = null;
   const consider = (markerIndex, amount) => {
     if (!amount) return;
-    if (!chosen || markerIndex >= chosen.markerIndex) chosen = { markerIndex, ohms: amount.ohms };
+    if (!chosen || markerIndex >= chosen.markerIndex) chosen = { markerIndex, amount };
   };
   for (const marker of text.matchAll(/->|→|\bto\b/giu)) {
-    const at = marker.index + marker[0].length;
-    consider(marker.index, amounts.find((amount) => amount.index >= at));
+    consider(marker.index, amounts.find((amount) => amount.index >= marker.index + marker[0].length));
   }
-  // 로부터 / 로서 / 로써 are sources ("from"), not destinations.
   for (const marker of text.matchAll(/으로|로(?!부터|서|써)/gu)) {
     const previous = amounts.findLast((amount) => amount.end <= marker.index);
     if (!previous) continue;
     if (text.slice(previous.end, marker.index).trim() !== '') continue;
     consider(marker.index, previous);
   }
-  if (chosen) return chosen.ohms;
-  return amounts[amounts.length - 1].ohms;
+  return chosen?.amount ?? null;
 }
 
-// A resistor edit is read only from this text. An unparseable value, or a
-// change that names the LED resistor and gives no value, is invalid. Example
-// numbers in some other sentence are not a fallback.
+function resistorEdit(amount) {
+  return {
+    kind: 'resistor',
+    ohms: amount.ohms,
+    ohmsText: amount.ohmsText,
+    label: formatResistorLabel(amount.ohmsText)
+  };
+}
+
+// A resistor edit is read only from this text. Candidates go through
+// parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
+// without a transition marker, or a token the parser rejects, are invalid.
 function interpretResistor(text) {
-  const scanned = scanResistorTokens(text);
-  const normalized = scanned.normalized;
+  const normalized = String(text ?? '').normalize('NFKC');
   const pullupOnly = /pull-?up|풀업|\bcc\d\b/i.test(normalized) && !/led|상태|직렬/i.test(normalized);
   if (pullupOnly) return null;
   const aboutLed = /led|저항|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   if (!aboutLed && !change) return null;
-  if (scanned.invalid.length > 0) return { kind: 'invalid' };
-  const ohms = destinationOhms(normalized, scanned.valid);
-  if (ohms != null) return { kind: 'resistor', ohms, label: formatResistorLabel(ohms) };
+
+  const tokens = scanResistorTokens(normalized);
+  promoteCoordinatedBareValues(tokens, normalized);
+  dropLeadingDesignators(tokens);
+  const parsed = classifyResistorAttempts(tokens);
+  if (parsed.malformed) return { kind: 'invalid' };
+  if (parsed.outOfRange) return { kind: 'invalid', reason: 'range' };
+
+  const chosen = destinationAmount(normalized, parsed.valid);
+  if (chosen) return resistorEdit(chosen);
+  const distinct = new Set(parsed.valid.map((amount) => amount.ohmsText));
+  if (distinct.size > 1) return { kind: 'invalid' };
+  if (distinct.size === 1) return resistorEdit(parsed.valid[parsed.valid.length - 1]);
   const asked = aboutLed && /(?:으로|로(?!부터|서|써)|->|→|\bto\b|바꿔|변경)/u.test(normalized);
   if (asked) return { kind: 'invalid' };
   return null;
 }
 
-// Same kilo and mega breakpoints as formatOhms in circuit-spec.js.
-// Ω stays on values below 1k, matching schematic fields such as 1k and 680Ω.
-function formatResistorLabel(ohms) {
-  if (!(ohms >= 1000)) return `${ohms}Ω`;
-  const nearest = Math.round(ohms);
-  const value = Math.abs(ohms - nearest) < 1e-6 ? nearest : ohms;
-  const mega = value >= 1_000_000;
-  const scaled = mega ? value / 1_000_000 : value / 1000;
-  return `${Math.round(scaled * 10) / 10}${mega ? 'M' : 'k'}`;
+// Sub-1k keeps the Ω suffix (680Ω, 1.5Ω). Kilo and mega keep every digit of
+// the canonical ohms string, so 4990 is 4.99k and 1050000 is 1.05M.
+function formatResistorLabel(ohmsText) {
+  const text = String(ohmsText);
+  const value = Number(text);
+  if (value >= 1_000_000) return `${scaleOhms(text, 6)}M`;
+  if (value >= 1000) return `${scaleOhms(text, 3)}k`;
+  return `${text}Ω`;
+}
+
+function scaleOhms(text, places) {
+  const [whole, frac = ''] = text.split('.');
+  const digits = `${whole}${frac}`.replace(/^0+(?=\d)/, '') || '0';
+  const pointFromRight = places + frac.length;
+  const padded = digits.padStart(pointFromRight + 1, '0');
+  const splitAt = padded.length - pointFromRight;
+  const head = padded.slice(0, splitAt).replace(/^0+(?=\d)/, '') || '0';
+  const tail = padded.slice(splitAt).replace(/0+$/, '');
+  return tail ? `${head}.${tail}` : head;
 }
 
 export function applyExistingProjectEdit(spec, edit) {
   const next = structuredClone(spec);
   const sourcePrompt = Object.prototype.hasOwnProperty.call(spec, 'sourcePrompt') ? spec.sourcePrompt : next.sourcePrompt;
-  if (edit.kind === 'resistor') applyResistorToSpec(next, edit.label);
+  if (edit.kind === 'resistor') applyResistorToSpec(next, edit);
   if (edit.kind === 'delete') applyDeletionToSpec(next, edit.targets ?? []);
   next.sourcePrompt = sourcePrompt;
   return next;
 }
 
-function applyResistorToSpec(spec, label) {
+function applyResistorToSpec(spec, edit) {
+  const label = edit.label;
+  const ohmsText = edit.ohmsText;
   const peripherals = Array.isArray(spec.peripherals) ? spec.peripherals : [];
   let foundResistor = false;
   spec.peripherals = peripherals.map((peripheral) => {
     if (peripheral?.kind === 'status-led-resistor') {
       foundResistor = true;
-      return { ...peripheral, value: label };
+      return { ...peripheral, value: ohmsText };
     }
     if (peripheral?.kind === 'status-led' && peripheral.currentLimit) {
       return { ...peripheral, currentLimit: label };
     }
     return peripheral;
   });
-  if (!foundResistor) spec.peripherals.push({ kind: 'status-led-resistor', value: label });
+  if (!foundResistor) spec.peripherals.push({ kind: 'status-led-resistor', value: ohmsText });
   for (const component of spec.schematic?.components ?? []) {
     if (isStatusLedResistor(component)) component.value = label;
   }
@@ -1229,10 +1283,19 @@ export async function applyMergedProjectEdit({ projectDir, existingSpec, edit })
   }
   if (edit.kind === 'resistor') {
     if (await schematicHasReference(projectDir, projectName, 'R3')) {
-      return writeResistorEdit({ projectDir, spec: next, label: edit.label });
+      return writeResistorEdit({
+        projectDir,
+        spec: next,
+        label: edit.label,
+        ohmsText: edit.ohmsText
+      });
     }
     // Fixture boards draw the LED without a series resistor until this edit asks for one.
-    return writeGeneratedProject({ projectDir, spec: next, projectName });
+    // Regeneration stores the exact ohms text, then the symbol and footprint values
+    // are patched back to the lossless label.
+    const generated = await writeGeneratedProject({ projectDir, spec: next, projectName });
+    await presentResistorLabel(generated, edit.label);
+    return generated;
   }
   throw editError(modifyRefusalMessage());
 }
@@ -1254,7 +1317,27 @@ async function projectBaseName(projectDir) {
   return specName.slice(0, -'.chatpcb.json'.length);
 }
 
-async function writeResistorEdit({ projectDir, spec, label }) {
+async function presentResistorLabel(generated, label) {
+  const schematic = await readFile(generated.files.schematic, 'utf8');
+  const updatedSchematic = replaceReferenceValue(schematic, 'R3', label);
+  if (updatedSchematic !== schematic) await writeFile(generated.files.schematic, updatedSchematic, 'utf8');
+  if (generated.files.board) {
+    await writeOptionalValue(generated.files.board, (text) => replaceReferenceValue(text, 'R3', label));
+  }
+  const spec = generated.spec;
+  if (!spec || typeof spec !== 'object') return;
+  for (const component of spec.schematic?.components ?? []) {
+    if (isStatusLedResistor(component)) component.value = label;
+  }
+  if (Array.isArray(spec.boardProfile?.productionParts)) {
+    spec.boardProfile.productionParts = spec.boardProfile.productionParts.map((part) => (
+      part?.role === 'status-led-resistor' ? { ...part, value: label } : part
+    ));
+  }
+  await writeFile(generated.files.spec, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
+}
+
+async function writeResistorEdit({ projectDir, spec, label, ohmsText }) {
   const projectName = await projectBaseName(projectDir);
   const files = projectFiles(projectDir, projectName);
   const schematicPath = files.schematic;
@@ -1263,11 +1346,10 @@ async function writeResistorEdit({ projectDir, spec, label }) {
   if (updatedSchematic === schematic) throw editError(modifyRefusalMessage());
   await writeFile(schematicPath, updatedSchematic, 'utf8');
   await writeOptionalValue(path.join(projectDir, `${projectName}.kicad_pcb`), (text) => replaceReferenceValue(text, 'R3', label));
-  const ohms = spiceOhms(label);
-  if (ohms) {
+  if (ohmsText) {
     await writeOptionalValue(files.spice, (text) => text.replace(
       /^(RLED\s+\S+\s+\S+\s+)\d+(?:\.\d+)?/m,
-      `$1${ohms}`
+      `$1${ohmsText}`
     ));
   }
   await writeFile(files.spec, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
@@ -1308,14 +1390,6 @@ function replaceReferenceValue(text, ref, value) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function spiceOhms(label) {
-  const parsed = parseResistorOhms(label);
-  if (parsed == null) return null;
-  const ohms = Number(parsed);
-  if (!(ohms > 0)) return null;
-  return String(ohms);
 }
 
 export function removedComponents(beforeSpec, afterSpec) {

@@ -103,7 +103,8 @@ const CONTRACT = [
   { prompt: 'R3 330 ohm -> 680 ohm', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
   { prompt: 'LED 저항 330옴에서 680옴으로', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
   { prompt: '상태 LED 저항 R3(현재 330Ω)의 값만 680Ω으로 변경하세요', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
-  { prompt: 'set R3 330Ω 680Ω', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
+  // Two distinct values and no transition marker. This row used to apply 680Ω.
+  { prompt: 'set R3 330Ω 680Ω', outcome: 'resistor-invalid', positive: [], negated: [] },
   { prompt: 'Delete the I2C connector', outcome: 'removal-candidate:i2c', positive: ["i2c"], negated: [] },
   { prompt: 'Remove the I2C connector', outcome: 'removal-candidate:i2c', positive: ["i2c"], negated: [] },
   { prompt: 'remove the I2C connector', outcome: 'removal-candidate:i2c', positive: ["i2c"], negated: [] },
@@ -215,6 +216,15 @@ test('deletion intent contract is fail-closed', () => {
 
   for (const row of CONTRACT) {
     const decision = classifyExistingProjectRequest(row.prompt, SPEC);
+    if (row.outcome === 'resistor-invalid') {
+      assert.equal(decision.mode, 'refuse', row.prompt);
+      assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', row.prompt);
+      assert.equal(decision.edit, undefined, row.prompt);
+      assert.deepEqual(boundTargets(row.prompt, false), row.positive, `${row.prompt} positive`);
+      assert.deepEqual(boundTargets(row.prompt, true), row.negated, `${row.prompt} negated`);
+      assert.equal(removesI2c(decision), false, row.prompt);
+      continue;
+    }
     assert.equal(outcomeOf(decision), row.outcome, row.prompt);
     assert.deepEqual(boundTargets(row.prompt, false), row.positive, `${row.prompt} positive`);
     assert.deepEqual(boundTargets(row.prompt, true), row.negated, `${row.prompt} negated`);

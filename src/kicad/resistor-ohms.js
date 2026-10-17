@@ -1,3 +1,7 @@
+// LED series resistors outside this window are refused by the edit path and by
+// SPICE validation. parseResistorOhms stays a pure parser; callers apply this.
+export const LED_SERIES_RESISTOR_RANGE = Object.freeze({ min: 1, max: 10e6 });
+
 // Lone "m" is SPICE milli. "M" and "meg" are mega. RKM writes that letter in
 // place of the decimal point, so 4k7 is 4.7 kΩ and 1R5 is 1.5 Ω.
 const RESISTOR_SCALE = {

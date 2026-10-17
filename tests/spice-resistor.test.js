@@ -19,10 +19,13 @@ test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
     ['1meg', '1000000'],
     ['1MEG', '1000000'],
     ['1 Meg', '1000000'],
-    ['1m', '0.001'],
-    ['10m', '0.01'],
-    ['2m2', '0.0022'],
     ['330', '330'],
+    ['1', '1'],
+    ['1R', '1'],
+    ['1Ω', '1'],
+    ['10M', '10000000'],
+    ['10MΩ', '10000000'],
+    ['4.99k', '4990'],
     ['330R', '330'],
     ['330Ω', '330'],
     ['330 ohm', '330'],
@@ -41,7 +44,10 @@ test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
 });
 
 test('spiceResistorOhms rejects unparseable and non-positive values', () => {
-  for (const input of ['330Ω±5%', '1/4W 330', '-10', '10kk', 'abc', '1,000', '0', '']) {
+  for (const input of [
+    '330Ω±5%', '1/4W 330', '-10', '10kk', 'abc', '1,000', '0', '',
+    '1m', '10m', '2m2', '4m7', 'R47', '1p', '100f', '1u', '10n', '1G', '1T', '0R', '1e3'
+  ]) {
     assert.equal(spiceResistorOhms(input), null, input);
   }
 });
@@ -70,8 +76,20 @@ test('renderSpiceFixture fails the SPICE netlist when the status LED resistor is
 
 test('renderSpiceFixture writes the parsed status LED resistance', () => {
   assert.match(renderSpiceFixture(statusLedSpec('4k7')), /^RLED v3v3 led 4700$/m);
-  assert.match(renderSpiceFixture(statusLedSpec('10m')), /^RLED v3v3 led 0\.01$/m);
+  assert.match(renderSpiceFixture(statusLedSpec('4.99k')), /^RLED v3v3 led 4990$/m);
   assert.match(renderSpiceFixture(statusLedSpec('330')), /^RLED v3v3 led 330$/m);
+  assert.match(renderSpiceFixture(statusLedSpec('1')), /^RLED v3v3 led 1$/m);
+  assert.match(renderSpiceFixture(statusLedSpec('10M')), /^RLED v3v3 led 10000000$/m);
+});
+
+test('renderSpiceFixture rejects status LED resistance outside 1Ω to 10MΩ', () => {
+  for (const value of ['10m', '2m2', '4m7', 'R47', '1p', '100f', '1u', '10n', '1G', '1T']) {
+    assert.throws(() => renderSpiceFixture(statusLedSpec(value)), (error) => {
+      assert.equal(error.code, 'SPICE_RESISTOR_INVALID', value);
+      assert.equal(error.message.includes('led 0'), false, value);
+      return true;
+    }, value);
+  }
 });
 
 function projectSpec(value) {

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
 import { resolveKicadCli } from './kicad-cli.js';
-import { parseResistorOhms } from './resistor-ohms.js';
+import { LED_SERIES_RESISTOR_RANGE, parseResistorOhms } from './resistor-ohms.js';
 import {
   flatpakAppLibraryPaths,
   flatpakLibraryRoots,
@@ -197,16 +197,21 @@ function statusLedResistorValue(spec) {
   return '1k';
 }
 
-// Shared with existing-project edits. Unparseable text returns null.
+// Shared with existing-project edits. Unparseable text and values outside
+// LED_SERIES_RESISTOR_RANGE return null.
 export function spiceResistorOhms(value) {
-  return parseResistorOhms(value);
+  const parsed = parseResistorOhms(value);
+  if (parsed == null) return null;
+  const ohms = Number(parsed);
+  if (!(ohms >= LED_SERIES_RESISTOR_RANGE.min && ohms <= LED_SERIES_RESISTOR_RANGE.max)) return null;
+  return parsed;
 }
 
 function requireSpiceResistorOhms(value) {
   const ohms = spiceResistorOhms(value);
   if (ohms == null) {
     const error = new Error(
-      `Cannot parse status LED resistor ${JSON.stringify(String(value ?? ''))} for the SPICE netlist. Use a positive resistance such as 330, 4k7, 4.7k, or 1M.`
+      `Cannot parse status LED resistor ${JSON.stringify(String(value ?? ''))} for the SPICE netlist. Use a positive resistance from 1Ω to 10MΩ such as 330, 4k7, 4.7k, or 1M.`
     );
     error.code = 'SPICE_RESISTOR_INVALID';
     throw error;
