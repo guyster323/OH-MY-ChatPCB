@@ -114,9 +114,9 @@ test('an LED edit and another role edit in one request asks instead of changing 
   const spec = seriesSpec('1k');
   const decision = classifyExistingProjectRequest('LED 저항이랑 I2C 저항 2.2k로', spec);
   assert.equal(decision.mode, 'refuse');
-  assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED');
   assert.equal(decision.edit, undefined);
-  assert.equal(decision.message, resistorTargetUnclearMessage('2200'));
+  assert.equal(decision.message, resistorRefUnsupportedMessage('R3'));
   assert.equal(componentValue(spec, 'R3'), '1k');
 
   const unitless = classifyExistingProjectRequest('LED랑 I2C 저항 470', spec);

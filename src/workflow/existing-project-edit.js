@@ -524,6 +524,16 @@ function unclearRemoval() {
 
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
+  // A value belongs to the role in its own clause. Any non-LED role that has a
+  // value refuses the whole request, so that ohms value cannot land on R3.
+  // A negated keep ("두지 말고", "don't keep") stays visible and still counts.
+  if (foreignRoleClauseHasValue(text)) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_REF_UNSUPPORTED',
+      message: resistorRefUnsupportedMessage(seriesResistorRef(spec))
+    };
+  }
   // A non-LED role is refused before the value is judged. 0.1Ω and 10mΩ on a
   // sense or shunt resistor are still "only the LED resistor", not a range error.
   // "current sense" is that role. It is not the LED current-limiting resistor.
@@ -1646,13 +1656,32 @@ function maskKoreanKeepClauses(chars, text) {
 
 function maskClauseGuards(chars, text, clause) {
   const base = clause.start;
+  const negated = clause.negatedBySeparator === true;
   for (const match of clause.text.matchAll(new RegExp(GUARD_BEFORE.source, 'giu'))) {
+    const after = clause.text.slice(match.index + match[0].length);
+    // "그대로 두지 말고" and "유지하지 말고" cancel the keep. The role stays.
+    if (koreanKeepCueNegated(after, negated)) continue;
     blankWordsBefore(chars, text, base, base + match.index);
   }
   for (const match of clause.text.matchAll(new RegExp(GUARD_AFTER.source, 'giu'))) {
+    // "don't keep" is not a keep. "without" still hides the object after it.
+    if (/^keep$/iu.test(match[0]) && englishKeepIsNegated(clause.text, match.index)) continue;
     const cueEnd = base + match.index + match[0].length;
     blankWordsAfter(chars, text, cueEnd, base + clause.text.length);
   }
+}
+
+// "두지 말고" splits on 말고, so the left clause ends at 두지/하지.
+// "두지 말" still inside the clause is the same negation.
+function koreanKeepCueNegated(after, negatedBySeparator) {
+  const body = String(after ?? '').trim();
+  if (/^(?:두지|하지)\s*(?:말|마|않)/u.test(body)) return true;
+  return negatedBySeparator === true && /^(?:두지|하지)$/u.test(body);
+}
+
+function englishKeepIsNegated(clauseText, matchIndex) {
+  const prefix = String(clauseText ?? '').slice(0, matchIndex).trimEnd();
+  return /(?:n't|\b(?:not|never|dont)\b)(?:\s+(?:please|just|you))?\s*$/iu.test(prefix);
 }
 
 function blankWordsBefore(chars, text, clauseStart, cueStart) {
@@ -1682,6 +1711,105 @@ function blankWordsAfter(chars, text, cueEnd, clauseEnd) {
 function blankRange(chars, from, to) {
   const end = Math.min(to, chars.length);
   for (let index = Math.max(0, from); index < end; index += 1) chars[index] = ' ';
+}
+
+// Resistor breaks are not the deletion breaks. A comma inside 4,7 or 1,000
+// stays. "and then" is one break, so the later "to" is still the destination.
+// 으로, 로, and "to" mark a value. They do not start a clause.
+const RESISTOR_CLAUSE_SEPARATORS = Object.freeze([
+  Object.freeze({ re: String.raw`\band\s+then\b` }),
+  Object.freeze({ re: String.raw`\band\b` }),
+  Object.freeze({ re: String.raw`\bthen\b` }),
+  Object.freeze({ re: String.raw`(?<!\d)\.(?!\d)` }),
+  Object.freeze({ re: String.raw`[;!?]` }),
+  Object.freeze({ re: String.raw`(?<!\d),(?!\d)` }),
+  Object.freeze({ re: '그리고' }),
+  Object.freeze({ re: '면서' }),
+  Object.freeze({ re: String.raw`하고(?![가-힣])` }),
+  Object.freeze({ re: String.raw`이고(?![가-힣])` }),
+  Object.freeze({ re: String.raw`이랑(?![가-힣])` }),
+  Object.freeze({ re: '지만' }),
+  Object.freeze({ re: '말고' }),
+  Object.freeze({ re: String.raw`(?<=[가-힣])며(?![가-힣])` }),
+  Object.freeze({ re: String.raw`(?<=[가-힣])고(?!\s*나서)(?![가-힣])` })
+]);
+
+// USB-C is a connector name. A bare USB role is not the LED resistor.
+const USB_ROLE = /\bUSB(?!-)/iu;
+
+function resistorClauseCuts(text) {
+  const hits = [];
+  for (const sep of RESISTOR_CLAUSE_SEPARATORS) {
+    const re = new RegExp(sep.re, 'giu');
+    for (let match = re.exec(text); match; match = re.exec(text)) {
+      if (match[0].length === 0) {
+        re.lastIndex += 1;
+        continue;
+      }
+      hits.push({ index: match.index, length: match[0].length });
+    }
+  }
+  hits.sort((left, right) => left.index - right.index || right.length - left.length);
+  const kept = [];
+  let cursor = 0;
+  for (const hit of hits) {
+    if (hit.index < cursor) continue;
+    kept.push(hit);
+    cursor = hit.index + hit.length;
+  }
+  return kept;
+}
+
+function splitResistorClauses(text) {
+  const pieces = [];
+  let start = 0;
+  for (const sep of resistorClauseCuts(text)) {
+    pieces.push(text.slice(start, sep.index));
+    start = sep.index + sep.length;
+  }
+  pieces.push(text.slice(start));
+  return pieces.map((piece) => piece.trim()).filter((piece) => piece.length > 0);
+}
+
+function clauseCarriesResistorValue(clauseText) {
+  return OHM_VALUE_IN_CLAUSE.test(clauseText);
+}
+
+function clauseHasForeignRole(clauseText) {
+  if (resistorNounKinds(clauseText).includes('foreign')) return true;
+  if (BARE_ROLE.test(clauseText)) return true;
+  return USB_ROLE.test(clauseText);
+}
+
+// An LED phrase or a resistor noun with no other role owns the clause.
+// A later owned clause drops a pending role that never received a value.
+function clauseHasOwnTarget(clauseText) {
+  const kinds = resistorNounKinds(clauseText);
+  if (kinds.length > 0 && !kinds.includes('foreign') && !kinds.includes('demonstrative')) return true;
+  return /\bleds?\b|엘이디|엘예디|발광/iu.test(clauseText);
+}
+
+// Kept objects are already blank. A foreign clause that carries an ohm value
+// refuses. A foreign clause with no value stays pending until an owned clause
+// clears it. A later value with no role of its own still belongs to that pending role.
+function foreignRoleClauseHasValue(text) {
+  const masked = maskGuardObjects(text);
+  let pendingForeign = false;
+  for (const clauseText of splitResistorClauses(masked)) {
+    const foreign = clauseHasForeignRole(clauseText);
+    const valued = clauseCarriesResistorValue(clauseText);
+    if (foreign && valued) return true;
+    if (foreign) {
+      pendingForeign = true;
+      continue;
+    }
+    if (clauseHasOwnTarget(clauseText)) {
+      pendingForeign = false;
+      continue;
+    }
+    if (valued && pendingForeign) return true;
+  }
+  return false;
 }
 
 // The LED series value is allowed for an LED phrase, the series ref, or a bare

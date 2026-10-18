@@ -2459,3 +2459,289 @@ test('a current-limiting resistor with no LED word applies R3=470Ω and RLED 470
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
+
+function countingProvider(onCall) {
+  return {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => onCall()
+  };
+}
+
+function nativeNoPatchCounter() {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    impl: countingProvider(() => {
+      calls += 1;
+      return { exitCode: 0, stderr: '', events: [] };
+    })
+  };
+}
+
+function maliciousPatchCounter(modelPrompt) {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    impl: countingProvider(() => {
+      calls += 1;
+      return {
+        exitCode: 0,
+        stderr: '',
+        events: [
+          createEnvelope('tool.call', {
+            id: `call_malicious_${calls}`,
+            name: 'schematic.patch',
+            args: { prompt: modelPrompt }
+          })
+        ]
+      };
+    })
+  };
+}
+
+function rledOhms(spice) {
+  const match = spice.match(/^RLED\s+\S+\s+\S+\s+(\S+)$/m);
+  return match ? match[1] : null;
+}
+
+// project.request → schematic.patch approve. A refusal has no patch to approve.
+// A merge is approved so a wrong R3 value is visible on the schematic and in RLED.
+async function requestAndMaybeApprove(services, projectDir, prompt, provider, id) {
+  const preview = await dispatchToolCall({
+    id,
+    name: 'project.request',
+    args: { provider: 'codex', projectDir, prompt }
+  }, { ...services, ...provider });
+  if (preview.ok && preview.result?.patchId) {
+    await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir, approved: true, patchId: preview.result.patchId }
+    }, services);
+  }
+  return preview;
+}
+
+function assertResistorUntouched(preview, calls, schematic, spice, before, prompt) {
+  const r3 = schematicRefValue(schematic, 'R3');
+  const rled = rledOhms(spice);
+  assert.equal(calls, 0, `${prompt} provider calls ${calls} R3=${r3} RLED=${rled} code=${preview.error?.code ?? preview.result?.applied}`);
+  assert.equal(preview.ok, false, `${prompt} R3=${r3} RLED=${rled}`);
+  assert.equal(preview.error?.code, 'RESISTOR_REF_UNSUPPORTED', `${prompt} code=${preview.error?.code ?? 'none'} R3=${r3} RLED=${rled} ${preview.error?.message ?? ''}`);
+  assert.equal(r3, schematicRefValue(before.schematic, 'R3'), `${prompt} R3`);
+  assert.equal(rled, rledOhms(before.spice), `${prompt} RLED`);
+  assert.equal(schematic, before.schematic, prompt);
+  assert.equal(spice, before.spice, prompt);
+}
+
+test('LED and pull-up values in one request never apply the pull-up value to R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    'LED resistor to 680Ω and pull-up to 2.2k',
+    'LED resistor to 680Ω, pull-up to 2.2k',
+    'LED 저항 680Ω, 풀업 2.2kΩ으로',
+    '풀업은 2.2k로, LED 저항은 680Ω으로',
+    'LED 저항 680Ω으로 그리고 풀업 저항 2.2k로',
+    'set the LED resistor to 680Ω and the I2C pull-up to 4.7kΩ',
+    'CC 저항 5.1k, LED 저항 680Ω으로'
+  ];
+  try {
+    let index = 0;
+    for (const prompt of prompts) {
+      for (const kind of ['native', 'malicious']) {
+        index += 1;
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_h1_mix_${index}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        assertResistorUntouched(preview, provider.calls(), schematic, spice, before, `${kind} ${prompt}`);
+      }
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('a negated keep clause on the pull-up (\'풀업을 그대로 두지 말고 2.2k로\') never changes R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    '풀업을 그대로 두지 말고 2.2k로',
+    '풀업은 유지하지 말고 2.2k로',
+    "don't keep the pull-up, set it to 2.2k",
+    "don't leave the pull-up as is, change it to 2.2k"
+  ];
+  try {
+    let index = 0;
+    for (const prompt of prompts) {
+      for (const kind of ['native', 'malicious']) {
+        index += 1;
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_h1_keep_${index}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        assertResistorUntouched(preview, provider.calls(), schematic, spice, before, `${kind} ${prompt}`);
+      }
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+// Deterministic mix of one LED clause and non-LED role clauses. The board's 1k
+// is not in the pool, so a stale R3 cannot look like a foreign value.
+const MIXED_ROLE_SEED = 20261018;
+const MIXED_ROLE_CASES = 200;
+const MIXED_ROLE_SEPARATORS = [', ', ' and ', '; ', ' then ', ' 그리고 ', ' 하고 ', ' 이고 ', ' 이랑 '];
+const MIXED_ROLE_VALUES = [
+  { en: '220Ω', ko: '220Ω', ohms: 220 },
+  { en: '330Ω', ko: '330Ω', ohms: 330 },
+  { en: '470Ω', ko: '470Ω', ohms: 470 },
+  { en: '680Ω', ko: '680Ω', ohms: 680 },
+  { en: '2.2kΩ', ko: '2.2kΩ', ohms: 2200 },
+  { en: '4.7kΩ', ko: '4.7kΩ', ohms: 4700 },
+  { en: '5.1kΩ', ko: '5.1kΩ', ohms: 5100 },
+  { en: '10kΩ', ko: '10kΩ', ohms: 10000 },
+  { en: '100Ω', ko: '100Ω', ohms: 100 },
+  { en: '1.5kΩ', ko: '1.5kΩ', ohms: 1500 },
+  { en: '3.3kΩ', ko: '3.3kΩ', ohms: 3300 },
+  { en: '22Ω', ko: '22Ω', ohms: 22 }
+];
+const MIXED_ROLE_WORDS = [
+  { en: 'pull-up', ko: '풀업' },
+  { en: 'CC', ko: 'CC' },
+  { en: 'I2C', ko: 'I2C' },
+  { en: 'SDA', ko: 'SDA' },
+  { en: 'SCL', ko: 'SCL' },
+  { en: 'USB', ko: 'USB' },
+  { en: 'reset', ko: '리셋' },
+  { en: 'button', ko: '버튼' },
+  { en: 'base', ko: '베이스' },
+  { en: 'gate', ko: '게이트' },
+  { en: 'sense', ko: '센스' },
+  { en: 'shunt', ko: '션트' },
+  { en: 'feedback', ko: '피드백' },
+  { en: 'divider', ko: '분압' },
+  { en: 'debounce', ko: '디바운스' },
+  { en: 'termination', ko: '종단' }
+];
+
+function mulberry32(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let mixed = state;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pickItem(rng, list) {
+  return list[Math.floor(rng() * list.length)];
+}
+
+function shuffleItems(rng, list) {
+  const copy = [...list];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(rng() * (index + 1));
+    const held = copy[index];
+    copy[index] = copy[swap];
+    copy[swap] = held;
+  }
+  return copy;
+}
+
+function mixedRoleClause(role, value, lang) {
+  if (lang === 'ko') return `${role.ko} 저항 ${value.ko}으로`;
+  return `${role.en} resistor to ${value.en}`;
+}
+
+function mixedLedClause(value, lang) {
+  if (lang === 'ko') return `LED 저항 ${value.ko}으로`;
+  return `LED resistor to ${value.en}`;
+}
+
+function buildMixedRoleCase(rng) {
+  const count = 1 + Math.floor(rng() * 3);
+  const values = shuffleItems(rng, MIXED_ROLE_VALUES).slice(0, count);
+  const roles = shuffleItems(rng, MIXED_ROLE_WORDS);
+  const lang = () => (rng() < 0.5 ? 'en' : 'ko');
+  const parts = [];
+  if (count === 1) {
+    parts.push({ text: mixedRoleClause(roles[0], values[0], lang()), ohms: values[0].ohms, label: values[0].en });
+  } else {
+    parts.push({ text: mixedLedClause(values[0], lang()), ohms: null, label: null });
+    for (let index = 1; index < count; index += 1) {
+      parts.push({
+        text: mixedRoleClause(roles[index - 1], values[index], lang()),
+        ohms: values[index].ohms,
+        label: values[index].en
+      });
+    }
+  }
+  const ordered = shuffleItems(rng, parts);
+  const foreign = ordered.filter((part) => part.ohms != null);
+  return {
+    prompt: ordered.map((part) => part.text).join(pickItem(rng, MIXED_ROLE_SEPARATORS)),
+    foreign,
+    modelPrompt: `LED resistor to ${foreign[0].label}`
+  };
+}
+
+test('random LED and non-LED role clauses never put a non-LED value on R3', { timeout: 20000 }, async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const rng = mulberry32(MIXED_ROLE_SEED);
+  const started = Date.now();
+  try {
+    for (let index = 0; index < MIXED_ROLE_CASES; index += 1) {
+      const sample = buildMixedRoleCase(rng);
+      for (const kind of ['native', 'malicious']) {
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter(sample.modelPrompt);
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(
+          services,
+          projectDir,
+          sample.prompt,
+          provider.impl,
+          `call_h1_mixrand_${index}_${kind}`
+        );
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        const label = `${kind} #${index} ${sample.prompt}`;
+        assertResistorUntouched(preview, provider.calls(), schematic, spice, before, label);
+        const rled = Number(rledOhms(spice));
+        for (const role of sample.foreign) {
+          assert.notEqual(rled, role.ohms, `${label} RLED`);
+          assert.equal(schematicRefValue(schematic, 'R3'), '1k', `${label} R3`);
+        }
+      }
+    }
+    assert.ok(Date.now() - started < 5000, `property cases took ${Date.now() - started}ms`);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
