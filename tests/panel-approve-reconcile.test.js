@@ -190,6 +190,40 @@ async function approveCallCount(page) {
   return approveCalls(page).then((calls) => calls.length);
 }
 
+function activeElementId(page) {
+  return page.evaluate(() => {
+    const active = document.activeElement;
+    if (!active || active === document.body || active === document.documentElement) return 'BODY';
+    return active.id || active.tagName;
+  });
+}
+
+async function sentCalls(page, name) {
+  return page.evaluate((tool) => window.__sent
+    .map((raw) => JSON.parse(raw).payload)
+    .filter((call) => call.name === tool), name);
+}
+
+async function waitForNthCall(page, name, index) {
+  await page.waitForFunction(({ tool, index: needed }) => (
+    window.__sent.map((raw) => JSON.parse(raw).payload).filter((call) => call.name === tool).length > needed
+  ), { tool: name, index }, { timeout: 3000 });
+  const calls = await sentCalls(page, name);
+  return calls[index];
+}
+
+async function signInChatGPT(page) {
+  const before = (await sentCalls(page, 'auth.chatgpt.status')).length;
+  await page.selectOption('#provider', 'chatgpt');
+  const authCall = await waitForNthCall(page, 'auth.chatgpt.status', before);
+  await emitResult(page, authCall.id, {
+    state: 'signed_in',
+    account: { email: 'ada@example.com' },
+    plan: 'plus'
+  });
+  await page.waitForSelector('#chatgpt-auth-title');
+}
+
 test('approve reconcile settles a lost reply, a closed socket, and a late reply', async (t) => {
   const browser = await launchPanelBrowser(t);
   if (!browser) return;
@@ -648,6 +682,233 @@ test('inspect reconcile confirms only the after digest, in that order', async (t
 function countPhrase(count, one, other) {
   return count === 1 ? one : other.replaceAll('{count}', String(count));
 }
+
+test('dropped approve and transaction.status replies time out to unconfirmed, and every final result focuses the heading', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const appliedBody = { applied: true, operation: 'patched', validation: { ok: true }, patchId: 'patch_test' };
+  const notAppliedText = `${en['patch.apply.failed.unknown']} ${en['patch.apply.failed.recheck']}`;
+
+  try {
+    const direct = await openPanel(browser, port);
+    try {
+      await showReady(direct.page, 5000);
+      await direct.page.locator('#approve-patch-button').click();
+      const approve = (await approveCalls(direct.page)).at(-1);
+      await emitResult(direct.page, approve.id, appliedBody);
+      await direct.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      assert.equal(await activeElementId(direct.page), 'request-result-heading');
+      assert.deepEqual(direct.pageErrors, []);
+    } finally {
+      await direct.page.close();
+    }
+
+    const reconciled = await openPanel(browser, port);
+    try {
+      await showReady(reconciled.page, 40);
+      await clickApply(reconciled.page);
+      const statusCall = await waitForCall(reconciled.page, 'project.transaction.status');
+      assert.equal((await sentCalls(reconciled.page, 'project.inspect')).length, 0);
+      await emitResult(reconciled.page, statusCall.id, appliedTransaction());
+      await reconciled.page.waitForFunction(() => document.activeElement?.id === 'request-result-heading', null, { timeout: 3000 });
+      assert.equal(await requestText(reconciled.page), en['patch.apply.applied']);
+      assert.equal(await activeElementId(reconciled.page), 'request-result-heading');
+      assert.deepEqual(reconciled.pageErrors, []);
+    } finally {
+      await reconciled.page.close();
+    }
+
+    const notApplied = await openPanel(browser, port);
+    try {
+      await showReady(notApplied.page, 40);
+      await clickApply(notApplied.page);
+      const statusCall = await waitForCall(notApplied.page, 'project.transaction.status');
+      await emitResult(notApplied.page, statusCall.id, failedTransaction('rolled-back'));
+      await notApplied.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
+      ), notAppliedText, { timeout: 3000 });
+      const text = await requestText(notApplied.page);
+      assert.equal(text.includes(en['patch.apply.unconfirmed']), false, text);
+      assert.equal(await activeElementId(notApplied.page), 'request-result-heading');
+      assert.deepEqual(notApplied.pageErrors, []);
+    } finally {
+      await notApplied.page.close();
+    }
+
+    const dropped = await openPanel(browser, port);
+    try {
+      await showReady(dropped.page, 30);
+      await dropped.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+      await clickApply(dropped.page);
+      const statusCall = await waitForCall(dropped.page, 'project.transaction.status');
+      assert.equal(statusCall.name, 'project.transaction.status');
+      assert.equal(await requestText(dropped.page), en['patch.apply.checking']);
+      await dropped.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+      const text = await requestText(dropped.page);
+      assert.equal(text, en['patch.apply.unconfirmed'], text);
+      assert.equal(text.includes('KiCad'), true, text);
+      assert.equal(text.includes(en['patch.apply.checking']), false, text);
+      assert.equal(text.includes(en['patch.apply.failed.unknown']), false, text);
+      const inspects = await sentCalls(dropped.page, 'project.inspect');
+      assert.equal(inspects.length, 0, 'a dropped status reply must not wait on inspect');
+      assert.equal((await sentCalls(dropped.page, 'project.transaction.status')).length, 1);
+      await dropped.page.waitForTimeout(120);
+      assert.equal(await requestText(dropped.page), en['patch.apply.unconfirmed']);
+      assert.equal(await activeElementId(dropped.page), 'request-result-heading');
+      const sent = await approveCallCount(dropped.page);
+      await dropped.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
+      await dropped.page.locator('#approve-patch-button').dispatchEvent('click');
+      assert.equal(await approveCallCount(dropped.page), sent);
+      assert.deepEqual(dropped.pageErrors, []);
+    } finally {
+      await dropped.page.close();
+    }
+
+    const reconnected = await openPanel(browser, port);
+    try {
+      await signInChatGPT(reconnected.page);
+      await showReady(reconnected.page, 10000);
+      await reconnected.page.locator('#approve-patch-button').click();
+      const authBefore = (await sentCalls(reconnected.page, 'auth.chatgpt.status')).length;
+      const providerBefore = (await sentCalls(reconnected.page, 'provider.status')).length;
+      const statusBefore = (await sentCalls(reconnected.page, 'project.transaction.status')).length;
+      await reconnected.page.evaluate(() => window.__sockets.at(-1).close());
+      await reconnected.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.checking'], { timeout: 3000 });
+      const authCall = await waitForNthCall(reconnected.page, 'auth.chatgpt.status', authBefore);
+      const providerCall = await waitForNthCall(reconnected.page, 'provider.status', providerBefore);
+      const signedIn = { state: 'signed_in', account: { email: 'ada@example.com' }, plan: 'plus' };
+      await emitResult(reconnected.page, authCall.id, signedIn);
+      await emitResult(reconnected.page, providerCall.id, { provider: 'chatgpt', status: 'signed-in', account: signedIn.account, plan: 'plus' });
+      await reconnected.page.waitForTimeout(250);
+      assert.equal(await requestText(reconnected.page), en['patch.apply.checking']);
+      assert.notEqual(await activeElementId(reconnected.page), 'chatgpt-auth-title');
+      const statusCall = await waitForNthCall(reconnected.page, 'project.transaction.status', statusBefore);
+      await emitResult(reconnected.page, statusCall.id, appliedTransaction());
+      await reconnected.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      await reconnected.page.evaluate(() => {
+        window.__sockets.at(-1).dispatchEvent(new MessageEvent('message', {
+          data: JSON.stringify({
+            version: 1,
+            id: 'auth_changed_while_result',
+            type: 'auth.chatgpt.changed',
+            createdAt: new Date().toISOString(),
+            payload: { state: 'signed_in', account: { email: 'ada@example.com' }, plan: 'plus' }
+          })
+        }));
+      });
+      await reconnected.page.waitForTimeout(250);
+      assert.equal(await requestText(reconnected.page), en['patch.apply.applied']);
+      assert.equal(await activeElementId(reconnected.page), 'request-result-heading');
+      assert.deepEqual(reconnected.pageErrors, []);
+    } finally {
+      await reconnected.page.close();
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('a non-boolean applied flag reconciles and only a real false or rolled-back transaction is not applied', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const notAppliedText = `${en['patch.apply.failed.unknown']} ${en['patch.apply.failed.recheck']}`;
+
+  async function blockReapply(page) {
+    const sent = await approveCallCount(page);
+    await page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
+    await page.locator('#approve-patch-button').dispatchEvent('click');
+    assert.equal(await page.locator('#approve-patch-button').isDisabled(), true);
+    assert.equal(await approveCallCount(page), sent);
+  }
+
+  try {
+    const asString = await openPanel(browser, port);
+    try {
+      await showReady(asString.page, 5000);
+      await installHost(asString.page);
+      await clickApply(asString.page);
+      const approve = (await approveCalls(asString.page)).at(-1);
+      await emitResult(asString.page, approve.id, { applied: 'true', operation: 'patched', validation: { ok: true }, patchId: 'patch_test' });
+      const statusCall = await waitForCall(asString.page, 'project.transaction.status');
+      assert.notEqual(await requestText(asString.page), notAppliedText);
+      assert.equal((await requestText(asString.page)).includes(en['patch.apply.failed.unknown']), false);
+      await emitResult(asString.page, statusCall.id, appliedTransaction());
+      await asString.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      assert.deepEqual((await completionSnapshot(asString.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      await blockReapply(asString.page);
+      assert.deepEqual(asString.pageErrors, []);
+    } finally {
+      await asString.page.close();
+    }
+
+    const asNumber = await openPanel(browser, port);
+    try {
+      await showReady(asNumber.page, 40);
+      await asNumber.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+      await installHost(asNumber.page);
+      await clickApply(asNumber.page);
+      const approve = (await approveCalls(asNumber.page)).at(-1);
+      await emitResult(asNumber.page, approve.id, { applied: 1, validation: { ok: true }, patchId: 'patch_test' });
+      await waitForCall(asNumber.page, 'project.transaction.status');
+      await asNumber.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+      const text = await requestText(asNumber.page);
+      assert.equal(text.includes(en['patch.apply.failed.unknown']), false, text);
+      assert.equal(text.includes(en['patch.apply.failed.recheck']), false, text);
+      assert.equal(text.includes('KiCad'), true, text);
+      assert.deepEqual((await completionSnapshot(asNumber.page)).reloads, []);
+      assert.equal(await activeElementId(asNumber.page), 'request-result-heading');
+      await blockReapply(asNumber.page);
+      assert.deepEqual(asNumber.pageErrors, []);
+    } finally {
+      await asNumber.page.close();
+    }
+
+    const explicitFalse = await openPanel(browser, port);
+    try {
+      await showReady(explicitFalse.page, 5000);
+      await clickApply(explicitFalse.page);
+      const approve = (await approveCalls(explicitFalse.page)).at(-1);
+      await emitResult(explicitFalse.page, approve.id, { applied: false, validation: { ok: true }, patchId: 'patch_test' });
+      await explicitFalse.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, notAppliedText, { timeout: 3000 });
+      await explicitFalse.page.waitForTimeout(60);
+      assert.equal((await sentCalls(explicitFalse.page, 'project.transaction.status')).length, 0);
+      assert.equal(await requestText(explicitFalse.page), notAppliedText);
+      assert.deepEqual(explicitFalse.pageErrors, []);
+    } finally {
+      await explicitFalse.page.close();
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
 
 test('ERC count copy is singular for 1 and plural for 0 and 2', async (t) => {
   const browser = await launchPanelBrowser(t);

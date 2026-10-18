@@ -563,7 +563,11 @@ function handleEnvelope(envelope) {
     handleReconcileInspect(id, envelope.payload);
     return;
   }
-  if (callName === 'schematic.patch.approve') disarmApproveFlight(id);
+  if (callName === 'schematic.patch.approve') {
+    // 'true' or 1 is not a boolean false. Reconcile instead of saying it was not applied.
+    if (nonBooleanApplied(envelope.payload?.result) && beginReconcileForUncertainApply(id)) return;
+    disarmApproveFlight(id);
+  }
 
   if (callName === 'auth.chatgpt.reopen') {
     normalizeDaemonReply(envelope.payload.result, 'auth');
@@ -718,7 +722,7 @@ function handleEnvelope(envelope) {
     if (!verdict.ok) {
       const code = verdict.code;
       const approvalGone = code === 'PATCH_STALE' || code === 'PATCH_EXPIRED' || code === 'PATCH_APPROVAL_EXPIRED';
-      // Missing, non-boolean, canceled, or removal-rejected applies do not say
+      // Missing, canceled, or removal-rejected applies do not say
       // whether this approval is still usable. Drop it so Apply cannot retry it.
       const uncertain = result.canceled === true
         || result.cancelled === true
@@ -1102,6 +1106,7 @@ function completeAppliedPatch(result) {
     }
   }
   inspectActiveProject();
+  focusPatchResult();
 }
 
 function inspectActiveProject() {
@@ -1764,6 +1769,20 @@ function disarmApproveFlight(callId) {
   approveFlight = null;
 }
 
+function nonBooleanApplied(result) {
+  return Boolean(result)
+    && typeof result === 'object'
+    && !Array.isArray(result)
+    && Object.hasOwn(result, 'applied')
+    && typeof result.applied !== 'boolean';
+}
+
+function beginReconcileForUncertainApply(callId) {
+  if (!approveFlight || approveFlight.callId !== callId || approveFlight.phase !== 'applying') return false;
+  beginApproveReconcile();
+  return true;
+}
+
 function sendSchematicApprove(extraArgs = {}) {
   if (!activeProject?.projectDir || !patchApprovalState.patchId) return;
   if (spentPatchIds.has(patchApprovalState.patchId)) return;
@@ -1934,10 +1953,12 @@ function finishApproveReconcile(outcome) {
   }
   if (outcome === 'not-applied') {
     renderApplyFailure({ ok: false, code: 'APPLY_REJECTED' });
+    focusPatchResult();
     return;
   }
   renderRequestStatus({ state: 'failed', summaryKey: 'patch.apply.unconfirmed', applyFailure: true });
   appendProgress({ stage: 'fail', text: t('patch.apply.unconfirmed') });
+  focusPatchResult();
 }
 
 function confirmRemovalApply() {
@@ -2299,6 +2320,14 @@ function focusRequestResultHeading() {
   if (!heading) return;
   const live = requestStatusLive();
   if (live) live.textContent = '';
+  focusPatchResult();
+}
+
+// Same heading the direct applied path focuses. Does not clear the live region,
+// so the result text stays announced after it is published.
+function focusPatchResult() {
+  const heading = requestResultHeading();
+  if (!heading) return;
   heading.tabIndex = -1;
   heading.focus({ focusVisible: true });
 }
@@ -3471,6 +3500,14 @@ function appendChatGPTAuthActions(parent, actions) {
   parent.append(row);
 }
 
+function patchFlowOwnsFocus() {
+  if (approveFlight && approveFlight.settled !== true) return true;
+  const key = requestStatusKey;
+  if (key === 'patch.apply.applied' || key === 'patch.apply.done' || key === 'patch.apply.unconfirmed' || key === 'patch.apply.checking' || key === 'patch.apply.summary') return true;
+  if (applyFailureCaption === true && requestStatusEl?.dataset.state === 'failed') return true;
+  return false;
+}
+
 function renderChatGPTAuth() {
   syncChatGPTSwitchOffer();
   if (!i18nReady || !chatgptAuthCardEl || !providerEl) return;
@@ -3603,9 +3640,9 @@ function renderChatGPTAuth() {
   }
   setChatGPTPlanVisible(state === 'signed_in');
 
-  if (focusTitle) {
+  if (focusTitle && !patchFlowOwnsFocus()) {
     setTimeout(() => {
-      if (titleEl.isConnected) titleEl.focus();
+      if (titleEl.isConnected && !patchFlowOwnsFocus()) titleEl.focus();
     }, 100);
   }
 }

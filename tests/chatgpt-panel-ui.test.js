@@ -218,7 +218,9 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
               requiresApproval: true,
               approved: false,
               applied: false,
-              patchId: 'sha256:preview',
+              patchId: typeof window.__previewPatchId === 'string' && window.__previewPatchId
+                ? window.__previewPatchId
+                : 'sha256:preview',
               expiresAt,
               operation: 'generated',
               files: {},
@@ -1689,16 +1691,18 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     },
     {
       id: 'applied-string',
+      patchId: 'sha256:applied-string',
       result: { applied: 'true', validation: { ok: true } },
-      text: en['patch.apply.failed.unknown'],
-      code: 'APPLY_REJECTED',
+      text: en['patch.apply.unconfirmed'],
+      nonBoolean: true,
       uncertain: true
     },
     {
       id: 'applied-number',
+      patchId: 'sha256:applied-number',
       result: { applied: 1, validation: { ok: true } },
-      text: en['patch.apply.failed.unknown'],
-      code: 'APPLY_REJECTED',
+      text: en['patch.apply.unconfirmed'],
+      nonBoolean: true,
       uncertain: true
     }
   ];
@@ -1729,6 +1733,7 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     });
 
     for (const item of cases) {
+      await page.evaluate((id) => { window.__previewPatchId = id; }, item.patchId || 'sha256:preview');
       await sendPlainPreview(page, `preview ${item.id}`);
       await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
       await page.evaluate((next) => { window.__patchApplyResult = next; }, item.result);
@@ -1744,11 +1749,18 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       assert.equal(await page.locator('#workflow-caption').innerText(), "Couldn't apply the change");
       assert.notEqual(await page.locator('#workflow-caption').innerText(), en['workflow.caption.failed']);
       assert.equal(await page.locator('#composer button[type="submit"]').isDisabled(), false);
-      assert.equal(status.includes(en['patch.apply.failed.recheck']), true, status);
       assert.equal(status.includes(reasonCode), false, status);
       assert.equal(status.includes(`(${reasonCode})`), false, status);
-      assert.equal(await page.locator('#request-status').getAttribute('data-reason-code'), reasonCode);
-      assert.equal(warnings.includes(reasonCode), true, warnings.join(' | '));
+      if (item.nonBoolean) {
+        assert.equal(status.includes(en['patch.apply.failed.unknown']), false, status);
+        assert.equal(status.includes(en['patch.apply.failed.recheck']), false, status);
+        assert.equal(status.includes('KiCad'), true, status);
+        assert.equal(await page.locator('#request-status').getAttribute('data-reason-code'), null);
+      } else {
+        assert.equal(status.includes(en['patch.apply.failed.recheck']), true, status);
+        assert.equal(await page.locator('#request-status').getAttribute('data-reason-code'), reasonCode);
+        assert.equal(warnings.includes(reasonCode), true, warnings.join(' | '));
+      }
       assert.equal(status.includes('Completed'), false, status);
       assert.equal(status.includes('Generated project'), false, status);
       assert.notEqual(await page.locator('[data-step="circuit.draft"]').getAttribute('data-state'), 'done');
@@ -1768,7 +1780,7 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       }
     }
 
-    await page.evaluate(() => { window.__patchApplyResult = null; });
+    await page.evaluate(() => { window.__patchApplyResult = null; window.__previewPatchId = ''; });
     await page.evaluate((next) => { window.__requestResult = next; }, {
       applied: false,
       validation: { ok: true },
