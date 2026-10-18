@@ -21,7 +21,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
+import { appliesBeforeProvider, blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -744,6 +744,39 @@ async function requestProject(call, ctx) {
             const refused = new Error(decision.message);
             refused.code = decision.code;
             throw refused;
+          }
+          // Only a current-limiting resistor named without LED, series, or a ref.
+          // Every other resistor merge still reaches the provider.
+          if (appliesBeforeProvider(prompt, decision)) {
+            const generated = await previewNativeChange({
+              projectDir,
+              prompt: generatePrompt,
+              context: args.selection
+            }, providerDispatchContext(ctx, proposalSource()));
+            if (!generated.ok) {
+              const error = new Error(generated.error.message);
+              error.code = generated.error.code;
+              throw error;
+            }
+            const localPreview = generated.result;
+            if (conversation && localPreview?.source) {
+              conversation.lastSource = {
+                provider: localPreview.source.provider ?? null,
+                via: localPreview.source.via ?? null
+              };
+            }
+            if (localPreview?.requiresApproval) {
+              emitProgress(ctx, {
+                stage: 'ready',
+                sprite: 'preview',
+                text: progressCopy(prompt, '회로 초안이 준비됐어요. 적용을 누르면 파일이 바뀝니다.', 'Circuit draft is ready. Apply it to change the schematic.')
+              });
+            }
+            return {
+              ...localPreview,
+              operation: 'patched',
+              conversation
+            };
           }
         }
       }

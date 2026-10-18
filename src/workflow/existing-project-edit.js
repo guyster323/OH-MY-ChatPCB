@@ -524,6 +524,14 @@ function unclearRemoval() {
 
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
+  // A non-LED role is refused before the value is judged. 0.1Ω and 10mΩ on a
+  // sense or shunt resistor are still "only the LED resistor", not a range error.
+  // "current sense" is that role. It is not the LED current-limiting resistor.
+  const masked = maskGuardObjects(text);
+  if (foreignRoleKind(masked) === 'foreign') {
+    const foreign = foreignRoleDecision(text, spec, resistor);
+    if (foreign) return foreign;
+  }
   // A wrong ref is reported before we ask for a unit, so R1 470 stays unsupported.
   if (resistor.kind === 'invalid' && resistor.reason !== 'unit-required') {
     return invalidResistor(resistor);
@@ -602,6 +610,19 @@ export function blocksBeforeProvider(text, decision) {
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
+}
+
+// "current limiting" / "전류 제한" with no LED word is the LED series resistor.
+// It is applied locally. "current sense" is a shunt role and does not match.
+// An LED word, a series word, or a ref such as R3 still reaches the provider.
+const CURRENT_LIMITING_PHRASE = /current[-\s]+limiting|전류\s*제한/iu;
+const EXPLICIT_LED_OR_REF = /led|엘이디|엘예디|발광|상태|\bstatus\b|\bseries\b|직렬|\bR\d+\b/iu;
+
+export function appliesBeforeProvider(text, decision) {
+  if (decision?.mode !== 'merge' || decision.edit?.kind !== 'resistor') return false;
+  const normalized = String(text ?? '').normalize('NFKC');
+  if (EXPLICIT_LED_OR_REF.test(normalized)) return false;
+  return CURRENT_LIMITING_PHRASE.test(normalized);
 }
 
 function nonRemovalEdit(text) {
@@ -1869,6 +1890,9 @@ function classifyModifiers(words) {
 }
 
 function isAllowedLedContext(content) {
+  // "current sense", "current-sense", and "current sensing" are shunt roles.
+  // They must not match the LED phrase "current limiting" / "current-limiting".
+  if (content.some((word) => /^(?:sens(?:e|es|ing)?|current-sense|shunts?|션트|센스)$/iu.test(word))) return false;
   if (!content.every((word) => ALLOW_WORD.test(word))) return false;
   if (content.some((word) => /^(?:leds?|엘이디|엘예디|status|상태|series|직렬)$/iu.test(word))) return true;
   const joined = content.map((word) => word.toLowerCase().replace(/-/g, ' ')).join(' ');

@@ -1617,6 +1617,12 @@ test('the same LED resistor value and another resistor role never call the provi
     ['the second resistor 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
     ['bias resistor 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
     ['shunt resistor 10Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['sense resistor 0.1Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['change the sense resistor to 0.1Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['센스 저항 0.1Ω으로', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['shunt resistor 10mΩ', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['션트 저항 0.05Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['current sense resistor 0.1Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
     ['저항 680Ω으로', 'RESISTOR_TARGET_UNCLEAR', resistorTargetUnclearMessage('680')]
   ];
   try {
@@ -2376,6 +2382,58 @@ test('LED synonyms/plurals and port noise edit R3', async () => {
     }, { ...services, ...blockedProvider });
     assert.notEqual(plain.error?.code, 'RESISTOR_REF_UNSUPPORTED');
     assert.equal(schematicRefValue(await readFile(generated.files.schematic, 'utf8'), 'R3'), '1k');
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('a current-limiting resistor with no LED word applies R3=470Ω and RLED 470 before the provider', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    'current limiting resistor 470Ω',
+    'current-limiting resistor 470Ω',
+    '전류제한 저항 470Ω',
+    '전류 제한 저항 470Ω으로'
+  ];
+  let calls = 0;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider }) => ({
+      provider,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      calls += 1;
+      throw new Error('provider must not be called');
+    }
+  };
+  try {
+    for (const [index, prompt] of prompts.entries()) {
+      calls = 0;
+      await writeGeneratedBytes(generated, before);
+      const preview = await dispatchToolCall({
+        id: `call_current_limit_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(calls, 0, prompt);
+      assert.equal(preview.ok, true, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.result.providerFallback, undefined, prompt);
+      assert.equal(preview.result.source?.via, 'native-fallback', prompt);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: preview.result.patchId }
+      }, services);
+      assert.equal(approved.result?.applied, true, `${prompt} ${JSON.stringify(approved.result?.reason ?? approved.error)}`);
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      const spice = await readFile(generated.files.spice, 'utf8');
+      assertOnlySeriesValueChanged(schematic, before.schematic, '470Ω', spice, before.spice, '470', prompt);
+    }
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });

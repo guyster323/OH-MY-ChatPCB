@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   applyExistingProjectEdit,
   applyMergedProjectEdit,
+  appliesBeforeProvider,
   blocksBeforeProvider,
   classifyExistingProjectRequest,
   resistorRefAmbiguousMessage,
@@ -445,6 +446,13 @@ const DENIED_ROLE_PROMPTS = [
   '센스 저항 10Ω',
   'shunt resistor 10Ω',
   '션트 저항 10Ω',
+  'sense resistor 0.1Ω',
+  'change the sense resistor to 0.1Ω',
+  '센스 저항 0.1Ω으로',
+  'shunt resistor 10mΩ',
+  '션트 저항 0.05Ω',
+  'current sense resistor 0.1Ω',
+  'current-sense resistor 0.1Ω',
   'pull-up resistor 2.2k',
   '풀업 저항 2.2k로',
   'CC resistor 10k',
@@ -464,6 +472,10 @@ const ALLOWED_ROLE_PROMPTS = [
   ['change the LED resistor to 680Ω', 680, '680Ω'],
   ['전류 제한 저항 680Ω', 680, '680Ω'],
   ['current-limiting resistor 680Ω', 680, '680Ω'],
+  ['current limiting resistor 470Ω', 470, '470Ω'],
+  ['current-limiting resistor 470Ω', 470, '470Ω'],
+  ['전류제한 저항 470Ω', 470, '470Ω'],
+  ['전류 제한 저항 470Ω으로', 470, '470Ω'],
   ['R3 680Ω', 680, '680Ω'],
   ['change R3 to 680Ω', 680, '680Ω'],
   ['LED의 저항 680Ω으로', 680, '680Ω'],
@@ -502,6 +514,37 @@ test('LED phrases and the series ref still change only the LED resistor', () => 
     assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
     assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
     assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+});
+
+test('a current-limiting phrase with no LED word applies before the provider', () => {
+  const spec = seriesSpec('1k');
+  const local = [
+    'current limiting resistor 470Ω',
+    'current-limiting resistor 470Ω',
+    '전류제한 저항 470Ω',
+    '전류 제한 저항 470Ω으로'
+  ];
+  for (const prompt of local) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.ohms, 470, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+  }
+  const provider = [
+    'current sense resistor 0.1Ω',
+    'change the sense resistor to 0.1Ω',
+    'current-sense resistor 0.1Ω',
+    'change R3 to 2.2kΩ and keep the 1 m cable',
+    'Change the status LED series resistor to 680 ohm',
+    'set the LED resistor to 1kΩ',
+    'current-limiting resistor 680Ω and set the LED',
+    '전류 제한 저항 680Ω LED',
+    'current limiting resistor 0.1Ω'
+  ];
+  for (const prompt of provider) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, `${prompt} ${decision.mode} ${decision.code ?? ''}`);
   }
 });
 
@@ -562,7 +605,7 @@ test('denied role words leave the schematic and the LED net unchanged', async ()
       assert.equal(await readFile(path.join(projectDir, 'board_simulation.cir'), 'utf8'), spice, prompt);
       assert.equal(schematicRefValue(schematic, 'R3'), '1k', prompt);
     }
-    for (const [prompt, , label] of ALLOWED_ROLE_PROMPTS) {
+    for (const [prompt, ohms, label] of ALLOWED_ROLE_PROMPTS) {
       await writeFile(path.join(projectDir, 'board.kicad_sch'), schematic);
       await writeFile(path.join(projectDir, 'board_simulation.cir'), spice);
       await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(seriesSpec('1k'), null, 2)}\n`);
@@ -578,7 +621,7 @@ test('denied role words leave the schematic and the LED net unchanged', async ()
       assert.equal(schematicRefValue(written, 'R3'), label, prompt);
       assert.equal(schematicRefValue(written, 'R1'), '5.1k', prompt);
       assert.equal(schematicRefValue(written, 'R4'), '4.7k', prompt);
-      assert.match(netlist, /^RLED v3v3 led 680$/m, prompt);
+      assert.match(netlist, new RegExp(`^RLED v3v3 led ${ohms}$`, 'm'), prompt);
       assert.match(netlist, /^R1 vbus cc 5100$/m, prompt);
       assert.match(netlist, /^R4 v3v3 sda 4700$/m, prompt);
     }
