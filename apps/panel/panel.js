@@ -127,6 +127,7 @@ const spentPatchIds = new Set();
 const closedApproveCalls = new Set();
 const DEFAULT_APPROVE_TIMEOUT_MS = 30000;
 const DEFAULT_RECONCILE_TIMEOUT_MS = 30000;
+const RECONNECT_DELAY_MS = 1500;
 let removalConfirmArmed = false;
 let syncingRemoval = false;
 let removalClosedForFocus = false;
@@ -379,18 +380,6 @@ function setConnectionStatus(key, state) {
   }
 }
 
-function approveTimeoutMs() {
-  const value = Number(window.__chatpcbApproveTimeoutMs);
-  if (Number.isFinite(value) && value >= 0) return value;
-  return DEFAULT_APPROVE_TIMEOUT_MS;
-}
-
-function reconcileTimeoutMs() {
-  const value = Number(window.__chatpcbReconcileTimeoutMs);
-  if (Number.isFinite(value) && value >= 0) return value;
-  return DEFAULT_RECONCILE_TIMEOUT_MS;
-}
-
 function clearReconcileTimer(flight) {
   if (!flight?.reconcileTimer) return;
   clearTimeout(flight.reconcileTimer);
@@ -404,20 +393,11 @@ function armReconcileTimer(flight) {
     if (approveFlight !== flight || flight.settled || flight.phase !== 'checking') return;
     finishApproveReconcile('unknown');
   };
-  // The test hook runs this same callback instead of waiting out a short timer.
-  flight.reconcileFire = fire;
-  flight.reconcileTimer = setTimeout(fire, reconcileTimeoutMs());
-}
-
-function reconnectDelayMs() {
-  const value = Number(window.__chatpcbReconnectMs);
-  if (Number.isFinite(value) && value >= 0) return value;
-  return 1500;
+  flight.reconcileTimer = setTimeout(fire, DEFAULT_RECONCILE_TIMEOUT_MS);
 }
 
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
-  window.__daemonSocket = socket;
   socket.addEventListener('open', () => {
     setConnectionStatus('connection.connected', 'ok');
     const flight = approveFlight;
@@ -433,7 +413,7 @@ function connect() {
   socket.addEventListener('close', () => {
     setConnectionStatus('connection.disconnected', 'warn');
     beginApproveReconcile();
-    setTimeout(connect, reconnectDelayMs());
+    setTimeout(connect, RECONNECT_DELAY_MS);
   });
   socket.addEventListener('error', () => {
     setConnectionStatus('connection.error', 'warn');
@@ -1760,7 +1740,7 @@ function armApproveFlight(callId) {
   };
   approveFlight.timer = setTimeout(() => {
     if (approveFlight?.callId === callId && approveFlight.phase === 'applying') beginApproveReconcile();
-  }, approveTimeoutMs());
+  }, DEFAULT_APPROVE_TIMEOUT_MS);
   if (approvePatchButtonEl) approvePatchButtonEl.disabled = true;
   if (approveWithoutErcButtonEl) approveWithoutErcButtonEl.disabled = true;
 }
@@ -2871,14 +2851,6 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
         },
         activeId: document.activeElement?.id ?? ''
       };
-    },
-    expireReconcileTimer() {
-      const flight = approveFlight;
-      const fire = flight?.reconcileFire;
-      if (!flight?.reconcileTimer || typeof fire !== 'function') return false;
-      clearReconcileTimer(flight);
-      fire();
-      return flight.settled === true;
     }
   };
 }

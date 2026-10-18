@@ -18,6 +18,13 @@ const TYPES = {
   '.png': 'image/png'
 };
 
+// Same durations as apps/panel/panel.js. The page clock is paused, so they
+// fire only when a test advances time.
+const APPROVE_TIMEOUT_MS = 30000;
+const RECONCILE_TIMEOUT_MS = 30000;
+const RECONNECT_DELAY_MS = 1500;
+const CLOCK_EPOCH = Date.parse('2026-01-15T12:00:00.000Z');
+
 const passedPreview = {
   patchId: 'patch_test',
   evidenceDigest: 'digest-before',
@@ -64,12 +71,13 @@ async function startServer() {
 }
 
 async function openPanel(browser, port, lang = 'en') {
-  const page = await browser.newPage();
+  const context = await browser.newContext();
+  const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.clock.install({ time: CLOCK_EPOCH });
   await page.addInitScript(() => {
     window.__CHATPCB_TEST_MODE__ = true;
-    window.__chatpcbReconnectMs = 0;
     window.__sent = [];
     window.__sockets = [];
     class FakeSocket extends EventTarget {
@@ -97,30 +105,27 @@ async function openPanel(browser, port, lang = 'en') {
   });
   await page.goto(`http://127.0.0.1:${port}/index.html?lang=${lang}&chatpcbTest=1`, { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => window.chatpcbI18n.ready);
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(now + 1000);
+  let closed = false;
+  page.on('close', () => {
+    if (closed) return;
+    closed = true;
+    context.close().catch(() => {});
+  });
   return { page, pageErrors };
 }
 
-async function showReady(page, timeoutMs = 30000, preview = passedPreview) {
-  await page.evaluate(({ preview: nextPreview, timeoutMs: nextTimeout }) => {
-    window.__chatpcbApproveTimeoutMs = nextTimeout;
+function advance(page, ms) {
+  return page.clock.runFor(ms);
+}
+
+async function showReady(page, preview = passedPreview) {
+  await page.evaluate((nextPreview) => {
     window.__sent.length = 0;
     window.__chatpcbTest.showPatch(nextPreview);
-  }, { preview, timeoutMs });
+  }, preview);
   await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
-}
-
-// Longer than a slow CI turn, so the checking copy cannot flip before it is asserted.
-const RECONCILE_HOLD_MS = 60000;
-
-async function holdReconcileTimeout(page) {
-  await page.evaluate((ms) => {
-    window.__chatpcbReconcileTimeoutMs = ms;
-  }, RECONCILE_HOLD_MS);
-}
-
-async function expireReconcileTimeout(page) {
-  const fired = await page.evaluate(() => window.__chatpcbTest.expireReconcileTimer());
-  assert.equal(fired, true, 'reconcile timer was not armed');
 }
 
 async function clickApply(page) {
@@ -290,12 +295,13 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
   try {
     const lost = await openPanel(browser, port);
     try {
-      await showReady(lost.page, 40);
+      await showReady(lost.page);
       await clickApply(lost.page);
       assert.equal(await lost.page.locator('#approve-patch-button').isDisabled(), true);
       const first = (await approveCalls(lost.page)).length;
       await lost.page.locator('#approve-patch-button').dispatchEvent('click');
       assert.equal((await approveCalls(lost.page)).length, first);
+      await advance(lost.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(lost.page, 'project.transaction.status');
       assert.equal(await requestText(lost.page), en['patch.apply.checking']);
       assert.notEqual(await requestText(lost.page), en['patch.apply.summary']);
@@ -316,8 +322,9 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
 
     const absent = await openPanel(browser, port);
     try {
-      await showReady(absent.page, 40);
+      await showReady(absent.page);
       await clickApply(absent.page);
+      await advance(absent.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(absent.page, 'project.transaction.status');
       await emitResult(absent.page, statusCall.id, { transactions: [] });
       const inspectCall = await waitForCall(absent.page, 'project.inspect');
@@ -348,8 +355,9 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
 
     const unknown = await openPanel(browser, port, 'ko');
     try {
-      await showReady(unknown.page, 40);
+      await showReady(unknown.page);
       await clickApply(unknown.page);
+      await advance(unknown.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(unknown.page, 'project.transaction.status');
       await emitResult(unknown.page, statusCall.id, { transactions: [{ proposal: { proposalId: 'patch_test' }, status: 'needs-inspection' }] });
       await unknown.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, ko['patch.apply.unconfirmed'], { timeout: 3000 });
@@ -368,10 +376,11 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
 
     const closed = await openPanel(browser, port);
     try {
-      await showReady(closed.page, 10000);
+      await showReady(closed.page);
       await clickApply(closed.page);
       await closed.page.evaluate(() => window.__sockets.at(-1).close());
       await closed.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.checking'], { timeout: 3000 });
+      await advance(closed.page, RECONNECT_DELAY_MS);
       const statusCall = await waitForCall(closed.page, 'project.transaction.status');
       await emitResult(closed.page, statusCall.id, { transactions: [] });
       const inspectCall = await waitForCall(closed.page, 'project.inspect');
@@ -391,13 +400,13 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
 
     const early = await openPanel(browser, port);
     try {
-      await showReady(early.page, 5000);
+      await showReady(early.page);
       await clickApply(early.page);
       const approve = (await approveCalls(early.page)).at(-1);
       await emitResult(early.page, approve.id, { applied: true, operation: 'patched', validation: { ok: true } });
       await early.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.applied'], { timeout: 3000 });
       assert.equal(await requestText(early.page) === en['patch.apply.checking'], false);
-      await early.page.waitForTimeout(80);
+      await advance(early.page, 80);
       assert.equal(await requestText(early.page), en['patch.apply.applied']);
       assert.deepEqual(early.pageErrors, []);
     } finally {
@@ -406,15 +415,16 @@ test('approve reconcile settles a lost reply, a closed socket, and a late reply'
 
     const late = await openPanel(browser, port);
     try {
-      await showReady(late.page, 40);
+      await showReady(late.page);
       await clickApply(late.page);
       const approve = (await approveCalls(late.page)).at(-1);
+      await advance(late.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(late.page, 'project.transaction.status');
       await emitResult(late.page, approve.id, { applied: false, reason: { code: 'PATCH_STALE' }, validation: { ok: true } });
       assert.equal(await requestText(late.page), en['patch.apply.checking']);
       await emitResult(late.page, statusCall.id, appliedTransaction());
       await late.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.applied'], { timeout: 3000 });
-      await late.page.waitForTimeout(50);
+      await advance(late.page, 50);
       const text = await requestText(late.page);
       assert.equal(text, en['patch.apply.applied']);
       assert.equal(text.includes(en['patch.apply.failed.PATCH_STALE']), false, text);
@@ -441,7 +451,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
     const direct = await openPanel(browser, port);
     let directShot;
     try {
-      await showReady(direct.page, 5000);
+      await showReady(direct.page);
       await installHost(direct.page);
       await clickApply(direct.page);
       const approve = (await approveCalls(direct.page)).at(-1);
@@ -462,9 +472,10 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
 
     const reconciled = await openPanel(browser, port);
     try {
-      await showReady(reconciled.page, 40);
+      await showReady(reconciled.page);
       await installHost(reconciled.page);
       await clickApply(reconciled.page);
+      await advance(reconciled.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(reconciled.page, 'project.transaction.status');
       await emitResult(reconciled.page, statusCall.id, appliedTransaction());
       await reconciled.page.waitForFunction((text) => (
@@ -482,7 +493,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
         reason: { code: 'PATCH_STALE' },
         validation: { ok: true }
       });
-      await reconciled.page.waitForTimeout(50);
+      await advance(reconciled.page, 50);
       const again = await completionSnapshot(reconciled.page);
       assert.deepEqual(again, shot);
       assert.equal(again.text.includes(en['patch.apply.failed.PATCH_STALE']), false, again.text);
@@ -497,10 +508,11 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
 
     const missing = await openPanel(browser, port);
     try {
-      await showReady(missing.page, 40);
+      await showReady(missing.page);
       await installHost(missing.page);
       await clickApply(missing.page);
       const approve = (await approveCalls(missing.page)).at(-1);
+      await advance(missing.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(missing.page, 'project.transaction.status');
       await emitResult(missing.page, statusCall.id, { transactions: [] });
       const inspectCall = await waitForCall(missing.page, 'project.inspect');
@@ -519,7 +531,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
       assert.equal(unconfirmed.includes(en['patch.apply.failed.recheck']), false, unconfirmed);
       assert.deepEqual(await completionSnapshot(missing.page).then((shot) => shot.reloads), []);
       await emitResult(missing.page, approve.id, { ...appliedBody, patchId: 'patch_other' });
-      await missing.page.waitForTimeout(40);
+      await advance(missing.page, 40);
       assert.equal(await requestText(missing.page), en['patch.apply.unconfirmed']);
       assert.deepEqual((await completionSnapshot(missing.page)).reloads, []);
       await emitResult(missing.page, approve.id, appliedBody);
@@ -532,7 +544,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
       assert.equal(corrected.text, directShot.text);
       assert.equal(corrected.state, directShot.state);
       await emitResult(missing.page, approve.id, appliedBody);
-      await missing.page.waitForTimeout(40);
+      await advance(missing.page, 40);
       assert.deepEqual((await completionSnapshot(missing.page)).reloads, corrected.reloads);
       const sent = await approveCallCount(missing.page);
       await missing.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
@@ -546,10 +558,11 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
 
     const rolledBack = await openPanel(browser, port);
     try {
-      await showReady(rolledBack.page, 40);
+      await showReady(rolledBack.page);
       await installHost(rolledBack.page);
       await clickApply(rolledBack.page);
       const approve = (await approveCalls(rolledBack.page)).at(-1);
+      await advance(rolledBack.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(rolledBack.page, 'project.transaction.status');
       await emitResult(rolledBack.page, statusCall.id, failedTransaction('rolled-back'));
       await rolledBack.page.waitForFunction((needle) => (
@@ -561,10 +574,10 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
       assert.equal(failed.includes(en['patch.apply.unconfirmed']), false, failed);
       assert.deepEqual((await completionSnapshot(rolledBack.page)).reloads, []);
       await emitResult(rolledBack.page, statusCall.id, appliedTransaction());
-      await rolledBack.page.waitForTimeout(40);
+      await advance(rolledBack.page, 40);
       assert.equal(await requestText(rolledBack.page), failed);
       await emitResult(rolledBack.page, approve.id, appliedBody);
-      await rolledBack.page.waitForTimeout(40);
+      await advance(rolledBack.page, 40);
       assert.equal(await requestText(rolledBack.page), failed);
       assert.equal(await rolledBack.page.locator('#request-status').getAttribute('data-state'), 'failed');
       assert.deepEqual((await completionSnapshot(rolledBack.page)).reloads, []);
@@ -579,13 +592,13 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
 
     const silentStatus = await openPanel(browser, port);
     try {
-      await showReady(silentStatus.page, 30);
-      await holdReconcileTimeout(silentStatus.page);
+      await showReady(silentStatus.page);
       await installHost(silentStatus.page);
       await clickApply(silentStatus.page);
+      await advance(silentStatus.page, APPROVE_TIMEOUT_MS);
       await waitForCall(silentStatus.page, 'project.transaction.status');
       assert.equal(await requestText(silentStatus.page), en['patch.apply.checking']);
-      await expireReconcileTimeout(silentStatus.page);
+      await advance(silentStatus.page, RECONCILE_TIMEOUT_MS);
       await silentStatus.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
       assert.equal(await silentStatus.page.locator('#request-status').getAttribute('data-state'), 'failed');
       assert.equal((await requestText(silentStatus.page)).includes('KiCad'), true);
@@ -608,22 +621,22 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
 
     const silentInspect = await openPanel(browser, port);
     try {
-      await showReady(silentInspect.page, 30);
-      await holdReconcileTimeout(silentInspect.page);
+      await showReady(silentInspect.page);
       await installHost(silentInspect.page);
       await clickApply(silentInspect.page);
+      await advance(silentInspect.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(silentInspect.page, 'project.transaction.status');
       await emitResult(silentInspect.page, statusCall.id, { transactions: [] });
       const inspectCall = await waitForCall(silentInspect.page, 'project.inspect');
       assert.equal(await requestText(silentInspect.page), en['patch.apply.checking']);
-      await expireReconcileTimeout(silentInspect.page);
+      await advance(silentInspect.page, RECONCILE_TIMEOUT_MS);
       await silentInspect.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
       await emitResult(silentInspect.page, inspectCall.id, {
         manifest: { freshness: { status: 'current' } },
         inspection: { projectDigest: 'digest-before' },
         evidenceDigest: { projectDigest: 'digest-before', matches: true }
       });
-      await silentInspect.page.waitForTimeout(40);
+      await advance(silentInspect.page, 40);
       const text = await requestText(silentInspect.page);
       assert.equal(text, en['patch.apply.unconfirmed'], text);
       assert.equal(text.includes(en['patch.apply.failed.unknown']), false, text);
@@ -640,6 +653,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
 
 async function settleEmptyTransactionInspect(page, body, ok) {
   await clickApply(page);
+  await advance(page, APPROVE_TIMEOUT_MS);
   const statusCall = await waitForCall(page, 'project.transaction.status');
   await emitResult(page, statusCall.id, { transactions: [] });
   const inspectCall = await waitForCall(page, 'project.inspect');
@@ -663,7 +677,7 @@ test('inspect reconcile confirms only the after digest, in that order', async (t
   try {
     const mismatched = await openPanel(browser, port);
     try {
-      await showReady(mismatched.page, 40);
+      await showReady(mismatched.page);
       await installHost(mismatched.page);
       const inspectCall = await settleEmptyTransactionInspect(mismatched.page, neither, true);
       assert.equal(inspectCall.args.expectedDigest, 'digest-before');
@@ -683,7 +697,7 @@ test('inspect reconcile confirms only the after digest, in that order', async (t
 
     const rejected = await openPanel(browser, port);
     try {
-      await showReady(rejected.page, 40);
+      await showReady(rejected.page);
       await installHost(rejected.page);
       await settleEmptyTransactionInspect(rejected.page, {
         manifest: { freshness: { status: 'current' } },
@@ -705,7 +719,7 @@ test('inspect reconcile confirms only the after digest, in that order', async (t
 
     const unchanged = await openPanel(browser, port);
     try {
-      await showReady(unchanged.page, 40, samePreview);
+      await showReady(unchanged.page, samePreview);
       await installHost(unchanged.page);
       const inspectCall = await settleEmptyTransactionInspect(unchanged.page, {
         manifest: { freshness: { status: 'current' } },
@@ -748,7 +762,7 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
   try {
     const direct = await openPanel(browser, port);
     try {
-      await showReady(direct.page, 5000);
+      await showReady(direct.page);
       await direct.page.locator('#approve-patch-button').click();
       const approve = (await approveCalls(direct.page)).at(-1);
       await emitResult(direct.page, approve.id, appliedBody);
@@ -765,8 +779,9 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
 
     const reconciled = await openPanel(browser, port);
     try {
-      await showReady(reconciled.page, 40);
+      await showReady(reconciled.page);
       await clickApply(reconciled.page);
+      await advance(reconciled.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(reconciled.page, 'project.transaction.status');
       assert.equal((await sentCalls(reconciled.page, 'project.inspect')).length, 0);
       await emitResult(reconciled.page, statusCall.id, appliedTransaction());
@@ -780,8 +795,9 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
 
     const notApplied = await openPanel(browser, port);
     try {
-      await showReady(notApplied.page, 40);
+      await showReady(notApplied.page);
       await clickApply(notApplied.page);
+      await advance(notApplied.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(notApplied.page, 'project.transaction.status');
       await emitResult(notApplied.page, statusCall.id, failedTransaction('rolled-back'));
       await notApplied.page.waitForFunction((text) => (
@@ -799,13 +815,13 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
 
     const dropped = await openPanel(browser, port);
     try {
-      await showReady(dropped.page, 30);
-      await holdReconcileTimeout(dropped.page);
+      await showReady(dropped.page);
       await clickApply(dropped.page);
+      await advance(dropped.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(dropped.page, 'project.transaction.status');
       assert.equal(statusCall.name, 'project.transaction.status');
       assert.equal(await requestText(dropped.page), en['patch.apply.checking']);
-      await expireReconcileTimeout(dropped.page);
+      await advance(dropped.page, RECONCILE_TIMEOUT_MS);
       await dropped.page.waitForFunction((text) => (
         document.querySelector('#request-status')?.dataset.state === 'failed'
         && document.querySelector('#request-status')?.textContent === text
@@ -819,7 +835,7 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
       const inspects = await sentCalls(dropped.page, 'project.inspect');
       assert.equal(inspects.length, 0, 'a dropped status reply must not wait on inspect');
       assert.equal((await sentCalls(dropped.page, 'project.transaction.status')).length, 1);
-      await dropped.page.waitForTimeout(120);
+      await advance(dropped.page, 120);
       assert.equal(await requestText(dropped.page), en['patch.apply.unconfirmed']);
       assert.equal(await activeElementId(dropped.page), 'request-result-heading');
       const sent = await approveCallCount(dropped.page);
@@ -834,19 +850,20 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
     const reconnected = await openPanel(browser, port);
     try {
       await signInChatGPT(reconnected.page);
-      await showReady(reconnected.page, 10000);
+      await showReady(reconnected.page);
       await reconnected.page.locator('#approve-patch-button').click();
       const authBefore = (await sentCalls(reconnected.page, 'auth.chatgpt.status')).length;
       const providerBefore = (await sentCalls(reconnected.page, 'provider.status')).length;
       const statusBefore = (await sentCalls(reconnected.page, 'project.transaction.status')).length;
       await reconnected.page.evaluate(() => window.__sockets.at(-1).close());
       await reconnected.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.checking'], { timeout: 3000 });
+      await advance(reconnected.page, RECONNECT_DELAY_MS);
       const authCall = await waitForNthCall(reconnected.page, 'auth.chatgpt.status', authBefore);
       const providerCall = await waitForNthCall(reconnected.page, 'provider.status', providerBefore);
       const signedIn = { state: 'signed_in', account: { email: 'ada@example.com' }, plan: 'plus' };
       await emitResult(reconnected.page, authCall.id, signedIn);
       await emitResult(reconnected.page, providerCall.id, { provider: 'chatgpt', status: 'signed-in', account: signedIn.account, plan: 'plus' });
-      await reconnected.page.waitForTimeout(250);
+      await advance(reconnected.page, 250);
       assert.equal(await requestText(reconnected.page), en['patch.apply.checking']);
       assert.notEqual(await activeElementId(reconnected.page), 'chatgpt-auth-title');
       const statusCall = await waitForNthCall(reconnected.page, 'project.transaction.status', statusBefore);
@@ -866,7 +883,7 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
           })
         }));
       });
-      await reconnected.page.waitForTimeout(250);
+      await advance(reconnected.page, 250);
       assert.equal(await requestText(reconnected.page), en['patch.apply.applied']);
       assert.equal(await activeElementId(reconnected.page), 'request-result-heading');
       assert.deepEqual(reconnected.pageErrors, []);
@@ -898,7 +915,7 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
   try {
     const asString = await openPanel(browser, port);
     try {
-      await showReady(asString.page, 5000);
+      await showReady(asString.page);
       await installHost(asString.page);
       await clickApply(asString.page);
       const approve = (await approveCalls(asString.page)).at(-1);
@@ -921,7 +938,7 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
 
     const missingField = await openPanel(browser, port);
     try {
-      await showReady(missingField.page, 5000);
+      await showReady(missingField.page);
       await installHost(missingField.page);
       await clickApply(missingField.page);
       const approve = (await approveCalls(missingField.page)).at(-1);
@@ -952,16 +969,18 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
 
     const asNumber = await openPanel(browser, port);
     try {
-      await showReady(asNumber.page, 40);
-      await asNumber.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+      await showReady(asNumber.page);
       await installHost(asNumber.page);
       await clickApply(asNumber.page);
       const approve = (await approveCalls(asNumber.page)).at(-1);
       await emitResult(asNumber.page, approve.id, { applied: 1, validation: { ok: true }, patchId: 'patch_test' });
       await waitForCall(asNumber.page, 'project.transaction.status');
+      assert.equal(await requestText(asNumber.page), en['patch.apply.checking']);
+      await advance(asNumber.page, RECONCILE_TIMEOUT_MS);
       await asNumber.page.waitForFunction((text) => (
         document.querySelector('#request-status')?.dataset.state === 'failed'
         && document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
       ), en['patch.apply.unconfirmed'], { timeout: 3000 });
       const text = await requestText(asNumber.page);
       assert.equal(text.includes(en['patch.apply.failed.unknown']), false, text);
@@ -977,12 +996,12 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
 
     const explicitFalse = await openPanel(browser, port);
     try {
-      await showReady(explicitFalse.page, 5000);
+      await showReady(explicitFalse.page);
       await clickApply(explicitFalse.page);
       const approve = (await approveCalls(explicitFalse.page)).at(-1);
       await emitResult(explicitFalse.page, approve.id, { applied: false, validation: { ok: true }, patchId: 'patch_test' });
       await explicitFalse.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, notAppliedText, { timeout: 3000 });
-      await explicitFalse.page.waitForTimeout(60);
+      await advance(explicitFalse.page, 60);
       assert.equal((await sentCalls(explicitFalse.page, 'project.transaction.status')).length, 0);
       assert.equal(await requestText(explicitFalse.page), notAppliedText);
       assert.deepEqual(explicitFalse.pageErrors, []);
@@ -1014,15 +1033,19 @@ test('a late non-boolean approve reply, or ok:false with applied:true, after rec
     for (const row of rows) {
       const opened = await openPanel(browser, port);
       try {
-        await showReady(opened.page, 30);
-        await opened.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+        await showReady(opened.page);
         await installHost(opened.page);
         await clickApply(opened.page);
         const approve = (await approveCalls(opened.page)).at(-1);
+        await advance(opened.page, APPROVE_TIMEOUT_MS);
+        assert.equal(await requestText(opened.page), en['patch.apply.checking'], row.name);
+        await advance(opened.page, RECONCILE_TIMEOUT_MS);
         await opened.page.waitForFunction((text) => (
           document.querySelector('#request-status')?.dataset.state === 'failed'
           && document.querySelector('#request-status')?.textContent === text
+          && document.activeElement?.id === 'request-result-heading'
         ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+        assert.equal(await activeElementId(opened.page), 'request-result-heading', row.name);
         const lateBody = {
           operation: 'patched',
           validation: { ok: true },
@@ -1030,7 +1053,7 @@ test('a late non-boolean approve reply, or ok:false with applied:true, after rec
         };
         if (row.name !== 'missing') lateBody.applied = row.applied;
         await emitResult(opened.page, approve.id, lateBody, row.ok !== false);
-        await opened.page.waitForTimeout(50);
+        await advance(opened.page, 50);
         const shot = await completionSnapshot(opened.page);
         assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
         assert.equal(shot.state, 'failed', row.name);
@@ -1057,7 +1080,7 @@ test('an applied result focuses the result heading once', async (t) => {
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 5000);
+    await showReady(page);
     await page.evaluate(() => {
       const heading = document.querySelector('#request-result-heading');
       const focus = heading.focus.bind(heading);
@@ -1074,7 +1097,7 @@ test('an applied result focuses the result heading once', async (t) => {
       document.querySelector('#request-status')?.dataset.state === 'completed'
       && document.querySelector('#request-status')?.textContent === text
     ), en['patch.apply.applied'], { timeout: 3000 });
-    await page.waitForTimeout(50);
+    await advance(page, 50);
     const calls = await page.evaluate(() => window.__resultHeadingFocusCalls);
     assert.equal(calls, 1, `result heading focus() was called ${calls} times`);
     assert.equal(await activeElementId(page), 'request-result-heading');
@@ -1096,7 +1119,7 @@ test('inspect reconcile with before==after and no transaction record stays uncon
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 40, samePreview);
+    await showReady(page, samePreview);
     await installHost(page);
     const inspectCall = await settleEmptyTransactionInspect(page, {
       manifest: { freshness: { status: 'current' } },
@@ -1132,10 +1155,11 @@ test("late applied:true after a recorded rollback keeps 'not applied' and sends 
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 40);
+    await showReady(page);
     await installHost(page);
     await clickApply(page);
     const approve = (await approveCalls(page)).at(-1);
+    await advance(page, APPROVE_TIMEOUT_MS);
     const statusCall = await waitForCall(page, 'project.transaction.status');
     await emitResult(page, statusCall.id, failedTransaction('rolled-back'));
     await page.waitForFunction((text) => (
@@ -1144,7 +1168,7 @@ test("late applied:true after a recorded rollback keeps 'not applied' and sends 
     ), notAppliedText, { timeout: 3000 });
     assert.deepEqual((await completionSnapshot(page)).reloads, []);
     await emitResult(page, approve.id, { applied: true, operation: 'patched', validation: { ok: true }, patchId: 'patch_test' });
-    await page.waitForTimeout(50);
+    await advance(page, 50);
     const shot = await completionSnapshot(page);
     assert.equal(shot.text, notAppliedText, shot.text);
     assert.equal(shot.state, 'failed');
@@ -1168,15 +1192,19 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 30);
-    await page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+    await showReady(page);
     await installHost(page);
     await clickApply(page);
+    await advance(page, APPROVE_TIMEOUT_MS);
     const statusCall = await waitForCall(page, 'project.transaction.status');
+    assert.equal(await requestText(page), en['patch.apply.checking']);
+    await advance(page, RECONCILE_TIMEOUT_MS);
     await page.waitForFunction((text) => (
       document.querySelector('#request-status')?.dataset.state === 'failed'
       && document.querySelector('#request-status')?.textContent === text
+      && document.activeElement?.id === 'request-result-heading'
     ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+    assert.equal(await activeElementId(page), 'request-result-heading');
     assert.deepEqual((await completionSnapshot(page)).reloads, []);
     await emitResult(page, statusCall.id, appliedTransaction());
     await page.waitForFunction((text) => (
@@ -1189,7 +1217,7 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
     assert.equal(shot.reloads.length, 1, 'late status applied posts project.reload once');
     assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
     await emitResult(page, statusCall.id, appliedTransaction());
-    await page.waitForTimeout(40);
+    await advance(page, 40);
     assert.equal((await completionSnapshot(page)).reloads.length, 1);
     assert.deepEqual(pageErrors, []);
   } finally {
@@ -1216,20 +1244,20 @@ test('late transaction status after reconcile timeout does not upgrade an empty 
     for (const row of rows) {
       const opened = await openPanel(browser, port);
       try {
-        await showReady(opened.page, 40);
-        await holdReconcileTimeout(opened.page);
+        await showReady(opened.page);
         await installHost(opened.page);
         await clickApply(opened.page);
+        await advance(opened.page, APPROVE_TIMEOUT_MS);
         const statusCall = await waitForCall(opened.page, 'project.transaction.status');
         assert.equal(await requestText(opened.page), en['patch.apply.checking'], row.name);
-        await expireReconcileTimeout(opened.page);
+        await advance(opened.page, RECONCILE_TIMEOUT_MS);
         await opened.page.waitForFunction((text) => (
           document.querySelector('#request-status')?.dataset.state === 'failed'
           && document.querySelector('#request-status')?.textContent === text
         ), en['patch.apply.unconfirmed'], { timeout: 3000 });
         assert.deepEqual((await completionSnapshot(opened.page)).reloads, [], row.name);
         await emitResult(opened.page, statusCall.id, row.result);
-        await opened.page.waitForTimeout(50);
+        await advance(opened.page, 50);
         const shot = await completionSnapshot(opened.page);
         assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
         assert.equal(shot.state, 'failed', row.name);
@@ -1259,7 +1287,7 @@ test('a late error keeps focus inside the removal confirm dialog', async (t) => 
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 5000, removalPreview);
+    await showReady(page, removalPreview);
     await page.waitForFunction(() => {
       const dialog = document.querySelector('#apply-remove-components-confirm');
       return dialog && dialog.hidden === false && dialog.contains(document.activeElement);
@@ -1312,7 +1340,7 @@ test('a late error keeps focus inside the apply-without-ERC confirm dialog', asy
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 5000, skippedPreview);
+    await showReady(page, skippedPreview);
     const call = await sendProjectRequest(page, 'what is R3?');
     await page.locator('#approve-patch-without-erc').click();
     await page.waitForFunction(() => {
@@ -1343,7 +1371,7 @@ test('ok:false approve reply with a result object but no applied field renders t
   const { page, pageErrors } = await openPanel(browser, port);
 
   try {
-    await showReady(page, 5000);
+    await showReady(page);
     await installHost(page);
     await clickApply(page);
     const approve = (await approveCalls(page)).at(-1);
@@ -1406,7 +1434,7 @@ test('every request result focuses the result heading', async (t) => {
     for (const row of rows) {
       const opened = await openPanel(browser, port);
       try {
-        await showReady(opened.page, 30000);
+        await showReady(opened.page);
         if (row.lang) await opened.page.evaluate((lang) => window.chatpcbI18n.setLang(lang), row.lang);
         let call;
         if (row.via === 'approve') {

@@ -83,6 +83,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
   }
   await page.addInitScript((config) => {
     window.__sent = [];
+    window.__panelSockets = [];
     window.__chatgptSignedIn = config.signedIn === true;
     if (config.storedProvider) localStorage.setItem('chatpcb.provider', config.storedProvider);
     else if (config.rememberChatGPT) localStorage.setItem('chatpcb.provider', 'chatgpt');
@@ -110,6 +111,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
       constructor() {
         this.readyState = 0;
         this.listeners = new Map();
+        window.__panelSockets.push(this);
         queueMicrotask(() => { this.readyState = 1; this.emit('open', {}); });
       }
       addEventListener(type, fn) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]); }
@@ -313,7 +315,7 @@ async function emitChatGPTAuth(page, payload, id = 'auth_changed') {
   await page.evaluate(({ payload: next, id: eventId }) => {
     if (next.state === 'signed_in') window.__chatgptSignedIn = true;
     if (next.state === 'signed_out') window.__chatgptSignedIn = false;
-    window.__daemonSocket.emit('message', {
+    window.__panelSockets.at(-1).emit('message', {
       data: JSON.stringify({
         version: 1,
         id: eventId,
@@ -834,7 +836,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
     const before = await page.evaluate(() => window.__sent.filter((call) => call.name === 'provider.status').length);
     await page.evaluate(() => {
       window.__chatgptSignedIn = true;
-      window.__daemonSocket.emit('message', {
+      window.__panelSockets.at(-1).emit('message', {
         data: JSON.stringify({
           version: 1,
           id: 'auth_changed_in',
@@ -858,7 +860,7 @@ test('sign-in completion refreshes the chatgpt provider label', async (t) => {
     assert.ok(afterSignIn > before);
     await page.evaluate(() => {
       window.__chatgptSignedIn = false;
-      window.__daemonSocket.emit('message', {
+      window.__panelSockets.at(-1).emit('message', {
         data: JSON.stringify({
           version: 1,
           id: 'auth_changed_out',
@@ -895,7 +897,7 @@ test('signed-in ChatGPT omits parentheses when no plan is reported', async (t) =
       await page.evaluate(() => {
         window.__chatgptPlan = '';
         window.__chatgptSignedIn = true;
-        window.__daemonSocket.emit('message', {
+        window.__panelSockets.at(-1).emit('message', {
           data: JSON.stringify({
             version: 1,
             id: 'auth_changed_no_plan',
@@ -1571,7 +1573,7 @@ async function sendPlainPreview(page, prompt) {
 
 async function emitDaemonProgress(page, text) {
   await page.evaluate((note) => {
-    window.__daemonSocket.emit('message', {
+    window.__panelSockets.at(-1).emit('message', {
       data: JSON.stringify({
         version: 1,
         id: `delta_${Date.now()}_${Math.random()}`,
