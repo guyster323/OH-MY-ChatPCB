@@ -553,6 +553,18 @@ function finishResistor(text, spec, resistor) {
   if (resistor.kind === 'invalid') return invalidResistor(resistor);
   const unchanged = unchangedResistor(spec, resistor);
   if (unchanged) return unchanged;
+  // Current limiting is the series resistor only on a board that already has an LED.
+  // With no LED and no series resistor, that phrase is not applied locally.
+  if (!seriesResistorRef(spec) && !boardHasLedPart(spec)) {
+    if (isLocalCurrentLimiting(text)) return null;
+    if (resistor?.kind === 'resistor') {
+      return {
+        mode: 'refuse',
+        code: 'RESISTOR_TARGET_UNCLEAR',
+        message: resistorTargetUnclearMessage(resistor.ohmsText)
+      };
+    }
+  }
   return { mode: 'merge', edit: { ...resistor, ref: seriesResistorRef(spec) } };
 }
 
@@ -592,10 +604,6 @@ const PRE_PROVIDER_REMOVAL_CODES = new Set([
 ]);
 const RESISTOR_EDIT_VERB = /(?:\b(?:change|set|update|make|modify|to)\b|바꿔|변경|수정|(?<!기준)으로|(?<!으)로(?!부터|서|써)|を|に)/iu;
 const OPEN_QUESTION = /[?？]|뭐|무엇|왜|어떻게|어떡|몇|괜찮|\b(?:why|what|how|which)\b/iu;
-// "괜찮아", "가능", "why", and "what" stay questions. A permission question that
-// also has a resistor target, an edit verb, and a unit-bound value does not:
-// questionStopsResistorEdit lets "바꿔도 돼?" and "can I change ...?" through.
-const QUESTION_SIGNAL = /뭐|무엇|왜|어떻게|어떡|몇|괜찮|가능|\b(?:why|what|how|which)\b|(?:도|해도)\s*돼/iu;
 
 function hasResistorEditVerb(text) {
   return RESISTOR_EDIT_VERB.test(text);
@@ -631,6 +639,10 @@ const EXPLICIT_LED_OR_REF = /led|엘이디|엘예디|발광|상태|\bstatus\b|\b
 
 export function appliesBeforeProvider(text, decision) {
   if (decision?.mode !== 'merge' || decision.edit?.kind !== 'resistor') return false;
+  return isLocalCurrentLimiting(text);
+}
+
+function isLocalCurrentLimiting(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   if (EXPLICIT_LED_OR_REF.test(normalized)) return false;
   return CURRENT_LIMITING_PHRASE.test(normalized);
@@ -1620,6 +1632,30 @@ function seriesResistorRef(spec) {
   return part ? String(part.ref) : null;
 }
 
+function componentLooksLikeLed(record) {
+  const libId = String(record?.libId ?? '');
+  const value = String(record?.value ?? '');
+  const role = String(record?.role ?? '');
+  return role === 'status-led'
+    || role === 'status-led-resistor'
+    || value === 'STATUS_LED'
+    || value === 'LED_RESISTOR'
+    || libId === 'ChatPCB:STATUS_LED'
+    || libId === 'ChatPCB:LED_RESISTOR'
+    || libId === 'Device:LED';
+}
+
+// An LED diode, a saved series resistor, or a status-LED peripheral. Pull-ups do not count.
+function boardHasLedPart(spec) {
+  if (seriesResistorRef(spec)) return true;
+  if (schematicComponents(spec).some((component) => componentLooksLikeLed(component))) return true;
+  if (productionParts(spec).some((part) => componentLooksLikeLed(part))) return true;
+  const peripherals = spec?.peripherals;
+  return Array.isArray(peripherals) && peripherals.some((item) => (
+    item?.kind === 'status-led' || item?.kind === 'status-led-resistor'
+  ));
+}
+
 // A kept part is not an edit target. The object is the few words before
 // 그대로/유지/남겨/unchanged, or after keep/without. A word that starts with a
 // digit is a value, so the walk stops there and the value stays an edit.
@@ -1820,7 +1856,7 @@ const RESISTOR_NOUN = /저항|抵抗|\bresistor\b/giu;
 const ALLOW_WORD = /^(?:leds?|엘이디|엘예디|발광다이오드|발광|다이오드|status|상태|series|직렬|current(?:-limiting)?|limiting|전류제한|전류|제한)$/iu;
 const FUNCTION_WORD = /^(?:a|an|the|of|for|to|from|into|onto|on|in|at|by|with|and|or|its|my|our|please|only|just|value|it|them|one|also|now|too)$/iu;
 const DEMONSTRATIVE = /^(?:그|저|이|this|that|these|those)$/iu;
-const EDIT_VERB_WORD = /^(?:change|set|update|make|modify|changing|setting)$/iu;
+const EDIT_VERB_WORD = /^(?:change|set|update|make|modify|changing|setting|use|using)$/iu;
 const WORD_PARTICLE = /(?:이랑|으로|에서|에게|은|는|을|를|과|와|의|도|만|랑|이|가|요|에|로|の|を|が|は|に)$/u;
 
 function foreignRoleDecision(text, spec, resistor) {
@@ -2047,8 +2083,9 @@ function stemWord(word) {
 
 function isIgnorableWord(word) {
   if (FUNCTION_WORD.test(word) || EDIT_VERB_WORD.test(word)) return true;
-  if (/^(?:can|could|would|will|shall|you|your|i|kindly)$/iu.test(word)) return true;
-  if (/^(?:으로|로|을|를|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|줄래|줄래요|주실래요|해줄래|해주세요|있어|있나|있을까요|줄|수|할|줘|그냥|값|기존|현재|existing|currently)$/iu.test(word)) return true;
+  if (/^(?:can|could|would|will|shall|may|should|why|how|what|which|ok|okay|you|your|i|kindly)$/iu.test(word)) return true;
+  if (/^(?:으로|로|을|를|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|줄래|줄래요|주실래요|해줄래|해주세요|있어|있나|있을까요|줄|수|할|줘|그냥|값|기존|현재|왜|어떻게|어떡|뭐|무엇|몇|할까|existing|currently)$/iu.test(word)) return true;
+  if (/^괜찮/u.test(word) || /^가능/u.test(word)) return true;
   return /(?:바꿔|바꾸|변경|수정)/u.test(word);
 }
 
@@ -2561,23 +2598,22 @@ const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Z
 // A resistor edit is read only from this text. Candidates go through
 // parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
 // without a transition marker ask which value. A token the parser rejects is invalid.
-// A resistor target, an edit verb, and a unit-bound value are an edit.
-// "why", "괜찮아", and "가능" stay questions when that verb is missing.
-// "바꿔도 돼?" and "can I change ... to 680Ω?" still edit: the verb is there.
-const STRONG_EDIT_VERB = /(?:\b(?:change|set|update|make|modify)\b|바꿔|변경|수정)/iu;
+// A question-shaped sentence is an edit only when it asks or permits the change.
+// "should I change ...?" and "2.2k ok?" do not. "바꿔도 돼?" and "can I ...?" do.
+const EDIT_PERMISSION = /바꿔\s*줄래|바꿔\s*줄\s*수\s*있어|바꿔주실래요|해줄래|할\s*수\s*있어|바꿔도\s*될까|바꿔도\s*되나요|바꿔도\s*돼|\bcan\s+you\b|\bcould\s+you\b|\bwould\s+you\b|\bcan\s+i\b|\bmay\s+i\b|\bis\s+it\s+ok\s+to\b|\bplease\b/iu;
 
-function hasUnitBoundResistorToken(text) {
-  return scanResistorTokens(text).some((token) => token.attempt);
+function isQuestionShaped(text) {
+  if (/[?？]/u.test(text)) return true;
+  if (/(?:뭐|무엇|왜|어떻게|어떡|몇|괜찮|가능|할까)/u.test(text)) return true;
+  if (/바꿔야\s*해/u.test(text)) return true;
+  if (/\b(?:should|why|what|how|which)\b/iu.test(text)) return true;
+  return false;
 }
 
 function questionStopsResistorEdit(text) {
-  if (!OPEN_QUESTION.test(text)) return false;
-  if (STRONG_EDIT_VERB.test(text) && hasResistorTargetText(text) && hasUnitBoundResistorToken(text)) return false;
-  if (QUESTION_SIGNAL.test(text)) return true;
-  if (!hasResistorEditVerb(text)) return true;
-  if (!hasResistorTargetText(text) && !BARE_ROLE.test(text)) return true;
-  if (!hasUnitBoundResistorToken(text)) return true;
-  return false;
+  if (!isQuestionShaped(text)) return false;
+  if (EDIT_PERMISSION.test(text)) return false;
+  return true;
 }
 
 function interpretResistor(text) {
@@ -2644,9 +2680,9 @@ function interpretResistor(text) {
 // role word, or when to/으로/로 marks it as the edit object ("4.99k로 바꿔줘").
 // rev/ver/model in front, or a following part/resolution noun, wins.
 const SUFFIX_EXCLUDE_BEFORE = /(?:\brevisions?\b|\brevs?\b|\bversions?\b|\bvers?\b|\bmodels?\b|리비전|버전|모델)\s*$/iu;
-const SUFFIX_EXCLUDE_AFTER = /^\s*(?:displays?|monitors?|tvs?|pots?|boards?|models?|화면|모니터|팟|보드|모델)용?(?![\p{L}\p{N}])/iu;
-const SUFFIX_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|\bR\d+\b)(?:을|를|은|는|이|가)?\s*$/iu;
-const SUFFIX_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b)/iu;
+const SUFFIX_EXCLUDE_AFTER = /^\s*(?:displays?|monitors?|tvs?|pots?|boards?|models?|screens?|cameras?|videos?|trimmers?|화면|모니터|팟|보드|모델|스크린|카메라|영상|트리머)용?(?![\p{L}\p{N}])/iu;
+const SUFFIX_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|\bR\d+\b)(?:값|을|를|은|는|이|가)?(?:\s+values?)?\s*:?\s*$/iu;
+const SUFFIX_CUE_AFTER = /^\s*(?:(?:leds?|엘이디|엘예디|발광(?:\s*다이오드)?|status|상태)\s+)*(?:저항|抵抗|\bresistors?\b)/iu;
 const SUFFIX_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
 const SUFFIX_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써))/u;
 
@@ -2656,11 +2692,17 @@ function isUnitlessKRSuffix(raw) {
   return /^\d+[rRkK]\d+$/.test(text) || /^\d+(?:\.\d+)?\s*[rRkK]$/.test(text);
 }
 
+function approximateResistorValue(before, after) {
+  if (/(?:~|\b(?:about|around|approximately|approx)\b|(?:^|[\s\d])(?:약|대략|대충))\s*$/iu.test(before)) return true;
+  return /^\s*(?:정도|쯤|가량)/u.test(after);
+}
+
 function unitlessSuffixCountsAsResistor(text, start, end) {
   const before = text.slice(0, start);
   const after = text.slice(end);
   if (SUFFIX_EXCLUDE_BEFORE.test(before)) return false;
   if (SUFFIX_EXCLUDE_AFTER.test(after)) return false;
+  if (approximateResistorValue(before, after)) return false;
   if (SUFFIX_CUE_BEFORE.test(before) || SUFFIX_CUE_AFTER.test(after)) return true;
   if (suffixRoleWord(lastWord(before))) return true;
   // "4.99k로 바꿔줘" names no part. The marker still binds that token: it is the
@@ -2688,6 +2730,12 @@ function markNonResistorQuantities(tokens, text) {
   for (const token of tokens) {
     const raw = token.raw.trim();
     if (/^\d+(?:st|nd|rd|th)$/i.test(raw)) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
+    // 30cm, 50mm, 2ft, 6in, and 1km are length. A bare "m" stays on the milli path.
+    if (/^\d+(?:\.\d+)?(?:cm|mm|km|ft|in)$/i.test(raw)) {
       token.quantity = true;
       token.attempt = false;
       continue;

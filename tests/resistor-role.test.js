@@ -548,6 +548,54 @@ test('a current-limiting phrase with no LED word applies before the provider', (
   }
 });
 
+function noLedSpec() {
+  return {
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '4.7k', role: 'i2c-scl-pullup' },
+        { ref: 'R2', libId: 'Device:R', value: '4.7k', role: 'i2c-sda-pullup' },
+        { ref: 'C1', libId: 'Device:C', value: '100n' }
+      ]
+    },
+    peripherals: [{ kind: 'i2c-sensor-header' }]
+  };
+}
+
+test('current limiting on a board with no LED part stays on the provider path', () => {
+  const spec = noLedSpec();
+  const localOnLed = [
+    '전류제한 저항 680Ω으로',
+    '전류 제한 저항 470Ω으로',
+    'current limiting resistor to 680Ω',
+    'current-limiting resistor 470Ω'
+  ];
+  for (const prompt of localOnLed) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+  const ask = [
+    'LED 저항 680Ω',
+    'LED 저항 680Ω으로 바꿔줘',
+    'change the LED resistor to 680Ω',
+    'set the LED resistor to 470Ω'
+  ];
+  for (const prompt of ask) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(componentValue(spec, 'R1'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R2'), '4.7k', prompt);
+  }
+});
+
 test('a bare resistor word applies only when the LED series resistor is the only resistor role', () => {
   const ask = resistorTargetUnclearMessage('680');
   const shared = [
@@ -635,7 +683,9 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
   const mergeRows = [
     'can you set the LED resistor to 680Ω?',
     'LED 저항 680Ω으로 바꿔줄래?',
+    'LED 저항 680Ω으로 바꿔 줄래?',
     'LED 저항 680Ω으로 바꿔 줄 수 있어?',
+    'LED 저항 680Ω으로 바꿔줄 수 있어?',
     'could you change R3 to 680Ω?',
     'LED 저항 680Ω으로 바꿔주실래요?',
     'LED 저항 680Ω으로 해줄래?',
@@ -644,7 +694,10 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
     'would you change the LED resistor to 680Ω, ok?',
     'please set the LED resistor to 680Ω?',
     'LED 저항 680Ω으로 바꿔도 될까?',
+    'LED 저항 680Ω으로 바꿔도 되나요?',
     'can I change the LED resistor to 680Ω?',
+    'may I change the LED resistor to 680Ω?',
+    'may I set the LED resistor to 680Ω?',
     'is it ok to set R3 to 680Ω?'
   ];
   for (const prompt of mergeRows) {
@@ -684,9 +737,20 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
     'LED 저항 1kΩ 괜찮아?',
     'R3 470?',
     'is 1kΩ ok for the LED resistor?',
+    'is 680Ω ok for the LED resistor?',
     'LED 저항 680Ω 가능?',
     '680Ω 가능?',
-    'can you add a 1kΩ resistor?'
+    'can you add a 1kΩ resistor?',
+    'should I change the LED resistor to 680Ω?',
+    'why not change the LED resistor to 680Ω?',
+    'how do I change the LED resistor to 680Ω?',
+    'what happens if I change the LED resistor to 680Ω?',
+    'which resistor should I change to 680Ω?',
+    '왜 LED 저항을 680Ω으로 바꿔야 해?',
+    'LED 저항 680Ω으로 바꿔야 할까?',
+    'LED resistor to 2.2k ok?',
+    'LED resistor to 2.2k okay?',
+    'LED 저항 680Ω으로 바꾸면 어떻게 돼?'
   ];
   for (const prompt of providerRows) {
     const decision = classifyExistingProjectRequest(prompt, spec);

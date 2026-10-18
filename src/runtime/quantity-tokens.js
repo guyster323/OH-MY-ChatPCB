@@ -228,7 +228,7 @@ const MILLI_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\
 const MILLI_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
 const MILLI_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써)|に)/u;
 const MILLI_RESISTOR_OBJECT = /저항|抵抗|\bresistor\b|\bR\d+\b/iu;
-const MILLI_LENGTH_OBJECT = /(?:\bcables?\b|\bwires?\b|\blengths?\b|케이블|길이|(?<![가-힣])선(?![가-힣]))/iu;
+const MILLI_LENGTH_OBJECT = /(?:\bcables?\b|\bwires?\b|\blengths?\b|케이블|전선|길이|(?<![가-힣])선(?![가-힣]))/iu;
 const FOREIGN_MILLI_ROLE = /(?:\bpull[-\s]?ups?\b|\bpull[-\s]?downs?\b|\bterminations?\b|\bdebounce\b|\bdividers?\b|\bfeedback\b|\bgates?\b|\bbases?\b|\bbuttons?\b|\bshunts?\b|\bsenses?\b|\bresets?\b|\bboots?\b|\bbias(?:es)?\b|\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|풀업|풀다운|종단|디바운스|분압|피드백|게이트|베이스|버튼|션트|센스|리셋|바이어스)/iu;
 
 // Comma, "and", and "그리고" close a clause. A comma between digits (1,000) does not.
@@ -947,6 +947,9 @@ function collectContext(prompt, candidates) {
   for (const pattern of pins) {
     for (const match of prompt.matchAll(pattern)) pushContext(candidates, prompt, match, 'pin');
   }
+  // Attached and spaced length units. A bare "m" stays on the milli path.
+  const lengths = /(?<![\w.])\d+(?:\.\d+)?\s*(?:cm|mm|km|ft|in)(?![A-Za-z])/gi;
+  for (const match of prompt.matchAll(lengths)) pushContext(candidates, prompt, match, 'length');
 }
 
 function collectPackages(prompt, candidates) {

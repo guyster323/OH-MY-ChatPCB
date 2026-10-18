@@ -2745,3 +2745,159 @@ test('random LED and non-LED role clauses never put a non-LED value on R3', { ti
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
+
+test('current limiting resistor for the pull-up / on SDA refuses with RESISTOR_REF_UNSUPPORTED and never applies R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const trailing = [
+    'current limiting resistor for the pull-up to 680Ω',
+    'current limiting resistor for the I2C pull-up to 680Ω',
+    'current limiting resistor on SDA to 680Ω',
+    'current limiting resistor for the CC pin to 680Ω',
+    '전류제한 저항 680Ω으로 (리셋 버튼용)'
+  ];
+  const noLedDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-no-led-'));
+  const noLedSpec = {
+    sourcePrompt: 'board with pull-ups and no LED',
+    mcu: { family: 'STM32' },
+    peripherals: [{ kind: 'i2c-sensor-header' }],
+    schematic: {
+      components: [
+        { ref: 'R1', libId: 'Device:R', value: '4.7k', role: 'i2c-scl-pullup' },
+        { ref: 'R2', libId: 'Device:R', value: '4.7k', role: 'i2c-sda-pullup' }
+      ]
+    }
+  };
+  const noLedSchematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "Device:R") (at 0 0 0)',
+    '    (property "Reference" "R1" (at 0 0 0))',
+    '    (property "Value" "4.7k" (at 0 0 0)))',
+    '  (symbol (lib_id "Device:R") (at 10 0 0)',
+    '    (property "Reference" "R2" (at 10 0 0))',
+    '    (property "Value" "4.7k" (at 10 0 0))))'
+  ].join('\n');
+  const noLedPath = path.join(noLedDir, 'board.kicad_sch');
+  await writeFile(path.join(noLedDir, 'board.chatpcb.json'), `${JSON.stringify(noLedSpec, null, 2)}\n`);
+  await writeFile(noLedPath, noLedSchematic);
+  const noLedRows = [
+    'current limiting resistor to 680Ω',
+    '전류제한 저항 680Ω으로'
+  ];
+  try {
+    let index = 0;
+    for (const prompt of trailing) {
+      for (const kind of ['native', 'malicious']) {
+        index += 1;
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('current limiting resistor to 680Ω');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_m1_trail_${index}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        assertResistorUntouched(preview, provider.calls(), schematic, spice, before, `${kind} ${prompt}`);
+      }
+    }
+    for (const [rowIndex, prompt] of noLedRows.entries()) {
+      const provider = nativeNoPatchCounter();
+      const preview = await dispatchToolCall({
+        id: `call_m1_noled_${rowIndex}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir: noLedDir, prompt }
+      }, { ...services, ...provider.impl });
+      const schematic = await readFile(noLedPath, 'utf8');
+      assert.equal(provider.calls(), 1, `${prompt} provider calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
+      assert.equal(preview.ok, false, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.error?.code, 'PROVIDER_NO_PATCH', `${prompt} ${preview.error?.code ?? ''}`);
+      assert.equal(String(preview.error?.code ?? '').startsWith('RESISTOR_'), false, prompt);
+      assert.equal(schematic, noLedSchematic, prompt);
+      assert.equal(schematicRefValue(schematic, 'R1'), '4.7k', prompt);
+      assert.equal(schematicRefValue(schematic, 'R2'), '4.7k', prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), null, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(noLedDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+// A question is an edit only with a request or permission ending. Other question
+// forms reach the provider: no RESISTOR_* code and no R3 patch.
+const QUESTION_PROVIDER_ROWS = [
+  { lang: 'en', prompt: 'should I change the LED resistor to 680Ω?' },
+  { lang: 'en', prompt: 'why not change the LED resistor to 680Ω?' },
+  { lang: 'en', prompt: 'how do I change the LED resistor to 680Ω?' },
+  { lang: 'en', prompt: 'what happens if I change the LED resistor to 680Ω?' },
+  { lang: 'en', prompt: 'which resistor should I change to 680Ω?' },
+  { lang: 'ko', prompt: '왜 LED 저항을 680Ω으로 바꿔야 해?' },
+  { lang: 'ko', prompt: 'LED 저항 680Ω으로 바꿔야 할까?' },
+  { lang: 'en', prompt: 'LED resistor to 2.2k ok?' },
+  { lang: 'en', prompt: 'LED resistor to 2.2k okay?' },
+  { lang: 'ko', prompt: 'LED 저항 680Ω으로 바꾸면 어떻게 돼?' }
+];
+
+async function assertQuestionLeavesR3(services, projectDir, generated, before, row, id) {
+  const provider = nativeNoPatchCounter();
+  await writeGeneratedBytes(generated, before);
+  const preview = await requestAndMaybeApprove(services, projectDir, row.prompt, provider.impl, id);
+  const schematic = await readFile(generated.files.schematic, 'utf8');
+  const spice = await readFile(generated.files.spice, 'utf8');
+  const code = preview.error?.code ?? '';
+  assert.equal(provider.calls(), 1, `${row.lang} ${row.prompt} calls=${provider.calls()} code=${code || preview.result?.applied}`);
+  assert.equal(preview.ok, false, `${row.prompt} ${code} ${preview.error?.message ?? ''}`);
+  assert.equal(code, 'PROVIDER_NO_PATCH', `${row.lang} ${row.prompt} ${code}`);
+  assert.equal(code.startsWith('RESISTOR_'), false, `${row.prompt} ${code}`);
+  assert.equal(schematicRefValue(schematic, 'R3'), '1k', row.prompt);
+  assert.equal(schematic, before.schematic, row.prompt);
+  assert.equal(spice, before.spice, row.prompt);
+}
+
+test('should/why not/how do I/what happens if questions with an edit verb reach the provider and do not report RESISTOR_REF_UNSUPPORTED', async () => {
+  const rows = QUESTION_PROVIDER_ROWS.filter((row) => (
+    row.prompt !== 'LED 저항 680Ω으로 바꿔야 할까?'
+    && row.prompt !== 'LED resistor to 2.2k ok?'
+    && row.prompt !== 'LED resistor to 2.2k okay?'
+    && row.prompt !== 'LED 저항 680Ω으로 바꾸면 어떻게 돼?'
+  ));
+  assert.ok(rows.some((row) => row.lang === 'ko'));
+  assert.ok(rows.some((row) => row.lang === 'en'));
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  try {
+    for (const [index, row] of rows.entries()) {
+      await assertQuestionLeavesR3(services, projectDir, generated, before, row, `call_q_real_${index}`);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test("'바꿔야 할까?' and '<value> ok?' are questions and do not create an R3 patch", async () => {
+  const rows = QUESTION_PROVIDER_ROWS.filter((row) => (
+    row.prompt === 'LED 저항 680Ω으로 바꿔야 할까?'
+    || row.prompt === 'LED resistor to 2.2k ok?'
+    || row.prompt === 'LED resistor to 2.2k okay?'
+    || row.prompt === 'LED 저항 680Ω으로 바꾸면 어떻게 돼?'
+  ));
+  assert.ok(rows.some((row) => row.lang === 'ko'));
+  assert.ok(rows.some((row) => row.lang === 'en'));
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  try {
+    for (const [index, row] of rows.entries()) {
+      await assertQuestionLeavesR3(services, projectDir, generated, before, row, `call_q_form_${index}`);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
