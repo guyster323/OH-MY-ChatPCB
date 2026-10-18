@@ -563,7 +563,7 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'schematic.patch.approve') {
-    // 'true' or 1 is not a boolean false. Reconcile instead of saying it was not applied.
+    // Missing applied, 'true', or 1 is not a boolean false. Reconcile instead of saying it was not applied.
     if (nonBooleanApplied(envelope.payload?.result) && beginReconcileForUncertainApply(id)) return;
     disarmApproveFlight(id);
   }
@@ -1105,7 +1105,6 @@ function completeAppliedPatch(result) {
     }
   }
   inspectActiveProject();
-  focusPatchResult();
 }
 
 function inspectActiveProject() {
@@ -1769,11 +1768,13 @@ function disarmApproveFlight(callId) {
 }
 
 function nonBooleanApplied(result) {
+  // A missing applied field is not a recorded rejection. Only applied === false
+  // (or a transaction recorded as not applied) settles without reconcile.
   return Boolean(result)
     && typeof result === 'object'
     && !Array.isArray(result)
-    && Object.hasOwn(result, 'applied')
-    && typeof result.applied !== 'boolean';
+    && result.applied !== true
+    && result.applied !== false;
 }
 
 function beginReconcileForUncertainApply(callId) {
@@ -1964,12 +1965,10 @@ function finishApproveReconcile(outcome) {
   }
   if (outcome === 'not-applied') {
     renderApplyFailure({ ok: false, code: 'APPLY_REJECTED' });
-    focusPatchResult();
     return;
   }
   renderRequestStatus({ state: 'failed', summaryKey: 'patch.apply.unconfirmed', applyFailure: true });
   appendProgress({ stage: 'fail', text: t('patch.apply.unconfirmed') });
-  focusPatchResult();
 }
 
 function confirmRemovalApply() {
@@ -1986,6 +1985,10 @@ function confirmRemovalApply() {
   hideRemovalConfirm();
   appendProgress({ stage: 'apply', text: t('patch.apply.progress') });
   renderRequestStatus({ state: 'running', summaryKey: 'patch.apply.summary' });
+  // Clear the live copy before focusing so the heading is not announced twice.
+  // The settled result republishes it.
+  const live = requestStatusLive();
+  if (live) live.textContent = '';
   focusRequestResultHeading();
   sendSchematicApprove({ allowRemovedComponents });
 }
@@ -2326,19 +2329,13 @@ function requestStatusLive() {
   return document.querySelector('#request-status-live');
 }
 
+// Every settled request result (success, error, clarify, rejection) focuses this heading.
+// An open confirm dialog keeps its own focus. Does not clear the live region.
 function focusRequestResultHeading() {
   const heading = requestResultHeading();
   if (!heading) return;
-  const live = requestStatusLive();
-  if (live) live.textContent = '';
-  focusPatchResult();
-}
-
-// Same heading the direct applied path focuses. Does not clear the live region,
-// so the result text stays announced after it is published.
-function focusPatchResult() {
-  const heading = requestResultHeading();
-  if (!heading) return;
+  if (applyRemoveConfirmEl && applyRemoveConfirmEl.hidden === false) return;
+  if (applyWithoutErcConfirmEl && applyWithoutErcConfirmEl.hidden === false) return;
   heading.tabIndex = -1;
   heading.focus({ focusVisible: true });
 }
@@ -2366,6 +2363,8 @@ function renderRequestStatus({ state, summary, summaryKey, summaryVars, technica
   requestTechnicalDetailsEl.hidden = technicalDetail.length === 0;
   publishRequestLive(requestResultHeading()?.textContent ?? requestStatusEl.textContent);
   syncWorkflow();
+  // Running copy is still in progress. Settled results move focus to the heading.
+  if (state !== 'running') focusRequestResultHeading();
 }
 
 function handleProgressDelta(payload = {}) {

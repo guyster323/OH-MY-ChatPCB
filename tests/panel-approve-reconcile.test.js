@@ -137,7 +137,11 @@ async function waitForCall(page, name) {
 }
 
 async function emitResult(page, id, result, ok = true) {
-  await page.evaluate(({ id: callId, result: body, ok: succeeded }) => {
+  await emitPayload(page, id, { ok, result });
+}
+
+async function emitPayload(page, id, payload) {
+  await page.evaluate(({ id: callId, payload: body }) => {
     const socket = window.__sockets.at(-1);
     socket.readyState = 1;
     socket.dispatchEvent(new MessageEvent('message', {
@@ -146,10 +150,32 @@ async function emitResult(page, id, result, ok = true) {
         id: `evt_${callId}`,
         type: 'tool.result',
         createdAt: new Date().toISOString(),
-        payload: { id: callId, ok: succeeded, result: body }
+        payload: { id: callId, ...body }
       })
     }));
-  }, { id, result, ok });
+  }, { id, payload });
+}
+
+async function blurToBody(page) {
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body && typeof active.blur === 'function') active.blur();
+  });
+}
+
+async function sendProjectRequest(page, prompt) {
+  const before = await page.evaluate(() => window.__sent.length);
+  await page.locator('#prompt').fill(prompt);
+  await page.locator('#composer button[type="submit"]').click();
+  await page.waitForFunction((start) => window.__sent.some((raw, index) => (
+    index >= start && JSON.parse(raw).payload?.name === 'project.request'
+  )), before, { timeout: 3000 });
+  return page.evaluate((start) => {
+    const raw = window.__sent.find((entry, index) => (
+      index >= start && JSON.parse(entry).payload?.name === 'project.request'
+    ));
+    return JSON.parse(raw).payload;
+  }, before);
 }
 
 function appliedTransaction(patchId = 'patch_test') {
@@ -864,6 +890,37 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
       await asString.page.close();
     }
 
+    const missingField = await openPanel(browser, port);
+    try {
+      await showReady(missingField.page, 5000);
+      await installHost(missingField.page);
+      await clickApply(missingField.page);
+      const approve = (await approveCalls(missingField.page)).at(-1);
+      const missingApplied = { operation: 'patched', validation: { ok: true }, patchId: 'patch_test' };
+      assert.equal(Object.hasOwn(missingApplied, 'applied'), false);
+      await emitResult(missingField.page, approve.id, missingApplied);
+      const statusCall = await waitForCall(missingField.page, 'project.transaction.status');
+      const checking = await requestText(missingField.page);
+      assert.equal(checking.includes(en['patch.apply.failed.missing']), false, checking);
+      assert.equal(checking.includes(en['patch.apply.failed.recheck']), false, checking);
+      assert.equal(checking.includes(en['patch.apply.unconfirmed']), false, checking);
+      await emitResult(missingField.page, statusCall.id, appliedTransaction());
+      await missingField.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'completed'
+        && document.querySelector('#request-status')?.textContent === text
+        && document.activeElement?.id === 'request-result-heading'
+      ), en['patch.apply.applied'], { timeout: 3000 });
+      const shot = await completionSnapshot(missingField.page);
+      assert.equal(shot.text, en['patch.apply.applied']);
+      assert.equal(shot.reloads.length, 1, 'missing applied reconciles to one project.reload');
+      assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.equal(await activeElementId(missingField.page), 'request-result-heading');
+      await blockReapply(missingField.page);
+      assert.deepEqual(missingField.pageErrors, []);
+    } finally {
+      await missingField.page.close();
+    }
+
     const asNumber = await openPanel(browser, port);
     try {
       await showReady(asNumber.page, 40);
@@ -919,7 +976,8 @@ test('a late non-boolean approve reply after reconcile timeout stays unconfirmed
     { name: 'string', applied: 'true' },
     { name: 'number', applied: 1 },
     { name: 'null', applied: null },
-    { name: 'object', applied: {} }
+    { name: 'object', applied: {} },
+    { name: 'missing' }
   ];
 
   try {
@@ -935,12 +993,13 @@ test('a late non-boolean approve reply after reconcile timeout stays unconfirmed
           document.querySelector('#request-status')?.dataset.state === 'failed'
           && document.querySelector('#request-status')?.textContent === text
         ), en['patch.apply.unconfirmed'], { timeout: 3000 });
-        await emitResult(opened.page, approve.id, {
-          applied: row.applied,
+        const lateBody = {
           operation: 'patched',
           validation: { ok: true },
           patchId: 'patch_test'
-        });
+        };
+        if (row.name !== 'missing') lateBody.applied = row.applied;
+        await emitResult(opened.page, approve.id, lateBody);
         await opened.page.waitForTimeout(50);
         const shot = await completionSnapshot(opened.page);
         assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
@@ -1105,6 +1164,79 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
     assert.deepEqual(pageErrors, []);
   } finally {
     await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('every request result focuses the result heading', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en, ko } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const preview = {
+    requiresApproval: true,
+    approved: false,
+    applied: false,
+    patchId: 'patch_preview',
+    operation: 'generated',
+    files: { project: '/tmp/demo-board/board.kicad_pro' },
+    validation: { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0 } },
+    conversation: { messages: [] }
+  };
+  const clarify = {
+    operation: 'clarify',
+    applied: false,
+    requiresApproval: false,
+    conversation: { status: 'awaiting-input', messages: [{ role: 'assistant', text: 'Which MCU should this use?' }] },
+    nextQuestion: 'Which MCU should this use?'
+  };
+  const rows = [
+    { name: 'success', via: 'request', result: preview, text: en['request.preview-ready'], state: 'ready' },
+    { name: 'success-applied', via: 'approve', result: { applied: true, operation: 'patched', validation: { ok: true }, patchId: 'patch_test' }, text: en['patch.apply.applied'], state: 'completed' },
+    { name: 'error', via: 'request', ok: false, error: { code: 'PROVIDER_FAILED', message: 'provider failed' }, prompt: 'R3가 뭐야?', text: en['request.failed'], state: 'failed' },
+    { name: 'error-ko', via: 'request', lang: 'ko', ok: false, error: { code: 'PROVIDER_FAILED', message: 'provider failed' }, prompt: 'LED 2개 추가해줘', text: ko['request.failed'], state: 'failed' },
+    { name: 'clarify', via: 'request', result: clarify, text: clarify.nextQuestion, state: 'ready' },
+    { name: 'rejection-PATCH_STALE', via: 'approve', result: { applied: false, validation: { ok: true }, reason: { code: 'PATCH_STALE' }, patchId: 'patch_test' }, text: en['patch.apply.failed.PATCH_STALE'], state: 'failed' },
+    { name: 'rejection-PATCH_EXPIRED', via: 'approve', result: { applied: false, validation: { ok: true }, reason: { code: 'PATCH_EXPIRED' }, patchId: 'patch_test' }, text: en['patch.apply.failed.PATCH_EXPIRED'], state: 'failed' },
+    { name: 'rejection-EXISTING_COMPONENTS_REMOVED', via: 'approve', result: { applied: false, validation: { ok: true }, reason: { code: 'EXISTING_COMPONENTS_REMOVED' }, patchId: 'patch_test' }, text: en['patch.apply.failed.EXISTING_COMPONENTS_REMOVED'], state: 'failed' },
+    { name: 'rejection-unknown', via: 'approve', result: { applied: false, validation: { ok: true }, reason: { code: 'NO_SUCH_CODE' }, patchId: 'patch_test' }, text: en['patch.apply.failed.unknown'], state: 'failed' },
+    { name: 'rejection-unverified', via: 'approve', result: { applied: false, validation: { ok: true }, reason: { code: 'PATCH_CANDIDATE_UNVERIFIED' }, patchId: 'patch_test' }, text: en['patch.unverified.body'], state: 'failed' }
+  ];
+
+  try {
+    for (const row of rows) {
+      const opened = await openPanel(browser, port);
+      try {
+        await showReady(opened.page, 30000);
+        if (row.lang) await opened.page.evaluate((lang) => window.chatpcbI18n.setLang(lang), row.lang);
+        let call;
+        if (row.via === 'approve') {
+          await clickApply(opened.page);
+          call = (await approveCalls(opened.page)).at(-1);
+        } else {
+          call = await sendProjectRequest(opened.page, row.prompt || `case ${row.name}`);
+        }
+        await blurToBody(opened.page);
+        assert.equal(await activeElementId(opened.page), 'BODY', `${row.name} starts on the body`);
+        if (row.ok === false) await emitPayload(opened.page, call.id, { ok: false, error: row.error });
+        else await emitResult(opened.page, call.id, row.result);
+        await opened.page.waitForFunction((expected) => (
+          document.querySelector('#request-status')?.dataset.state === expected.state
+          && document.querySelector('#request-status')?.textContent?.includes(expected.text)
+          && document.activeElement?.id === 'request-result-heading'
+        ), { text: row.text, state: row.state }, { timeout: 3000 });
+        const text = await requestText(opened.page);
+        assert.equal(text.includes(row.text), true, `${row.name}: ${text}`);
+        assert.equal(await opened.page.locator('#request-status').getAttribute('data-state'), row.state, row.name);
+        assert.equal(await activeElementId(opened.page), 'request-result-heading', row.name);
+        assert.deepEqual(opened.pageErrors, [], row.name);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
     await new Promise((resolveClose) => server.close(resolveClose));
     await browser.close();
   }

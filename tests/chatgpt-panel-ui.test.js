@@ -1677,9 +1677,12 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       text: en['patch.apply.failed.unknown']
     },
     {
+      // A missing applied field reconciles and spends this id. It is not an immediate couldn't-confirm.
       id: 'missing-applied',
+      patchId: 'sha256:missing-applied',
       result: { validation: { ok: true }, operation: 'patched' },
-      text: en['patch.apply.failed.missing'],
+      text: en['patch.apply.unconfirmed'],
+      nonBoolean: true,
       uncertain: true
     },
     {
@@ -2236,7 +2239,13 @@ test('a reply without validation and without applied does not reload or show suc
         const reloads = await page.evaluate(() => window.__hostMessages.filter((message) => message?.type === 'project.reload'));
         assert.deepEqual(reloads, [], `${locale} ${item.id}`);
       }
-      await page.evaluate(() => { window.__requestResult = null; window.__patchApplyResult = null; window.__hostMessages = []; });
+      await page.evaluate(() => {
+        window.__requestResult = null;
+        window.__patchApplyResult = null;
+        window.__hostMessages = [];
+        // apply-missing reconciled and spent sha256:preview. This apply needs a new id.
+        window.__previewPatchId = 'sha256:applied-without-validation';
+      });
       await sendPlainPreview(page, 'applied without validation');
       await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
       await page.evaluate(() => {
