@@ -404,10 +404,28 @@ function confirmDialogOwnsFocus() {
   return confirmDialogs().length > 0;
 }
 
+// Chromium's focus fixup moves focus to the body when the focused control becomes
+// disabled. An open confirm dialog puts that focus back on one of its own buttons.
+function keepConfirmDialogFocus() {
+  const dialogs = confirmDialogs();
+  if (dialogs.length === 0) return;
+  const active = document.activeElement;
+  if (active && dialogs.some((dialog) => dialog.contains(active))) return;
+  for (const dialog of dialogs) {
+    const target = [...dialog.querySelectorAll('button')].find((button) => !button.disabled);
+    if (!target) continue;
+    focusProgrammatically(target);
+    return;
+  }
+}
+
 // One focus path. An open confirm dialog keeps focus on its own controls.
 function focusProgrammatically(element, options) {
   if (!element || typeof element.focus !== 'function') return;
-  if (confirmDialogOwnsFocus() && !confirmDialogs().some((dialog) => dialog.contains(element))) return;
+  if (confirmDialogOwnsFocus() && !confirmDialogs().some((dialog) => dialog.contains(element))) {
+    keepConfirmDialogFocus();
+    return;
+  }
   element.focus(options);
 }
 
@@ -3055,8 +3073,11 @@ function focusApplyButton() {
 }
 
 function reassertPatchApprovalFocus() {
+  if (confirmDialogOwnsFocus()) {
+    keepConfirmDialogFocus();
+    return;
+  }
   if (patchApplyBusy()) return;
-  if (confirmDialogOwnsFocus()) return;
   if (!patchApprovalCardEl || patchApprovalCardEl.hidden) return;
   const remembered = patchAreaFocusedEl;
   if (!remembered && !patchFocusHold) return;
@@ -3091,7 +3112,10 @@ function scheduleApprovalStatusFocus() {
   approvalStatusFocusTimer = setTimeout(() => {
     approvalStatusFocusTimer = 0;
     removalClosedForFocus = false;
-    if (confirmDialogOwnsFocus()) return;
+    if (confirmDialogOwnsFocus()) {
+      keepConfirmDialogFocus();
+      return;
+    }
     if (!approvePatchButtonEl?.disabled) return;
     focusPatchApprovalStatus();
   }, 0);
