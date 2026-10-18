@@ -1704,6 +1704,22 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
       text: en['patch.apply.unconfirmed'],
       nonBoolean: true,
       uncertain: true
+    },
+    {
+      id: 'applied-null',
+      patchId: 'sha256:applied-null',
+      result: { applied: null, validation: { ok: true } },
+      text: en['patch.apply.unconfirmed'],
+      nonBoolean: true,
+      uncertain: true
+    },
+    {
+      id: 'applied-object',
+      patchId: 'sha256:applied-object',
+      result: { applied: {}, validation: { ok: true } },
+      text: en['patch.apply.unconfirmed'],
+      nonBoolean: true,
+      uncertain: true
     }
   ];
   const warnings = [];

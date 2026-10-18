@@ -121,6 +121,8 @@ function shapesFor(success) {
     ['unexpected', { unexpected: true }, false],
     ['applied-string', { ...success, applied: 'true' }, false],
     ['applied-number', { ...success, applied: 1 }, false],
+    ['applied-null', { ...success, applied: null }, false],
+    ['applied-object', { ...success, applied: {} }, false],
     ['rolled-back', { ...success, rolledBack: true }, false]
   ];
 }
@@ -149,7 +151,7 @@ test('daemon replies accept only the daemon success shape', () => {
       const verdict = normalize(value, reply.kind);
       assert.equal(verdict.ok, ok, `${label} ${name} normalize`);
       assert.equal(verdict.kind, reply.kind, `${label} ${name} kind`);
-      if (!ok && value && typeof value === 'object' && (value.applied === 'true' || value.applied === 1)) {
+      if (!ok && value && typeof value === 'object' && Object.hasOwn(value, 'applied') && typeof value.applied !== 'boolean') {
         assert.equal(verdict.code, 'APPLY_REJECTED', `${label} ${name} code`);
       }
       const routed = outcome(value);

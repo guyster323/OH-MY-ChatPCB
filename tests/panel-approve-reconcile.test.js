@@ -512,11 +512,10 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
       await rolledBack.page.waitForTimeout(40);
       assert.equal(await requestText(rolledBack.page), failed);
       await emitResult(rolledBack.page, approve.id, appliedBody);
-      await rolledBack.page.waitForFunction((text) => (
-        document.querySelector('#request-status')?.dataset.state === 'completed'
-        && document.querySelector('#request-status')?.textContent === text
-      ), en['patch.apply.applied'], { timeout: 3000 });
-      assert.deepEqual((await completionSnapshot(rolledBack.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      await rolledBack.page.waitForTimeout(40);
+      assert.equal(await requestText(rolledBack.page), failed);
+      assert.equal(await rolledBack.page.locator('#request-status').getAttribute('data-state'), 'failed');
+      assert.deepEqual((await completionSnapshot(rolledBack.page)).reloads, []);
       const sent = await approveCallCount(rolledBack.page);
       await rolledBack.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
       await rolledBack.page.locator('#approve-patch-button').dispatchEvent('click');
@@ -661,14 +660,14 @@ test('inspect reconcile confirms only the after digest, in that order', async (t
       }, true);
       assert.equal(inspectCall.args.expectedDigest, 'digest-same');
       await unchanged.page.waitForFunction((text) => (
-        document.querySelector('#request-status')?.dataset.state === 'completed'
+        document.querySelector('#request-status')?.dataset.state === 'failed'
         && document.querySelector('#request-status')?.textContent === text
-      ), en['patch.apply.applied'], { timeout: 3000 });
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
       const text = await requestText(unchanged.page);
-      assert.equal(text, en['patch.apply.applied'], text);
-      assert.equal(text.includes(en['patch.apply.unconfirmed']), false, text);
+      assert.equal(text, en['patch.apply.unconfirmed'], text);
+      assert.equal(text.includes(en['patch.apply.applied']), false, text);
       assert.equal(text.includes(en['patch.apply.failed.recheck']), false, text);
-      assert.deepEqual((await completionSnapshot(unchanged.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual((await completionSnapshot(unchanged.page)).reloads, []);
       assert.deepEqual(unchanged.pageErrors, []);
     } finally {
       await unchanged.page.close();
@@ -905,6 +904,207 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
       await explicitFalse.page.close();
     }
   } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('a late non-boolean approve reply after reconcile timeout stays unconfirmed and sends no reload', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    { name: 'string', applied: 'true' },
+    { name: 'number', applied: 1 },
+    { name: 'null', applied: null },
+    { name: 'object', applied: {} }
+  ];
+
+  try {
+    for (const row of rows) {
+      const opened = await openPanel(browser, port);
+      try {
+        await showReady(opened.page, 30);
+        await opened.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+        await installHost(opened.page);
+        await clickApply(opened.page);
+        const approve = (await approveCalls(opened.page)).at(-1);
+        await opened.page.waitForFunction((text) => (
+          document.querySelector('#request-status')?.dataset.state === 'failed'
+          && document.querySelector('#request-status')?.textContent === text
+        ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+        await emitResult(opened.page, approve.id, {
+          applied: row.applied,
+          operation: 'patched',
+          validation: { ok: true },
+          patchId: 'patch_test'
+        });
+        await opened.page.waitForTimeout(50);
+        const shot = await completionSnapshot(opened.page);
+        assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
+        assert.equal(shot.state, 'failed', row.name);
+        assert.equal(shot.text.includes(en['patch.apply.applied']), false, row.name);
+        assert.deepEqual(shot.reloads, [], row.name);
+        assert.notEqual(shot.draft, 'done', row.name);
+        assert.deepEqual(opened.pageErrors, [], row.name);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('an applied result focuses the result heading once', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 5000);
+    await page.evaluate(() => {
+      const heading = document.querySelector('#request-result-heading');
+      const focus = heading.focus.bind(heading);
+      window.__resultHeadingFocusCalls = 0;
+      heading.focus = (...args) => {
+        window.__resultHeadingFocusCalls += 1;
+        return focus(...args);
+      };
+    });
+    await clickApply(page);
+    const approve = (await approveCalls(page)).at(-1);
+    await emitResult(page, approve.id, { applied: true, operation: 'patched', validation: { ok: true }, patchId: 'patch_test' });
+    await page.waitForFunction((text) => (
+      document.querySelector('#request-status')?.dataset.state === 'completed'
+      && document.querySelector('#request-status')?.textContent === text
+    ), en['patch.apply.applied'], { timeout: 3000 });
+    await page.waitForTimeout(50);
+    const calls = await page.evaluate(() => window.__resultHeadingFocusCalls);
+    assert.equal(calls, 1, `result heading focus() was called ${calls} times`);
+    assert.equal(await activeElementId(page), 'request-result-heading');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('inspect reconcile with before==after and no transaction record stays unconfirmed', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const samePreview = { ...passedPreview, evidenceDigest: 'digest-same', afterDigest: 'digest-same' };
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 40, samePreview);
+    await installHost(page);
+    const inspectCall = await settleEmptyTransactionInspect(page, {
+      manifest: { freshness: { status: 'current' } },
+      inspection: { projectDigest: 'digest-same' },
+      evidenceDigest: { projectDigest: 'digest-same', matches: true }
+    }, true);
+    assert.equal(inspectCall.args.expectedDigest, 'digest-same');
+    await page.waitForFunction((text) => (
+      document.querySelector('#request-status')?.dataset.state === 'failed'
+      && document.querySelector('#request-status')?.textContent === text
+    ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+    const shot = await completionSnapshot(page);
+    assert.equal(shot.text, en['patch.apply.unconfirmed'], shot.text);
+    assert.equal(shot.state, 'failed');
+    assert.equal(shot.text.includes(en['patch.apply.applied']), false, shot.text);
+    assert.equal(shot.text.includes(en['patch.apply.failed.recheck']), false, shot.text);
+    assert.deepEqual(shot.reloads, []);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test("late applied:true after a recorded rollback keeps 'not applied' and sends no reload", async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const notAppliedText = `${en['patch.apply.failed.unknown']} ${en['patch.apply.failed.recheck']}`;
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 40);
+    await installHost(page);
+    await clickApply(page);
+    const approve = (await approveCalls(page)).at(-1);
+    const statusCall = await waitForCall(page, 'project.transaction.status');
+    await emitResult(page, statusCall.id, failedTransaction('rolled-back'));
+    await page.waitForFunction((text) => (
+      document.querySelector('#request-status')?.dataset.state === 'failed'
+      && document.querySelector('#request-status')?.textContent === text
+    ), notAppliedText, { timeout: 3000 });
+    assert.deepEqual((await completionSnapshot(page)).reloads, []);
+    await emitResult(page, approve.id, { applied: true, operation: 'patched', validation: { ok: true }, patchId: 'patch_test' });
+    await page.waitForTimeout(50);
+    const shot = await completionSnapshot(page);
+    assert.equal(shot.text, notAppliedText, shot.text);
+    assert.equal(shot.state, 'failed');
+    assert.equal(shot.text.includes(en['patch.apply.applied']), false, shot.text);
+    assert.equal(shot.text.includes(en['patch.apply.unconfirmed']), false, shot.text);
+    assert.deepEqual(shot.reloads, []);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test("late transaction status 'applied' after reconcile timeout upgrades to applied with one reload", async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 30);
+    await page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+    await installHost(page);
+    await clickApply(page);
+    const statusCall = await waitForCall(page, 'project.transaction.status');
+    await page.waitForFunction((text) => (
+      document.querySelector('#request-status')?.dataset.state === 'failed'
+      && document.querySelector('#request-status')?.textContent === text
+    ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+    assert.deepEqual((await completionSnapshot(page)).reloads, []);
+    await emitResult(page, statusCall.id, appliedTransaction());
+    await page.waitForFunction((text) => (
+      document.querySelector('#request-status')?.dataset.state === 'completed'
+      && document.querySelector('#request-status')?.textContent === text
+    ), en['patch.apply.applied'], { timeout: 3000 });
+    const shot = await completionSnapshot(page);
+    assert.equal(shot.text, en['patch.apply.applied']);
+    assert.equal(shot.state, 'completed');
+    assert.equal(shot.reloads.length, 1, 'late status applied posts project.reload once');
+    assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+    await emitResult(page, statusCall.id, appliedTransaction());
+    await page.waitForTimeout(40);
+    assert.equal((await completionSnapshot(page)).reloads.length, 1);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
     await new Promise((resolveClose) => server.close(resolveClose));
     await browser.close();
   }

@@ -547,8 +547,7 @@ function handleEnvelope(envelope) {
   const id = envelope.payload.id;
   const callName = pendingCalls.get(id) ?? (activeRequestId ? 'project.request' : activeProjectCreateId ? 'project.create' : undefined);
   pendingCalls.delete(id);
-  // A late error or a second status keeps the first reconcile result.
-  // An authoritative applied:true may still upgrade unknown or not-applied.
+  // A late approve reply upgrades couldn't-confirm only when applied is exactly true.
   if (closedApproveCalls.has(id)) {
     if (isAuthoritativeApplied(envelope.payload, approveFlight?.patchId)) {
       correctUnconfirmedApply(id, envelope.payload.result);
@@ -1873,10 +1872,11 @@ function classifyInspect(payload, flight) {
   const digest = typeof result.inspection?.projectDigest === 'string'
     ? result.inspection.projectDigest
     : (typeof result.evidenceDigest?.projectDigest === 'string' ? result.evidenceDigest.projectDigest : '');
-  // No transaction record yet. The after digest is decided first, so a no-change
-  // patch (before === after) still counts as applied. Any other digest, including
-  // a before-only match, stays unconfirmed. An unchanged project is not a failed apply.
-  if (typeof flight.afterDigest === 'string' && flight.afterDigest.length > 0 && digest === flight.afterDigest) return 'applied';
+  const before = typeof flight.beforeDigest === 'string' ? flight.beforeDigest : '';
+  const after = typeof flight.afterDigest === 'string' ? flight.afterDigest : '';
+  // No transaction record. Applied only when the preview changed the digest and the
+  // project now matches that after digest. before === after stays unconfirmed.
+  if (after.length > 0 && after !== before && digest === after) return 'applied';
   return 'unknown';
 }
 
@@ -1897,8 +1897,13 @@ function requestReconcileInspect(flight) {
 
 function handleTransactionStatusReply(id, payload) {
   const flight = approveFlight;
-  if (!flight || flight.settled || flight.statusCallId !== id) return;
+  if (!flight || flight.statusCallId !== id) return;
   const outcome = classifyTransactions(payload, flight.patchId);
+  // Timeout already settled this flight. A recorded applied may still upgrade couldn't-confirm.
+  if (flight.settled) {
+    if (outcome === 'applied') upgradeUnconfirmedApply({ applied: true, operation: 'patched' });
+    return;
+  }
   if (outcome === 'inspect') {
     requestReconcileInspect(flight);
     return;
@@ -1921,18 +1926,24 @@ function isAuthoritativeApplied(payload, patchId) {
   return true;
 }
 
-function correctUnconfirmedApply(callId, result) {
+function upgradeUnconfirmedApply(result) {
   const flight = approveFlight;
-  if (!flight || flight.callId !== callId || flight.settled !== true) return;
-  if (flight.outcome !== 'unknown' && flight.outcome !== 'not-applied') return;
+  if (!flight || flight.settled !== true || flight.outcome !== 'unknown') return;
   flight.outcome = 'applied';
+  const body = result && typeof result === 'object' && !Array.isArray(result) ? result : {};
   completeAppliedPatch({
-    ...result,
+    ...body,
     applied: true,
-    operation: result?.operation || 'patched',
+    operation: body.operation || 'patched',
     fromPatchApprove: true,
     removedRefs: flight.removedRefs
   });
+}
+
+function correctUnconfirmedApply(callId, result) {
+  const flight = approveFlight;
+  if (!flight || flight.callId !== callId) return;
+  upgradeUnconfirmedApply(result);
 }
 
 function finishApproveReconcile(outcome) {
