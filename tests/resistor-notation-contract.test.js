@@ -896,13 +896,17 @@ test('non-resistor units, additions, questions, and non-edit numbers are not res
     if (code === 'RESISTOR_VALUE_INVALID') assert.match(decision.message ?? '', /M for megaohms|메가옴은 M/, prompt);
   }
 
-  const merged = classifyExistingProjectRequest('change R3 to 1kΩ and keep the 1 m cable', SPEC);
-  assert.equal(merged.mode, 'merge');
-  assert.equal(merged.edit?.ohms, 1000);
-  assert.equal(merged.edit?.ref, 'R3');
-  const korean = classifyExistingProjectRequest('LED 저항을 1kΩ으로, 케이블 1m', SPEC);
-  assert.equal(korean.mode, 'merge', korean.code ?? korean.message ?? '');
-  assert.equal(korean.edit?.ohms, 1000);
+  // A keep or edit of a cable is leftover content, so the resistor value is not applied.
+  for (const prompt of [
+    'change R3 to 1kΩ and keep the 1 m cable',
+    'LED 저항을 1kΩ으로, 케이블 1m'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  }
 });
 
 function assertProvider(prompt) {
@@ -922,7 +926,7 @@ function assertR3(prompt, ohms) {
   assert.equal(decision.edit?.ref, 'R3', prompt);
 }
 
-test('a length that is the object of a non-resistor edit changes only R3', () => {
+test('a length clause mixed into a resistor edit asks which resistor', () => {
   for (const prompt of [
     'change R3 to 1kΩ and set the cable to 1m',
     'LED 저항 1kΩ으로, 케이블은 1m로',
@@ -936,7 +940,11 @@ test('a length that is the object of a non-resistor edit changes only R3', () =>
     'LED 저항 1kΩ으로 하고 선 2m로',
     'R3를 1kΩ으로 바꾸고 전선은 2m로'
   ]) {
-    assertR3(prompt, 1000);
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
   }
   assertProvider('set the cable to 1m');
   const milli = classifyExistingProjectRequest('change the LED resistor to 1m', SPEC);

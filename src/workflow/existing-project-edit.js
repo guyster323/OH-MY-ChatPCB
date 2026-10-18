@@ -1,10 +1,35 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+function compileRegExp(source, flags) {
+  return new RegExp(source, flags);
+}
+
 import { classifyResistorValue, isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
 import { normalizeMatchText } from '../runtime/match-text.js';
 import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
+import {
+  approximateAfter,
+  approximateBefore,
+  assessRequestCoverage,
+  hasMalformedRkm,
+  isAdviceQuestion,
+  isCounterFollow,
+  isCounterLead,
+  isDemonstrativeWord,
+  isEditVerbWord,
+  isFunctionWord,
+  isKnownRoleWord,
+  isLedAllowWord,
+  isModalOrParticleWord,
+  isDontDeleteClause,
+  isPermittedEdit,
+  isUnboundMeasureAfter,
+  textHasKnownRole,
+  textHasLengthObject,
+  textHasUsbRole
+} from './resistor-vocabulary.js';
 
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
@@ -474,6 +499,8 @@ function classifyEditText(text, spec) {
   if (decided) return decided;
   const finished = finishResistor(text, spec, resistor);
   if (finished) return finished;
+  const caught = coverageCatch(text, spec);
+  if (caught) return caught;
   if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
 }
@@ -523,48 +550,105 @@ function unclearRemoval() {
   };
 }
 
+function coverageRefusal(text, spec, coverage, code) {
+  if (code === 'RESISTOR_REF_UNSUPPORTED') {
+    return {
+      mode: 'refuse',
+      code,
+      message: resistorRefUnsupportedMessage(seriesResistorRef(spec))
+    };
+  }
+  const ohmsText = coverage?.valueToken ? (parseResistorOhms(coverage.valueToken) ?? null) : null;
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_TARGET_UNCLEAR',
+    message: resistorTargetUnclearMessage(ohmsText)
+  };
+}
+
+// A known role with no value, or an unknown role word beside a value, never
+// reaches the provider. Questions and unbound k tokens still do.
+function coverageCatch(text, spec) {
+  if (isAdviceQuestion(text)) return null;
+  if (isQuestionShaped(text) && !isPermittedEdit(text)) return null;
+  // A removal sentence with no resistor value stays on the deletion path.
+  // "지워줘" and "제거" are removal verbs. They are not a valueless role edit.
+  if (!assessRequestCoverage(text).hasBoundValue && findVerbs(text).length > 0) return null;
+  const coverage = assessRequestCoverage(text);
+  if (coverage.approximate) return null;
+  if (coverage.foreignRole && coverage.resistorMention && !coverage.hasBoundValue) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
+  }
+  if (coverage.unknownRoleValue && !coverage.hasBoundValue) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
+  }
+  if (coverage.unknownRoleValue && coverage.hasBoundValue && !/저항|抵抗|\bresistor\b|\bled/iu.test(text)) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
+  }
+  return null;
+}
+
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
+  const coverage = assessRequestCoverage(text);
   // A value belongs to the role in its own clause. Any non-LED role that has a
   // value refuses the whole request, so that ohms value cannot land on R3.
   // A negated keep ("두지 말고", "don't keep") stays visible and still counts.
-  if (foreignRoleClauseHasValue(text)) {
-    return {
-      mode: 'refuse',
-      code: 'RESISTOR_REF_UNSUPPORTED',
-      message: resistorRefUnsupportedMessage(seriesResistorRef(spec))
-    };
+  // A length clause is not that value: "USB 케이블 1m" asks which resistor.
+  if (foreignRoleClauseHasValue(text) && !(resistor.kind === 'resistor' && coverage.lengthClause)) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
   }
   // A non-LED role is refused before the value is judged. 0.1Ω and 10mΩ on a
   // sense or shunt resistor are still "only the LED resistor", not a range error.
   // "current sense" is that role. It is not the LED current-limiting resistor.
   const masked = maskGuardObjects(text);
-  if (foreignRoleKind(masked) === 'foreign') {
+  const roleKind = foreignRoleKind(masked);
+  // A known role is "only the LED resistor". An unknown word beside a value
+  // asks which resistor, including "terminator 120Ω" and "NRST 10k".
+  if (roleKind === 'unknown' && resistor.kind === 'resistor') {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
+  }
+  if (roleKind === 'foreign' && !(resistor.kind === 'resistor' && coverage.lengthClause)) {
     const foreign = foreignRoleDecision(text, spec, resistor);
     if (foreign) return foreign;
   }
   // A wrong ref is reported before we ask for a unit, so R1 470 stays unsupported.
-  if (resistor.kind === 'invalid' && resistor.reason !== 'unit-required') {
+  // Milli and other invalid values also win over a mixed-in length clause.
+  // Two values with no transition ask which value. An unknown role that owns
+  // one of them asks which resistor instead. Milli and malformed values still win.
+  if (resistor.kind === 'invalid' && resistor.reason !== 'unit-required' && resistor.reason !== 'ambiguous') {
     return invalidResistor(resistor);
+  }
+  if (resistor.kind === 'invalid' && resistor.reason === 'ambiguous') {
+    if (coverage.unknownRoleValue) return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
+    if (coverage.foreignRole || foreignRoleClauseHasValue(text)) {
+      return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
+    }
+    return invalidResistor(resistor);
+  }
+  // A keep of a capacitor, cable, or other non-resistor is leftover content.
+  if (resistor.kind === 'resistor' && coverage.keepNonResistor) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
   const gated = resistorRefDecision(text, spec, resistor);
   if (gated) return gated;
   const foreign = foreignRoleDecision(text, spec, resistor);
-  if (foreign) return foreign;
+  if (foreign && !(resistor.kind === 'resistor' && coverage.lengthClause)) return foreign;
   if (resistor.kind === 'invalid') return invalidResistor(resistor);
   const unchanged = unchangedResistor(spec, resistor);
   if (unchanged) return unchanged;
-  // Current limiting is the series resistor only on a board that already has an LED.
-  // With no LED and no series resistor, that phrase is not applied locally.
-  if (!seriesResistorRef(spec) && !boardHasLedPart(spec)) {
-    if (isLocalCurrentLimiting(text)) return null;
-    if (resistor?.kind === 'resistor') {
-      return {
-        mode: 'refuse',
-        code: 'RESISTOR_TARGET_UNCLEAR',
-        message: resistorTargetUnclearMessage(resistor.ohmsText)
-      };
-    }
+  if (resistor.kind === 'resistor' && coverage.lengthClause) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
+  }
+  if (resistor.kind === 'resistor' && (coverage.foreignRole || unkeptForeignRole(text))) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
+  }
+  if (resistor.kind === 'resistor' && (coverage.unknownRoleValue || coverage.unknownLeftover || !coverage.covered)) {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
+  }
+  // An LED series edit needs the series resistor role. A lone LED symbol is not enough.
+  if (!hasLedSeriesRole(spec) && resistor.kind === 'resistor') {
+    return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
   return { mode: 'merge', edit: { ...resistor, ref: seriesResistorRef(spec) } };
 }
@@ -626,27 +710,17 @@ export function blocksBeforeProvider(text, decision) {
   const normalized = normalizeMatchText(text).trim();
   if (valueOnlyDecision(normalized)) return true;
   if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
+  if (decision.code === 'RESISTOR_VALUE_INVALID' && hasMalformedRkm(normalized)) return true;
   if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
 }
 
-// "current limiting" / "전류 제한" with no LED word is the LED series resistor.
-// It is applied locally. "current sense" is a shunt role and does not match.
-// An LED word, a series word, or a ref such as R3 still reaches the provider.
-const CURRENT_LIMITING_PHRASE = /current[-\s]+limiting|전류\s*제한/iu;
-const EXPLICIT_LED_OR_REF = /led|엘이디|엘예디|발광|상태|\bstatus\b|\bseries\b|직렬|\bR\d+\b/iu;
-
+// A covered allow-list edit is applied locally. Anything left over does not merge.
 export function appliesBeforeProvider(text, decision) {
   if (decision?.mode !== 'merge' || decision.edit?.kind !== 'resistor') return false;
-  return isLocalCurrentLimiting(text);
-}
-
-function isLocalCurrentLimiting(text) {
-  const normalized = normalizeMatchText(text);
-  if (EXPLICIT_LED_OR_REF.test(normalized)) return false;
-  return CURRENT_LIMITING_PHRASE.test(normalized);
+  return assessRequestCoverage(text).covered;
 }
 
 function nonRemovalEdit(text) {
@@ -701,7 +775,7 @@ function bareReferenceList(text) {
   if (!body) return null;
   body = body.replace(BARE_REF_TAIL, '').trim();
   if (!body) return null;
-  const designator = new RegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
+  const designator = compileRegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
   const refs = [];
   let last = 0;
   for (const match of body.matchAll(designator)) {
@@ -769,7 +843,7 @@ function normalizeDeletionText(text) {
   return normalizeMatchText(text)
     .replace(/([A-Za-z])[ \u00A0]\u0301([A-Za-z])/gu, "$1'$2")
     .replace(/([A-Za-z])\u0301([A-Za-z])/gu, "$1'$2")
-    .replace(new RegExp(`[${apostrophes}]`, 'gu'), "'")
+    .replace(compileRegExp(`[${apostrophes}]`, 'gu'), "'")
     .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"');
 }
 
@@ -792,8 +866,8 @@ function phraseSource(phrase) {
 
 function matchEdge(edge, text, source) {
   const re = edge === 'end'
-    ? new RegExp(`(?:${source})\\s*$`, 'iu')
-    : new RegExp(`^(?:${source})`, 'iu');
+    ? compileRegExp(`(?:${source})\\s*$`, 'iu')
+    : compileRegExp(`^(?:${source})`, 'iu');
   return text.match(re);
 }
 
@@ -832,7 +906,7 @@ function englishBridges() {
 // A comma is a new clause only when the piece is not just that padding.
 function wordCarriesNegation(word) {
   return DELETION_INTENT_VOCABULARY.negationMarkers.some((marker) => (
-    new RegExp(`(?:${marker.re})$`, 'iu').test(word)
+    compileRegExp(`(?:${marker.re})$`, 'iu').test(word)
   ));
 }
 
@@ -905,7 +979,7 @@ function splitCommaClauses(text) {
 function findSeparators(text) {
   const hits = [];
   for (const sep of DELETION_INTENT_VOCABULARY.clauseSeparators) {
-    const re = new RegExp(sep.re, 'giu');
+    const re = compileRegExp(sep.re, 'giu');
     for (let match = re.exec(text); match; match = re.exec(text)) {
       if (match[0].length === 0) {
         re.lastIndex += 1;
@@ -953,14 +1027,14 @@ function splitClauses(text) {
 
 function findVerbs(text) {
   const verbs = DELETION_INTENT_VOCABULARY.positiveVerbs;
-  const re = new RegExp(verbs.map((verb) => `(?:${verb.re})`).join('|'), 'giu');
+  const re = compileRegExp(verbs.map((verb) => `(?:${verb.re})`).join('|'), 'giu');
   const found = [];
   for (let match = re.exec(text); match; match = re.exec(text)) {
     if (match[0].length === 0) {
       re.lastIndex += 1;
       continue;
     }
-    const entry = verbs.find((verb) => new RegExp(`^(?:${verb.re})$`, 'iu').test(match[0]));
+    const entry = verbs.find((verb) => compileRegExp(`^(?:${verb.re})$`, 'iu').test(match[0]));
     if (!entry) continue;
     found.push({ id: entry.id, lang: entry.lang, index: match.index, length: match[0].length });
   }
@@ -975,7 +1049,7 @@ function targetPattern(id) {
 function findMentions(text) {
   const found = [];
   for (const target of DELETION_INTENT_VOCABULARY.targets) {
-    const re = new RegExp(target.re, 'giu');
+    const re = compileRegExp(target.re, 'giu');
     for (let match = re.exec(text); match; match = re.exec(text)) {
       if (match[0].length === 0) {
         re.lastIndex += 1;
@@ -984,7 +1058,7 @@ function findMentions(text) {
       found.push({ id: target.id, index: match.index, length: match[0].length });
     }
   }
-  const refRe = new RegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
+  const refRe = compileRegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
   for (const match of text.matchAll(refRe)) {
     if (match[0].length === 0) continue;
     const token = match[0].toUpperCase();
@@ -1000,9 +1074,9 @@ function closestMention(mentions, verbOffset) {
 }
 
 function explicitPart(text) {
-  const led = new RegExp(targetPattern('led'), 'iu').test(text);
-  const resistor = new RegExp(targetPattern('resistor'), 'iu').test(text);
-  const i2c = new RegExp(targetPattern('i2c'), 'iu').test(text);
+  const led = compileRegExp(targetPattern('led'), 'iu').test(text);
+  const resistor = compileRegExp(targetPattern('resistor'), 'iu').test(text);
+  const i2c = compileRegExp(targetPattern('i2c'), 'iu').test(text);
   if (led && resistor) return 'led-resistor';
   if (led) return 'led';
   if (i2c) return 'i2c';
@@ -1060,7 +1134,7 @@ function koreanCoordinationSource() {
 
 function koreanSuffixNegates(after) {
   const pattern = `^${koreanCoordinationSource()}${DELETION_INTENT_VOCABULARY.koreanNegationSuffix}`;
-  return new RegExp(pattern, 'u').test(after);
+  return compileRegExp(pattern, 'u').test(after);
 }
 
 // Any negation in front of the verb blocks it. A second marker ("don't not")
@@ -1157,7 +1231,7 @@ function verbScopeCues() {
 }
 
 function hasCue(text, cues) {
-  return cues.some((cue) => new RegExp(cue.re, 'iu').test(text));
+  return cues.some((cue) => compileRegExp(cue.re, 'iu').test(text));
 }
 
 function hasVerbScopeCue(text) {
@@ -1176,7 +1250,7 @@ function isRestOnlyClause(text) {
 function hasBlockingVerbScopeCue(text) {
   const clauses = splitClauses(text);
   for (const cue of verbScopeCues()) {
-    const re = new RegExp(cue.re, 'giu');
+    const re = compileRegExp(cue.re, 'giu');
     for (const match of text.matchAll(re)) {
       if (match[0].length === 0) continue;
       const clause = clauses.find((item) => (
@@ -1263,7 +1337,7 @@ function partsBlockedByKeep(text) {
   const clauses = splitClauses(text);
   const blocked = new Set();
   for (const cue of DELETION_INTENT_VOCABULARY.partScopeCues) {
-    const re = new RegExp(cue.re, 'giu');
+    const re = compileRegExp(cue.re, 'giu');
     for (const match of text.matchAll(re)) {
       const clause = clauses.find((item) => (
         match.index >= item.start && match.index < item.start + item.text.length
@@ -1313,7 +1387,7 @@ function guardedPartIds(text) {
   const clauses = splitClauses(text);
   const guarded = new Set();
   for (const cue of sameTargetGuardCues()) {
-    const re = new RegExp(cue.re, 'giu');
+    const re = compileRegExp(cue.re, 'giu');
     for (const match of text.matchAll(re)) {
       const clause = clauses.find((item) => (
         match.index >= item.start && match.index < item.start + item.text.length
@@ -1412,7 +1486,7 @@ function listGapPattern() {
   ].join('|');
   // A modifier may sit on either side of the join ("connector and the",
   // "커넥터와", "and also the") without breaking the list.
-  return new RegExp(
+  return compileRegExp(
     `^(?:(?:${skip})\\s*)*(?:,\\s*(?:${afterComma.join('|')})?|(?:${words.join('|')}))(?:\\s*(?:${skip}))*\\s*$`,
     'iu'
   );
@@ -1474,7 +1548,7 @@ function residueOutsideMentions(text) {
 function alsoAttachedPartIds(text) {
   const ids = new Set();
   for (const entry of DELETION_INTENT_VOCABULARY.alsoAttachments) {
-    const re = new RegExp(entry.re, 'giu');
+    const re = compileRegExp(entry.re, 'giu');
     for (const match of text.matchAll(re)) {
       const span = match[1] ?? '';
       // "I2C" contains a digit. Judge the words around the part, not the name.
@@ -1560,7 +1634,7 @@ function residueBlankSources() {
 function hasUnexplainedResidue(clauseText) {
   let rest = clauseText;
   for (const source of residueBlankSources()) {
-    rest = rest.replace(new RegExp(source, 'giu'), ' ');
+    rest = rest.replace(compileRegExp(source, 'giu'), ' ');
   }
   return /[\p{L}\p{N}]/u.test(rest);
 }
@@ -1633,28 +1707,13 @@ function seriesResistorRef(spec) {
   return part ? String(part.ref) : null;
 }
 
-function componentLooksLikeLed(record) {
-  const libId = String(record?.libId ?? '');
-  const value = String(record?.value ?? '');
-  const role = String(record?.role ?? '');
-  return role === 'status-led'
-    || role === 'status-led-resistor'
-    || value === 'STATUS_LED'
-    || value === 'LED_RESISTOR'
-    || libId === 'ChatPCB:STATUS_LED'
-    || libId === 'ChatPCB:LED_RESISTOR'
-    || libId === 'Device:LED';
-}
-
-// An LED diode, a saved series resistor, or a status-LED peripheral. Pull-ups do not count.
-function boardHasLedPart(spec) {
+// The series role is the resistor, or a status-led peripheral that owns its
+// current limit. A lone LED symbol is not that role: the generator draws D1
+// even when the prompt never asked for an LED.
+function hasLedSeriesRole(spec) {
   if (seriesResistorRef(spec)) return true;
-  if (schematicComponents(spec).some((component) => componentLooksLikeLed(component))) return true;
-  if (productionParts(spec).some((part) => componentLooksLikeLed(part))) return true;
-  const peripherals = spec?.peripherals;
-  return Array.isArray(peripherals) && peripherals.some((item) => (
-    item?.kind === 'status-led' || item?.kind === 'status-led-resistor'
-  ));
+  const peripherals = Array.isArray(spec?.peripherals) ? spec.peripherals : [];
+  return peripherals.some((item) => item?.kind === 'status-led' || item?.kind === 'status-led-resistor');
 }
 
 // A kept part is not an edit target. The object is the few words before
@@ -1694,13 +1753,13 @@ function maskKoreanKeepClauses(chars, text) {
 function maskClauseGuards(chars, text, clause) {
   const base = clause.start;
   const negated = clause.negatedBySeparator === true;
-  for (const match of clause.text.matchAll(new RegExp(GUARD_BEFORE.source, 'giu'))) {
+  for (const match of clause.text.matchAll(compileRegExp(GUARD_BEFORE.source, 'giu'))) {
     const after = clause.text.slice(match.index + match[0].length);
     // "그대로 두지 말고" and "유지하지 말고" cancel the keep. The role stays.
     if (koreanKeepCueNegated(after, negated)) continue;
     blankWordsBefore(chars, text, base, base + match.index);
   }
-  for (const match of clause.text.matchAll(new RegExp(GUARD_AFTER.source, 'giu'))) {
+  for (const match of clause.text.matchAll(compileRegExp(GUARD_AFTER.source, 'giu'))) {
     // "don't keep" is not a keep. "without" still hides the object after it.
     if (/^keep$/iu.test(match[0]) && englishKeepIsNegated(clause.text, match.index)) continue;
     const cueEnd = base + match.index + match[0].length;
@@ -1777,7 +1836,7 @@ const USB_ROLE = /\bUSB(?!-)/iu;
 function resistorClauseCuts(text) {
   const hits = [];
   for (const sep of RESISTOR_CLAUSE_SEPARATORS) {
-    const re = new RegExp(sep.re, 'giu');
+    const re = compileRegExp(sep.re, 'giu');
     for (let match = re.exec(text); match; match = re.exec(text)) {
       if (match[0].length === 0) {
         re.lastIndex += 1;
@@ -1797,7 +1856,7 @@ function resistorClauseCuts(text) {
   return kept;
 }
 
-function splitResistorClauses(text) {
+export function splitResistorClauses(text) {
   const pieces = [];
   let start = 0;
   for (const sep of resistorClauseCuts(text)) {
@@ -1809,12 +1868,20 @@ function splitResistorClauses(text) {
 }
 
 function clauseCarriesResistorValue(clauseText) {
+  if (textHasLengthObject(clauseText) && /\d+(?:\.\d+)?\s*m(?![A-Za-z])/iu.test(clauseText)) {
+    const withoutLength = clauseText.replace(/\d+(?:\.\d+)?\s*m(?![A-Za-z])/giu, ' ');
+    if (!OHM_VALUE_IN_CLAUSE.test(withoutLength)) return false;
+  }
+  if (/\d+(?:\.\d+)?\s*(?:cm|mm|km|ft|in)(?![A-Za-z])/iu.test(clauseText)) {
+    const withoutLength = clauseText.replace(/\d+(?:\.\d+)?\s*(?:cm|mm|km|ft|in)(?![A-Za-z])/giu, ' ');
+    if (!OHM_VALUE_IN_CLAUSE.test(withoutLength)) return false;
+  }
   return OHM_VALUE_IN_CLAUSE.test(clauseText);
 }
 
 function clauseHasForeignRole(clauseText) {
   if (resistorNounKinds(clauseText).includes('foreign')) return true;
-  if (BARE_ROLE.test(clauseText)) return true;
+  if (textHasKnownRole(clauseText)) return true;
   return USB_ROLE.test(clauseText);
 }
 
@@ -1849,15 +1916,22 @@ function foreignRoleClauseHasValue(text) {
   return false;
 }
 
+// A known role that survives keep-masking is still part of the request.
+// "풀업용" and "for SDA" refuse. "I2C는 삭제하지 마" and "keep the pull-up" do not.
+function unkeptForeignRole(text) {
+  const masked = maskGuardObjects(text);
+  for (const clauseText of splitResistorClauses(masked)) {
+    if (isDontDeleteClause(clauseText)) continue;
+    if (textHasKnownRole(clauseText) || textHasUsbRole(clauseText)) return true;
+  }
+  return false;
+}
+
 // The LED series value is allowed for an LED phrase, the series ref, or a bare
 // 저항/resistor/抵抗 when that is the only resistor role. Any other word in
 // front of the noun is refused. Words kept with 그대로/keep do not count.
 // One LED noun and one other noun ask which resistor.
 const RESISTOR_NOUN = /저항|抵抗|\bresistor\b/giu;
-const ALLOW_WORD = /^(?:leds?|엘이디|엘예디|발광다이오드|발광|다이오드|status|상태|series|직렬|current(?:-limiting)?|limiting|전류제한|전류|제한)$/iu;
-const FUNCTION_WORD = /^(?:a|an|the|of|for|to|from|into|onto|on|in|at|by|with|and|or|its|my|our|please|only|just|value|it|them|one|also|now|too)$/iu;
-const DEMONSTRATIVE = /^(?:그|저|이|this|that|these|those)$/iu;
-const EDIT_VERB_WORD = /^(?:change|set|update|make|modify|changing|setting|use|using)$/iu;
 const WORD_PARTICLE = /(?:이랑|으로|에서|에게|은|는|을|를|과|와|의|도|만|랑|이|가|요|에|로|の|を|が|は|に)$/u;
 
 function foreignRoleDecision(text, spec, resistor) {
@@ -1950,12 +2024,16 @@ function foreignRoleKind(text) {
 // gate, I2C) is not the LED resistor. A clause with only the value and a verb
 // stays an LED edit, including "680옴으로. I2C는 삭제하지 마".
 function bareNonLedSubject(text) {
+  let unknown = false;
   for (const clause of splitClauses(text)) {
     if (!OHM_VALUE_IN_CLAUSE.test(clause.text)) continue;
     const words = [...clause.text.matchAll(/\S+/gu)].map((match) => match[0]);
-    if (classifyModifiers(words) === 'foreign') return 'foreign';
+    if (classifyModifiers(words) !== 'foreign') continue;
+    // pull-up, I2C, and USB are known roles. terminator, NRST, and BOOT0 are not.
+    if (textHasKnownRole(clause.text) || textHasUsbRole(clause.text)) return 'foreign';
+    unknown = true;
   }
-  return null;
+  return unknown ? 'unknown' : null;
 }
 
 function wordsNearNoun(text, noun, previousEnd) {
@@ -1981,7 +2059,7 @@ function modifiersBefore(words) {
     }
     if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
     picked.push(raw);
-    if (!ALLOW_WORD.test(stemmed)) break;
+    if (!isLedAllowWord(stemmed)) break;
   }
   return picked.reverse();
 }
@@ -1997,7 +2075,7 @@ function isQuantityNoise(words, index) {
 }
 
 function isDemonstrative(word) {
-  return DEMONSTRATIVE.test(word);
+  return isDemonstrativeWord(word);
 }
 
 function isClauseBreak(word) {
@@ -2035,7 +2113,7 @@ function wordsAfterNoun(text, noun) {
       kept.push(word);
       break;
     }
-    if (!ALLOW_WORD.test(stemmed)) break;
+    if (!isLedAllowWord(stemmed)) break;
     kept.push(word);
     if (kept.length >= 4) break;
   }
@@ -2063,12 +2141,12 @@ function classifyModifiers(words) {
 function isAllowedLedContext(content) {
   // "current sense", "current-sense", and "current sensing" are shunt roles.
   // They must not match the LED phrase "current limiting" / "current-limiting".
-  if (content.some((word) => /^(?:sens(?:e|es|ing)?|current-sense|shunts?|션트|센스)$/iu.test(word))) return false;
-  if (!content.every((word) => ALLOW_WORD.test(word))) return false;
-  if (content.some((word) => /^(?:leds?|엘이디|엘예디|status|상태|series|직렬)$/iu.test(word))) return true;
+  if (content.some((word) => ['sense', 'senses', 'sensing', 'current-sense', 'shunt', 'shunts', '션트', '센스'].includes(String(word).toLowerCase()))) return false;
+  if (!content.every((word) => isLedAllowWord(word))) return false;
+  if (content.some((word) => /^(?:led|leds|엘이디|엘예디|status|상태|series|직렬)$/iu.test(word))) return true;
   const joined = content.map((word) => word.toLowerCase().replace(/-/g, ' ')).join(' ');
   const compact = content.join('').toLowerCase().replace(/-/g, '');
-  return /current\s+limiting/.test(joined) || compact.includes('전류제한') || compact.includes('발광다이오드');
+  return joined.includes('current limiting') || compact.includes('전류제한') || compact.includes('발광다이오드');
 }
 
 function stemWord(word) {
@@ -2083,11 +2161,10 @@ function stemWord(word) {
 }
 
 function isIgnorableWord(word) {
-  if (FUNCTION_WORD.test(word) || EDIT_VERB_WORD.test(word)) return true;
-  if (/^(?:can|could|would|will|shall|may|should|why|how|what|which|ok|okay|you|your|i|kindly)$/iu.test(word)) return true;
-  if (/^(?:으로|로|을|를|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|줄래|줄래요|주실래요|해줄래|해주세요|있어|있나|있을까요|줄|수|할|줘|그냥|값|기존|현재|왜|어떻게|어떡|뭐|무엇|몇|할까|existing|currently)$/iu.test(word)) return true;
+  if (isFunctionWord(word) || isEditVerbWord(word) || isModalOrParticleWord(word)) return true;
+  if (/^[-–—<>→⇒~∼〜.±%]+$/u.test(word)) return true;
   if (/^괜찮/u.test(word) || /^가능/u.test(word)) return true;
-  return /(?:바꿔|바꾸|변경|수정)/u.test(word);
+  return word.includes('바꿔') || word.includes('바꾸') || word.includes('변경') || word.includes('수정');
 }
 
 function isDesignator(word) {
@@ -2097,7 +2174,7 @@ function isDesignator(word) {
 // R2D2 is a model code, not a reference. A real ref is letters then digits only.
 // I2C matches the same shape and is a resistor role, so it stays off this path.
 function isGluedModelCode(word) {
-  if (BARE_ROLE.test(word)) return false;
+  if (textHasKnownRole(word)) return false;
   return /^[A-Za-z]{1,3}\d+[A-Za-z][A-Za-z0-9]*$/u.test(word);
 }
 
@@ -2301,7 +2378,7 @@ function resolveRefRemoval(spec, token) {
 }
 
 function designatorsInOrder(text) {
-  const re = new RegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
+  const re = compileRegExp(DELETION_INTENT_VOCABULARY.referenceDesignator, 'giu');
   return [...text.matchAll(re)].map((match) => match[0].toUpperCase());
 }
 
@@ -2436,7 +2513,7 @@ function removalDecision(text, spec) {
 // The same is true of a comma: 4,7k must not be read as 7k.
 // Hiragana and katakana are not part of a reference designator, so を470 stays
 // a value. Latin letters and Hangul still block a match inside a word.
-const RESISTOR_TOKEN = new RegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3\p{N}_.+,\u2212\u2013\u00B1-])(?:${[
+const RESISTOR_TOKEN = compileRegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3\p{N}_.+,\u2212\u2013\u00B1-])(?:${[
   String.raw`\d+\s*/\s*\d+\s*[Ww](?![A-Za-z])`,
   String.raw`[+\-\u2212\u2013\uFF0D\u00B1]\s*(?:\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)|\d+[rRkKmM]\d+|\d+(?:\.\d+)?\s*meg|\d+(?:\.\d+)?\s*[rRkKmMuUnNpPfFgGtT]|\d+(?:\.\d+)?(?!\s*%))(?![A-Za-z])`,
   String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
@@ -2593,7 +2670,6 @@ function resistorReferenceTokens(text) {
 
 // A role word plus a clear ohm value (10k, 120Ω), with no 저항/resistor word.
 // Lone milli (4m7, 10mΩ) is not this: the value error stays on the resistor path.
-const BARE_ROLE = /pull[-\s]?ups?|pull[-\s]?downs?|풀업|풀다운|terminations?|종단|debounce|디바운스|dividers?|분압|feedback|피드백|\bgates?\b|게이트|\bbases?\b|베이스|\bbuttons?\b|버튼|shunts?|션트|\bsenses?\b|센스|\bresets?\b|리셋|\bboots?\b|\bbias(?:es)?\b|바이어스|\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b/iu;
 const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Za-z])|\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?)|\d+\s*[kKrR]\d+/iu;
 
 // A resistor edit is read only from this text. Candidates go through
@@ -2601,12 +2677,8 @@ const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Z
 // without a transition marker ask which value. A token the parser rejects is invalid.
 // A question-shaped sentence is an edit only when it permits the change.
 // why/ask/know/what/how/wonder and 왜/뭐/어떻게/궁금 outrank a permission form.
-// "may I" / "can I" / "could I" count only when they govern an edit verb.
-// "should I change ...?" and "2.2k ok?" do not. "바꿔도 돼?" and "may I change ...?" do.
-const QUESTION_PRIORITY = /\b(?:why|ask|know|what|how|wonder)\b|왜|뭐|어떻게|궁금/iu;
-const MODAL_GOVERNS_EDIT = /\b(?:may|can|could)\s+i\s+(?:(?:please|just|kindly)\s+)?(?:(?:change|set|replace|make|use)\b|바꿔|변경|수정)/iu;
-const EDIT_PERMISSION = /바꿔\s*줄래|바꿔\s*줄\s*수\s*있어|바꿔주실래요|해줄래|할\s*수\s*있어|바꿔도\s*될까|바꿔도\s*되나요|바꿔도\s*돼|\bcan\s+you\b|\bcould\s+you\b|\bwould\s+you\b|\bis\s+it\s+ok\s+to\b|\bplease\b/iu;
-
+// "should I" stays a question even with "please". "should be" is an edit.
+// "바꿔도 돼?" and "may I change ...?" do. "2.2k ok?" does not.
 function isQuestionShaped(text) {
   if (/[?？]/u.test(text)) return true;
   if (/(?:뭐|무엇|왜|어떻게|어떡|몇|괜찮|가능|할까)/u.test(text)) return true;
@@ -2616,12 +2688,9 @@ function isQuestionShaped(text) {
 }
 
 function questionStopsResistorEdit(text) {
-  const priority = QUESTION_PRIORITY.test(text);
-  if (!isQuestionShaped(text) && !priority) return false;
-  if (priority) return true;
-  if (MODAL_GOVERNS_EDIT.test(text)) return false;
-  if (EDIT_PERMISSION.test(text)) return false;
-  return true;
+  if (isAdviceQuestion(text)) return true;
+  if (isPermittedEdit(text)) return false;
+  return isQuestionShaped(text);
 }
 
 function interpretResistor(text) {
@@ -2631,7 +2700,7 @@ function interpretResistor(text) {
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   const named = namedRefs[0] ?? null;
-  const roleValue = BARE_ROLE.test(normalized) && CLEAR_OHM.test(normalized);
+  const roleValue = textHasKnownRole(normalized) && CLEAR_OHM.test(normalized);
   if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0 && !roleValue) return null;
 
   const tokens = scanResistorTokens(normalized);
@@ -2688,7 +2757,7 @@ function interpretResistor(text) {
 // role word, or when to/으로/로 marks it as the edit object ("4.99k로 바꿔줘").
 // rev/ver/model in front, or a following part/resolution noun, wins.
 const SUFFIX_EXCLUDE_BEFORE = /(?:\brevisions?\b|\brevs?\b|\bversions?\b|\bvers?\b|\bmodels?\b|리비전|버전|모델)\s*$/iu;
-const SUFFIX_EXCLUDE_AFTER = /^\s*(?:displays?|monitors?|tvs?|pots?|boards?|models?|screens?|cameras?|videos?|trimmers?|화면|모니터|팟|보드|모델|스크린|카메라|영상|트리머)용?(?![\p{L}\p{N}])/iu;
+
 const SUFFIX_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|\bR\d+\b)(?:값|을|를|은|는|이|가)?(?:\s+values?)?\s*:?\s*$/iu;
 const SUFFIX_CUE_AFTER = /^\s*(?:(?:leds?|엘이디|엘예디|발광(?:\s*다이오드)?|status|상태)\s+)*(?:저항|抵抗|\bresistors?\b)/iu;
 const SUFFIX_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
@@ -2701,16 +2770,14 @@ function isUnitlessKRSuffix(raw) {
 }
 
 function approximateResistorValue(before, after) {
-  if (/(?:~|\b(?:about|around|approximately|approx|roughly)\b|(?:^|[\s\d])(?:약|대략|대충))\s*$/iu.test(before)) return true;
-  if (/^\s*(?:정도|쯤|가량|내외)/u.test(after)) return true;
-  return /^\s*-ish\b/iu.test(after);
+  return approximateBefore(before) || approximateAfter(after);
 }
 
 function unitlessSuffixCountsAsResistor(text, start, end) {
   const before = text.slice(0, start);
   const after = text.slice(end);
   if (SUFFIX_EXCLUDE_BEFORE.test(before)) return false;
-  if (SUFFIX_EXCLUDE_AFTER.test(after)) return false;
+  if (isUnboundMeasureAfter(after)) return false;
   if (approximateResistorValue(before, after)) return false;
   if (SUFFIX_CUE_BEFORE.test(before) || SUFFIX_CUE_AFTER.test(after)) return true;
   if (suffixRoleWord(lastWord(before))) return true;
@@ -2727,13 +2794,8 @@ function lastWord(text) {
 
 function suffixRoleWord(word) {
   const stemmed = String(word ?? '').replace(/(?:을|를|은|는|이|가)$/u, '');
-  return BARE_ROLE.test(stemmed) || BARE_ROLE.test(word);
+  return isKnownRoleWord(stemmed) || isKnownRoleWord(word);
 }
-
-// A count, pin, year, frequency, or electrical unit glued to a number is not
-// a resistor candidate. The word may follow (2개, 2019년형, 1 Hz) or lead (pin 13).
-const COUNTER_FOLLOW = /^\s*(?:년형|개만|만|천|억|포트|models?|rev|nF|nf|uF|uf|µF|μF|pF|pf|mF|mf|uH|uh|µH|μH|mH|mh|nH|nh|kHz|MHz|GHz|pcs|pieces|piece|pins|pin|years|year|LEDs|LED|leds|Hz|mA|uA|µA|μA|mW|kV|mV|개|년|형|핀|번|ea|pc|times|time|[VvAaWw%×xX])(?![A-Za-z0-9])/u;
-const COUNTER_LEAD = /(?:\b(?:pins?|gpios?|ports?|rev(?:ision)?s?|models?|years?)|핀|포트)\s*$/iu;
 
 function markNonResistorQuantities(tokens, text) {
   for (const token of tokens) {
@@ -2780,8 +2842,8 @@ function isTiedToOtherQuantity(text, token) {
   const after = text.slice(token.end);
   if (/^Hz\b/i.test(after)) return true;
   if (!/^\d+(?:\.\d+)?$/.test(raw)) return false;
-  if (COUNTER_FOLLOW.test(after)) return true;
-  if (COUNTER_LEAD.test(text.slice(0, token.index))) return true;
+  if (isCounterFollow(after)) return true;
+  if (isCounterLead(text.slice(0, token.index))) return true;
   const before = text.slice(Math.max(0, token.index - 48), token.index);
   return /(?:\bports?\b|포트)/iu.test(before);
 }
@@ -3107,7 +3169,7 @@ async function writeOptionalValue(filePath, update) {
 }
 
 function replaceReferenceValue(text, ref, value) {
-  const pattern = new RegExp(`(\\(property "Reference" "${escapeRegExp(ref)}"[\\s\\S]*?\\(property "Value" ")([^"]*)(")`);
+  const pattern = compileRegExp(`(\\(property "Reference" "${escapeRegExp(ref)}"[\\s\\S]*?\\(property "Value" ")([^"]*)(")`);
   return text.replace(pattern, `$1${value}$3`);
 }
 

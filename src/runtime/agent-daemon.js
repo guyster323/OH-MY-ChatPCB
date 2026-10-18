@@ -21,7 +21,8 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { appliesBeforeProvider, blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale } from '../workflow/existing-project-edit.js';
+import { assessRequestCoverage } from '../workflow/resistor-vocabulary.js';
+import { blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale, resistorTargetUnclearMessage } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -745,9 +746,15 @@ async function requestProject(call, ctx) {
             refused.code = decision.code;
             throw refused;
           }
-          // Only a current-limiting resistor named without LED, series, or a ref.
-          // Every other resistor merge still reaches the provider.
-          if (appliesBeforeProvider(prompt, decision)) {
+          // The same allow list gates a local apply. A covered resistor edit
+          // never calls the provider. A merge that is not covered asks which resistor.
+          const coverage = assessRequestCoverage(prompt);
+          if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && !coverage.covered) {
+            const refused = new Error(resistorTargetUnclearMessage(decision.edit.ohmsText));
+            refused.code = 'RESISTOR_TARGET_UNCLEAR';
+            throw refused;
+          }
+          if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && coverage.covered) {
             const generated = await previewNativeChange({
               projectDir,
               prompt: generatePrompt,

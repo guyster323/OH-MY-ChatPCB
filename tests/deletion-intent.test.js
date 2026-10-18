@@ -702,11 +702,11 @@ test('the unclear hint example removes that reference instead of looping', () =>
   assertRefRemoval(`${ref} 삭제`, ref, 'i2c');
 });
 
-test('cancel in a resistor edit does not block the value change', () => {
+test('cancel in a resistor edit is leftover content and asks which resistor', () => {
   const decision = classifyExistingProjectRequest('set LED resistor 680 ohm. cancel is not this edit', REF_SPEC);
-  assert.equal(decision.mode, 'merge');
-  assert.equal(decision.edit?.kind, 'resistor');
-  assert.equal(decision.edit?.ohms, 680);
+  assert.equal(decision.mode, 'refuse');
+  assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(decision.edit, undefined);
 });
 
 // A removal and a value edit in one request used to apply only one of them.

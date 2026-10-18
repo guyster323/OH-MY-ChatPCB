@@ -10,6 +10,7 @@ import {
   appliesBeforeProvider,
   blocksBeforeProvider,
   classifyExistingProjectRequest,
+  splitResistorClauses,
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
@@ -531,18 +532,27 @@ test('a current-limiting phrase with no LED word applies before the provider', (
     assert.equal(decision.edit?.ohms, 470, prompt);
     assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
   }
-  const provider = [
+  const covered = [
+    'Change the status LED series resistor to 680 ohm',
+    'current-limiting resistor 680Ω and set the LED',
+    '전류 제한 저항 680Ω LED'
+  ];
+  for (const prompt of covered) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+  }
+  // Sense/shunt is another role. A cable keep is leftover. 1k is already the value.
+  // 0.1Ω is outside the LED resistor range.
+  const held = [
     'current sense resistor 0.1Ω',
     'change the sense resistor to 0.1Ω',
     'current-sense resistor 0.1Ω',
     'change R3 to 2.2kΩ and keep the 1 m cable',
-    'Change the status LED series resistor to 680 ohm',
     'set the LED resistor to 1kΩ',
-    'current-limiting resistor 680Ω and set the LED',
-    '전류 제한 저항 680Ω LED',
     'current limiting resistor 0.1Ω'
   ];
-  for (const prompt of provider) {
+  for (const prompt of held) {
     const decision = classifyExistingProjectRequest(prompt, spec);
     assert.equal(appliesBeforeProvider(prompt, decision), false, `${prompt} ${decision.mode} ${decision.code ?? ''}`);
   }
@@ -562,7 +572,7 @@ function noLedSpec() {
   };
 }
 
-test('current limiting on a board with no LED part stays on the provider path', () => {
+test('current limiting on a board with no LED series resistor asks which resistor', () => {
   const spec = noLedSpec();
   const localOnLed = [
     '전류제한 저항 680Ω으로',
@@ -574,10 +584,10 @@ test('current limiting on a board with no LED part stays on the provider path', 
     const before = structuredClone(spec);
     const decision = classifyExistingProjectRequest(prompt, spec);
     assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
-    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${decision.code ?? ''}`);
     assert.equal(decision.edit, undefined, prompt);
     assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
-    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
     assert.deepEqual(spec, before, prompt);
   }
   const ask = [
@@ -920,4 +930,88 @@ test('LED synonyms, plurals, and non-resistor quantities edit only the LED resis
   assert.equal(diode.mode, 'refuse');
   assert.equal(diode.code, 'RESISTOR_REF_UNSUPPORTED');
   assert.equal(diode.edit, undefined);
+});
+
+test("current limiting with the role in a following clause ('…, 풀업용', '…, for SDA') refuses and never applies R3", () => {
+  const spec = seriesSpec('1k');
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  for (const prompt of [
+    '전류 제한 저항 680Ω, 풀업용',
+    '전류제한 저항 680Ω, 리셋용',
+    'current limiting resistor to 680Ω, for SDA',
+    'current limiting resistor to 680Ω, it is for the pull-up'
+  ]) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
+});
+
+test('an LED clause plus an unknown role clause with its own value asks which resistor instead of silently dropping it', () => {
+  const spec = seriesSpec('1k');
+  const rows = [
+    'LED resistor to 680Ω, terminator to 120Ω',
+    'LED resistor to 680Ω, NRST 10k',
+    'LED resistor to 680Ω, BOOT0 10k',
+    'LED resistor to 680Ω, transistor 1k',
+    'LED resistor to 680Ω, opamp 10k',
+    'LED resistor to 680Ω, ADC 10k',
+    'LED 저항 680Ω으로, 풀 업 2.2k로',
+    'LED 저항 680Ω으로, 플업 2.2k로',
+    'LED 680Ω, terminator 120Ω',
+    'terminator 120Ω',
+    'NRST 10k',
+    'BOOT0 10k',
+    'transistor 1k',
+    'opamp 10k',
+    'ADC 10k',
+    '풀 업 2.2k',
+    '플업 2.2k'
+  ];
+  for (const prompt of rows) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+  const ledOnly = classifyExistingProjectRequest('LED 680Ω', spec);
+  assert.equal(ledOnly.mode, 'merge', ledOnly.code ?? '');
+  assert.equal(ledOnly.edit?.ohms, 680);
+  assert.equal(ledOnly.edit?.ref, 'R3');
+});
+
+test('가능하면 is an ignorable prefix and the LED resistor edit still merges', () => {
+  const spec = seriesSpec('1k');
+  for (const prompt of [
+    '가능하면 LED 저항 680Ω으로 바꿔줘',
+    '괜찮으면 LED 저항 680Ω으로 바꿔줘'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+});
+
+test('clause separators keep and and comma, and a digit comma stays inside the value', () => {
+  assert.equal(splitResistorClauses('LED resistor to 680Ω and pull-up to 2.2k').length, 2);
+  assert.equal(splitResistorClauses('LED resistor to 680Ω, pull-up to 2.2k').length, 2);
+  assert.equal(splitResistorClauses('LED resistor to 4,7k').length, 1);
 });

@@ -1,5 +1,10 @@
 import { isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
 import { normalizeMatchText } from './match-text.js';
+import { clauseAround, textHasForeignMilliRole, textHasLengthObject } from '../workflow/resistor-vocabulary.js';
+
+function compileRegExp(source, flags) {
+  return new RegExp(source, flags);
+}
 
 // Quantities in an LED prompt. `value` is normalized: volts, ohms, milliamps,
 // or a count. `unit` is the notation that was recognized (mV, VAC, ohm, …).
@@ -29,8 +34,8 @@ const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
 // An "R=" / "R1" label is collected separately. Each resistor candidate is
 // reported; more than one is refused by the discrete LED parser.
 const RESISTOR_CONTEXT_WORD = '(?:\\bohms?\\b|\\bresistors?\\b|저항(?:값|은|는|이|가|을|를|의)?|(?<![가-힣])옴)';
-const RESISTOR_CONTEXT_BEFORE = new RegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
-const RESISTOR_CONTEXT_AFTER = new RegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
+const RESISTOR_CONTEXT_BEFORE = compileRegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
+const RESISTOR_CONTEXT_AFTER = compileRegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
 
 const PRIORITY = {
   range: 0,
@@ -229,30 +234,15 @@ const MILLI_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\
 const MILLI_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
 const MILLI_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써)|に)/u;
 const MILLI_RESISTOR_OBJECT = /저항|抵抗|\bresistor\b|\bR\d+\b/iu;
-const MILLI_LENGTH_OBJECT = /(?:\bcables?\b|\bwires?\b|\blengths?\b|케이블|전선|길이|(?<![가-힣])선(?![가-힣]))/iu;
-const FOREIGN_MILLI_ROLE = /(?:\bpull[-\s]?ups?\b|\bpull[-\s]?downs?\b|\bterminations?\b|\bdebounce\b|\bdividers?\b|\bfeedback\b|\bgates?\b|\bbases?\b|\bbuttons?\b|\bshunts?\b|\bsenses?\b|\bresets?\b|\bboots?\b|\bbias(?:es)?\b|\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|풀업|풀다운|종단|디바운스|분압|피드백|게이트|베이스|버튼|션트|센스|리셋|바이어스)/iu;
 
 // Comma, "and", and "그리고" close a clause. A comma between digits (1,000) does not.
 export function clauseAroundToken(prompt, start, end) {
-  const text = String(prompt ?? '');
-  const split = /(?<!\d),(?!\d)|，|\band\b|그리고/giu;
-  let from = 0;
-  let to = text.length;
-  for (const mark of text.matchAll(split)) {
-    const at = mark.index ?? 0;
-    const next = at + mark[0].length;
-    if (next <= start) from = next;
-    else if (at >= end) {
-      to = at;
-      break;
-    }
-  }
-  return text.slice(from, to);
+  return clauseAround(prompt, start, end);
 }
 
 function milliEditObjectIsResistor(text, start, end) {
   const clause = clauseAroundToken(text, start, end);
-  if (MILLI_LENGTH_OBJECT.test(clause)) return false;
+  if (textHasLengthObject(clause)) return false;
   return MILLI_RESISTOR_OBJECT.test(clause);
 }
 
@@ -282,7 +272,7 @@ export function milliOwnedByForeignRole(prompt, start, end) {
   spans.push([from, text.length]);
   for (const [spanStart, spanEnd] of spans) {
     if (end <= spanStart || start >= spanEnd) continue;
-    if (FOREIGN_MILLI_ROLE.test(text.slice(spanStart, spanEnd))) return true;
+    if (textHasForeignMilliRole(text.slice(spanStart, spanEnd))) return true;
   }
   return false;
 }
@@ -343,7 +333,7 @@ function voltageToken(prompt, start, end, volts, multiplier, unitText) {
 }
 
 function collectRanges(prompt, candidates) {
-  const pattern = new RegExp(
+  const pattern = compileRegExp(
     `(?<![\\w.])${VOLTAGE_NUMBER}(?:\\s*${VOLTAGE_UNIT})?\\s*${RANGE_SEPARATOR}\\s*${VOLTAGE_NUMBER}\\s*${VOLTAGE_MULT}\\s*(${VOLTAGE_UNIT})${VOLTAGE_AC_TAIL}(?![A-Za-z])`,
     'g'
   );
@@ -383,7 +373,7 @@ function collectGlued(prompt, candidates) {
 }
 
 function collectVoltages(prompt, candidates) {
-  const pattern = new RegExp(
+  const pattern = compileRegExp(
     `${VOLTAGE_START}${VOLTAGE_SIGN}${VOLTAGE_NUMBER}\\s*${VOLTAGE_MULT}\\s*(${VOLTAGE_UNIT})${VOLTAGE_AC_TAIL}(?![A-Za-z])`,
     'g'
   );
@@ -460,7 +450,7 @@ function collectRkm(prompt, candidates) {
 // ± before a percent is tolerance, so that span is left for collectTolerance.
 // Voltage, current, and counts start on the same sign and outrank this span.
 function collectSignedResistors(prompt, candidates) {
-  const pattern = new RegExp(String.raw`(?<![\p{L}\p{N}_.+])[+\-\u2212\u2013\uFF0D\u00B1]\s*(?:${[
+  const pattern = compileRegExp(String.raw`(?<![\p{L}\p{N}_.+])[+\-\u2212\u2013\uFF0D\u00B1]\s*(?:${[
     String.raw`\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)`,
     String.raw`\d+[rRkKmM]\d+`,
     String.raw`\d+(?:\.\d+)?\s*meg`,
@@ -614,7 +604,7 @@ function collectCurrent(prompt, candidates) {
     '암페어',
     'a'
   ].join('|');
-  const pattern = new RegExp(`(?<![\\w.])([+\\-\\u2212]\\s*)?(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
+  const pattern = compileRegExp(`(?<![\\w.])([+\\-\\u2212]\\s*)?(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
   for (const match of prompt.matchAll(pattern)) {
     const amount = Number(match[2]);
     if (!Number.isFinite(amount) || amount < 0) continue;
@@ -770,7 +760,7 @@ function collectEnglishWordCounts(prompt, candidates) {
   const words = Object.keys(COUNT_WORD).join('|');
   // "two and a half LEDs" is a fractional count, same as "2.5 LEDs". The
   // integer word matcher would otherwise keep "two" and drop the half.
-  const fractional = new RegExp(`\\b(${words})\\s+and\\s+(?:a|one)\\s+half\\s+leds?\\b`, 'i');
+  const fractional = compileRegExp(`\\b(${words})\\s+and\\s+(?:a|one)\\s+half\\s+leds?\\b`, 'i');
   const fraction = fractional.exec(prompt);
   if (fraction) {
     const value = COUNT_WORD[fraction[1].toLowerCase()] + 0.5;
@@ -778,7 +768,7 @@ function collectEnglishWordCounts(prompt, candidates) {
     pushWordCountToken(candidates, prompt, start, start + fraction[0].length, value);
     return true;
   }
-  const englishLed = new RegExp(`\\b(${words})\\b(?:\\s+\\w+){0,3}\\s+leds?\\b`, 'i');
+  const englishLed = compileRegExp(`\\b(${words})\\b(?:\\s+\\w+){0,3}\\s+leds?\\b`, 'i');
   const english = englishLed.exec(prompt);
   if (!english) return false;
   const value = COUNT_WORD[english[1].toLowerCase()];
@@ -798,8 +788,8 @@ function collectEnglishWordCounts(prompt, candidates) {
 function collectKoreanWordCounts(prompt, candidates) {
   const words = [...KOREAN_COUNT_WORDS].sort((left, right) => right[0].length - left[0].length);
   for (const [word, value] of words) {
-    const after = new RegExp(`(?:leds?|엘이디|발광)[^\\d]{0,12}(${word}\\s*개)`, 'i');
-    const before = new RegExp(`(${word}\\s*개)(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
+    const after = compileRegExp(`(?:leds?|엘이디|발광)[^\\d]{0,12}(${word}\\s*개)`, 'i');
+    const before = compileRegExp(`(${word}\\s*개)(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
     const afterMatch = after.exec(prompt);
     const beforeMatch = before.exec(prompt);
     const match = afterMatch ?? beforeMatch;
@@ -826,7 +816,7 @@ function collectCounts(prompt, candidates) {
   const prefix = /(?<![\w.])[x\u00D7]\s*([+\-\u2212])?(\d+(?:[.,]\d+)?)(?![\w.])/gi;
   const gluedLed = /(?<![A-Za-z0-9])leds?[x\u00D7](\d+)(?![\w.])/gi;
   const words = Object.keys(COUNT_WORD).join('|');
-  const wordPcs = new RegExp(`(?<![A-Za-z])(${words})\\s+pcs(?![A-Za-z])`, 'gi');
+  const wordPcs = compileRegExp(`(?<![A-Za-z])(${words})\\s+pcs(?![A-Za-z])`, 'gi');
   for (const match of prompt.matchAll(led)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(fractionalLeds)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(marker)) pushCount(candidates, prompt, match, match[1], match[2]);
@@ -1048,7 +1038,7 @@ function resolveOverlaps(candidates) {
 
 function hasUncoveredVoltage(prompt, spans) {
   return UNCOVERED_VOLTAGE.some((source) => {
-    for (const match of prompt.matchAll(new RegExp(source, 'gi'))) {
+    for (const match of prompt.matchAll(compileRegExp(source, 'gi'))) {
       const start = match.index ?? 0;
       const end = start + match[0].length;
       const covered = spans.some((span) => start >= span.start && end <= span.end);
@@ -1098,7 +1088,7 @@ function keywordHits(prompt, sources, role) {
   const found = [];
   for (const source of sources) {
     const flags = source.flags.includes('g') ? source.flags : `${source.flags}g`;
-    for (const match of prompt.matchAll(new RegExp(source.source, flags))) {
+    for (const match of prompt.matchAll(compileRegExp(source.source, flags))) {
       const start = match.index ?? 0;
       found.push({ role, start, end: start + match[0].length });
     }

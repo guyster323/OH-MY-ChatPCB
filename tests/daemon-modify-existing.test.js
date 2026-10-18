@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomInt } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -388,29 +389,25 @@ test('modify on an applied project keeps I2C when ChatGPT only inspects', async 
       }, services);
       const liveAfter = await readFile(generated.files.schematic, 'utf8');
       assert.match(liveAfter, /I2C_CONNECTOR/);
-      const nudged = fetchStub.bodies.some((body) => /Call schematic\.patch now/.test(body));
-      assert.equal(nudged, true);
-      if (result.ok && hasI2c(result.result?.components)) {
-        assert.equal(hasOhm680(result.result.components), true);
-        assert.equal(result.result.requiresApproval, true);
-        const approved = await dispatchToolCall({
-          name: 'schematic.patch',
-          args: { projectDir, approved: true, patchId: result.result.patchId }
-        }, services);
-        assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
-        assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
-        const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
-        const schematic = await readFile(generated.files.schematic, 'utf8');
-        assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
-        assert.match(schematic, /I2C_CONNECTOR/);
-        assert.match(schematic, /680/);
-        return;
-      }
-      assert.equal(result.ok, false);
-      assert.match(liveAfter, /I2C_CONNECTOR/);
-      assert.doesNotMatch(liveAfter, /680/);
-      const message = `${result.error?.message ?? ''}`;
-      assert.match(message, /could not be applied|수정 사항을 적용할 수 없어요/);
+      assert.equal(liveAfter, liveBefore);
+      // The sentence is covered, so it applies locally and never nudges ChatGPT.
+      assert.equal(fetchStub.bodies.length, 0);
+      assert.equal(result.ok, true, result.error?.message);
+      assert.equal(result.result.source?.via, 'native-fallback');
+      assert.equal(hasI2c(result.result?.components), true, JSON.stringify(result.result.components));
+      assert.equal(hasOhm680(result.result.components), true, JSON.stringify(result.result.components));
+      assert.equal(result.result.requiresApproval, true);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: result.result.patchId }
+      }, services);
+      assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+      const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      assert.equal(spec.sourcePrompt, STM32_USER_PROMPT);
+      assert.match(schematic, /I2C_CONNECTOR/);
+      assert.match(schematic, /680/);
     });
   } finally {
     fetchStub.restore();
@@ -445,19 +442,8 @@ test('inspect then schematic.patch keeps I2C, applies 680 ohm, and leaves source
       assert.equal(result.ok, true, result.error?.message);
       assert.equal(hasI2c(result.result.components), true, JSON.stringify(result.result.components));
       assert.equal(hasOhm680(result.result.components), true, JSON.stringify(result.result.components));
-      assert.equal(result.result.source?.via, 'provider');
-      const first = JSON.parse(fetchStub.bodies[0]);
-      const promptText = first.input.map((item) => item.content ?? '').join('\n');
-      assert.match(promptText, /I2C_CONNECTOR/);
-      assert.equal(promptText.includes('returns results'), false);
-      assert.equal(first.tools.some((tool) => tool.name === 'schematic_generate'), false);
-      assert.equal(first.tools.some((tool) => tool.name === 'project_create'), false);
-      assert.equal(first.tools.some((tool) => tool.name === 'schematic_patch'), true);
-      assert.equal(first.tool_choice?.type, 'function');
-      assert.equal(first.tool_choice?.name, 'schematic_patch');
-      assert.ok(fetchStub.bodies.length >= 2);
-      const second = JSON.parse(fetchStub.bodies[1]);
-      assert.equal(second.input.some((item) => item.type === 'function_call_output'), true);
+      assert.equal(result.result.source?.via, 'native-fallback');
+      assert.equal(fetchStub.bodies.length, 0);
       const approved = await dispatchToolCall({
         name: 'schematic.patch',
         args: { projectDir, approved: true, patchId: result.result.patchId }
@@ -808,11 +794,12 @@ test('model-written schematic.patch prompt cannot remove I2C when the user kept 
   }
 });
 
-test('English resistor edit applies 680 ohm on a board that already has the resistor', async () => {
+test('a pronoun with no resistor target asks which resistor and does not apply the provider rewrite', async () => {
   const services = await transactionServices();
   try {
     await withBoardResistor(330, async ({ projectDir, generated }) => {
       const before = await readFile(generated.files.schematic, 'utf8');
+      let calls = 0;
       const preview = await dispatchToolCall({
         id: 'call_en_680',
         name: 'project.request',
@@ -823,24 +810,22 @@ test('English resistor edit applies 680 ohm on a board that already has the resi
         }
       }, {
         ...services,
-        ...codexPatchRewrite('Change the status LED resistor R3 from 330Ω to 680Ω. Do not delete the I2C.')
+        checkProviderAvailabilityImpl: async ({ provider }) => ({
+          provider,
+          command: 'codex',
+          available: true,
+          status: 'available'
+        }),
+        runProviderProcessImpl: async () => {
+          calls += 1;
+          throw new Error('provider must not be called');
+        }
       });
-      assert.equal(preview.ok, true, preview.error?.message);
-      assert.equal(preview.error?.code, undefined);
-      assert.equal(hasI2c(preview.result.components), true, JSON.stringify(preview.result.components));
-      assert.equal(hasOhm680(preview.result.components), true, JSON.stringify(preview.result.components));
-      assert.equal(removalBlocker(preview.result.review), null);
-      const approved = await dispatchToolCall({
-        name: 'schematic.patch',
-        args: { projectDir, approved: true, patchId: preview.result.patchId }
-      }, services);
-      assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
-      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
-      const schematic = await readFile(generated.files.schematic, 'utf8');
-      assert.match(schematic, /I2C_CONNECTOR/);
-      assert.match(schematic, /680/);
-      assert.equal(schematic.includes('330Ω'), false);
-      assert.notEqual(schematic, before);
+      assert.equal(calls, 0);
+      assert.equal(preview.ok, false, preview.error?.message);
+      assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR');
+      assert.match(preview.error?.message ?? '', /Nothing was changed|아무것도 바꾸지 않았어요/);
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
     });
   } finally {
     services.patchApprovalRegistry.disposeAll();
@@ -2020,8 +2005,7 @@ test('the pre-provider gate sends non-resistor edits to the provider and blocks 
     'LED 저항 0805로',
     'R3 0603',
     'R3 470?',
-    'why is R3 470',
-    'change R3 to 2.2kΩ and keep the 1 m cable'
+    'why is R3 470'
   ];
   const blocked = [
     ['pull-up 10k', 'RESISTOR_REF_UNSUPPORTED'],
@@ -2033,7 +2017,8 @@ test('the pre-provider gate sends non-resistor edits to the provider and blocks 
     ['LED 저항 330으로', 'RESISTOR_UNIT_REQUIRED'],
     ['set the LED resistor to 470', 'RESISTOR_UNIT_REQUIRED'],
     ['LED 저항 4m7으로', 'RESISTOR_VALUE_INVALID'],
-    ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID']
+    ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID'],
+    ['change R3 to 2.2kΩ and keep the 1 m cable', 'RESISTOR_TARGET_UNCLEAR']
   ];
   let calls = 0;
   const provider = {
@@ -2355,7 +2340,8 @@ test('LED synonyms/plurals and port noise edit R3', async () => {
         args: { provider: 'codex', projectDir, prompt }
       }, { ...services, ...codexNoPatch() });
       assert.equal(preview.ok, true, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
-      assert.equal(preview.result.providerFallback, 'built-in-draft', prompt);
+      assert.equal(preview.result.providerFallback, undefined, prompt);
+      assert.equal(preview.result.source?.via, 'native-fallback', prompt);
       const approved = await dispatchToolCall({
         name: 'schematic.patch',
         args: { projectDir, approved: true, patchId: preview.result.patchId }
@@ -2715,11 +2701,11 @@ test('a negated keep clause on the pull-up (\'풀업을 그대로 두지 말고 
   }
 });
 
-// Deterministic mix of one LED clause and non-LED role clauses. The board's 1k
+// Mix of one LED clause and non-LED or unknown role clauses. The board's 1k
 // is not in the pool, so a stale R3 cannot look like a foreign value.
-const MIXED_ROLE_SEED = 20261018;
+// Each run picks a seed. CHATPCB_PROP_SEED overrides it.
 const MIXED_ROLE_CASES = 200;
-const MIXED_ROLE_SEPARATORS = [', ', ' and ', '; ', ' then ', ' 그리고 ', ' 하고 ', ' 이고 ', ' 이랑 '];
+const MIXED_ROLE_SEPARATORS = [', ', ' and ', '; ', ' then ', ' 그리고 ', ' 하고 ', ' 이고 ', ' 이랑 ', '\n', ' / ', ' • ', ',\n'];
 const MIXED_ROLE_VALUES = [
   { en: '220Ω', ko: '220Ω', ohms: 220 },
   { en: '330Ω', ko: '330Ω', ohms: 330 },
@@ -2779,9 +2765,22 @@ function shuffleItems(rng, list) {
   return copy;
 }
 
+const PROP_DASHES = ['\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212', '\uFE58', '\uFE63', '\uFF0D'];
+const UNKNOWN_ROLE_WORDS = ['terminator', 'NRST', 'BOOT0', 'transistor', 'opamp', 'ADC', '플업', '풀 업'];
+
+function propertySeed() {
+  const raw = process.env.CHATPCB_PROP_SEED;
+  if (raw != null && String(raw).trim() !== '' && Number.isFinite(Number(raw))) return Number(raw) >>> 0;
+  return randomInt(0, 0x100000000);
+}
+
 function mixedRoleClause(role, value, lang) {
   if (lang === 'ko') return `${role.ko} 저항 ${value.ko}으로`;
   return `${role.en} resistor to ${value.en}`;
+}
+
+function fullwidthDigits(text) {
+  return String(text).replace(/[0-9]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) + 0xFEE0));
 }
 
 function mixedLedClause(value, lang) {
@@ -2790,38 +2789,110 @@ function mixedLedClause(value, lang) {
 }
 
 function buildMixedRoleCase(rng) {
-  const count = 1 + Math.floor(rng() * 3);
-  const values = shuffleItems(rng, MIXED_ROLE_VALUES).slice(0, count);
-  const roles = shuffleItems(rng, MIXED_ROLE_WORDS);
-  const lang = () => (rng() < 0.5 ? 'en' : 'ko');
-  const parts = [];
-  if (count === 1) {
-    parts.push({ text: mixedRoleClause(roles[0], values[0], lang()), ohms: values[0].ohms, label: values[0].en });
-  } else {
-    parts.push({ text: mixedLedClause(values[0], lang()), ohms: null, label: null });
-    for (let index = 1; index < count; index += 1) {
-      parts.push({
-        text: mixedRoleClause(roles[index - 1], values[index], lang()),
-        ohms: values[index].ohms,
-        label: values[index].en
-      });
+  const led = pickItem(rng, MIXED_ROLE_VALUES);
+  const foreignValue = pickItem(rng, MIXED_ROLE_VALUES.filter((item) => item.ohms !== led.ohms));
+  const role = pickItem(rng, MIXED_ROLE_WORDS);
+  const unknown = pickItem(rng, UNKNOWN_ROLE_WORDS);
+  const lang = rng() < 0.5 ? 'en' : 'ko';
+  const dash = pickItem(rng, PROP_DASHES);
+  const shape = Math.floor(rng() * 12);
+  const foreign = [{ ohms: foreignValue.ohms, label: foreignValue.en }];
+  let prompt;
+  if (shape === 0) {
+    const count = 1 + Math.floor(rng() * 3);
+    const values = shuffleItems(rng, MIXED_ROLE_VALUES).slice(0, count);
+    const roles = shuffleItems(rng, MIXED_ROLE_WORDS);
+    const parts = [];
+    if (count === 1) {
+      parts.push({ text: mixedRoleClause(roles[0], values[0], lang), ohms: values[0].ohms, label: values[0].en });
+    } else {
+      parts.push({ text: mixedLedClause(values[0], lang), ohms: null, label: null });
+      for (let index = 1; index < count; index += 1) {
+        parts.push({
+          text: mixedRoleClause(roles[index - 1], values[index], lang),
+          ohms: values[index].ohms,
+          label: values[index].en
+        });
+      }
     }
+    const ordered = shuffleItems(rng, parts);
+    return {
+      prompt: ordered.map((part) => part.text).join(pickItem(rng, MIXED_ROLE_SEPARATORS)),
+      foreign: ordered.filter((part) => part.ohms != null),
+      modelPrompt: `LED resistor to ${ordered.find((part) => part.ohms != null).label}`
+    };
   }
-  const ordered = shuffleItems(rng, parts);
-  const foreign = ordered.filter((part) => part.ohms != null);
+  if (shape === 1) {
+    const ledText = lang === 'ko' ? `LED 저항 ${led.ko}으로` : `LED resistor to ${led.en}`;
+    const roleText = lang === 'ko' ? `${role.ko}용` : `for ${role.en}`;
+    prompt = `${ledText}, ${roleText}`;
+    foreign[0] = { ohms: led.ohms, label: led.en };
+  } else if (shape === 2) {
+    prompt = lang === 'ko'
+      ? `${foreignValue.ko} ${role.ko}, LED 저항 ${led.ko}으로`
+      : `${foreignValue.en} ${role.en}, LED resistor to ${led.en}`;
+  } else if (shape === 3) {
+    prompt = lang === 'ko'
+      ? `전류제한 저항 ${led.ko}으로 (${role.ko}용)`
+      : `current limiting resistor to ${led.en} (for ${role.en})`;
+    foreign[0] = { ohms: led.ohms, label: led.en };
+  } else if (shape === 4) {
+    const ledText = lang === 'ko' ? `LED 저항 ${led.ko}` : `LED resistor ${led.en}`;
+    prompt = rng() < 0.5 ? `${unknown} ${foreignValue.en}` : `${ledText}, ${unknown} ${foreignValue.en}`;
+  } else if (shape === 5) {
+    prompt = lang === 'ko'
+      ? `LED 저항이랑 ${role.ko}, 둘 다 ${foreignValue.ko}`
+      : `LED resistor and ${role.en}, both ${foreignValue.en}`;
+  } else if (shape === 6) {
+    prompt = lang === 'ko'
+      ? `LED 저항과 ${role.ko} 저항을 각각 ${led.ko}, ${foreignValue.ko}로`
+      : `LED resistor and ${role.en} to ${led.en} and ${foreignValue.en} respectively`;
+  } else if (shape === 7) {
+    prompt = lang === 'ko'
+      ? `그거 ${led.ko}으로, ${role.ko}는 ${foreignValue.ko}`
+      : `set it to ${led.en} and the ${role.en} to ${foreignValue.en}`;
+  } else if (shape === 8) {
+    const pulled = `pull${dash}up`;
+    prompt = `LED resistor to ${led.en}${pickItem(rng, ['\n', ' • ', ' / '])}${pulled} to ${foreignValue.en}`;
+    foreign[0] = { ohms: foreignValue.ohms, label: foreignValue.en };
+  } else if (shape === 9) {
+    prompt = `LED 저항 ${fullwidthDigits(led.en)}\uFF0C풀업 ${fullwidthDigits(foreignValue.en)}`;
+  } else if (shape === 10) {
+    prompt = lang === 'ko'
+      ? `LED 저항 ${led.ko}으로\n• ${role.ko} ${foreignValue.ko}`
+      : `LED resistor to ${led.en}\n• ${role.en} ${foreignValue.en}`;
+  } else {
+    prompt = `LED resistor to ${led.en} / ${unknown} ${foreignValue.en}`;
+  }
   return {
-    prompt: ordered.map((part) => part.text).join(pickItem(rng, MIXED_ROLE_SEPARATORS)),
+    prompt,
     foreign,
     modelPrompt: `LED resistor to ${foreign[0].label}`
   };
+}
+
+function assertForeignValueDidNotLand(preview, calls, schematic, spice, before, prompt, seed) {
+  const where = `seed ${seed} ${prompt}`;
+  const r3 = schematicRefValue(schematic, 'R3');
+  const rled = rledOhms(spice);
+  const code = preview.error?.code ?? 'none';
+  assert.equal(calls, 0, `${where} provider calls ${calls} R3=${r3} RLED=${rled} code=${code}`);
+  assert.equal(preview.ok, false, `${where} code=${code}`);
+  assert.ok(code === 'RESISTOR_REF_UNSUPPORTED' || code === 'RESISTOR_TARGET_UNCLEAR', `${where} code=${code} ${preview.error?.message ?? ''}`);
+  assert.equal(r3, schematicRefValue(before.schematic, 'R3'), `${where} R3`);
+  assert.equal(rled, rledOhms(before.spice), `${where} RLED`);
+  assert.equal(schematic, before.schematic, where);
+  assert.equal(spice, before.spice, where);
 }
 
 test('random LED and non-LED role clauses never put a non-LED value on R3', { timeout: 20000 }, async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();
   const before = await materializeSeriesResistor(services, projectDir, generated);
-  const rng = mulberry32(MIXED_ROLE_SEED);
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
   const started = Date.now();
+  console.log(`property seed ${seed}`);
   try {
     for (let index = 0; index < MIXED_ROLE_CASES; index += 1) {
       const sample = buildMixedRoleCase(rng);
@@ -2839,16 +2910,16 @@ test('random LED and non-LED role clauses never put a non-LED value on R3', { ti
         );
         const schematic = await readFile(generated.files.schematic, 'utf8');
         const spice = await readFile(generated.files.spice, 'utf8');
-        const label = `${kind} #${index} ${sample.prompt}`;
-        assertResistorUntouched(preview, provider.calls(), schematic, spice, before, label);
+        const label = `${kind} #${index} seed ${seed} ${sample.prompt}`;
+        assertForeignValueDidNotLand(preview, provider.calls(), schematic, spice, before, label, seed);
         const rled = Number(rledOhms(spice));
         for (const role of sample.foreign) {
-          assert.notEqual(rled, role.ohms, `${label} RLED`);
+          assert.notEqual(rled, role.ohms, `${label} RLED took ${role.ohms}`);
           assert.equal(schematicRefValue(schematic, 'R3'), '1k', `${label} R3`);
         }
       }
     }
-    assert.ok(Date.now() - started < 5000, `property cases took ${Date.now() - started}ms`);
+    assert.ok(Date.now() - started < 5000, `property seed ${seed} took ${Date.now() - started}ms`);
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
@@ -2918,10 +2989,10 @@ test('current limiting resistor for the pull-up / on SDA refuses with RESISTOR_R
         args: { provider: 'codex', projectDir: noLedDir, prompt }
       }, { ...services, ...provider.impl });
       const schematic = await readFile(noLedPath, 'utf8');
-      assert.equal(provider.calls(), 1, `${prompt} provider calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
+      assert.equal(provider.calls(), 0, `${prompt} provider calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
       assert.equal(preview.ok, false, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
-      assert.equal(preview.error?.code, 'PROVIDER_NO_PATCH', `${prompt} ${preview.error?.code ?? ''}`);
-      assert.equal(String(preview.error?.code ?? '').startsWith('RESISTOR_'), false, prompt);
+      assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${preview.error?.code ?? ''}`);
+      assert.equal(preview.result?.patchId, undefined, prompt);
       assert.equal(schematic, noLedSchematic, prompt);
       assert.equal(schematicRefValue(schematic, 'R1'), '4.7k', prompt);
       assert.equal(schematicRefValue(schematic, 'R2'), '4.7k', prompt);
@@ -2931,6 +3002,69 @@ test('current limiting resistor for the pull-up / on SDA refuses with RESISTOR_R
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
     await rm(noLedDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+const GEN_NOLED_PROMPT = 'STM32 board with USB-C, 3.3V regulator, I2C sensor connector, UART header, SWD header, reset button';
+
+function resistorRefs(schematic) {
+  return Object.keys(referenceValues(schematic)).filter((ref) => /^R\d+$/i.test(ref)).sort();
+}
+
+// The test name still says "reaches the provider". The board has a status LED
+// symbol and no LED series resistor, so the edit is RESISTOR_TARGET_UNCLEAR
+// and the provider is not called. Approval cannot add a resistor.
+test('current limiting resistor on a generated board without a status LED reaches the provider and adds no resistor', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-gen-noled-'));
+  const generated = await generateMcuPeripheralProject({
+    projectDir,
+    prompt: GEN_NOLED_PROMPT,
+    projectName: 'stm32_no_led'
+  });
+  const beforeSpec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+  const beforeSchematic = await readFile(generated.files.schematic, 'utf8');
+  const beforeSpice = await readFile(generated.files.spice, 'utf8');
+  const beforeRefs = resistorRefs(beforeSchematic);
+  assert.equal(beforeSpec.peripherals.some((item) => item.kind === 'status-led' || item.kind === 'status-led-resistor'), false);
+  assert.match(beforeSchematic, /ChatPCB:STATUS_LED/);
+  assert.match(beforeSpice, /^RREG\s/m);
+  assert.match(beforeSpice, /^RBUTTON\s/m);
+  assert.doesNotMatch(beforeSpice, /^RLED\b/m);
+  const prompts = [
+    '전류제한 저항 680Ω으로',
+    'current limiting resistor to 680Ω',
+    'LED resistor to 680Ω',
+    '저항 680Ω으로 바꿔줘'
+  ];
+  try {
+    let index = 0;
+    for (const prompt of prompts) {
+      for (const kind of ['native', 'malicious']) {
+        index += 1;
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('current limiting resistor to 680Ω');
+        await writeFile(generated.files.schematic, beforeSchematic);
+        await writeFile(generated.files.spice, beforeSpice);
+        await writeFile(generated.files.spec, `${JSON.stringify(beforeSpec, null, 2)}\n`);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_gen_noled_${index}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        const where = `${kind} ${prompt}`;
+        assert.equal(provider.calls(), 0, `${where} calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
+        assert.equal(preview.ok, false, `${where} ${preview.error?.message ?? ''}`);
+        assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', `${where} ${preview.error?.code ?? ''}`);
+        assert.equal(preview.result?.patchId, undefined, where);
+        assert.deepEqual(resistorRefs(schematic), beforeRefs, where);
+        assert.equal(schematic, beforeSchematic, where);
+        assert.equal(spice, beforeSpice, where);
+      }
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });

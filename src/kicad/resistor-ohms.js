@@ -1,5 +1,7 @@
 // LED series resistors outside this window are refused by the edit path and by
 // SPICE validation. parseResistorOhms stays a pure parser; callers apply this.
+import { isRejectedUppercaseRkm } from '../workflow/resistor-vocabulary.js';
+
 export const LED_SERIES_RESISTOR_RANGE = Object.freeze({ min: 1, max: 10e6 });
 
 // A lone "m" is not a value (4m7, 4.7m). It is not mega. "M" and "meg" are mega.
@@ -53,6 +55,8 @@ function parseResistorOhmsAllowingZero(value) {
 
   const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
   if (rkm) {
+    // 4K7 is RKM. 4K60 is not: an uppercase K needs a single fraction digit.
+    if (isRejectedUppercaseRkm(text)) return null;
     const multiplier = resistorScale(rkm[2]);
     return multiplier == null ? null : formatResistorOhms(resistorNumber(rkm[1], rkm[3], multiplier));
   }
