@@ -400,10 +400,13 @@ function clearReconcileTimer(flight) {
 function armReconcileTimer(flight) {
   if (!flight) return;
   clearReconcileTimer(flight);
-  flight.reconcileTimer = setTimeout(() => {
+  const fire = () => {
     if (approveFlight !== flight || flight.settled || flight.phase !== 'checking') return;
     finishApproveReconcile('unknown');
-  }, reconcileTimeoutMs());
+  };
+  // The test hook runs this same callback instead of waiting out a short timer.
+  flight.reconcileFire = fire;
+  flight.reconcileTimer = setTimeout(fire, reconcileTimeoutMs());
 }
 
 function reconnectDelayMs() {
@@ -2867,6 +2870,14 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
         },
         activeId: document.activeElement?.id ?? ''
       };
+    },
+    expireReconcileTimer() {
+      const flight = approveFlight;
+      const fire = flight?.reconcileFire;
+      if (!flight?.reconcileTimer || typeof fire !== 'function') return false;
+      clearReconcileTimer(flight);
+      fire();
+      return flight.settled === true;
     }
   };
 }

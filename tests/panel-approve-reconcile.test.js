@@ -109,6 +109,20 @@ async function showReady(page, timeoutMs = 30000, preview = passedPreview) {
   await page.waitForFunction(() => document.querySelector('#approve-patch-button')?.disabled === false);
 }
 
+// Longer than a slow CI turn, so the checking copy cannot flip before it is asserted.
+const RECONCILE_HOLD_MS = 60000;
+
+async function holdReconcileTimeout(page) {
+  await page.evaluate((ms) => {
+    window.__chatpcbReconcileTimeoutMs = ms;
+  }, RECONCILE_HOLD_MS);
+}
+
+async function expireReconcileTimeout(page) {
+  const fired = await page.evaluate(() => window.__chatpcbTest.expireReconcileTimer());
+  assert.equal(fired, true, 'reconcile timer was not armed');
+}
+
 async function clickApply(page) {
   const before = await page.evaluate(() => window.__sent.length);
   await page.evaluate(() => document.querySelector('#approve-patch-button').click());
@@ -554,11 +568,12 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
     const silentStatus = await openPanel(browser, port);
     try {
       await showReady(silentStatus.page, 30);
-      await silentStatus.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 200; });
+      await holdReconcileTimeout(silentStatus.page);
       await installHost(silentStatus.page);
       await clickApply(silentStatus.page);
       await waitForCall(silentStatus.page, 'project.transaction.status');
       assert.equal(await requestText(silentStatus.page), en['patch.apply.checking']);
+      await expireReconcileTimeout(silentStatus.page);
       await silentStatus.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
       assert.equal(await silentStatus.page.locator('#request-status').getAttribute('data-state'), 'failed');
       assert.equal((await requestText(silentStatus.page)).includes('KiCad'), true);
@@ -582,13 +597,14 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
     const silentInspect = await openPanel(browser, port);
     try {
       await showReady(silentInspect.page, 30);
-      await silentInspect.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 350; });
+      await holdReconcileTimeout(silentInspect.page);
       await installHost(silentInspect.page);
       await clickApply(silentInspect.page);
       const statusCall = await waitForCall(silentInspect.page, 'project.transaction.status');
       await emitResult(silentInspect.page, statusCall.id, { transactions: [] });
       const inspectCall = await waitForCall(silentInspect.page, 'project.inspect');
       assert.equal(await requestText(silentInspect.page), en['patch.apply.checking']);
+      await expireReconcileTimeout(silentInspect.page);
       await silentInspect.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['patch.apply.unconfirmed'], { timeout: 3000 });
       await emitResult(silentInspect.page, inspectCall.id, {
         manifest: { freshness: { status: 'current' } },
@@ -772,11 +788,12 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
     const dropped = await openPanel(browser, port);
     try {
       await showReady(dropped.page, 30);
-      await dropped.page.evaluate(() => { window.__chatpcbReconcileTimeoutMs = 80; });
+      await holdReconcileTimeout(dropped.page);
       await clickApply(dropped.page);
       const statusCall = await waitForCall(dropped.page, 'project.transaction.status');
       assert.equal(statusCall.name, 'project.transaction.status');
       assert.equal(await requestText(dropped.page), en['patch.apply.checking']);
+      await expireReconcileTimeout(dropped.page);
       await dropped.page.waitForFunction((text) => (
         document.querySelector('#request-status')?.dataset.state === 'failed'
         && document.querySelector('#request-status')?.textContent === text
