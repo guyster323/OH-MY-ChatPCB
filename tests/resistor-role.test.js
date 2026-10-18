@@ -7,12 +7,14 @@ import test from 'node:test';
 import {
   applyExistingProjectEdit,
   applyMergedProjectEdit,
+  blocksBeforeProvider,
   classifyExistingProjectRequest,
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
   resistorTargetUnclearMessage,
   resistorValueAmbiguousMessage,
+  resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
 
@@ -583,4 +585,179 @@ test('denied role words leave the schematic and the LED net unchanged', async ()
   } finally {
     await rm(projectDir, { force: true, recursive: true });
   }
+});
+
+test('a polite request with a resistor target, an edit verb, and a unit value merges', () => {
+  const spec = seriesSpec('1k');
+  const mergeRows = [
+    'can you set the LED resistor to 680Ω?',
+    'LED 저항 680Ω으로 바꿔줄래?',
+    'LED 저항 680Ω으로 바꿔 줄 수 있어?',
+    'could you change R3 to 680Ω?',
+    'LED 저항 680Ω으로 바꿔주실래요?',
+    'LED 저항 680Ω으로 해줄래?',
+    'LED 저항 680Ω으로 할 수 있어?',
+    'R3를 680Ω으로 바꿔줄래?',
+    'would you change the LED resistor to 680Ω, ok?',
+    'please set the LED resistor to 680Ω?'
+  ];
+  for (const prompt of mergeRows) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+
+  const providerRows = [
+    'why is R3 330?',
+    'what does R3 do?',
+    'R3가 뭐야?',
+    'R3는 왜 330이야?',
+    'how about R3 = 2.2k?',
+    'LED 저항 1kΩ 괜찮아?',
+    'R3 470?',
+    'is 1kΩ ok for the LED resistor?',
+    'LED 저항 10k로 바꿔도 돼?',
+    'LED 저항 680Ω 가능?',
+    'can you add a 1kΩ resistor?'
+  ];
+  for (const prompt of providerRows) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+
+  const invalid = classifyExistingProjectRequest('can you set the LED resistor to 0R?', spec);
+  assert.equal(invalid.mode, 'refuse');
+  assert.equal(invalid.code, 'RESISTOR_VALUE_INVALID');
+  assert.equal(invalid.message, resistorValueOutOfRangeMessage());
+  assert.equal(invalid.edit, undefined);
+  assert.equal(blocksBeforeProvider('can you set the LED resistor to 0R?', invalid), true);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+
+  const pullUp = classifyExistingProjectRequest('could you change the pull-up to 10k?', spec);
+  assert.equal(pullUp.mode, 'refuse');
+  assert.equal(pullUp.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(pullUp.message, resistorRefUnsupportedMessage('R3'));
+  assert.equal(pullUp.edit, undefined);
+  assert.equal(blocksBeforeProvider('could you change the pull-up to 10k?', pullUp), true);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'R4'), '4.7k');
+});
+
+test('a Korean keep clause hides that role and still edits only the LED resistor', () => {
+  const spec = seriesSpec('1k');
+  const rows = [
+    'I2C는 그대로 두고 LED 저항 680옴으로',
+    '풀업은 그대로 두고 LED 저항 680Ω으로 바꿔줘',
+    '풀업 저항은 건드리지 말고 LED 저항 680Ω으로',
+    'CC 저항은 유지하고 LED 저항 680Ω으로 바꿔줘',
+    '풀업 빼고 LED 저항 680Ω으로',
+    'I2C는 놔두고 LED 저항 680Ω으로'
+  ];
+  for (const prompt of rows) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+
+  const keptLed = classifyExistingProjectRequest('LED 저항은 그대로 두고 풀업 저항 10k로', spec);
+  assert.equal(keptLed.mode, 'refuse');
+  assert.equal(keptLed.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(keptLed.edit, undefined);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+
+  const keptLedValue = classifyExistingProjectRequest('LED 저항은 그대로 두고 680Ω으로', spec);
+  assert.equal(keptLedValue.mode, 'refuse');
+  assert.equal(keptLedValue.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(keptLedValue.edit, undefined);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+
+  const touch = classifyExistingProjectRequest('R3 680Ω, R4는 건드리지 마', spec);
+  assert.equal(touch.mode, 'refuse');
+  assert.equal(touch.code, 'RESISTOR_REF_AMBIGUOUS');
+  assert.equal(touch.edit, undefined);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'R4'), '4.7k');
+});
+
+test('LED synonyms, plurals, and non-resistor quantities edit only the LED resistor', () => {
+  const spec = seriesSpec('1k');
+  const ledOnly = ledOnlySpec('1k');
+  const mergeRows = [
+    ['엘예디 저항 680Ω으로', spec, 680, '680Ω'],
+    ['발광 다이오드 저항 680Ω으로', spec, 680, '680Ω'],
+    ['LED들 저항 680Ω으로', spec, 680, '680Ω'],
+    ['LED들의 저항 680Ω으로', spec, 680, '680Ω'],
+    ['port 8080 LED 저항 330Ω', spec, 330, '330Ω'],
+    ['포트 8080 LED 저항 330Ω', spec, 330, '330Ω'],
+    ['pin 13 LED 저항 330Ω', spec, 330, '330Ω'],
+    ['GPIO 4 LED 저항 330Ω', spec, 330, '330Ω'],
+    ['3.3V LED 저항 330Ω', spec, 330, '330Ω'],
+    ['100nF LED 저항 330Ω', spec, 330, '330Ω'],
+    ['port 8080 저항 330Ω', ledOnly, 330, '330Ω']
+  ];
+  for (const [prompt, board, ohms, label] of mergeRows) {
+    const decision = classifyExistingProjectRequest(prompt, board);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    const next = applyExistingProjectEdit(board, decision.edit);
+    assert.equal(componentValue(next, 'R3'), label, prompt);
+    assert.equal(componentValue(board, 'R3'), '1k', prompt);
+  }
+
+  const barePort = classifyExistingProjectRequest('port 8080 저항 330Ω', spec);
+  assert.equal(barePort.mode, 'refuse');
+  assert.equal(barePort.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(barePort.edit, undefined);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+
+  for (const board of [spec, ledOnly]) {
+    for (const prompt of ['그 저항 10k로', '이 저항 10k로', 'that resistor to 10k', 'this resistor to 10k']) {
+      const decision = classifyExistingProjectRequest(prompt, board);
+      assert.equal(decision.mode, 'refuse', prompt);
+      assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${decision.code ?? ''}`);
+      assert.equal(decision.edit, undefined, prompt);
+      assert.equal(componentValue(board, 'R3'), '1k', prompt);
+    }
+  }
+
+  for (const board of [spec, ledOnly]) {
+    const plain = classifyExistingProjectRequest('이 저항', board);
+    assert.equal(plain.mode, 'refuse');
+    assert.notEqual(plain.code, 'RESISTOR_REF_UNSUPPORTED');
+    assert.equal(plain.edit, undefined);
+    assert.equal(componentValue(board, 'R3'), '1k');
+  }
+
+  const counted = classifyExistingProjectRequest('LED 3개, 저항 330Ω', spec);
+  assert.equal(counted.mode, 'refuse');
+  assert.equal(counted.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(counted.edit, undefined);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+
+  const diode = classifyExistingProjectRequest('다이오드 저항 330Ω으로', spec);
+  assert.equal(diode.mode, 'refuse');
+  assert.equal(diode.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(diode.edit, undefined);
 });

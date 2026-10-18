@@ -574,6 +574,9 @@ const PRE_PROVIDER_REMOVAL_CODES = new Set([
 ]);
 const RESISTOR_EDIT_VERB = /(?:\b(?:change|set|update|make|modify|to)\b|바꿔|변경|수정|(?<!기준)으로|(?<!으)로(?!부터|서|써)|を|に)/iu;
 const OPEN_QUESTION = /[?？]|뭐|무엇|왜|어떻게|어떡|몇|괜찮|\b(?:why|what|how|which)\b/iu;
+// Permission and interrogative words stay questions even when a value is present.
+// A bare "?" does not: "can you set the LED resistor to 680Ω?" is still an edit.
+const QUESTION_SIGNAL = /뭐|무엇|왜|어떻게|어떡|몇|괜찮|가능|\b(?:why|what|how|which)\b|(?:도|해도)\s*돼/iu;
 
 function hasResistorEditVerb(text) {
   return RESISTOR_EDIT_VERB.test(text);
@@ -1597,7 +1600,26 @@ function maskGuardObjects(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const chars = normalized.split('');
   for (const clause of splitClauses(normalized)) maskClauseGuards(chars, normalized, clause);
+  // "두고" splits on 고, so the whole keep phrase is masked on the raw text.
+  // "건드리지 마" is not one of these; only "말고" closes that phrase.
+  maskKoreanKeepClauses(chars, normalized);
   return chars.join('');
+}
+
+const KOREAN_KEEP_CLAUSE = /(?<![가-힣])(?:그대로\s*두고|건드리지\s*말고|유지하고|놔\s*두고|빼고)/gu;
+
+function maskKoreanKeepClauses(chars, text) {
+  for (const match of text.matchAll(KOREAN_KEEP_CLAUSE)) {
+    const phraseStart = match.index;
+    const phraseEnd = phraseStart + match[0].length;
+    const before = text.slice(0, phraseStart);
+    let boundary = -1;
+    for (const mark of [',', '.', '?', '!', '\n', '。', '？', '！']) {
+      boundary = Math.max(boundary, before.lastIndexOf(mark));
+    }
+    blankWordsBefore(chars, text, boundary < 0 ? 0 : boundary + 1, phraseStart);
+    blankRange(chars, phraseStart, phraseEnd);
+  }
 }
 
 function maskClauseGuards(chars, text, clause) {
@@ -1645,17 +1667,37 @@ function blankRange(chars, from, to) {
 // front of the noun is refused. Words kept with 그대로/keep do not count.
 // One LED noun and one other noun ask which resistor.
 const RESISTOR_NOUN = /저항|抵抗|\bresistor\b/giu;
-const ALLOW_WORD = /^(?:leds?|엘이디|status|상태|series|직렬|current(?:-limiting)?|limiting|전류제한|전류|제한)$/iu;
-const FUNCTION_WORD = /^(?:a|an|the|of|for|to|from|into|onto|on|in|at|by|with|and|or|its|this|that|my|our|please|only|just|value|it|them|one|also|now|too)$/iu;
+const ALLOW_WORD = /^(?:leds?|엘이디|엘예디|발광다이오드|발광|다이오드|status|상태|series|직렬|current(?:-limiting)?|limiting|전류제한|전류|제한)$/iu;
+const FUNCTION_WORD = /^(?:a|an|the|of|for|to|from|into|onto|on|in|at|by|with|and|or|its|my|our|please|only|just|value|it|them|one|also|now|too)$/iu;
+const DEMONSTRATIVE = /^(?:그|저|이|this|that|these|those)$/iu;
 const EDIT_VERB_WORD = /^(?:change|set|update|make|modify|changing|setting)$/iu;
 const WORD_PARTICLE = /(?:이랑|으로|에서|에게|은|는|을|를|과|와|의|도|만|랑|이|가|요|에|로|の|を|が|は|に)$/u;
 
 function foreignRoleDecision(text, spec, resistor) {
-  const kind = foreignRoleKind(maskGuardObjects(text));
+  const masked = maskGuardObjects(text);
+  const kind = foreignRoleKind(masked);
+  // Keeping the LED resistor drops that noun. A later value must not land on R3.
+  if (ledResistorWasKept(text, masked) && kind !== 'foreign' && kind !== 'ambiguous' && resistor?.kind === 'resistor') {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_TARGET_UNCLEAR',
+      message: resistorTargetUnclearMessage(resistor.ohmsText)
+    };
+  }
   if (!kind) return null;
+  // "그 저항" and "that resistor" name no role. A saved ref still does.
+  if (kind === 'demonstrative') {
+    if (namesSeriesRef(text, spec) && !nounModifierIsForeign(masked)) return null;
+    if (resistor?.kind !== 'resistor') return null;
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_TARGET_UNCLEAR',
+      message: resistorTargetUnclearMessage(resistor.ohmsText)
+    };
+  }
   // "R3 680Ω" names the series part even when the sentence has other words
   // and no LED phrase. A foreign word on the resistor noun still refuses.
-  if (namesSeriesRef(text, spec) && kind !== 'ambiguous' && !nounModifierIsForeign(maskGuardObjects(text))) return null;
+  if (namesSeriesRef(text, spec) && kind !== 'ambiguous' && !nounModifierIsForeign(masked)) return null;
   if (kind === 'bare' && !hasOtherResistorRole(spec)) return null;
   // "저항 12만" has no ohm value. Keep the unit question. A real value asks which resistor.
   if (kind === 'bare' && resistor?.kind !== 'resistor') return null;
@@ -1671,6 +1713,10 @@ function foreignRoleDecision(text, spec, resistor) {
     code: 'RESISTOR_REF_UNSUPPORTED',
     message: resistorRefUnsupportedMessage(seriesResistorRef(spec))
   };
+}
+
+function ledResistorWasKept(text, masked) {
+  return resistorNounKinds(text).includes('led') && !resistorNounKinds(masked).includes('led');
 }
 
 function namesSeriesRef(text, spec) {
@@ -1691,18 +1737,24 @@ function nounModifierIsForeign(text) {
   return false;
 }
 
-function foreignRoleKind(text) {
+function resistorNounKinds(text) {
   RESISTOR_NOUN.lastIndex = 0;
-  const nouns = [...text.matchAll(RESISTOR_NOUN)];
-  if (nouns.length === 0) return bareNonLedSubject(text);
+  const nouns = [...String(text ?? '').matchAll(RESISTOR_NOUN)];
   const kinds = [];
   let previous = 0;
   for (const noun of nouns) {
     kinds.push(classifyModifiers(wordsNearNoun(text, noun, previous)));
     previous = noun.index + noun[0].length;
   }
-  if (kinds.includes('led') && kinds.includes('foreign')) return 'ambiguous';
+  return kinds;
+}
+
+function foreignRoleKind(text) {
+  const kinds = resistorNounKinds(text);
+  if (kinds.length === 0) return bareNonLedSubject(text);
+  if (kinds.includes('led') && (kinds.includes('foreign') || kinds.includes('demonstrative'))) return 'ambiguous';
   if (kinds.includes('foreign')) return 'foreign';
+  if (kinds.includes('demonstrative')) return 'demonstrative';
   if (kinds.every((kind) => kind === 'bare')) return 'bare';
   return null;
 }
@@ -1734,13 +1786,31 @@ function modifiersBefore(words) {
   for (let index = words.length - 1; index >= 0; index -= 1) {
     const raw = words[index];
     if (isPhraseBoundary(raw) || isClauseBreak(raw)) break;
-    if (isValueWord(raw)) continue;
+    if (isValueWord(raw) || isQuantityNoise(words, index)) continue;
     const stemmed = stemWord(raw);
+    if (isDemonstrative(stemmed)) {
+      picked.push(raw);
+      continue;
+    }
     if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
     picked.push(raw);
     if (!ALLOW_WORD.test(stemmed)) break;
   }
   return picked.reverse();
+}
+
+// "port 8080" and "3 개" are not resistor roles. A port word with no number still is.
+function isQuantityNoise(words, index) {
+  const stemmed = stemWord(words[index]);
+  const prev = index > 0 ? words[index - 1] : '';
+  const next = index + 1 < words.length ? words[index + 1] : '';
+  if (/^(?:ports?|pins?|gpios?|포트|핀)$/iu.test(stemmed)) return isValueWord(prev) || isValueWord(next);
+  if (/^(?:개|번)$/u.test(stemmed)) return isValueWord(prev);
+  return false;
+}
+
+function isDemonstrative(word) {
+  return DEMONSTRATIVE.test(word);
 }
 
 function isClauseBreak(word) {
@@ -1763,6 +1833,12 @@ function wordsAfterNoun(text, noun) {
     if (isValueWord(word)) break;
     const stemmed = stemWord(word);
     if (/^(?:저항|抵抗|resistor)$/iu.test(stemmed)) break;
+    // "저항이 680Ω" glues the subject particle 이 onto the noun. "이 저항" does not.
+    if (match.index === 0 && /^(?:이|가|은|는|을|를)$/u.test(stemmed)) continue;
+    if (isDemonstrative(stemmed)) {
+      kept.push(word);
+      continue;
+    }
     if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) {
       kept.push(word);
       continue;
@@ -1776,34 +1852,45 @@ function wordsAfterNoun(text, noun) {
 
 function classifyModifiers(words) {
   const content = [];
+  let demonstrative = false;
   for (const raw of words) {
     if (isValueWord(raw) || isPhraseBoundary(raw)) continue;
     const stemmed = stemWord(raw);
+    if (isDemonstrative(stemmed)) {
+      demonstrative = true;
+      continue;
+    }
     if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
     content.push(stemmed);
   }
-  if (content.length === 0) return 'bare';
+  if (content.length === 0) return demonstrative ? 'demonstrative' : 'bare';
   if (isAllowedLedContext(content)) return 'led';
   return 'foreign';
 }
 
 function isAllowedLedContext(content) {
   if (!content.every((word) => ALLOW_WORD.test(word))) return false;
-  if (content.some((word) => /^(?:leds?|엘이디|status|상태|series|직렬)$/iu.test(word))) return true;
+  if (content.some((word) => /^(?:leds?|엘이디|엘예디|status|상태|series|직렬)$/iu.test(word))) return true;
   const joined = content.map((word) => word.toLowerCase().replace(/-/g, ' ')).join(' ');
   const compact = content.join('').toLowerCase().replace(/-/g, '');
-  return /current\s+limiting/.test(joined) || compact.includes('전류제한');
+  return /current\s+limiting/.test(joined) || compact.includes('전류제한') || compact.includes('발광다이오드');
 }
 
 function stemWord(word) {
-  let text = String(word ?? '').replace(/^[("'`[]+|[\])"'`,.:;]+$/gu, '');
+  let text = String(word ?? '').replace(/^[("'`[?？]+|[\])"'`,.:;?？]+$/gu, '');
   if (!text) return '';
-  return text.replace(WORD_PARTICLE, (match, offset) => (offset === 0 ? match : ''));
+  text = text.replace(WORD_PARTICLE, (match, offset) => (offset === 0 ? match : ''));
+  if (text.length > 1 && text.endsWith('들')) {
+    const bare = text.slice(0, -1);
+    if (/^(?:leds?|엘이디|엘예디)$/iu.test(bare)) return bare;
+  }
+  return text;
 }
 
 function isIgnorableWord(word) {
   if (FUNCTION_WORD.test(word) || EDIT_VERB_WORD.test(word)) return true;
-  if (/^(?:으로|로|을|를|이|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|그냥|값|기존|현재|existing|currently)$/iu.test(word)) return true;
+  if (/^(?:can|could|would|will|shall|you|your|kindly)$/iu.test(word)) return true;
+  if (/^(?:으로|로|을|를|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|줄래|줄래요|주실래요|해줄래|해주세요|있어|있나|있을까요|줄|수|할|줘|그냥|값|기존|현재|existing|currently)$/iu.test(word)) return true;
   return /(?:바꿔|바꾸|변경|수정)/u.test(word);
 }
 
@@ -2309,9 +2396,20 @@ const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Z
 // A resistor edit is read only from this text. Candidates go through
 // parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
 // without a transition marker ask which value. A token the parser rejects is invalid.
+// A resistor target, an edit verb, and a unit-bound value are an edit.
+// "why", "괜찮아", "가능", and "바꿔도 돼" stay questions. A trailing "?" does not.
+function questionStopsResistorEdit(text) {
+  if (!OPEN_QUESTION.test(text)) return false;
+  if (QUESTION_SIGNAL.test(text)) return true;
+  if (!hasResistorEditVerb(text)) return true;
+  if (!hasResistorTargetText(text) && !BARE_ROLE.test(text)) return true;
+  if (!scanResistorTokens(text).some((token) => token.attempt)) return true;
+  return false;
+}
+
 function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
-  if (OPEN_QUESTION.test(normalized)) return null;
+  if (questionStopsResistorEdit(normalized)) return null;
   const namedRefs = resistorReferenceTokens(normalized);
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);

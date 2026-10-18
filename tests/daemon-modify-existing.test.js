@@ -2077,3 +2077,308 @@ test('the pre-provider gate sends non-resistor edits to the provider and blocks 
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
+
+async function readGeneratedBytes(generated) {
+  return {
+    schematic: await readFile(generated.files.schematic, 'utf8'),
+    spice: await readFile(generated.files.spice, 'utf8'),
+    spec: await readFile(generated.files.spec, 'utf8'),
+    board: generated.files.board ? await readFile(generated.files.board, 'utf8') : null
+  };
+}
+
+async function writeGeneratedBytes(generated, bytes) {
+  await writeFile(generated.files.schematic, bytes.schematic);
+  await writeFile(generated.files.spice, bytes.spice);
+  await writeFile(generated.files.spec, bytes.spec);
+  if (generated.files.board && bytes.board != null) await writeFile(generated.files.board, bytes.board);
+}
+
+function spiceWithoutLed(spice) {
+  return spice.split('\n').filter((line) => !/^RLED\b/.test(line)).join('\n');
+}
+
+function referenceValues(schematic) {
+  const values = {};
+  for (const match of schematic.matchAll(/\(property "Reference" "([A-Za-z]{1,3}\d+)"[\s\S]*?\(property "Value" "([^"]*)"/g)) {
+    values[match[1]] = match[2];
+  }
+  return values;
+}
+
+function assertOnlySeriesValueChanged(schematic, beforeSchematic, label, spice, beforeSpice, ohms, prompt) {
+  const next = referenceValues(schematic);
+  const prev = referenceValues(beforeSchematic);
+  assert.equal(next.R3, label, prompt);
+  assert.deepEqual(Object.keys(next).sort(), Object.keys(prev).sort(), prompt);
+  for (const ref of Object.keys(prev)) {
+    if (ref === 'R3') continue;
+    assert.equal(next[ref], prev[ref], `${prompt} ${ref}`);
+  }
+  assert.match(spice, new RegExp(`^RLED\\s+\\S+\\s+\\S+\\s+${ohms}$`, 'm'), prompt);
+  assert.equal(spiceWithoutLed(spice), spiceWithoutLed(beforeSpice), prompt);
+}
+
+async function materializeSeriesResistor(services, projectDir, generated) {
+  const preview = await dispatchToolCall({
+    id: `call_materialize_${projectDir.length}`,
+    name: 'project.request',
+    args: { provider: 'codex', projectDir, prompt: 'set the LED resistor to 1kΩ' }
+  }, { ...services, ...codexNoPatch() });
+  assert.equal(preview.ok, true, preview.error?.message ?? '');
+  const approved = await dispatchToolCall({
+    name: 'schematic.patch',
+    args: { projectDir, approved: true, patchId: preview.result.patchId }
+  }, services);
+  assert.equal(approved.result?.applied, true, JSON.stringify(approved.result?.reason ?? approved.error));
+  const before = await readGeneratedBytes(generated);
+  assert.equal(schematicRefValue(before.schematic, 'R3'), '1k');
+  assert.match(before.spice, /^RLED\s+\S+\s+\S+\s+1000$/m);
+  return before;
+}
+
+test('a polite question with an LED target, edit verb, and unit value applies R3=680Ω and RLED 680', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    'can you set the LED resistor to 680Ω?',
+    'LED 저항 680Ω으로 바꿔줄래?',
+    'LED 저항 680Ω으로 바꿔 줄 수 있어?',
+    'could you change R3 to 680Ω?'
+  ];
+  const paths = [
+    ['patch', codexPatchRewrite('Change the LED resistor to 680Ω.')],
+    ['native', codexNoPatch()]
+  ];
+  try {
+    let index = 0;
+    for (const prompt of prompts) {
+      for (const [pathName, provider] of paths) {
+        index += 1;
+        await writeGeneratedBytes(generated, before);
+        const preview = await dispatchToolCall({
+          id: `call_polite_${index}`,
+          name: 'project.request',
+          args: { provider: 'codex', projectDir, prompt }
+        }, { ...services, ...provider });
+        assert.equal(preview.ok, true, `${pathName} ${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+        const approved = await dispatchToolCall({
+          name: 'schematic.patch',
+          args: { projectDir, approved: true, patchId: preview.result.patchId }
+        }, services);
+        assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+        assert.equal(approved.result.applied, true, `${pathName} ${prompt} ${JSON.stringify(approved.result?.reason)}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        assertOnlySeriesValueChanged(schematic, before.schematic, '680Ω', spice, before.spice, '680', `${pathName} ${prompt}`);
+        assert.match(schematic, /I2C_CONNECTOR/, prompt);
+      }
+    }
+
+    let calls = 0;
+    const counting = {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({
+        provider,
+        command: 'codex',
+        available: true,
+        status: 'available'
+      }),
+      runProviderProcessImpl: async () => {
+        calls += 1;
+        return {
+          exitCode: 0,
+          stderr: '',
+          events: [
+            createEnvelope('tool.call', {
+              id: 'call_polite_should_not_apply',
+              name: 'schematic.patch',
+              args: { prompt: 'Change the LED resistor to 680Ω.' }
+            })
+          ]
+        };
+      }
+    };
+    const blocked = [
+      ['can you set the LED resistor to 0R?', 'RESISTOR_VALUE_INVALID', 0],
+      ['could you change the pull-up to 10k?', 'RESISTOR_REF_UNSUPPORTED', 0],
+      ['can you add a 1kΩ resistor?', 'PROVIDER_NO_PATCH', 1],
+      ['how about R3 = 2.2k?', 'PROVIDER_NO_PATCH', 1],
+      ['LED 저항 1kΩ 괜찮아?', 'PROVIDER_NO_PATCH', 1],
+      ['R3 470?', 'PROVIDER_NO_PATCH', 1]
+    ];
+    for (const [prompt, code, expectedCalls] of blocked) {
+      calls = 0;
+      await writeGeneratedBytes(generated, before);
+      const preview = await dispatchToolCall({
+        id: `call_polite_block_${prompt.length}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...counting });
+      assert.equal(calls, expectedCalls, prompt);
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, code, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.equal(await readFile(generated.files.schematic, 'utf8'), before.schematic, prompt);
+      assert.equal(await readFile(generated.files.spice, 'utf8'), before.spice, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('Korean keep clause applies only R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    'I2C는 그대로 두고 LED 저항 680옴으로',
+    '풀업은 그대로 두고 LED 저항 680Ω으로 바꿔줘',
+    '풀업 저항은 건드리지 말고 LED 저항 680Ω으로',
+    'CC 저항은 유지하고 LED 저항 680Ω으로 바꿔줘',
+    '풀업 빼고 LED 저항 680Ω으로',
+    'I2C는 놔두고 LED 저항 680Ω으로'
+  ];
+  const paths = [
+    ['patch', codexPatchRewrite('Change the LED resistor to 680Ω.')],
+    ['native', codexNoPatch()]
+  ];
+  try {
+    let index = 0;
+    for (const prompt of prompts) {
+      for (const [pathName, provider] of paths) {
+        index += 1;
+        await writeGeneratedBytes(generated, before);
+        const preview = await dispatchToolCall({
+          id: `call_keep_${index}`,
+          name: 'project.request',
+          args: { provider: 'codex', projectDir, prompt }
+        }, { ...services, ...provider });
+        assert.equal(preview.ok, true, `${pathName} ${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+        const approved = await dispatchToolCall({
+          name: 'schematic.patch',
+          args: { projectDir, approved: true, patchId: preview.result.patchId }
+        }, services);
+        assert.equal(approved.result.applied, true, `${pathName} ${prompt} ${JSON.stringify(approved.result?.reason)}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        assertOnlySeriesValueChanged(schematic, before.schematic, '680Ω', spice, before.spice, '680', `${pathName} ${prompt}`);
+      }
+    }
+
+    let calls = 0;
+    const blockedProvider = {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({
+        provider,
+        command: 'codex',
+        available: true,
+        status: 'available'
+      }),
+      runProviderProcessImpl: async () => {
+        calls += 1;
+        throw new Error('provider must not be called');
+      }
+    };
+    const blocked = [
+      ['LED 저항은 그대로 두고 풀업 저항 10k로', 'RESISTOR_REF_UNSUPPORTED'],
+      ['LED 저항은 그대로 두고 680Ω으로', 'RESISTOR_TARGET_UNCLEAR']
+    ];
+    for (const [prompt, code] of blocked) {
+      calls = 0;
+      await writeGeneratedBytes(generated, before);
+      const preview = await dispatchToolCall({
+        id: `call_keep_block_${prompt.length}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...blockedProvider });
+      assert.equal(calls, 0, prompt);
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, code, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.equal(schematicRefValue(await readFile(generated.files.schematic, 'utf8'), 'R3'), schematicRefValue(before.schematic, 'R3'), prompt);
+      assert.equal(await readFile(generated.files.spice, 'utf8'), before.spice, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('LED synonyms/plurals and port noise edit R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const rows = [
+    ['엘예디 저항 680Ω으로', '680Ω', '680'],
+    ['발광 다이오드 저항 680Ω으로', '680Ω', '680'],
+    ['LED들 저항 680Ω으로', '680Ω', '680'],
+    ['LED들의 저항 680Ω으로', '680Ω', '680'],
+    ['port 8080 LED 저항 330Ω', '330Ω', '330'],
+    ['포트 8080 LED 저항 330Ω', '330Ω', '330'],
+    ['pin 13 LED 저항 330Ω', '330Ω', '330'],
+    ['GPIO 4 LED 저항 330Ω', '330Ω', '330'],
+    ['3.3V LED 저항 330Ω', '330Ω', '330'],
+    ['100nF LED 저항 330Ω', '330Ω', '330']
+  ];
+  try {
+    for (const [index, [prompt, label, ohms]] of rows.entries()) {
+      await writeGeneratedBytes(generated, before);
+      const preview = await dispatchToolCall({
+        id: `call_synonym_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...codexNoPatch() });
+      assert.equal(preview.ok, true, `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.equal(preview.result.providerFallback, 'built-in-draft', prompt);
+      const approved = await dispatchToolCall({
+        name: 'schematic.patch',
+        args: { projectDir, approved: true, patchId: preview.result.patchId }
+      }, services);
+      assert.equal(approved.result.applied, true, `${prompt} ${JSON.stringify(approved.result?.reason)}`);
+      const schematic = await readFile(generated.files.schematic, 'utf8');
+      const spice = await readFile(generated.files.spice, 'utf8');
+      assertOnlySeriesValueChanged(schematic, before.schematic, label, spice, before.spice, ohms, prompt);
+    }
+
+    let calls = 0;
+    const blockedProvider = {
+      checkProviderAvailabilityImpl: async ({ provider }) => ({
+        provider,
+        command: 'codex',
+        available: true,
+        status: 'available'
+      }),
+      runProviderProcessImpl: async () => {
+        calls += 1;
+        throw new Error('provider must not be called');
+      }
+    };
+    for (const [index, prompt] of ['그 저항 10k로', 'that resistor to 10k', '이 저항 10k로', 'this resistor to 10k'].entries()) {
+      calls = 0;
+      await writeGeneratedBytes(generated, before);
+      const preview = await dispatchToolCall({
+        id: `call_demonstrative_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...blockedProvider });
+      assert.equal(calls, 0, prompt);
+      assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.equal(schematicRefValue(await readFile(generated.files.schematic, 'utf8'), 'R3'), '1k', prompt);
+    }
+
+    calls = 0;
+    await writeGeneratedBytes(generated, before);
+    const plain = await dispatchToolCall({
+      id: 'call_demonstrative_plain',
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, prompt: '이 저항' }
+    }, { ...services, ...blockedProvider });
+    assert.notEqual(plain.error?.code, 'RESISTOR_REF_UNSUPPORTED');
+    assert.equal(schematicRefValue(await readFile(generated.files.schematic, 'utf8'), 'R3'), '1k');
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
