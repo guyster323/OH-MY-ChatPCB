@@ -2151,7 +2151,8 @@ test('a polite question with an LED target, edit verb, and unit value applies R3
     'can you set the LED resistor to 680Ω?',
     'LED 저항 680Ω으로 바꿔줄래?',
     'LED 저항 680Ω으로 바꿔 줄 수 있어?',
-    'could you change R3 to 680Ω?'
+    'could you change R3 to 680Ω?',
+    'can I change the LED resistor to 680Ω?'
   ];
   const paths = [
     ['patch', codexPatchRewrite('Change the LED resistor to 680Ω.')],
@@ -2181,6 +2182,24 @@ test('a polite question with an LED target, edit verb, and unit value applies R3
         assert.match(schematic, /I2C_CONNECTOR/, prompt);
       }
     }
+
+    await writeGeneratedBytes(generated, before);
+    const permission = 'LED 저항 10k로 바꿔도 돼?';
+    const permissionPreview = await dispatchToolCall({
+      id: 'call_polite_permission',
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, prompt: permission }
+    }, { ...services, ...codexNoPatch() });
+    assert.equal(permissionPreview.ok, true, `${permissionPreview.error?.code ?? ''} ${permissionPreview.error?.message ?? ''}`);
+    const permissionApproved = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir, approved: true, patchId: permissionPreview.result.patchId }
+    }, services);
+    assert.equal(permissionApproved.ok, true, permissionApproved.error?.message ?? JSON.stringify(permissionApproved.result?.reason));
+    assert.equal(permissionApproved.result.applied, true, JSON.stringify(permissionApproved.result?.reason));
+    const permissionSchematic = await readFile(generated.files.schematic, 'utf8');
+    const permissionSpice = await readFile(generated.files.spice, 'utf8');
+    assertOnlySeriesValueChanged(permissionSchematic, before.schematic, '10k', permissionSpice, before.spice, '10000', permission);
 
     let calls = 0;
     const counting = {

@@ -220,13 +220,40 @@ function bareHasResistorContext(prompt, start, end) {
 // the token, or the object of a resistor edit ("to 4.7m", "4.7m으로").
 // 4m7 and 2m2 stay resistor notations wherever they appear. "1 m cable" and
 // "every 5m" are length and time even when Ω or 저항 sits nearby.
+// "to 1m" / "1m로" is a resistor only when that edit's object is a resistor
+// or an R-ref in the same clause. A cable, wire, or length object is not.
 // A bound milli that names another role (shunt, sense, pull-up) is not the LED resistor.
 const MILLI_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\bohms?\b|Ω)\s*$/iu;
 const MILLI_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\bohms?\b|Ω)/iu;
 const MILLI_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
 const MILLI_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써)|に)/u;
-const MILLI_TARGET = /저항|抵抗|\bresistor\b|\bR\d+\b/iu;
+const MILLI_RESISTOR_OBJECT = /저항|抵抗|\bresistor\b|\bR\d+\b/iu;
+const MILLI_LENGTH_OBJECT = /(?:\bcables?\b|\bwires?\b|\blengths?\b|케이블|길이|(?<![가-힣])선(?![가-힣]))/iu;
 const FOREIGN_MILLI_ROLE = /(?:\bpull[-\s]?ups?\b|\bpull[-\s]?downs?\b|\bterminations?\b|\bdebounce\b|\bdividers?\b|\bfeedback\b|\bgates?\b|\bbases?\b|\bbuttons?\b|\bshunts?\b|\bsenses?\b|\bresets?\b|\bboots?\b|\bbias(?:es)?\b|\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|풀업|풀다운|종단|디바운스|분압|피드백|게이트|베이스|버튼|션트|센스|리셋|바이어스)/iu;
+
+// Comma, "and", and "그리고" close a clause. A comma between digits (1,000) does not.
+export function clauseAroundToken(prompt, start, end) {
+  const text = String(prompt ?? '');
+  const split = /(?<!\d),(?!\d)|，|\band\b|그리고/giu;
+  let from = 0;
+  let to = text.length;
+  for (const mark of text.matchAll(split)) {
+    const at = mark.index ?? 0;
+    const next = at + mark[0].length;
+    if (next <= start) from = next;
+    else if (at >= end) {
+      to = at;
+      break;
+    }
+  }
+  return text.slice(from, to);
+}
+
+function milliEditObjectIsResistor(text, start, end) {
+  const clause = clauseAroundToken(text, start, end);
+  if (MILLI_LENGTH_OBJECT.test(clause)) return false;
+  return MILLI_RESISTOR_OBJECT.test(clause);
+}
 
 export function loneMilliCountsAsResistor(prompt, start, end) {
   const text = String(prompt ?? '');
@@ -238,8 +265,8 @@ export function loneMilliCountsAsResistor(prompt, start, end) {
   const after = text.slice(end);
   if (before.trim() === '' && after.trim() === '') return true;
   if (MILLI_CUE_BEFORE.test(before) || MILLI_CUE_AFTER.test(after)) return true;
-  if (!MILLI_TARGET.test(text)) return false;
-  return MILLI_EDIT_BEFORE.test(before) || MILLI_EDIT_AFTER.test(after);
+  if (!(MILLI_EDIT_BEFORE.test(before) || MILLI_EDIT_AFTER.test(after))) return false;
+  return milliEditObjectIsResistor(text, start, end);
 }
 
 // The clause that holds the token names a resistor role other than the LED series resistor.

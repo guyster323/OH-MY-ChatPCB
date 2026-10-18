@@ -188,3 +188,23 @@ test('a length token is not a resistor when ohms merely sit nearby', () => {
     assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
   }
 });
+
+test('an edit-target length is a resistor only when that object is the resistor', () => {
+  for (const prompt of [
+    'RP2040 board with status LED, LED resistor 1kΩ, cable length to 1m',
+    'RP2040 보드, 상태 LED 저항 1kΩ, 케이블 길이 1m로',
+    'RP2040 board with status LED (1kΩ resistor), wire -> 2m',
+    'change R3 to 1kΩ and set the cable to 1m',
+    'set the cable to 1m',
+    'LED 저항 1kΩ으로, 케이블은 1m로'
+  ]) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.resistorFault ?? null, null, prompt);
+    assert.equal(scan.unparseable, false, prompt);
+  }
+  for (const prompt of ['change the LED resistor to 1m', 'change R3 to 4.7m', 'LED resistor 1m']) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.resistorFault, 'milli', prompt);
+    assert.equal(scan.unparseable, true, prompt);
+  }
+});

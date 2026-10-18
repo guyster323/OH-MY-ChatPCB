@@ -888,3 +888,127 @@ test('non-resistor units, additions, questions, and non-edit numbers are not res
   assert.equal(korean.mode, 'merge', korean.code ?? korean.message ?? '');
   assert.equal(korean.edit?.ohms, 1000);
 });
+
+function assertProvider(prompt) {
+  const decision = classifyExistingProjectRequest(prompt, SPEC);
+  assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+  assert.equal(decision.code, undefined, prompt);
+  assert.equal(decision.edit, undefined, prompt);
+  assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+}
+
+function assertR3(prompt, ohms) {
+  const decision = classifyExistingProjectRequest(prompt, SPEC);
+  assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+  assert.equal(decision.code, undefined, prompt);
+  assert.equal(decision.edit?.kind, 'resistor', prompt);
+  assert.equal(decision.edit?.ohms, ohms, prompt);
+  assert.equal(decision.edit?.ref, 'R3', prompt);
+}
+
+test('a length that is the object of a non-resistor edit changes only R3', () => {
+  for (const prompt of [
+    'change R3 to 1kΩ and set the cable to 1m',
+    'LED 저항 1kΩ으로, 케이블은 1m로',
+    'R3를 1kΩ으로 바꾸고 선 길이는 2m로',
+    'change the LED resistor to 1kΩ, cable -> 2m'
+  ]) {
+    assertR3(prompt, 1000);
+  }
+  assertProvider('set the cable to 1m');
+  const milli = classifyExistingProjectRequest('change the LED resistor to 1m', SPEC);
+  assert.equal(milli.mode, 'refuse');
+  assert.equal(milli.code, 'RESISTOR_VALUE_INVALID');
+  assert.equal(milli.edit, undefined);
+});
+
+test('unitless k/K/R suffixes count only when bound to the resistor target', () => {
+  for (const prompt of [
+    'rev 4k',
+    '4K display',
+    '8K TV',
+    '2K19 model',
+    '10k pot',
+    'status LED, rev 4k',
+    'LED board, 8K TV',
+    'change the LED resistor, rev 4k',
+    'LED 저항 rev 4k',
+    'change R3 to rev 4k',
+    'LED 저항 4K display용',
+    'change the LED resistor next to the 4K display',
+    'change the LED resistor for the 4K monitor',
+    'LED 저항, 4K 모니터 옆',
+    'LED resistor 8K TV',
+    'LED 저항 8K TV용',
+    'LED resistor 2K19 model',
+    'LED 저항 2K19 모델',
+    'change the LED resistor beside the 10k pot',
+    'LED 저항 10k 팟 옆'
+  ]) {
+    assertProvider(prompt);
+  }
+  for (const [prompt, ohms] of [
+    ['LED 저항 4k7', 4700],
+    ['R3 4k7', 4700],
+    ['change R3 to 4k7', 4700],
+    ['LED resistor 2k2', 2200],
+    ['LED 저항 4k', 4000],
+    ['LED resistor 1k', 1000],
+    ['change the LED resistor to 4k', 4000],
+    ['LED 저항 4.7k로', 4700],
+    ['change the LED resistor next to the 4K display to 1kΩ', 1000],
+    ['change R3 to 2R2', 2.2],
+    ['R3 4R7', 4.7],
+    ['LED 저항 2R2로', 2.2],
+    ['change R3 to 1R', 1],
+    ['change R3 to 1R5', 1.5],
+    ['LED resistor 1R', 1]
+  ]) {
+    assertR3(prompt, ohms);
+  }
+});
+
+test('a question without an edit verb does not change the LED resistor', () => {
+  for (const prompt of [
+    'LED 저항 1kΩ 괜찮아',
+    'LED 저항 1kΩ이면 괜찮아',
+    'LED 저항 1kΩ으로 해도 괜찮을까',
+    'LED 저항 1kΩ 괜찮아?',
+    '680Ω 가능?'
+  ]) {
+    assertProvider(prompt);
+  }
+});
+
+test('an add request in a separate user prompt reaches the provider', () => {
+  for (const [generatePrompt, userPrompt] of [
+    ['Change the status LED series resistor to 1k ohm.', 'add a 1kΩ resistor'],
+    ['LED 저항을 1kΩ으로', '1kΩ 저항 추가해줘']
+  ]) {
+    const decision = classifyExistingProjectRequest(generatePrompt, SPEC, userPrompt);
+    assert.equal(decision.mode, 'refuse', userPrompt);
+    assert.equal(decision.code, undefined, `${userPrompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, userPrompt);
+    assert.equal(blocksBeforeProvider(userPrompt, decision), false, userPrompt);
+  }
+});
+
+test('package codes outside the old four-code list are not resistor values', () => {
+  for (const prompt of ['R3를 0201로', 'change R3 to 2512', 'R3 1210으로', 'change R3 to 01005', 'R3를 2010으로']) {
+    assertProvider(prompt);
+  }
+});
+
+test('a model code beside the LED resistor is unsupported in both languages', () => {
+  for (const prompt of [
+    'R2D2 LED 저항 1kΩ으로',
+    'change the R2D2 LED resistor to 1kΩ',
+    'change the LED resistor for R2D2 to 1kΩ'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, resistorRefUnsupportedMessage('R3'), prompt);
+  }
+});

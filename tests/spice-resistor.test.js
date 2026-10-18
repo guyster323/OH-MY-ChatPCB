@@ -171,6 +171,29 @@ test('a length or a time next to a status LED is not the series resistor', async
   }
 });
 
+test('a cable length edit target still generates the 1k LED resistor', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'chatpcb-spice-len-object-'));
+  const prompts = [
+    'RP2040 board with status LED, LED resistor 1kΩ, cable length to 1m',
+    'RP2040 보드, 상태 LED 저항 1kΩ, 케이블 길이 1m로',
+    'RP2040 board with status LED (1kΩ resistor), wire -> 2m'
+  ];
+  try {
+    for (const [index, prompt] of prompts.entries()) {
+      const generated = await generateMcuPeripheralProject({
+        projectDir: path.join(parent, `p${index}`),
+        prompt,
+        projectName: `p${index}`
+      });
+      const spice = await readFile(generated.files.spice, 'utf8');
+      const led = (spice.match(/^RLED\s+\S+\s+\S+\s+(\S+)/m) ?? [])[1];
+      assert.equal(led, '1000', prompt);
+    }
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
 test('a milli value outside the LED resistor is not the series resistor', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'chatpcb-spice-shunt-'));
   try {

@@ -642,7 +642,10 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
     'LED 저항 680Ω으로 할 수 있어?',
     'R3를 680Ω으로 바꿔줄래?',
     'would you change the LED resistor to 680Ω, ok?',
-    'please set the LED resistor to 680Ω?'
+    'please set the LED resistor to 680Ω?',
+    'LED 저항 680Ω으로 바꿔도 될까?',
+    'can I change the LED resistor to 680Ω?',
+    'is it ok to set R3 to 680Ω?'
   ];
   for (const prompt of mergeRows) {
     const decision = classifyExistingProjectRequest(prompt, spec);
@@ -659,6 +662,19 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
     assert.equal(componentValue(spec, 'R3'), '1k', prompt);
   }
 
+  const tenK = classifyExistingProjectRequest('LED 저항 10k로 바꿔도 돼?', spec);
+  assert.equal(tenK.mode, 'merge', `${tenK.code ?? ''} ${tenK.message ?? ''}`);
+  assert.equal(tenK.code, undefined);
+  assert.equal(tenK.edit?.kind, 'resistor');
+  assert.equal(tenK.edit?.ohms, 10000);
+  assert.equal(tenK.edit?.label, '10k');
+  assert.equal(tenK.edit?.ref, 'R3');
+  const tenKNext = applyExistingProjectEdit(spec, tenK.edit);
+  assert.equal(componentValue(tenKNext, 'R3'), '10k');
+  assert.equal(componentValue(tenKNext, 'R1'), '5.1k');
+  assert.equal(componentValue(tenKNext, 'R4'), '4.7k');
+  assert.equal(componentValue(spec, 'R3'), '1k');
+
   const providerRows = [
     'why is R3 330?',
     'what does R3 do?',
@@ -668,8 +684,8 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
     'LED 저항 1kΩ 괜찮아?',
     'R3 470?',
     'is 1kΩ ok for the LED resistor?',
-    'LED 저항 10k로 바꿔도 돼?',
     'LED 저항 680Ω 가능?',
+    '680Ω 가능?',
     'can you add a 1kΩ resistor?'
   ];
   for (const prompt of providerRows) {
@@ -697,6 +713,25 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
   assert.equal(blocksBeforeProvider('could you change the pull-up to 10k?', pullUp), true);
   assert.equal(componentValue(spec, 'R3'), '1k');
   assert.equal(componentValue(spec, 'R4'), '4.7k');
+});
+
+test('an R ref with another role modifier is unsupported', () => {
+  const spec = seriesSpec('1k');
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  for (const prompt of [
+    'R3 풀업 저항 4.7kΩ으로',
+    'change the R3 pull-up resistor to 4.7kΩ',
+    'R3 디바운스 저항을 10kΩ으로'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
 });
 
 test('a Korean keep clause hides that role and still edits only the LED resistor', () => {

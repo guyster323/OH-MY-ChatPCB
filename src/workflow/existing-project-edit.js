@@ -582,8 +582,9 @@ const PRE_PROVIDER_REMOVAL_CODES = new Set([
 ]);
 const RESISTOR_EDIT_VERB = /(?:\b(?:change|set|update|make|modify|to)\b|바꿔|변경|수정|(?<!기준)으로|(?<!으)로(?!부터|서|써)|を|に)/iu;
 const OPEN_QUESTION = /[?？]|뭐|무엇|왜|어떻게|어떡|몇|괜찮|\b(?:why|what|how|which)\b/iu;
-// Permission and interrogative words stay questions even when a value is present.
-// A bare "?" does not: "can you set the LED resistor to 680Ω?" is still an edit.
+// "괜찮아", "가능", "why", and "what" stay questions. A permission question that
+// also has a resistor target, an edit verb, and a unit-bound value does not:
+// questionStopsResistorEdit lets "바꿔도 돼?" and "can I change ...?" through.
 const QUESTION_SIGNAL = /뭐|무엇|왜|어떻게|어떡|몇|괜찮|가능|\b(?:why|what|how|which)\b|(?:도|해도)\s*돼/iu;
 
 function hasResistorEditVerb(text) {
@@ -1864,6 +1865,11 @@ function wordsAfterNoun(text, noun) {
       kept.push(word);
       continue;
     }
+    // "resistor for R2D2" names a model, same as "R2D2 LED resistor".
+    if (isGluedModelCode(stemmed)) {
+      kept.push(word);
+      break;
+    }
     if (!ALLOW_WORD.test(stemmed)) break;
     kept.push(word);
     if (kept.length >= 4) break;
@@ -1913,13 +1919,20 @@ function stemWord(word) {
 
 function isIgnorableWord(word) {
   if (FUNCTION_WORD.test(word) || EDIT_VERB_WORD.test(word)) return true;
-  if (/^(?:can|could|would|will|shall|you|your|kindly)$/iu.test(word)) return true;
+  if (/^(?:can|could|would|will|shall|you|your|i|kindly)$/iu.test(word)) return true;
   if (/^(?:으로|로|을|를|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|줄래|줄래요|주실래요|해줄래|해주세요|있어|있나|있을까요|줄|수|할|줘|그냥|값|기존|현재|existing|currently)$/iu.test(word)) return true;
   return /(?:바꿔|바꾸|변경|수정)/u.test(word);
 }
 
 function isDesignator(word) {
   return /^[A-Za-z]{1,3}\d+$/.test(word);
+}
+
+// R2D2 is a model code, not a reference. A real ref is letters then digits only.
+// I2C matches the same shape and is a resistor role, so it stays off this path.
+function isGluedModelCode(word) {
+  if (BARE_ROLE.test(word)) return false;
+  return /^[A-Za-z]{1,3}\d+[A-Za-z][A-Za-z0-9]*$/u.test(word);
 }
 
 function isValueWord(word) {
@@ -2421,13 +2434,21 @@ const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Z
 // parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
 // without a transition marker ask which value. A token the parser rejects is invalid.
 // A resistor target, an edit verb, and a unit-bound value are an edit.
-// "why", "괜찮아", "가능", and "바꿔도 돼" stay questions. A trailing "?" does not.
+// "why", "괜찮아", and "가능" stay questions when that verb is missing.
+// "바꿔도 돼?" and "can I change ... to 680Ω?" still edit: the verb is there.
+const STRONG_EDIT_VERB = /(?:\b(?:change|set|update|make|modify)\b|바꿔|변경|수정)/iu;
+
+function hasUnitBoundResistorToken(text) {
+  return scanResistorTokens(text).some((token) => token.attempt);
+}
+
 function questionStopsResistorEdit(text) {
   if (!OPEN_QUESTION.test(text)) return false;
+  if (STRONG_EDIT_VERB.test(text) && hasResistorTargetText(text) && hasUnitBoundResistorToken(text)) return false;
   if (QUESTION_SIGNAL.test(text)) return true;
   if (!hasResistorEditVerb(text)) return true;
   if (!hasResistorTargetText(text) && !BARE_ROLE.test(text)) return true;
-  if (!scanResistorTokens(text).some((token) => token.attempt)) return true;
+  if (!hasUnitBoundResistorToken(text)) return true;
   return false;
 }
 
@@ -2490,6 +2511,46 @@ function interpretResistor(text) {
   return null;
 }
 
+// Ω-less k/K/R suffixes are values only when bound. Mega (1M, 4M7) is not this:
+// M stays a multiplier. A token is a value on a resistor word, an R-ref, or a
+// role word, or when to/으로/로 marks it as the edit object ("4.99k로 바꿔줘").
+// rev/ver/model in front, or a following part/resolution noun, wins.
+const SUFFIX_EXCLUDE_BEFORE = /(?:\brevisions?\b|\brevs?\b|\bversions?\b|\bvers?\b|\bmodels?\b|리비전|버전|모델)\s*$/iu;
+const SUFFIX_EXCLUDE_AFTER = /^\s*(?:displays?|monitors?|tvs?|pots?|boards?|models?|화면|모니터|팟|보드|모델)용?(?![\p{L}\p{N}])/iu;
+const SUFFIX_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|\bR\d+\b)(?:을|를|은|는|이|가)?\s*$/iu;
+const SUFFIX_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b)/iu;
+const SUFFIX_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
+const SUFFIX_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써))/u;
+
+function isUnitlessKRSuffix(raw) {
+  const text = String(raw ?? '').trim();
+  if (/(?:Ω|옴|ohms?)/iu.test(text)) return false;
+  return /^\d+[rRkK]\d+$/.test(text) || /^\d+(?:\.\d+)?\s*[rRkK]$/.test(text);
+}
+
+function unitlessSuffixCountsAsResistor(text, start, end) {
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  if (SUFFIX_EXCLUDE_BEFORE.test(before)) return false;
+  if (SUFFIX_EXCLUDE_AFTER.test(after)) return false;
+  if (SUFFIX_CUE_BEFORE.test(before) || SUFFIX_CUE_AFTER.test(after)) return true;
+  if (suffixRoleWord(lastWord(before))) return true;
+  // "4.99k로 바꿔줘" names no part. The marker still binds that token: it is the
+  // edit object. "to rev 4k" and "4K display" already returned false above.
+  if (SUFFIX_EDIT_BEFORE.test(before) || SUFFIX_EDIT_AFTER.test(after)) return true;
+  return false;
+}
+
+function lastWord(text) {
+  const match = String(text ?? '').match(/(\S+)\s*$/u);
+  return match ? match[1] : '';
+}
+
+function suffixRoleWord(word) {
+  const stemmed = String(word ?? '').replace(/(?:을|를|은|는|이|가)$/u, '');
+  return BARE_ROLE.test(stemmed) || BARE_ROLE.test(word);
+}
+
 // A count, pin, year, frequency, or electrical unit glued to a number is not
 // a resistor candidate. The word may follow (2개, 2019년형, 1 Hz) or lead (pin 13).
 const COUNTER_FOLLOW = /^\s*(?:년형|개만|만|천|억|포트|models?|rev|nF|nf|uF|uf|µF|μF|pF|pf|mF|mf|uH|uh|µH|μH|mH|mh|nH|nh|kHz|MHz|GHz|pcs|pieces|piece|pins|pin|years|year|LEDs|LED|leds|Hz|mA|uA|µA|μA|mW|kV|mV|개|년|형|핀|번|ea|pc|times|time|[VvAaWw%×xX])(?![A-Za-z0-9])/u;
@@ -2505,6 +2566,13 @@ function markNonResistorQuantities(tokens, text) {
     }
     // "1 m cable" beside a resistor is length. "1m resistor" and "to 4.7m" stay values.
     if (isLoneMilliResistorSuffix(raw) && !loneMilliCountsAsResistor(text, token.index, token.end)) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
+    // Unitless k/K/R (4k, 4K, 4k7, 2R2) is a value only when it is bound to the
+    // resistor target. "rev 4k", "4K display", and "10k pot" are not.
+    if (isUnitlessKRSuffix(raw) && !unitlessSuffixCountsAsResistor(text, token.index, token.end)) {
       token.quantity = true;
       token.attempt = false;
       continue;
