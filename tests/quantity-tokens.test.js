@@ -131,7 +131,12 @@ test('length and time are not resistor tokens', () => {
     'LED with 2m wire',
     '5V LED, 1 m cable',
     '2m long wire',
-    'blink every 500ms'
+    'blink every 500ms',
+    '50 mm',
+    '2 ft',
+    '30 cm',
+    '1 km',
+    '6 in'
   ];
   for (const prompt of ignored) {
     const scan = tokenizeQuantities(prompt);
@@ -174,7 +179,8 @@ test('a length token is not a resistor when ohms merely sit nearby', () => {
     ['상태 LED 저항 1kΩ, 케이블 1m', 1000],
     ['LED resistor 470Ω, 2 m cable', 470],
     ['LED with a 1kΩ resistor and a 1 m cable', 1000],
-    ['LED 1개, 1kΩ 저항, 케이블 1m', 1000]
+    ['LED 1개, 1kΩ 저항, 케이블 1m', 1000],
+    ['LED with a 330Ω resistor and a 50 mm lead', 330]
   ]) {
     const scan = tokenizeQuantities(prompt);
     assert.equal(scan.unparseable, false, prompt);

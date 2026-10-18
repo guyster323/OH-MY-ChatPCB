@@ -844,7 +844,14 @@ test('non-resistor units, additions, questions, and non-edit numbers are not res
     'R3 470?',
     'why is R3 470',
     'change the port to 8080',
-    'LED 저항 포트 8080'
+    'LED 저항 포트 8080',
+    'change it to 4.7m',
+    '4.7m로 바꿔줘',
+    '50 mm',
+    '2 ft',
+    '30 cm',
+    '1 km',
+    '6 in'
   ];
   for (const prompt of provider) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
@@ -869,7 +876,16 @@ test('non-resistor units, additions, questions, and non-edit numbers are not res
     ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID', true],
     ['4m7 resistor', 'RESISTOR_VALUE_INVALID', false],
     ['LED 5V 4m7', 'RESISTOR_VALUE_INVALID', false],
-    ['LED resistor 4m7', 'RESISTOR_VALUE_INVALID', false]
+    ['LED resistor 4m7', 'RESISTOR_VALUE_INVALID', false],
+    ['4.7mΩ', 'RESISTOR_VALUE_INVALID', true],
+    ['4.7 mΩ', 'RESISTOR_VALUE_INVALID', true],
+    ['4.7m ohm', 'RESISTOR_VALUE_INVALID', true],
+    ['4.7 m Ω', 'RESISTOR_VALUE_INVALID', true],
+    ['LED 저항 4.7 m Ω으로', 'RESISTOR_VALUE_INVALID', true],
+    ['change the LED resistor to 4.7 m Ω', 'RESISTOR_VALUE_INVALID', true],
+    ['change R3 to 4.7 m ohm', 'RESISTOR_VALUE_INVALID', true],
+    ['change R3 to 4.7m and the cable to 1m', 'RESISTOR_VALUE_INVALID', true],
+    ['R3를 4.7m로, 선 2m', 'RESISTOR_VALUE_INVALID', true]
   ];
   for (const [prompt, code, blocks] of blocked) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
@@ -911,7 +927,14 @@ test('a length that is the object of a non-resistor edit changes only R3', () =>
     'change R3 to 1kΩ and set the cable to 1m',
     'LED 저항 1kΩ으로, 케이블은 1m로',
     'R3를 1kΩ으로 바꾸고 선 길이는 2m로',
-    'change the LED resistor to 1kΩ, cable -> 2m'
+    'change the LED resistor to 1kΩ, cable -> 2m',
+    'change R3 to 1kΩ and set the cable to 50 mm',
+    'LED 저항 1kΩ으로, 케이블은 30 cm로',
+    'R3를 1kΩ으로, 케이블은 2 ft로',
+    'change R3 to 1kΩ and set the cable to 1 km',
+    'LED 저항 1kΩ으로, 케이블은 6 in로',
+    'LED 저항 1kΩ으로 하고 선 2m로',
+    'R3를 1kΩ으로 바꾸고 전선은 2m로'
   ]) {
     assertR3(prompt, 1000);
   }
@@ -943,7 +966,32 @@ test('unitless k/K/R suffixes count only when bound to the resistor target', () 
     'LED resistor 2K19 model',
     'LED 저항 2K19 모델',
     'change the LED resistor beside the 10k pot',
-    'LED 저항 10k 팟 옆'
+    'LED 저항 10k 팟 옆',
+    'LED 저항을 rev 4k로',
+    'LED 저항을 model 2K19로',
+    'model 2K19',
+    'LED resistor 4K screen',
+    'LED resistor 4K camera',
+    'LED resistor 8K video',
+    'LED resistor 10k trimmer',
+    '4K screen',
+    '4K camera',
+    '8K video',
+    '10k trimmer',
+    'LED 저항을 4.7k 정도로',
+    'LED 저항 약 4.7k로',
+    'LED 저항 대략 4.7k로',
+    'change the LED resistor to about 4.7k',
+    'change the LED resistor to around 4.7k',
+    'set the LED resistor to approximately 4.7k',
+    'LED resistor ~4.7k',
+    '4.7k 정도로',
+    '약 4.7k',
+    '대략 4.7k',
+    'about 4.7k',
+    'around 4.7k',
+    'approximately 4.7k',
+    '~4.7k'
   ]) {
     assertProvider(prompt);
   }
@@ -962,7 +1010,9 @@ test('unitless k/K/R suffixes count only when bound to the resistor target', () 
     ['LED 저항 2R2로', 2.2],
     ['change R3 to 1R', 1],
     ['change R3 to 1R5', 1.5],
-    ['LED resistor 1R', 1]
+    ['LED resistor 1R', 1],
+    ['use a 10k LED resistor', 10000],
+    ['10k LED 저항으로 바꿔줘', 10000]
   ]) {
     assertR3(prompt, ohms);
   }
@@ -974,9 +1024,28 @@ test('a question without an edit verb does not change the LED resistor', () => {
     'LED 저항 1kΩ이면 괜찮아',
     'LED 저항 1kΩ으로 해도 괜찮을까',
     'LED 저항 1kΩ 괜찮아?',
-    '680Ω 가능?'
+    '680Ω 가능?',
+    '680Ω 가능',
+    'LED 저항 680Ω으로 가능'
   ]) {
     assertProvider(prompt);
+  }
+  for (const prompt of [
+    'LED with a 330Ω resistor and a 50 mm lead',
+    'LED with a 330Ω resistor and a 30 cm cable',
+    'LED with a 330Ω resistor, cable 2 ft',
+    'LED with a 330Ω resistor and a 6 in wire',
+    'LED with a 330Ω resistor and a 1 km cable'
+  ]) {
+    const scan = tokenizeQuantities(prompt);
+    const values = scan.tokens.filter((token) => token.kind === 'resistance').map((token) => token.value);
+    assert.deepEqual(values, [330], prompt);
+    assert.equal(scan.unparseable, false, prompt);
+    assert.equal(scan.resistorFault ?? null, null, prompt);
+    const led = parseDiscreteLedRequest(prompt);
+    assert.equal(led.refused, false, prompt);
+    assert.equal(led.resistanceOhms, 330, prompt);
+    assert.equal(led.resistorExplicit, true, prompt);
   }
 });
 

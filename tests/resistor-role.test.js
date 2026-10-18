@@ -695,6 +695,7 @@ test('a polite request with a resistor target, an edit verb, and a unit value me
     'please set the LED resistor to 680Ω?',
     'LED 저항 680Ω으로 바꿔도 될까?',
     'LED 저항 680Ω으로 바꿔도 되나요?',
+    'LED 저항 680Ω으로 바꿔도 돼?',
     'can I change the LED resistor to 680Ω?',
     'may I change the LED resistor to 680Ω?',
     'may I set the LED resistor to 680Ω?',
@@ -839,6 +840,23 @@ test('a Korean keep clause hides that role and still edits only the LED resistor
   assert.equal(touch.edit, undefined);
   assert.equal(componentValue(spec, 'R3'), '1k');
   assert.equal(componentValue(spec, 'R4'), '4.7k');
+
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  for (const prompt of [
+    '풀업은 2.2k로, LED 저항은 680Ω으로',
+    'LED resistor to 680Ω and pull-up to 2.2k',
+    'LED resistor to 680Ω, pull-up to 2.2k',
+    '풀업을 그대로 두지 말고 2.2k로'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
 });
 
 test('LED synonyms, plurals, and non-resistor quantities edit only the LED resistor', () => {

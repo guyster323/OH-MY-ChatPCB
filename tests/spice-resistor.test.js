@@ -176,7 +176,8 @@ test('a cable length edit target still generates the 1k LED resistor', async () 
   const prompts = [
     'RP2040 board with status LED, LED resistor 1kΩ, cable length to 1m',
     'RP2040 보드, 상태 LED 저항 1kΩ, 케이블 길이 1m로',
-    'RP2040 board with status LED (1kΩ resistor), wire -> 2m'
+    'RP2040 board with status LED (1kΩ resistor), wire -> 2m',
+    'RP2040 보드, 상태 LED 저항 1kΩ으로 하고 전선은 2m로'
   ];
   try {
     for (const [index, prompt] of prompts.entries()) {
