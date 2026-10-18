@@ -215,19 +215,66 @@ function bareHasResistorContext(prompt, start, end) {
   return RESISTOR_CONTEXT_BEFORE.test(before) || RESISTOR_CONTEXT_AFTER.test(after);
 }
 
-// A lone m (1m, 4.7m, 4m7) is a resistor only in a resistor phrase, or when the
-// whole prompt is that suffix. "1 m cable" and "every 5m" are length and time.
-// 4m7 and 2m2 stay resistor faults wherever they appear. LED alone is not context.
-const MILLI_RESISTOR_CONTEXT = /(?:\bohms?\b|\bresistors?\b|저항|抵抗|(?<![가-힣])옴|Ω|\bR\d+\b)/iu;
+// A lone m (1m, 4.7m) is a resistor only when the token itself is bound:
+// the whole prompt, an attached Ω/ohm/옴, the word resistor/저항/抵抗 against
+// the token, or the object of a resistor edit ("to 4.7m", "4.7m으로").
+// 4m7 and 2m2 stay resistor notations wherever they appear. "1 m cable" and
+// "every 5m" are length and time even when Ω or 저항 sits nearby.
+// A bound milli that names another role (shunt, sense, pull-up) is not the LED resistor.
+const MILLI_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\bohms?\b|Ω)\s*$/iu;
+const MILLI_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\bohms?\b|Ω)/iu;
+const MILLI_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
+const MILLI_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써)|に)/u;
+const MILLI_TARGET = /저항|抵抗|\bresistor\b|\bR\d+\b/iu;
+const FOREIGN_MILLI_ROLE = /(?:\bpull[-\s]?ups?\b|\bpull[-\s]?downs?\b|\bterminations?\b|\bdebounce\b|\bdividers?\b|\bfeedback\b|\bgates?\b|\bbases?\b|\bbuttons?\b|\bshunts?\b|\bsenses?\b|\bresets?\b|\bboots?\b|\bbias(?:es)?\b|\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|풀업|풀다운|종단|디바운스|분압|피드백|게이트|베이스|버튼|션트|센스|리셋|바이어스)/iu;
 
 export function loneMilliCountsAsResistor(prompt, start, end) {
   const text = String(prompt ?? '');
-  const raw = text.slice(start, end).replace(/\s+/g, '');
-  if (/^\d+m\d+$/i.test(raw)) return true;
+  const slice = text.slice(start, end);
+  const compact = slice.replace(/\s+/g, '').replace(/(?:Ω|옴|ohms?)$/iu, '');
+  if (/^\d+m\d+$/i.test(compact)) return true;
+  if (/(?:Ω|옴|ohms?)\s*$/iu.test(slice)) return true;
   const before = text.slice(0, start);
   const after = text.slice(end);
   if (before.trim() === '' && after.trim() === '') return true;
-  return MILLI_RESISTOR_CONTEXT.test(before.slice(-24)) || MILLI_RESISTOR_CONTEXT.test(after.slice(0, 24));
+  if (MILLI_CUE_BEFORE.test(before) || MILLI_CUE_AFTER.test(after)) return true;
+  if (!MILLI_TARGET.test(text)) return false;
+  return MILLI_EDIT_BEFORE.test(before) || MILLI_EDIT_AFTER.test(after);
+}
+
+// The clause that holds the token names a resistor role other than the LED series resistor.
+export function milliOwnedByForeignRole(prompt, start, end) {
+  const text = String(prompt ?? '');
+  let from = 0;
+  const spans = [];
+  for (const mark of text.matchAll(/[,;.!?。！？]/gu)) {
+    spans.push([from, mark.index]);
+    from = mark.index + mark[0].length;
+  }
+  spans.push([from, text.length]);
+  for (const [spanStart, spanEnd] of spans) {
+    if (end <= spanStart || start >= spanEnd) continue;
+    if (FOREIGN_MILLI_ROLE.test(text.slice(spanStart, spanEnd))) return true;
+  }
+  return false;
+}
+
+function milliResistorFault(prompt, start, end) {
+  return loneMilliCountsAsResistor(prompt, start, end) && !milliOwnedByForeignRole(prompt, start, end);
+}
+
+function pushLoneMilli(candidates, prompt, start, end, priority) {
+  if (milliResistorFault(prompt, start, end)) {
+    candidates.push(invalidResistorCandidate(priority, start, end, prompt.slice(start, end)));
+    return;
+  }
+  candidates.push({
+    priority,
+    start,
+    end,
+    invalid: false,
+    token: contextToken(prompt, start, end, 'length')
+  });
 }
 
 function pushMatch(candidates, match, priority, token, invalid = false) {
@@ -349,8 +396,10 @@ function collectRkm(prompt, candidates) {
     const end = start + match[0].length;
     const ohms = resistorOhmsNumber(match[0]);
     // 4m7 and 2m2 do not parse. Cover the span so the digits are not a bare value.
+    // A shunt or sense milli is not the LED resistor, so it is not a fault.
     if (ohms == null) {
-      candidates.push(invalidResistorCandidate(PRIORITY.rkm, start, end, match[0]));
+      if (isLoneMilliResistorSuffix(match[0])) pushLoneMilli(candidates, prompt, start, end, PRIORITY.rkm);
+      else candidates.push(invalidResistorCandidate(PRIORITY.rkm, start, end, match[0]));
       continue;
     }
     candidates.push({
@@ -437,7 +486,9 @@ function collectOhm(prompt, candidates) {
     // 0Ω does not parse, so the span is unparseable instead of a 0Ω token.
     // "1.000 ohm" does not parse. The span stays covered so a bare 1.000 is not 1Ω.
     if (ohms == null) {
-      candidates.push(invalidResistorCandidate(PRIORITY.ohm, start, end, prompt.slice(start, end)));
+      const raw = prompt.slice(start, end);
+      if (isLoneMilliResistorSuffix(raw)) pushLoneMilli(candidates, prompt, start, end, PRIORITY.ohm);
+      else candidates.push(invalidResistorCandidate(PRIORITY.ohm, start, end, raw));
       continue;
     }
     if (ohms < 0) continue;
@@ -469,19 +520,10 @@ function collectSuffix(prompt, candidates) {
     const end = start + match[0].length;
     const ohms = resistorOhmsFromSuffix(match[0]);
     if (ohms == null) {
-      // Cover a length or a time so the digits are not a bare resistor, and so
-      // the span is not an invalid milli fault. 1m beside "resistor" still is.
-      if (isLoneMilliResistorSuffix(match[0]) && !loneMilliCountsAsResistor(prompt, start, end)) {
-        candidates.push({
-          priority: PRIORITY.suffix,
-          start,
-          end,
-          invalid: false,
-          token: contextToken(prompt, start, end, 'length')
-        });
-        continue;
-      }
-      candidates.push(invalidResistorCandidate(PRIORITY.suffix, start, end, match[0]));
+      // A length or a time is not a milli fault. A bound milli ("1m resistor",
+      // "to 4.7m") still is, unless that clause names another resistor role.
+      if (isLoneMilliResistorSuffix(match[0])) pushLoneMilli(candidates, prompt, start, end, PRIORITY.suffix);
+      else candidates.push(invalidResistorCandidate(PRIORITY.suffix, start, end, match[0]));
       continue;
     }
     if (ohms < 0) continue;

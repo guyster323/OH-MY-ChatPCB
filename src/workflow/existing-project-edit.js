@@ -1,7 +1,8 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { classifyResistorValue, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { classifyResistorValue, isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
@@ -432,6 +433,11 @@ function classifyPrompt(text, spec) {
 }
 
 function classifySeparateIntent(editText, intentText, spec) {
+  // "Add a status LED" is not a resistor edit. A full board in either text still regenerates.
+  if (isAdditionRequest(intentText) && !isFullDesignPrompt(intentText)) {
+    if (isFullDesignPrompt(editText)) return { mode: 'regenerate' };
+    return { mode: 'refuse' };
+  }
   const valueOnly = valueOnlyDecision(intentText);
   if (valueOnly) return valueOnly;
   const bare = bareRefDecision(intentText, spec);
@@ -449,7 +455,13 @@ function classifySeparateIntent(editText, intentText, spec) {
   return { mode: 'refuse' };
 }
 
+// add / insert / 추가 / 넣어 always reach the provider. "additional" is not an add verb.
+function isAdditionRequest(text) {
+  return /\b(?:add|insert)\b|추가|넣어/iu.test(String(text ?? '').normalize('NFKC'));
+}
+
 function classifyEditText(text, spec) {
+  if (isAdditionRequest(text)) return { mode: 'refuse' };
   const valueOnly = valueOnlyDecision(text);
   if (valueOnly) return valueOnly;
   const bare = bareRefDecision(text, spec);
@@ -561,7 +573,7 @@ const PRE_PROVIDER_REMOVAL_CODES = new Set([
   'REMOVAL_REF_UNSUPPORTED'
 ]);
 const RESISTOR_EDIT_VERB = /(?:\b(?:change|set|update|make|modify|to)\b|바꿔|변경|수정|(?<!기준)으로|(?<!으)로(?!부터|서|써)|を|に)/iu;
-const OPEN_QUESTION = /[?？]|뭐|왜|어떻게|어떡|\b(?:why|what|how|which)\b/iu;
+const OPEN_QUESTION = /[?？]|뭐|무엇|왜|어떻게|어떡|몇|괜찮|\b(?:why|what|how|which)\b/iu;
 
 function hasResistorEditVerb(text) {
   return RESISTOR_EDIT_VERB.test(text);
@@ -575,6 +587,7 @@ function hasResistorTargetText(text) {
 // The daemon calls this before the provider. Removal handling stays.
 // A resistor refusal stops the provider only when the whole input is one
 // value token, or a resistor target and an edit verb are both present.
+// A unit question stops here too, including "R3 470".
 // Ref-safety codes still stop here, except a question with no edit verb.
 export function blocksBeforeProvider(text, decision) {
   if (decision?.mode !== 'refuse' || !decision.code) return false;
@@ -582,6 +595,7 @@ export function blocksBeforeProvider(text, decision) {
   const normalized = String(text ?? '').normalize('NFKC').trim();
   if (valueOnlyDecision(normalized)) return true;
   if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
+  if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
@@ -1577,7 +1591,7 @@ function seriesResistorRef(spec) {
 const GUARD_BEFORE = /남겨|남기|유지|그대로|\bunchanged\b/iu;
 const GUARD_AFTER = /\b(?:keep|without)\b/iu;
 const GUARD_AFTER_STOP = /^(?:change|set|update|make|modify|to)$|(?:바꿔|변경|수정)/iu;
-const OHM_VALUE_IN_CLAUSE = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[rRkK])\b|\d+(?:\.\d+)?\s*[kKmM]\d*\b|\d+\s*[rR]\d+/iu;
+const OHM_VALUE_IN_CLAUSE = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?\b|[rRkK]\b)|\d+(?:\.\d+)?\s*[kKmM]\d*\b|\d+\s*[rR]\d+/iu;
 
 function maskGuardObjects(text) {
   const normalized = String(text ?? '').normalize('NFKC');
@@ -2155,7 +2169,7 @@ const RESISTOR_TOKEN = new RegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\u31
   String.raw`\d+,\d+`,
   String.raw`\d+(?:\.\d+)?`
 ].join('|')})`, 'gu');
-const RESISTOR_PACKAGE = /^(?:0402|0603|0805|1206)$/;
+const RESISTOR_PACKAGE = /^(?:01005|0201|0402|0603|0805|1206|1210|2010|2512)$/;
 const RESISTOR_COORDINATOR = /^(?:and|or|하고|와|과|및|그리고)$/iu;
 const OHM_UNIT = /(?:Ω|옴|ohm)/iu;
 
@@ -2180,6 +2194,7 @@ function isIgnoredResistorToken(raw) {
   if (/^[rR]\d$/.test(raw)) return true;
   if (/^[A-Za-z]+\d+$/.test(raw)) return true;
   if (RESISTOR_PACKAGE.test(raw)) return true;
+  if (isNonOhmUnitToken(raw)) return true;
   if (/^\d+(?:\.\d+)?$/.test(raw)) return true;
   if (/^\d+\s*\/\s*\d+\s*[Ww]$/.test(raw)) return true;
   if (/^\d+(?:\.\d+)?\s*[Ww]$/.test(raw)) return true;
@@ -2286,16 +2301,23 @@ function resistorReferenceTokens(text) {
   return refs;
 }
 
+// A role word plus a clear ohm value (10k, 120Ω), with no 저항/resistor word.
+// Lone milli (4m7, 10mΩ) is not this: the value error stays on the resistor path.
+const BARE_ROLE = /pull[-\s]?ups?|pull[-\s]?downs?|풀업|풀다운|terminations?|종단|debounce|디바운스|dividers?|분압|feedback|피드백|\bgates?\b|게이트|\bbases?\b|베이스|\bbuttons?\b|버튼|shunts?|션트|\bsenses?\b|센스|\bresets?\b|리셋|\bboots?\b|\bbias(?:es)?\b|바이어스|\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b/iu;
+const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Za-z])|\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?)|\d+\s*[kKrR]\d+/iu;
+
 // A resistor edit is read only from this text. Candidates go through
 // parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
 // without a transition marker ask which value. A token the parser rejects is invalid.
 function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
+  if (OPEN_QUESTION.test(normalized)) return null;
   const namedRefs = resistorReferenceTokens(normalized);
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   const named = namedRefs[0] ?? null;
-  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0) return null;
+  const roleValue = BARE_ROLE.test(normalized) && CLEAR_OHM.test(normalized);
+  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0 && !roleValue) return null;
 
   const tokens = scanResistorTokens(normalized);
   markNonResistorQuantities(tokens, normalized);
@@ -2333,6 +2355,10 @@ function interpretResistor(text) {
   const cleanBare = tokens.filter((token) => isBareUnitlessToken(token) && isCleanUnitless(token.raw.trim()));
   if (cleanBare.length > 0) return { kind: 'invalid', reason: 'unitless', valued: true };
 
+  // Counts, years, packages, ports, and capacitor units are not a value,
+  // even when the sentence has an edit verb. "1/4W로" still asks for a value.
+  if (nonValueQuantityOnly(tokens)) return null;
+
   // 2개, 2019년형, 3.3V, and 1 Hz are not resistor edits. A real edit verb
   // with no resistor value, such as "1/4W로", still asks for a valid value.
   if (!hasResistorEditVerb(normalized) && explainedByOtherQuantity(tokens)) return null;
@@ -2344,11 +2370,23 @@ function interpretResistor(text) {
 
 // A count, pin, year, frequency, or electrical unit glued to a number is not
 // a resistor candidate. The word may follow (2개, 2019년형, 1 Hz) or lead (pin 13).
-const COUNTER_FOLLOW = /^\s*(?:년형|개만|kHz|MHz|GHz|pcs|pieces|piece|pins|pin|years|year|LEDs|LED|leds|Hz|mA|uA|µA|μA|mW|kV|mV|개|년|형|핀|번|ea|pc|times|time|[VvAaWw%×xX])(?![A-Za-z0-9])/u;
-const COUNTER_LEAD = /(?:\b(?:pins?|gpios?)|핀)\s*$/iu;
+const COUNTER_FOLLOW = /^\s*(?:년형|개만|만|천|억|포트|models?|rev|nF|nf|uF|uf|µF|μF|pF|pf|mF|mf|uH|uh|µH|μH|mH|mh|nH|nh|kHz|MHz|GHz|pcs|pieces|piece|pins|pin|years|year|LEDs|LED|leds|Hz|mA|uA|µA|μA|mW|kV|mV|개|년|형|핀|번|ea|pc|times|time|[VvAaWw%×xX])(?![A-Za-z0-9])/u;
+const COUNTER_LEAD = /(?:\b(?:pins?|gpios?|ports?|rev(?:ision)?s?|models?|years?)|핀|포트)\s*$/iu;
 
 function markNonResistorQuantities(tokens, text) {
   for (const token of tokens) {
+    const raw = token.raw.trim();
+    if (/^\d+(?:st|nd|rd|th)$/i.test(raw)) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
+    // "1 m cable" beside a resistor is length. "1m resistor" and "to 4.7m" stay values.
+    if (isLoneMilliResistorSuffix(raw) && !loneMilliCountsAsResistor(text, token.index, token.end)) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
     if (!isTiedToOtherQuantity(text, token)) continue;
     token.quantity = true;
     token.attempt = false;
@@ -2362,7 +2400,34 @@ function isTiedToOtherQuantity(text, token) {
   if (/^Hz\b/i.test(after)) return true;
   if (!/^\d+(?:\.\d+)?$/.test(raw)) return false;
   if (COUNTER_FOLLOW.test(after)) return true;
-  return COUNTER_LEAD.test(text.slice(0, token.index));
+  if (COUNTER_LEAD.test(text.slice(0, token.index))) return true;
+  const before = text.slice(Math.max(0, token.index - 48), token.index);
+  return /(?:\bports?\b|포트)/iu.test(before);
+}
+
+// Capacitance, inductance, frequency, voltage, and current. Not a bare 1u/10n,
+// and not wattage: "1/4W로" is still an invalid resistor value.
+function isNonOhmUnitToken(raw) {
+  const text = String(raw ?? '').trim();
+  if (/^\d+(?:\.\d+)?\s*[pnuµμkKmM]\s*[FfHh]$/u.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*[FH]$/u.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*(?:[kKmMgG])?\s*Hz$/iu.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*(?:[mµμuUnNkK])?\s*[Vv](?:DC|AC|dc|ac)?$/u.test(text)) return true;
+  if (/^\d+(?:\.\d+)?\s*(?:[mµμuUnN])?\s*[Aa]$/u.test(text)) return true;
+  return false;
+}
+
+function nonValueQuantityOnly(tokens) {
+  const interesting = tokens.filter((token) => !/^[A-Za-z]{1,3}\d+$/.test(token.raw.trim()));
+  if (interesting.length === 0) return false;
+  if (interesting.some((token) => token.attempt)) return false;
+  return interesting.every((token) => {
+    const raw = token.raw.trim();
+    return token.quantity
+      || RESISTOR_PACKAGE.test(raw)
+      || /^\d+(?:st|nd|rd|th)$/i.test(raw)
+      || isNonOhmUnitToken(raw);
+  });
 }
 
 function explainedByOtherQuantity(tokens) {

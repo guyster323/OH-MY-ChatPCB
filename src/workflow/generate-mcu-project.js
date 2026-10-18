@@ -15,7 +15,7 @@ import {
   renderSpiceFixture
 } from '../kicad/project-generator.js';
 import { isLoneMilliResistorSuffix } from '../kicad/resistor-ohms.js';
-import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
+import { loneMilliCountsAsResistor, milliOwnedByForeignRole } from '../runtime/quantity-tokens.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { assertInspectionTree, assertUnlinkedAncestors } from './inspection-copy.js';
 import { assertSafeProjectDir } from './project-workspace.js';
@@ -47,6 +47,7 @@ export async function generateMcuPeripheralProject({
 // A lone m in a resistor phrase (4m7, "1m resistor") is not a value. Put it on
 // the status LED resistor so SPICE throws before writeGeneratedProject creates
 // the directory. A length or a time (1 m cable, every 5m) is left alone.
+// A shunt, sense, or other role milli is not the LED resistor either.
 // 10mA and 4M7 do not match.
 function loneMilliResistorToken(prompt) {
   const text = String(prompt ?? '').normalize('NFKC');
@@ -56,6 +57,7 @@ function loneMilliResistorToken(prompt) {
     const end = start + match[1].length;
     if (!isLoneMilliResistorSuffix(match[1])) continue;
     if (!loneMilliCountsAsResistor(text, start, end)) continue;
+    if (milliOwnedByForeignRole(text, start, end)) continue;
     return match[1].replace(/\s+/g, '');
   }
   return null;

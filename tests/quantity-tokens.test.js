@@ -168,3 +168,23 @@ test('voltage and current milli stay milli', () => {
   assert.equal(resistanceTokens('LED 5V 1kHz').length, 0);
   assert.deepEqual(kilohertz.tokens.map((token) => token.raw), ['5V']);
 });
+
+test('a length token is not a resistor when ohms merely sit nearby', () => {
+  for (const [prompt, ohms] of [
+    ['상태 LED 저항 1kΩ, 케이블 1m', 1000],
+    ['LED resistor 470Ω, 2 m cable', 470],
+    ['LED with a 1kΩ resistor and a 1 m cable', 1000],
+    ['LED 1개, 1kΩ 저항, 케이블 1m', 1000]
+  ]) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.unparseable, false, prompt);
+    assert.equal(scan.resistorFault ?? null, null, prompt);
+    assert.deepEqual(resistanceTokens(prompt).map((token) => token.value), [ohms], prompt);
+  }
+  for (const prompt of ['4m7 resistor', 'LED 5V 4m7', 'LED resistor 4m7', 'LED with a 1m resistor', 'LED resistor 1m']) {
+    const scan = tokenizeQuantities(prompt);
+    assert.equal(scan.resistorFault, 'milli', prompt);
+    assert.equal(scan.unparseable, true, prompt);
+    assert.equal(scan.tokens.some((token) => token.kind === 'resistance'), false, prompt);
+  }
+});

@@ -1955,3 +1955,125 @@ test('the pre-provider gate lets counts, pins, colors, and questions reach the p
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });
+
+test('the pre-provider gate sends non-resistor edits to the provider and blocks real resistor refusals', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-gate-table-'));
+  const spec = {
+    sourcePrompt: 'existing board',
+    mcu: { family: 'STM32' },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '1000' }
+    ],
+    schematic: {
+      components: [
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '1k' }
+      ]
+    }
+  };
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "ChatPCB:LED_RESISTOR") (at 0 0 0)',
+    '    (property "Reference" "R3" (at 0 0 0))',
+    '    (property "Value" "1k" (at 0 0 0))))'
+  ].join('\n');
+  const schematicPath = path.join(projectDir, 'board.kicad_sch');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(schematicPath, schematic);
+  const reach = [
+    'add 100nF cap near U1',
+    'C1을 10uF로',
+    'change C1 to 100nF',
+    'L1 10uH로',
+    'set VCC to 3.3V',
+    'add 10k pull-up on reset',
+    'reset에 10k 풀업 추가',
+    'add a 120Ω termination resistor',
+    'LED 하나 더 추가하고 저항 330Ω',
+    '1kΩ 저항 추가해줘',
+    'add a 1kΩ resistor',
+    'why is R3 330?',
+    'R3는 왜 330이야?',
+    'what does R3 do?',
+    '포트 8080',
+    'port 8080',
+    '12만',
+    '3천',
+    '저항 12만으로',
+    'LED 저항 1kΩ 괜찮아?',
+    'is 1kΩ ok for the LED resistor?',
+    'rev 2',
+    'the 2019 model',
+    'LED 저항 2개',
+    'LED 저항 2019년형',
+    'v2 board',
+    'change the LED resistor to the 2019 model',
+    'LED resistor rev 2',
+    'change R3 to 0603',
+    'LED 저항 0805로',
+    'R3 0603',
+    'R3 470?',
+    'why is R3 470',
+    'change R3 to 2.2kΩ and keep the 1 m cable'
+  ];
+  const blocked = [
+    ['pull-up 10k', 'RESISTOR_REF_UNSUPPORTED'],
+    ['풀업 10k', 'RESISTOR_REF_UNSUPPORTED'],
+    ['change the pull-up to 10k', 'RESISTOR_REF_UNSUPPORTED'],
+    ['CC 5.1k로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['R3 470', 'RESISTOR_UNIT_REQUIRED'],
+    ['change R3 to 470', 'RESISTOR_UNIT_REQUIRED'],
+    ['LED 저항 330으로', 'RESISTOR_UNIT_REQUIRED'],
+    ['set the LED resistor to 470', 'RESISTOR_UNIT_REQUIRED'],
+    ['LED 저항 4m7으로', 'RESISTOR_VALUE_INVALID'],
+    ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID']
+  ];
+  let calls = 0;
+  const provider = {
+    checkProviderAvailabilityImpl: async ({ provider: id }) => ({
+      provider: id,
+      command: 'codex',
+      available: true,
+      status: 'available'
+    }),
+    runProviderProcessImpl: async () => {
+      calls += 1;
+      const error = new Error('provider-reached');
+      error.code = 'PROVIDER_REACHED';
+      throw error;
+    }
+  };
+  try {
+    for (const [index, prompt] of reach.entries()) {
+      calls = 0;
+      const preview = await dispatchToolCall({
+        id: `call_gate_table_reach_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(calls, 1, prompt);
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, 'PROVIDER_REACHED', `${prompt} ${preview.error?.code} ${preview.error?.message ?? ''}`);
+      assert.equal(await readFile(schematicPath, 'utf8'), schematic, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '1k', prompt);
+    }
+    for (const [index, [prompt, code]] of blocked.entries()) {
+      calls = 0;
+      const preview = await dispatchToolCall({
+        id: `call_gate_table_block_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider });
+      assert.equal(calls, 0, prompt);
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, code, `${prompt} ${preview.error?.code} ${preview.error?.message ?? ''}`);
+      assert.match(preview.error?.message ?? '', /Nothing was changed|아무것도 바꾸지 않았어요/, prompt);
+      assert.equal(await readFile(schematicPath, 'utf8'), schematic, prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});

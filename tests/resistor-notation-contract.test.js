@@ -6,6 +6,7 @@ import { spiceResistorOhms } from '../src/kicad/project-generator.js';
 import { parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
 import { tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
 import {
+  blocksBeforeProvider,
   classifyExistingProjectRequest,
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
@@ -802,4 +803,88 @@ test('a value with no part name asks which resistor in English and Korean', () =
   assert.equal(sentence.code, undefined);
   assert.equal(sentence.mode, 'merge');
   assert.equal(sentence.edit?.ohms, 4990);
+});
+
+test('non-resistor units, additions, questions, and non-edit numbers are not resistor edits', () => {
+  const provider = [
+    'add 100nF cap near U1',
+    'C1을 10uF로',
+    'change C1 to 100nF',
+    'L1 10uH로',
+    'set VCC to 3.3V',
+    'add 10k pull-up on reset',
+    'reset에 10k 풀업 추가',
+    'add a 120Ω termination resistor',
+    'LED 하나 더 추가하고 저항 330Ω',
+    '1kΩ 저항 추가해줘',
+    'add a 1kΩ resistor',
+    'why is R3 330?',
+    'R3는 왜 330이야?',
+    'what does R3 do?',
+    '포트 8080',
+    'port 8080',
+    '12만',
+    '3천',
+    '저항 12만으로',
+    '저항 12만으로 바꿔줘',
+    'LED 저항 1kΩ 괜찮아?',
+    'is 1kΩ ok for the LED resistor?',
+    'rev 2',
+    'the 2019 model',
+    'LED 저항 2개',
+    'LED 저항 2019년형',
+    'v2 board',
+    'change the LED resistor to the 2019 model',
+    'LED resistor rev 2',
+    'LED 저항 2개로 바꿔줘',
+    'LED resistor for the 2nd LED',
+    'change R3 to 0603',
+    'LED 저항 0805로',
+    'R3 0603',
+    'R3 470?',
+    'why is R3 470',
+    'change the port to 8080',
+    'LED 저항 포트 8080'
+  ];
+  for (const prompt of provider) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+  }
+
+  const blocked = [
+    ['pull-up 10k', 'RESISTOR_REF_UNSUPPORTED', true],
+    ['풀업 10k', 'RESISTOR_REF_UNSUPPORTED', true],
+    ['change the pull-up to 10k', 'RESISTOR_REF_UNSUPPORTED', true],
+    ['CC 5.1k로', 'RESISTOR_REF_UNSUPPORTED', true],
+    ['termination 120Ω', 'RESISTOR_REF_UNSUPPORTED', true],
+    ['R3 470', 'RESISTOR_UNIT_REQUIRED', true],
+    ['change R3 to 470', 'RESISTOR_UNIT_REQUIRED', true],
+    ['LED 저항 330으로', 'RESISTOR_UNIT_REQUIRED', true],
+    ['set the LED resistor to 470', 'RESISTOR_UNIT_REQUIRED', true],
+    ['LED 저항 4m7', 'RESISTOR_VALUE_INVALID', false],
+    ['LED 저항 4m7으로', 'RESISTOR_VALUE_INVALID', true],
+    ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID', true],
+    ['4m7 resistor', 'RESISTOR_VALUE_INVALID', false],
+    ['LED 5V 4m7', 'RESISTOR_VALUE_INVALID', false],
+    ['LED resistor 4m7', 'RESISTOR_VALUE_INVALID', false]
+  ];
+  for (const [prompt, code, blocks] of blocked) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, code, `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), blocks, prompt);
+    if (code === 'RESISTOR_VALUE_INVALID') assert.match(decision.message ?? '', /M for megaohms|메가옴은 M/, prompt);
+  }
+
+  const merged = classifyExistingProjectRequest('change R3 to 1kΩ and keep the 1 m cable', SPEC);
+  assert.equal(merged.mode, 'merge');
+  assert.equal(merged.edit?.ohms, 1000);
+  assert.equal(merged.edit?.ref, 'R3');
+  const korean = classifyExistingProjectRequest('LED 저항을 1kΩ으로, 케이블 1m', SPEC);
+  assert.equal(korean.mode, 'merge', korean.code ?? korean.message ?? '');
+  assert.equal(korean.edit?.ohms, 1000);
 });

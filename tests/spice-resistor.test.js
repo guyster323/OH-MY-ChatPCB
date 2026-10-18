@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { renderSpiceFixture, spiceResistorOhms } from '../src/kicad/project-generator.js';
-import { normalizeCircuitSpec } from '../src/runtime/circuit-spec.js';
+import { normalizeCircuitSpec, parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
 import { generateMcuPeripheralProject, writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
 
 test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
@@ -166,6 +166,58 @@ test('a length or a time next to a status LED is not the series resistor', async
         return true;
       }
     );
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
+test('a milli value outside the LED resistor is not the series resistor', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'chatpcb-spice-shunt-'));
+  try {
+    const plain = await generateMcuPeripheralProject({
+      projectDir: path.join(parent, 'plain'),
+      prompt: 'RP2040 board with status LED',
+      projectName: 'plain'
+    });
+    const plainSpice = await readFile(plain.files.spice, 'utf8');
+    const plainLed = (plainSpice.match(/^RLED\s+\S+\s+\S+\s+(\S+)/m) ?? [])[1];
+    const prompts = [
+      '4.7mΩ shunt',
+      '10mΩ sense resistor',
+      'RP2040 board with status LED and a 4.7mΩ shunt',
+      'STM32 board with status LED and a 10mΩ sense resistor',
+      'RP2040 board with status LED, LED resistor 470Ω, 2 m cable',
+      'RP2040 보드, 상태 LED 저항 1kΩ, 케이블 1m'
+    ];
+    for (const [index, prompt] of prompts.entries()) {
+      const generated = await generateMcuPeripheralProject({
+        projectDir: path.join(parent, `p${index}`),
+        prompt,
+        projectName: `p${index}`
+      });
+      const spice = await readFile(generated.files.spice, 'utf8');
+      if (/status LED|상태 LED/.test(prompt)) {
+        const led = (spice.match(/^RLED\s+\S+\s+\S+\s+(\S+)/m) ?? [])[1];
+        assert.equal(led, plainLed, prompt);
+      } else {
+        assert.equal(/SPICE_RESISTOR_INVALID/.test(spice), false, prompt);
+      }
+    }
+    await assert.rejects(
+      () => generateMcuPeripheralProject({
+        projectDir: path.join(parent, 'bad'),
+        prompt: 'STM32 board with a status LED and a 4m7 resistor',
+        projectName: 'bad'
+      }),
+      (error) => error.code === 'SPICE_RESISTOR_INVALID'
+    );
+    for (const prompt of ['LED 4.7mΩ', 'LED resistor 4.7mΩ']) {
+      const led = parseDiscreteLedRequest(prompt);
+      assert.equal(led.refused, true, prompt);
+    }
+    const shunt = parseDiscreteLedRequest('LED 4.7mΩ shunt');
+    assert.equal(shunt.refused, false);
+    assert.equal(shunt.resistanceOhms > 0, true);
   } finally {
     await rm(parent, { force: true, recursive: true });
   }
