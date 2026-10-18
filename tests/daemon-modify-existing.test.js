@@ -20,6 +20,7 @@ import {
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
+  resistorTargetUnclearMessage,
   resistorValueInvalidMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
@@ -1603,7 +1604,20 @@ test('the same LED resistor value and another resistor role never call the provi
     ['SDA 저항 2.2k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
     ['pull up resistor 2.2k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
     ['USB CC resistor to 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
-    ['풀업 저항 4.7k로', 'RESISTOR_REF_UNSUPPORTED', unsupported]
+    ['풀업 저항 4.7k로', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['디바운스 저항 10k로', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['분압 저항 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['feedback resistor 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['버튼 저항 10k로', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['gate resistor 10Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['termination resistor 120Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['베이스 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['foo resistor 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['파란 저항 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['the second resistor 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['bias resistor 10k', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['shunt resistor 10Ω', 'RESISTOR_REF_UNSUPPORTED', unsupported],
+    ['저항 680Ω으로', 'RESISTOR_TARGET_UNCLEAR', resistorTargetUnclearMessage('680')]
   ];
   try {
     for (const [index, [prompt, code, message]] of rows.entries()) {

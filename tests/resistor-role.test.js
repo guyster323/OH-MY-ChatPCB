@@ -398,3 +398,189 @@ test('a non-resistor ref is not edited as the LED resistor', () => {
   assert.equal(withHeader.schematic.components.find((part) => part.ref === 'J2').value, 'I2C_CONNECTOR');
   assert.equal(componentValue(withHeader, 'R5'), '330');
 });
+
+// The only resistor role is the LED series resistor. Bare "저항" may name it.
+function ledOnlySpec(value = '1k') {
+  return {
+    mcu: { family: 'STM32' },
+    schematic: {
+      components: [
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value, role: 'status-led-resistor' },
+        { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED', role: 'status-led' },
+        { ref: 'C1', libId: 'Device:C', value: '100n' }
+      ]
+    },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value }
+    ],
+    boardProfile: {
+      productionParts: [
+        { ref: 'R3', role: 'status-led-resistor', value }
+      ]
+    }
+  };
+}
+
+const DENIED_ROLE_PROMPTS = [
+  '디바운스 저항 10k로',
+  'debounce resistor 10k',
+  '분압 저항 10k',
+  'divider resistor 10k',
+  'feedback resistor 10k',
+  '피드백 저항 10k로',
+  '버튼 저항 10k로',
+  'button resistor 10k',
+  'gate resistor 10Ω',
+  '게이트 저항 10Ω으로',
+  'termination resistor 120Ω',
+  '종단 저항 120Ω',
+  '베이스 저항 680Ω으로',
+  'base resistor 680Ω',
+  'bias resistor 10k',
+  '바이어스 저항 10k로',
+  'sense resistor 10Ω',
+  '센스 저항 10Ω',
+  'shunt resistor 10Ω',
+  '션트 저항 10Ω',
+  'pull-up resistor 2.2k',
+  '풀업 저항 2.2k로',
+  'CC resistor 10k',
+  'CC 저항 10k로',
+  'I2C resistor 2.2k',
+  'I2C 저항 2.2k로',
+  'foo resistor 10k',
+  '파란 저항 10k',
+  'big resistor 10k',
+  '큰 저항 10k로',
+  'the second resistor 10k',
+  '두 번째 저항 10k로'
+];
+
+const ALLOWED_ROLE_PROMPTS = [
+  ['LED 저항 680Ω으로', 680, '680Ω'],
+  ['change the LED resistor to 680Ω', 680, '680Ω'],
+  ['전류 제한 저항 680Ω', 680, '680Ω'],
+  ['current-limiting resistor 680Ω', 680, '680Ω'],
+  ['R3 680Ω', 680, '680Ω'],
+  ['change R3 to 680Ω', 680, '680Ω'],
+  ['LED의 저항 680Ω으로', 680, '680Ω'],
+  ['set the resistor for the LED to 680Ω', 680, '680Ω'],
+  ['상태 LED 저항 680Ω으로', 680, '680Ω'],
+  ['LED 직렬 저항 680Ω', 680, '680Ω']
+];
+
+test('a modifier that is not an LED phrase does not change the LED resistor', () => {
+  const spec = seriesSpec('1k');
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  for (const prompt of DENIED_ROLE_PROMPTS) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
+});
+
+test('LED phrases and the series ref still change only the LED resistor', () => {
+  const spec = seriesSpec('1k');
+  for (const [prompt, ohms, label] of ALLOWED_ROLE_PROMPTS) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), label, prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+});
+
+test('a bare resistor word applies only when the LED series resistor is the only resistor role', () => {
+  const ask = resistorTargetUnclearMessage('680');
+  const shared = [
+    '저항 680Ω으로',
+    'resistor 680Ω',
+    'change the resistor to 680Ω',
+    '抵抗 680Ω'
+  ];
+  const many = seriesSpec('1k');
+  for (const prompt of shared) {
+    const before = structuredClone(many);
+    const decision = classifyExistingProjectRequest(prompt, many);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.message, ask, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.deepEqual(many, before, prompt);
+    assert.equal(componentValue(many, 'R3'), '1k', prompt);
+    assert.equal(componentValue(many, 'R4'), '4.7k', prompt);
+  }
+
+  const only = ledOnlySpec('1k');
+  for (const prompt of shared) {
+    const decision = classifyExistingProjectRequest(prompt, only);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    const next = applyExistingProjectEdit(only, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'C1'), '100n', prompt);
+    assert.equal(componentValue(only, 'R3'), '1k', prompt);
+  }
+});
+
+test('denied role words leave the schematic and the LED net unchanged', async () => {
+  const spec = seriesSpec('1k');
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-role-allow-'));
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    schematicSymbol('R1', 'Device:R', '5.1k', 0),
+    schematicSymbol('R3', 'ChatPCB:LED_RESISTOR', '1k', 10),
+    schematicSymbol('R4', 'ChatPCB:I2C_PULLUP', '4.7k', 20),
+    ')'
+  ].join('\n');
+  const spice = ['* role allow', 'R1 vbus cc 5100', 'R4 v3v3 sda 4700', 'RLED v3v3 led 1000', '.end', ''].join('\n');
+  await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(spec, null, 2)}\n`);
+  await writeFile(path.join(projectDir, 'board.kicad_sch'), schematic);
+  await writeFile(path.join(projectDir, 'board_simulation.cir'), spice);
+  try {
+    for (const prompt of DENIED_ROLE_PROMPTS) {
+      const decision = classifyExistingProjectRequest(prompt, seriesSpec('1k'));
+      assert.equal(decision.mode, 'refuse', prompt);
+      assert.equal(decision.edit, undefined, prompt);
+      assert.equal(await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8'), schematic, prompt);
+      assert.equal(await readFile(path.join(projectDir, 'board_simulation.cir'), 'utf8'), spice, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '1k', prompt);
+    }
+    for (const [prompt, , label] of ALLOWED_ROLE_PROMPTS) {
+      await writeFile(path.join(projectDir, 'board.kicad_sch'), schematic);
+      await writeFile(path.join(projectDir, 'board_simulation.cir'), spice);
+      await writeFile(path.join(projectDir, 'board.chatpcb.json'), `${JSON.stringify(seriesSpec('1k'), null, 2)}\n`);
+      const decision = classifyExistingProjectRequest(prompt, seriesSpec('1k'));
+      assert.equal(decision.mode, 'merge', prompt);
+      await applyMergedProjectEdit({
+        projectDir,
+        existingSpec: seriesSpec('1k'),
+        edit: decision.edit
+      });
+      const written = await readFile(path.join(projectDir, 'board.kicad_sch'), 'utf8');
+      const netlist = await readFile(path.join(projectDir, 'board_simulation.cir'), 'utf8');
+      assert.equal(schematicRefValue(written, 'R3'), label, prompt);
+      assert.equal(schematicRefValue(written, 'R1'), '5.1k', prompt);
+      assert.equal(schematicRefValue(written, 'R4'), '4.7k', prompt);
+      assert.match(netlist, /^RLED v3v3 led 680$/m, prompt);
+      assert.match(netlist, /^R1 vbus cc 5100$/m, prompt);
+      assert.match(netlist, /^R4 v3v3 sda 4700$/m, prompt);
+    }
+  } finally {
+    await rm(projectDir, { force: true, recursive: true });
+  }
+});

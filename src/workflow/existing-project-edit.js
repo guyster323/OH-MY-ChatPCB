@@ -1577,9 +1577,6 @@ function seriesResistorRef(spec) {
 const GUARD_BEFORE = /남겨|남기|유지|그대로|\bunchanged\b/iu;
 const GUARD_AFTER = /\b(?:keep|without)\b/iu;
 const GUARD_AFTER_STOP = /^(?:change|set|update|make|modify|to)$|(?:바꿔|변경|수정)/iu;
-const LED_ROLE = /\bled\b|엘이디|(?<![가-힣])상태(?![가-힣])|(?<![가-힣])직렬(?![가-힣])|\bstatus\b/iu;
-const FOREIGN_ROLE = /\bCC\d*\b|\bI2C\b|\bSDA\b|\bSCL\b|\bUSB\b|\bBOOT\d*\b|\breset\b|\bprogramming\b|pull[\s-]?downs?|pull[\s-]?ups?|풀업|풀다운|프로그래밍|(?<![가-힣])리셋/iu;
-const PULL_ROLE = /pull[\s-]?downs?|pull[\s-]?ups?|풀업|풀다운/iu;
 const OHM_VALUE_IN_CLAUSE = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[rRkK])\b|\d+(?:\.\d+)?\s*[kKmM]\d*\b|\d+\s*[rR]\d+/iu;
 
 function maskGuardObjects(text) {
@@ -1629,14 +1626,26 @@ function blankRange(chars, from, to) {
   for (let index = Math.max(0, from); index < end; index += 1) chars[index] = ' ';
 }
 
-// Another resistor job (CC, I2C, pull-up, reset, …) is not the LED series
-// resistor. The role has to modify the resistor noun, unless it is a bare
-// pull-up or pull-down. A role that only appears in a keep phrase is ignored.
-// LED and a different role on the same edit ask which resistor.
+// The LED series value is allowed for an LED phrase, the series ref, or a bare
+// 저항/resistor/抵抗 when that is the only resistor role. Any other word in
+// front of the noun is refused. Words kept with 그대로/keep do not count.
+// One LED noun and one other noun ask which resistor.
+const RESISTOR_NOUN = /저항|抵抗|\bresistor\b/giu;
+const ALLOW_WORD = /^(?:leds?|엘이디|status|상태|series|직렬|current(?:-limiting)?|limiting|전류제한|전류|제한)$/iu;
+const FUNCTION_WORD = /^(?:a|an|the|of|for|to|from|into|onto|on|in|at|by|with|and|or|its|this|that|my|our|please|only|just|value|it|them|one|also|now|too)$/iu;
+const EDIT_VERB_WORD = /^(?:change|set|update|make|modify|changing|setting)$/iu;
+const WORD_PARTICLE = /(?:이랑|으로|에서|에게|은|는|을|를|과|와|의|도|만|랑|이|가|요|에|로|の|を|が|は|に)$/u;
+
 function foreignRoleDecision(text, spec, resistor) {
   const kind = foreignRoleKind(maskGuardObjects(text));
   if (!kind) return null;
-  if (kind === 'ambiguous' && resistor?.kind === 'resistor') {
+  // "R3 680Ω" names the series part even when the sentence has other words
+  // and no LED phrase. A foreign word on the resistor noun still refuses.
+  if (namesSeriesRef(text, spec) && kind !== 'ambiguous' && !nounModifierIsForeign(maskGuardObjects(text))) return null;
+  if (kind === 'bare' && !hasOtherResistorRole(spec)) return null;
+  // "저항 12만" has no ohm value. Keep the unit question. A real value asks which resistor.
+  if (kind === 'bare' && resistor?.kind !== 'resistor') return null;
+  if ((kind === 'ambiguous' || kind === 'bare') && resistor?.kind === 'resistor') {
     return {
       mode: 'refuse',
       code: 'RESISTOR_TARGET_UNCLEAR',
@@ -1650,65 +1659,183 @@ function foreignRoleDecision(text, spec, resistor) {
   };
 }
 
-function foreignRoleKind(text) {
-  const nouns = [...text.matchAll(/저항|抵抗|\bresistor\b/giu)];
-  if (nouns.length === 0) return bareForeignKind(text);
-  const roles = [];
+function namesSeriesRef(text, spec) {
+  const series = seriesResistorRef(spec);
+  if (!series) return false;
+  const refs = editTargetDesignators(text).filter((ref) => /^R\d+$/.test(ref));
+  return refs.length === 1 && refs[0].toUpperCase() === series.toUpperCase();
+}
+
+function nounModifierIsForeign(text) {
+  RESISTOR_NOUN.lastIndex = 0;
+  const nouns = [...text.matchAll(RESISTOR_NOUN)];
+  let previous = 0;
   for (const noun of nouns) {
-    const role = closestRole(nounPrefix(text, noun.index));
-    if (role) roles.push(role);
+    if (classifyModifiers(wordsNearNoun(text, noun, previous)) === 'foreign') return true;
+    previous = noun.index + noun[0].length;
   }
-  if (PULL_ROLE.test(text)) roles.push('foreign');
-  if (roles.includes('ambiguous') || (roles.includes('led') && roles.includes('foreign'))) return 'ambiguous';
-  if (roles.includes('foreign')) return 'foreign';
+  return false;
+}
+
+function foreignRoleKind(text) {
+  RESISTOR_NOUN.lastIndex = 0;
+  const nouns = [...text.matchAll(RESISTOR_NOUN)];
+  if (nouns.length === 0) return bareNonLedSubject(text);
+  const kinds = [];
+  let previous = 0;
+  for (const noun of nouns) {
+    kinds.push(classifyModifiers(wordsNearNoun(text, noun, previous)));
+    previous = noun.index + noun[0].length;
+  }
+  if (kinds.includes('led') && kinds.includes('foreign')) return 'ambiguous';
+  if (kinds.includes('foreign')) return 'foreign';
+  if (kinds.every((kind) => kind === 'bare')) return 'bare';
   return null;
 }
 
-// No "resistor" noun: a pull-up still names a resistor job. CC, I2C, reset,
-// and the other role words count only in the clause that also states a value,
-// so "680옴으로. I2C는 삭제하지 마" stays an LED edit.
-function bareForeignKind(text) {
-  if (PULL_ROLE.test(text)) return 'foreign';
+// No resistor noun. A value clause that still names something else (pull-up,
+// gate, I2C) is not the LED resistor. A clause with only the value and a verb
+// stays an LED edit, including "680옴으로. I2C는 삭제하지 마".
+function bareNonLedSubject(text) {
   for (const clause of splitClauses(text)) {
     if (!OHM_VALUE_IN_CLAUSE.test(clause.text)) continue;
-    if (FOREIGN_ROLE.test(clause.text)) return 'foreign';
+    const words = [...clause.text.matchAll(/\S+/gu)].map((match) => match[0]);
+    if (classifyModifiers(words) === 'foreign') return 'foreign';
   }
   return null;
 }
 
-function nounPrefix(text, nounIndex) {
-  const before = text.slice(0, nounIndex);
+function wordsNearNoun(text, noun, previousEnd) {
+  const before = text.slice(previousEnd, noun.index);
   let start = 0;
   for (const match of before.matchAll(/[.;!?,。！？]/gu)) start = match.index + match[0].length;
-  const slice = before.slice(start);
-  const words = [...slice.matchAll(/\S+/gu)];
-  const last = words.slice(-4);
-  if (last.length === 0) return '';
-  return slice.slice(last[0].index);
+  const prefix = [...before.slice(start).matchAll(/\S+/gu)].map((match) => match[0]);
+  return [...modifiersBefore(prefix), ...wordsAfterNoun(text, noun)];
 }
 
-function closestRole(prefix) {
-  if (!prefix) return null;
-  const leds = [...prefix.matchAll(new RegExp(LED_ROLE.source, 'giu'))];
-  const foreigns = [...prefix.matchAll(new RegExp(FOREIGN_ROLE.source, 'giu'))];
-  if (leds.length === 0 && foreigns.length === 0) return null;
-  if (leds.length === 0) return 'foreign';
-  if (foreigns.length === 0) return 'led';
-  for (const led of leds) {
-    for (const foreign of foreigns) {
-      if (wordsBetween(prefix, led, foreign) <= 1) return 'ambiguous';
-    }
+// Modifiers sit against the noun. A place or time word ("프로젝트에서") ends
+// the phrase, so earlier words are not part of the resistor name.
+function modifiersBefore(words) {
+  const picked = [];
+  for (let index = words.length - 1; index >= 0; index -= 1) {
+    const raw = words[index];
+    if (isPhraseBoundary(raw) || isClauseBreak(raw)) break;
+    if (isValueWord(raw)) continue;
+    const stemmed = stemWord(raw);
+    if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
+    picked.push(raw);
+    if (!ALLOW_WORD.test(stemmed)) break;
   }
-  const ledEnd = Math.max(...leds.map((match) => match.index + match[0].length));
-  const foreignEnd = Math.max(...foreigns.map((match) => match.index + match[0].length));
-  return foreignEnd > ledEnd ? 'foreign' : 'led';
+  return picked.reverse();
 }
 
-function wordsBetween(text, left, right) {
-  const start = Math.min(left.index + left[0].length, right.index + right[0].length);
-  const end = Math.max(left.index, right.index);
-  if (end <= start) return 0;
-  return text.slice(start, end).trim().split(/\s+/u).filter(Boolean).length;
+function isClauseBreak(word) {
+  return /^(?:말고|하고|지만|그리고|and|but|then)$/iu.test(stemWord(word));
+}
+
+function isPhraseBoundary(word) {
+  return /(?:에서|부터|에게|으로서|로써)$/u.test(String(word ?? ''));
+}
+
+// "resistor for the LED" carries the LED after the noun. Stop at a value or at
+// a word that belongs to the next resistor ("LED 저항이랑 I2C 저항").
+function wordsAfterNoun(text, noun) {
+  const after = text.slice(noun.index + noun[0].length);
+  const end = after.search(/[.;!?,。！？]/u);
+  const cut = end >= 0 ? after.slice(0, end) : after;
+  const kept = [];
+  for (const match of cut.matchAll(/\S+/gu)) {
+    const word = match[0];
+    if (isValueWord(word)) break;
+    const stemmed = stemWord(word);
+    if (/^(?:저항|抵抗|resistor)$/iu.test(stemmed)) break;
+    if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) {
+      kept.push(word);
+      continue;
+    }
+    if (!ALLOW_WORD.test(stemmed)) break;
+    kept.push(word);
+    if (kept.length >= 4) break;
+  }
+  return kept;
+}
+
+function classifyModifiers(words) {
+  const content = [];
+  for (const raw of words) {
+    if (isValueWord(raw) || isPhraseBoundary(raw)) continue;
+    const stemmed = stemWord(raw);
+    if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
+    content.push(stemmed);
+  }
+  if (content.length === 0) return 'bare';
+  if (isAllowedLedContext(content)) return 'led';
+  return 'foreign';
+}
+
+function isAllowedLedContext(content) {
+  if (!content.every((word) => ALLOW_WORD.test(word))) return false;
+  if (content.some((word) => /^(?:leds?|엘이디|status|상태|series|직렬)$/iu.test(word))) return true;
+  const joined = content.map((word) => word.toLowerCase().replace(/-/g, ' ')).join(' ');
+  const compact = content.join('').toLowerCase().replace(/-/g, '');
+  return /current\s+limiting/.test(joined) || compact.includes('전류제한');
+}
+
+function stemWord(word) {
+  let text = String(word ?? '').replace(/^[("'`[]+|[\])"'`,.:;]+$/gu, '');
+  if (!text) return '';
+  return text.replace(WORD_PARTICLE, (match, offset) => (offset === 0 ? match : ''));
+}
+
+function isIgnorableWord(word) {
+  if (FUNCTION_WORD.test(word) || EDIT_VERB_WORD.test(word)) return true;
+  if (/^(?:으로|로|을|를|이|가|은|는|의|도|만|와|과|랑|요|에|에서|이랑|하고|및|그리고|또는|좀|다시|주세요|해줘|해주|그냥|값|기존|현재|existing|currently)$/iu.test(word)) return true;
+  return /(?:바꿔|바꾸|변경|수정)/u.test(word);
+}
+
+function isDesignator(word) {
+  return /^[A-Za-z]{1,3}\d+$/.test(word);
+}
+
+function isValueWord(word) {
+  const stemmed = stemWord(word);
+  if (/^(?:Ω|옴|ohms?|meg)$/iu.test(stemmed)) return true;
+  // I2C and R3 contain digits and are not values. 2.2k, 10Ω, and 0603 are.
+  if (/^[±+]?\d/.test(stemmed)) return true;
+  return /\d/.test(stemmed) && /[kKmMrRΩ옴%]$/u.test(stemmed);
+}
+
+function productionParts(spec) {
+  const parts = spec?.boardProfile?.productionParts;
+  return Array.isArray(parts) ? parts : [];
+}
+
+// Pull-ups, CC resistors, and any other saved resistor are a second role.
+// A bare "저항" then asks which one instead of editing the LED resistor.
+function hasOtherResistorRole(spec) {
+  const series = String(seriesResistorRef(spec) ?? '').toUpperCase();
+  const seen = new Set();
+  for (const part of [...schematicComponents(spec), ...productionParts(spec)]) {
+    const ref = String(part?.ref ?? '').toUpperCase();
+    if (!ref || ref === series || seen.has(ref)) continue;
+    if (!isOtherResistor(spec, part)) continue;
+    seen.add(ref);
+    return true;
+  }
+  return false;
+}
+
+function isOtherResistor(spec, part) {
+  if (isEditableLedSeriesResistor(spec, part)) return false;
+  const libId = String(part?.libId ?? '');
+  const role = String(part?.role || componentRole(spec, part?.ref) || '');
+  if (/^Device:R$/i.test(libId) || /PULLUP|PULLDOWN|RESISTOR/i.test(libId)) return true;
+  return /resistor|pull-?up|pull-?down|pulldown|pullup/i.test(role);
+}
+
+function isForeignResistorRole(text) {
+  const kind = foreignRoleKind(text);
+  return kind === 'foreign' || kind === 'ambiguous';
 }
 
 // The saved series value wins over the user's spelling. 330Ω, 330R, and 0.33k
@@ -1817,7 +1944,7 @@ function resistorRefDecision(text, spec, resistor) {
   if (others.length > 1) return ambiguousResistorRefs(others);
   if (others.length !== 1) return null;
   const token = others[0];
-  if (!refRecord(spec, token) && foreignRoleKind(maskGuardObjects(text))) return null;
+  if (!refRecord(spec, token) && isForeignResistorRole(maskGuardObjects(text))) return null;
   return refusedDesignator(spec, token);
 }
 
