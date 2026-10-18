@@ -1,4 +1,5 @@
 import { isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { normalizeMatchText } from './match-text.js';
 
 // Quantities in an LED prompt. `value` is normalized: volts, ohms, milliamps,
 // or a count. `unit` is the notation that was recognized (mV, VAC, ohm, …).
@@ -1058,7 +1059,7 @@ function hasUncoveredVoltage(prompt, spans) {
 }
 
 export function tokenizeQuantities(prompt) {
-  const text = String(prompt ?? '').normalize('NFKC');
+  const text = normalizeMatchText(prompt);
   const candidates = [];
   collectRanges(text, candidates);
   collectGlued(text, candidates);
@@ -1132,8 +1133,8 @@ function bindKeyword(tokens, keyword) {
 }
 
 function explicitLabelGap(text) {
-  // En dash and em dash join a label to its value, as in "Vf—3.2V".
-  return /^[\s:=\u2013\u2014]*$/i.test(text) || /^[\s:=\u2013\u2014]*of[\s:=\u2013\u2014]*$/i.test(text);
+  // Match text folds every dash to ASCII '-', so "Vf—3.2V" arrives as "Vf-3.2V".
+  return /^[\s:=\u2013\u2014-]*$/i.test(text) || /^[\s:=\u2013\u2014-]*of[\s:=\u2013\u2014-]*$/i.test(text);
 }
 
 function resistanceFollowsLabel(prompt, tokens, label) {
@@ -1189,7 +1190,7 @@ function roleForVoltage(prompt, token) {
 }
 
 export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
-  const text = String(prompt ?? '').normalize('NFKC');
+  const text = normalizeMatchText(prompt);
   const tokens = scan.tokens.map((token) => ({ ...token, hits: [] }));
   bindExplicitForwardVoltages(text, tokens);
   for (const keyword of keywordHits(text, SUPPLY_KEYWORDS, 'supply')) bindKeyword(tokens, keyword);

@@ -2,6 +2,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { classifyResistorValue, isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { normalizeMatchText } from '../runtime/match-text.js';
 import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 
@@ -418,9 +419,9 @@ function clientLanguage(locale) {
 // full board description, so a new project or a full regeneration keeps its preview.
 export function classifyExistingProjectRequest(prompt, existingSpec, userPrompt) {
   if (!existingSpec || typeof existingSpec !== 'object') return { mode: 'regenerate' };
-  const editText = String(prompt ?? '');
+  const editText = normalizeMatchText(prompt);
   const hasUser = typeof userPrompt === 'string' && userPrompt.trim().length > 0;
-  const intentText = hasUser ? String(userPrompt) : editText;
+  const intentText = hasUser ? normalizeMatchText(userPrompt) : editText;
   const separateIntent = hasUser && intentText.trim() !== editText.trim();
   if (!separateIntent) return classifyPrompt(editText, existingSpec);
 
@@ -622,7 +623,7 @@ function hasResistorTargetText(text) {
 export function blocksBeforeProvider(text, decision) {
   if (decision?.mode !== 'refuse' || !decision.code) return false;
   if (PRE_PROVIDER_REMOVAL_CODES.has(decision.code)) return true;
-  const normalized = String(text ?? '').normalize('NFKC').trim();
+  const normalized = normalizeMatchText(text).trim();
   if (valueOnlyDecision(normalized)) return true;
   if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
   if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
@@ -643,7 +644,7 @@ export function appliesBeforeProvider(text, decision) {
 }
 
 function isLocalCurrentLimiting(text) {
-  const normalized = String(text ?? '').normalize('NFKC');
+  const normalized = normalizeMatchText(text);
   if (EXPLICIT_LED_OR_REF.test(normalized)) return false;
   return CURRENT_LIMITING_PHRASE.test(normalized);
 }
@@ -669,7 +670,7 @@ function wholeResistorToken(text) {
 // The whole request is one resistor token, optionally with a particle. A valid
 // value asks which resistor. It is not applied to R3. A bare number asks for a unit.
 function valueOnlyDecision(text) {
-  const normalized = String(text ?? '').normalize('NFKC').trim();
+  const normalized = normalizeMatchText(text).trim();
   if (!normalized) return null;
   const stripped = normalized.replace(VALUE_ONLY_TAIL, '').trim();
   if (!stripped) return null;
@@ -754,6 +755,7 @@ function isFullDesignPrompt(text) {
 // Format characters (Cf) are removed before NFKC, so they cannot hide a
 // negation or a retraction. Cf includes bidi controls U+202A–U+202E and
 // U+2066–U+2069, plus ZWSP, ZWNJ, ZWJ, word joiner, BOM, and soft hyphen.
+// Dashes fold to ASCII '-' and whitespace collapses with the other matchers.
 // U+00B4 then decomposes to a space plus combining acute, and that residue is
 // folded back to an apostrophe before the other apostrophe-like characters
 // are mapped.
@@ -762,14 +764,13 @@ function normalizeDeletionText(text) {
     .filter((ch) => ch !== '\u0301')
     .map((ch) => (/[-\\\]^]/.test(ch) ? `\\${ch}` : ch))
     .join('');
-  return String(text ?? '')
-    .replace(/\p{Cf}/gu, '')
-    .normalize('NFKC')
+  // Match normalization runs first. U+00B4's NFKC form is a space plus
+  // combining acute, and that residue is still folded back to an apostrophe.
+  return normalizeMatchText(text)
     .replace(/([A-Za-z])[ \u00A0]\u0301([A-Za-z])/gu, "$1'$2")
     .replace(/([A-Za-z])\u0301([A-Za-z])/gu, "$1'$2")
     .replace(new RegExp(`[${apostrophes}]`, 'gu'), "'")
-    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
-    .replace(/\u00A0/g, ' ');
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"');
 }
 
 function stripQuotedMentions(text) {
@@ -2598,9 +2599,13 @@ const CLEAR_OHM = /\d+(?:\.\d+)?\s*(?:meg|[kKrR])(?:\s*(?:Ω|옴|ohms?))?(?![A-Z
 // A resistor edit is read only from this text. Candidates go through
 // parseResistorOhms and then LED_SERIES_RESISTOR_RANGE. Two distinct values
 // without a transition marker ask which value. A token the parser rejects is invalid.
-// A question-shaped sentence is an edit only when it asks or permits the change.
-// "should I change ...?" and "2.2k ok?" do not. "바꿔도 돼?" and "can I ...?" do.
-const EDIT_PERMISSION = /바꿔\s*줄래|바꿔\s*줄\s*수\s*있어|바꿔주실래요|해줄래|할\s*수\s*있어|바꿔도\s*될까|바꿔도\s*되나요|바꿔도\s*돼|\bcan\s+you\b|\bcould\s+you\b|\bwould\s+you\b|\bcan\s+i\b|\bmay\s+i\b|\bis\s+it\s+ok\s+to\b|\bplease\b/iu;
+// A question-shaped sentence is an edit only when it permits the change.
+// why/ask/know/what/how/wonder and 왜/뭐/어떻게/궁금 outrank a permission form.
+// "may I" / "can I" / "could I" count only when they govern an edit verb.
+// "should I change ...?" and "2.2k ok?" do not. "바꿔도 돼?" and "may I change ...?" do.
+const QUESTION_PRIORITY = /\b(?:why|ask|know|what|how|wonder)\b|왜|뭐|어떻게|궁금/iu;
+const MODAL_GOVERNS_EDIT = /\b(?:may|can|could)\s+i\s+(?:(?:please|just|kindly)\s+)?(?:(?:change|set|replace|make|use)\b|바꿔|변경|수정)/iu;
+const EDIT_PERMISSION = /바꿔\s*줄래|바꿔\s*줄\s*수\s*있어|바꿔주실래요|해줄래|할\s*수\s*있어|바꿔도\s*될까|바꿔도\s*되나요|바꿔도\s*돼|\bcan\s+you\b|\bcould\s+you\b|\bwould\s+you\b|\bis\s+it\s+ok\s+to\b|\bplease\b/iu;
 
 function isQuestionShaped(text) {
   if (/[?？]/u.test(text)) return true;
@@ -2611,7 +2616,10 @@ function isQuestionShaped(text) {
 }
 
 function questionStopsResistorEdit(text) {
-  if (!isQuestionShaped(text)) return false;
+  const priority = QUESTION_PRIORITY.test(text);
+  if (!isQuestionShaped(text) && !priority) return false;
+  if (priority) return true;
+  if (MODAL_GOVERNS_EDIT.test(text)) return false;
   if (EDIT_PERMISSION.test(text)) return false;
   return true;
 }
@@ -2693,8 +2701,9 @@ function isUnitlessKRSuffix(raw) {
 }
 
 function approximateResistorValue(before, after) {
-  if (/(?:~|\b(?:about|around|approximately|approx)\b|(?:^|[\s\d])(?:약|대략|대충))\s*$/iu.test(before)) return true;
-  return /^\s*(?:정도|쯤|가량)/u.test(after);
+  if (/(?:~|\b(?:about|around|approximately|approx|roughly)\b|(?:^|[\s\d])(?:약|대략|대충))\s*$/iu.test(before)) return true;
+  if (/^\s*(?:정도|쯤|가량|내외)/u.test(after)) return true;
+  return /^\s*-ish\b/iu.test(after);
 }
 
 function unitlessSuffixCountsAsResistor(text, start, end) {
@@ -2729,6 +2738,12 @@ const COUNTER_LEAD = /(?:\b(?:pins?|gpios?|ports?|rev(?:ision)?s?|models?|years?
 function markNonResistorQuantities(tokens, text) {
   for (const token of tokens) {
     const raw = token.raw.trim();
+    // An approximate ohm value is not applied, with or without a unit.
+    if (approximateResistorValue(text.slice(0, token.index), text.slice(token.end))) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
     if (/^\d+(?:st|nd|rd|th)$/i.test(raw)) {
       token.quantity = true;
       token.attempt = false;

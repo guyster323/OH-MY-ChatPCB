@@ -2538,6 +2538,29 @@ function assertResistorUntouched(preview, calls, schematic, spice, before, promp
   assert.equal(spice, before.spice, prompt);
 }
 
+// A question or an approximate value reaches the provider and writes nothing.
+// The malicious model prompt must not land either.
+async function assertProviderLeavesSeries(services, projectDir, generated, before, prompt, id) {
+  for (const kind of ['native', 'malicious']) {
+    const provider = kind === 'native'
+      ? nativeNoPatchCounter()
+      : maliciousPatchCounter('LED 22Ω, R4 10k');
+    await writeGeneratedBytes(generated, before);
+    const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `${id}_${kind}`);
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    const spice = await readFile(generated.files.spice, 'utf8');
+    const code = preview.error?.code ?? '';
+    assert.equal(provider.calls(), 1, `${kind} ${prompt} calls=${provider.calls()} code=${code || preview.result?.applied} R3=${schematicRefValue(schematic, 'R3')}`);
+    assert.equal(preview.ok, false, `${kind} ${prompt} ${code} ${preview.error?.message ?? ''}`);
+    assert.equal(code, 'PROVIDER_NO_PATCH', `${kind} ${prompt} ${code}`);
+    assert.equal(code.startsWith('RESISTOR_'), false, `${kind} ${prompt} ${code}`);
+    assert.equal(schematicRefValue(schematic, 'R3'), '1k', `${kind} ${prompt}`);
+    assert.equal(rledOhms(spice), '1000', `${kind} ${prompt}`);
+    assert.equal(schematic, before.schematic, `${kind} ${prompt}`);
+    assert.equal(spice, before.spice, `${kind} ${prompt}`);
+  }
+}
+
 test('LED and pull-up values in one request never apply the pull-up value to R3', async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();
@@ -2565,6 +2588,93 @@ test('LED and pull-up values in one request never apply the pull-up value to R3'
         const spice = await readFile(generated.files.spice, 'utf8');
         assertResistorUntouched(preview, provider.calls(), schematic, spice, before, `${kind} ${prompt}`);
       }
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('LED and pull\u2011up (U+2010/2011/2013/2014 hyphen) values in one request never apply the pull-up value to R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    ...['\u2010', '\u2011', '\u2013', '\u2014', '\u2212', '\uFF0D'].map((dash) => `LED resistor to 680Ω, pull${dash}up to 2.2k`),
+    'LED 저항 680Ω\uFF0C 풀업 2.2kΩ',
+    'LED 저항 680Ω\uFF0C풀업 2.2kΩ'
+  ];
+  try {
+    let index = 0;
+    for (const prompt of prompts) {
+      for (const kind of ['native', 'malicious']) {
+        index += 1;
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_h1_dash_${index}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        assertResistorUntouched(preview, provider.calls(), schematic, spice, before, `${kind} ${prompt}`);
+      }
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('\'may I ask why R3 is 680Ω?\' and \'may I know why\u2026\' reach the provider and create no R3 patch', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    'may I ask why R3 is 680Ω?',
+    'may I know why R3 is 680Ω?',
+    'can I ask why the LED resistor is 680Ω?',
+    'could I know what R3 is?',
+    'LED 저항이 왜 680Ω인지 물어봐도 돼?'
+  ];
+  try {
+    for (const [index, prompt] of prompts.entries()) {
+      await assertProviderLeavesSeries(services, projectDir, generated, before, prompt, `call_m5_${index}`);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('approximate values with a unit (\'약 680Ω\', \'~680Ω\', \'680Ω 내외\') reach the provider', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = [
+    'LED 저항 약 680Ω으로',
+    'LED resistor ~680Ω',
+    'change the LED resistor to ~680Ω',
+    'change the LED resistor to about 4.7kΩ',
+    'LED 저항 680옴 정도로',
+    'LED 저항을 680옴 정도로',
+    'LED 저항 4.7k 내외로',
+    'LED 저항을 4.7k 내외로',
+    'change the LED resistor to 680Ω 내외',
+    'change the LED resistor to around 680Ω',
+    'change the LED resistor to approximately 680Ω',
+    'set the LED resistor to approximately 680Ω',
+    'change the LED resistor to roughly 680Ω',
+    'LED resistor roughly 680Ω',
+    'LED 저항 대략 680Ω으로',
+    'change the LED resistor to 680Ω-ish',
+    'LED resistor 680Ω-ish'
+  ];
+  try {
+    for (const [index, prompt] of prompts.entries()) {
+      await assertProviderLeavesSeries(services, projectDir, generated, before, prompt, `call_l1_${index}`);
     }
   } finally {
     services.patchApprovalRegistry.disposeAll();

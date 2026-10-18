@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { applyDiscreteLedSpec, normalizeCircuitSpec, parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
+import { normalizeMatchText } from '../src/runtime/match-text.js';
 import { classifyQuantities, promptDescribesAcSupply, tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
 import * as quantityTokens from '../src/runtime/quantity-tokens.js';
 import { reviewCircuitReadiness } from '../src/workflow/review-project.js';
@@ -1515,10 +1516,10 @@ test('identical blocker, note, and warning sentences appear once in the review',
 test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () => {
   const cases = [
     ['3.0-3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
-    ['3.0–3.4V', [{ value: 3.4, unit: 'V', raw: '3.0–3.4V' }]],
-    ['3.0—3.4V', [{ value: 3.4, unit: 'V', raw: '3.0—3.4V' }]],
+    ['3.0–3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
+    ['3.0—3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
     ['2.0～2.4V', [{ value: 2.4, unit: 'V', raw: '2.0~2.4V' }]],
-    ['2.0〜2.4V', [{ value: 2.4, unit: 'V', raw: '2.0〜2.4V' }]],
+    ['2.0〜2.4V', [{ value: 2.4, unit: 'V', raw: '2.0-2.4V' }]],
     ['2.0~2.4V', [{ value: 2.4, unit: 'V', raw: '2.0~2.4V' }]],
     ['2.0 to 2.4 V', [{ value: 2.4, unit: 'V', raw: '2.0 to 2.4 V' }]],
     ['vf3.2v', [{ value: 3.2, unit: 'V', raw: '3.2v' }]],
@@ -1632,7 +1633,7 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
       assert.equal(token.value, item.value, `${prompt} [${index}]`);
       assert.equal(token.unit, item.unit, `${prompt} [${index}] ${token.raw}`);
       assert.equal(token.raw, item.raw, prompt);
-      assert.equal(prompt.normalize('NFKC').slice(token.start, token.end), token.raw, prompt);
+      assert.equal(normalizeMatchText(prompt).slice(token.start, token.end), token.raw, prompt);
       assert.equal(typeof token.start, 'number', prompt);
       assert.ok(token.end > token.start, prompt);
     });
@@ -1867,10 +1868,10 @@ test('quantity classification is order-independent inside a small window', () =>
 test('a forward-voltage range is not a resistor and uses its maximum', () => {
   const cases = [
     ['LED Vf 3.0-3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
-    ['LED Vf 3.0–3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0–3.4V'],
-    ['LED Vf 3.0—3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0—3.4V'],
+    ['LED Vf 3.0–3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
+    ['LED Vf 3.0—3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
     ['LED Vf 2.0～2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0~2.4V'],
-    ['LED Vf 2.0〜2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0〜2.4V'],
+    ['LED Vf 2.0〜2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0-2.4V'],
     ['LED Vf 2.0~2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0~2.4V'],
     ['LED Vf 2.0 to 2.4 V at 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0 to 2.4 V'],
     ['blue LED Vf 3.0-3.4V on 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V']
@@ -2473,7 +2474,7 @@ test('a voltage range with no Vf label asks which value is the supply', () => {
     assert.equal(parsed.resistanceOhms, null, prompt);
     assert.equal(parsed.reviewBlockers.length, 1, prompt);
     const blocker = parsed.reviewBlockers[0];
-    const shown = prompt.match(/\d[\d.\u2013\u2014-]*V/)[0];
+    const shown = prompt.match(/\d[\d.\u2013\u2014-]*V/)[0].replace(/\p{Pd}/gu, '-');
     assert.equal(blocker.code, 'discrete-led-ambiguous-range', `${prompt} ${blocker.code}`);
     assert.match(blocker.en, new RegExp(`^Which value is the supply and which is the LED Vf in ${escapeRegExp(shown)}\\?`), blocker.en);
     assert.match(blocker.en, /forward voltage \(Vf\)/i, blocker.en);

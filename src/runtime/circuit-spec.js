@@ -1,3 +1,4 @@
+import { normalizeMatchText } from './match-text.js';
 import { classifyQuantities, promptDescribesAcSupply } from './quantity-tokens.js';
 
 const FAMILY_PATTERNS = [
@@ -935,12 +936,14 @@ function refuseDiscreteLed({ code, texts, prompt, supplyVolts, supplyAssumed = f
 }
 
 export function parseDiscreteLedRequest(prompt) {
-  const text = String(prompt ?? '').normalize('NFKC');
+  // Length stays on NFKC, before whitespace collapse, so padding spaces still count.
+  const counted = String(prompt ?? '').normalize('NFKC');
+  const text = normalizeMatchText(counted);
   if (!isSimpleDiscreteLedPrompt(text)) return null;
-  if (text.length > MAX_DISCRETE_LED_PROMPT_CHARS) {
+  if (counted.length > MAX_DISCRETE_LED_PROMPT_CHARS) {
     return refuseDiscreteLed({
       code: 'discrete-led-prompt-too-long',
-      prompt: text,
+      prompt: counted,
       supplyVolts: null,
       texts: promptTooLongMessage()
     });
