@@ -190,7 +190,7 @@ newProjectFormEl.addEventListener('submit', (event) => {
 });
 newProjectAgainEl?.addEventListener('click', () => {
   if (projectSetupEl) projectSetupEl.hidden = false;
-  projectNameEl?.focus();
+  focusProgrammatically(projectNameEl);
 });
 formEl.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -271,7 +271,7 @@ document.addEventListener('keydown', (event) => {
     const next = index < 0
       ? (event.shiftKey ? buttons[buttons.length - 1] : buttons[0])
       : buttons[(index + direction + buttons.length) % buttons.length];
-    next.focus();
+    focusProgrammatically(next);
     return;
   }
   if (event.key !== 'Escape') return;
@@ -288,7 +288,7 @@ document.addEventListener('keydown', (event) => {
   const menu = document.querySelector('#tools-menu');
   if (!menu || menu.hidden) return;
   setToolsMenuOpen(false);
-  document.querySelector('#tools-menu-button')?.focus();
+  focusProgrammatically(document.querySelector('#tools-menu-button'));
 });
 for (const button of document.querySelectorAll('.flow-btn')) {
   button.addEventListener('click', () => {
@@ -296,7 +296,7 @@ for (const button of document.querySelectorAll('.flow-btn')) {
       const reason = document.getElementById(button.getAttribute('aria-describedby') || '');
       if (reason) {
         reason.hidden = false;
-        reason.focus();
+        focusProgrammatically(reason);
       }
       return;
     }
@@ -312,7 +312,7 @@ for (const row of document.querySelectorAll('.lane-row')) {
       const reason = document.getElementById(row.getAttribute('aria-describedby') || '');
       if (reason) {
         reason.hidden = false;
-        reason.focus();
+        focusProgrammatically(reason);
       }
       return;
     }
@@ -396,13 +396,36 @@ function armReconcileTimer(flight) {
   flight.reconcileTimer = setTimeout(fire, DEFAULT_RECONCILE_TIMEOUT_MS);
 }
 
+function confirmDialogs() {
+  return [applyRemoveConfirmEl, applyWithoutErcConfirmEl].filter((el) => el && el.hidden === false);
+}
+
+function confirmDialogOwnsFocus() {
+  return confirmDialogs().length > 0;
+}
+
+// One focus path. An open confirm dialog keeps focus on its own controls.
+function focusProgrammatically(element, options) {
+  if (!element || typeof element.focus !== 'function') return;
+  if (confirmDialogOwnsFocus() && !confirmDialogs().some((dialog) => dialog.contains(element))) return;
+  element.focus(options);
+}
+
+function expirePreviewAfterReconnect() {
+  clearProgress();
+  lastProgressText = '';
+  renderRequestStatus({ state: 'failed', summaryKey: 'request.preview-expired' });
+}
+
 function connect() {
   socket = new WebSocket(DAEMON_WS_URL);
   socket.addEventListener('open', () => {
     setConnectionStatus('connection.connected', 'ok');
     const flight = approveFlight;
     const reconciling = Boolean(flight && flight.phase === 'checking' && flight.settled !== true);
+    const dialogOpen = confirmDialogOwnsFocus();
     if (!reconciling) clearPatchApproval();
+    if (dialogOpen && !reconciling) expirePreviewAfterReconnect();
     refreshProviderStatus();
     refreshChatGPTAuthStatus();
     if (providerEl?.value !== 'chatgpt' && chatgptAuthCardEl) chatgptAuthCardEl.hidden = true;
@@ -1716,7 +1739,7 @@ function askChatpcbToFixErc() {
     ? erc.messages.join('\n')
     : ercFailedCopy(erc).text;
   promptEl.value = `${t('patch.fix')}\n${detail}`;
-  if (!promptEl.disabled) promptEl.focus();
+  if (!promptEl.disabled) focusProgrammatically(promptEl);
 }
 
 function armApproveFlight(callId) {
@@ -2000,12 +2023,12 @@ function revealApplyWithoutErcConfirm() {
   const erc = ercBlockState();
   if (erc.skipped !== true || erc.failed || erc.passed === true) return;
   applyWithoutErcConfirmEl.hidden = false;
-  cancelApplyWithoutErcButtonEl?.focus();
+  focusProgrammatically(cancelApplyWithoutErcButtonEl);
 }
 
 function cancelApplyWithoutErcConfirm() {
   hideApplyWithoutErcConfirm();
-  approveWithoutErcButtonEl?.focus();
+  focusProgrammatically(approveWithoutErcButtonEl);
 }
 
 function approvePatchWithoutErc() {
@@ -2281,7 +2304,9 @@ function syncWorkflow() {
   const copyWait = t(`workflow.copy.${active}.wait`);
   const copyRun = t(`workflow.copy.${active}.run`);
   if (workflowCaptionEl && active) {
-    const failedCaptionKey = applyFailureCaption ? 'workflow.caption.apply-failed' : 'workflow.caption.failed';
+    const failedCaptionKey = requestStatusKey === 'request.preview-expired'
+      ? 'request.preview-expired'
+      : (applyFailureCaption ? 'workflow.caption.apply-failed' : 'workflow.caption.failed');
     workflowCaptionEl.textContent = requestStatusEl?.dataset.state === 'failed'
       ? t(failedCaptionKey)
       : (mode === 'run' ? copyRun : (mode === 'idle' ? t('workflow.caption.idle') : copyWait));
@@ -2318,10 +2343,8 @@ function requestStatusLive() {
 function focusRequestResultHeading() {
   const heading = requestResultHeading();
   if (!heading) return;
-  if (applyRemoveConfirmEl && applyRemoveConfirmEl.hidden === false) return;
-  if (applyWithoutErcConfirmEl && applyWithoutErcConfirmEl.hidden === false) return;
   heading.tabIndex = -1;
-  heading.focus({ focusVisible: true });
+  focusProgrammatically(heading, { focusVisible: true });
 }
 
 function publishRequestLive(text) {
@@ -3004,7 +3027,7 @@ function presentRemovalConfirm() {
     }
   }
   applyRemoveConfirmEl.hidden = false;
-  cancelApplyRemoveButtonEl?.focus();
+  focusProgrammatically(cancelApplyRemoveButtonEl);
 }
 
 function cancelRemovalConfirm() {
@@ -3028,14 +3051,12 @@ function applyGateClosedStatus() {
 }
 
 function focusApplyButton() {
-  const button = approvePatchButtonEl;
-  if (!button) return;
-  button.focus();
+  focusProgrammatically(approvePatchButtonEl);
 }
 
 function reassertPatchApprovalFocus() {
   if (patchApplyBusy()) return;
-  if (applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden) return;
+  if (confirmDialogOwnsFocus()) return;
   if (!patchApprovalCardEl || patchApprovalCardEl.hidden) return;
   const remembered = patchAreaFocusedEl;
   if (!remembered && !patchFocusHold) return;
@@ -3055,7 +3076,7 @@ function focusPatchApprovalStatus() {
   if (patchApprovalCardEl) patchApprovalCardEl.hidden = false;
   status.hidden = false;
   status.tabIndex = -1;
-  status.focus({ focusVisible: true });
+  focusProgrammatically(status, { focusVisible: true });
 }
 
 function cancelApprovalStatusFocus() {
@@ -3070,7 +3091,7 @@ function scheduleApprovalStatusFocus() {
   approvalStatusFocusTimer = setTimeout(() => {
     approvalStatusFocusTimer = 0;
     removalClosedForFocus = false;
-    if (applyRemoveConfirmEl && !applyRemoveConfirmEl.hidden) return;
+    if (confirmDialogOwnsFocus()) return;
     if (!approvePatchButtonEl?.disabled) return;
     focusPatchApprovalStatus();
   }, 0);
@@ -3497,7 +3518,7 @@ function appendChatGPTAuthActions(parent, actions) {
 function patchFlowOwnsFocus() {
   if (approveFlight && approveFlight.settled !== true) return true;
   const key = requestStatusKey;
-  if (key === 'patch.apply.applied' || key === 'patch.apply.done' || key === 'patch.apply.unconfirmed' || key === 'patch.apply.checking' || key === 'patch.apply.summary') return true;
+  if (key === 'patch.apply.applied' || key === 'patch.apply.done' || key === 'patch.apply.unconfirmed' || key === 'patch.apply.checking' || key === 'patch.apply.summary' || key === 'request.preview-expired') return true;
   if (applyFailureCaption === true && requestStatusEl?.dataset.state === 'failed') return true;
   return false;
 }
@@ -3636,7 +3657,7 @@ function renderChatGPTAuth() {
 
   if (focusTitle && !patchFlowOwnsFocus()) {
     setTimeout(() => {
-      if (titleEl.isConnected && !patchFlowOwnsFocus()) titleEl.focus();
+      if (titleEl.isConnected && !patchFlowOwnsFocus()) focusProgrammatically(titleEl);
     }, 100);
   }
 }
@@ -3848,7 +3869,7 @@ function copyChatGPTLink() {
 }
 
 function focusProviderSelect() {
-  providerEl?.focus();
+  focusProgrammatically(providerEl);
 }
 
 async function awaitStatus(statusPromise) {

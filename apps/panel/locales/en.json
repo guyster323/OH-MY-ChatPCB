@@ -229,6 +229,7 @@
   "request.project-ready": "Project ready. Describe the circuit you want to create.",
   "request.clarify-fallback": "Reply in chat to continue. Missing capabilities are part of the product flow.",
   "request.preview-ready": "The circuit draft is ready. Apply it to the schematic?",
+  "request.preview-expired": "Connection was reset, so this preview expired. Create it again.",
   "request.preview-done": "Preview is ready. Applying will change the files.",
   "request.draft-progress": "Drawing a local schematic draft.",
   "draft.create": "Create a draft with this setup",

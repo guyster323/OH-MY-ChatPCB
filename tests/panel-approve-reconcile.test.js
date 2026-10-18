@@ -1,4 +1,4 @@
-/* global document, window */
+/* global document, window, MouseEvent, KeyboardEvent */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -37,6 +37,19 @@ const passedPreview = {
     manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
     validation: {}
   }
+};
+
+const skippedPreview = {
+  ...passedPreview,
+  validation: { ok: true, skipped: true, executed: false },
+  candidateVerification: { erc: { ok: true, skipped: true, executed: false } }
+};
+
+const removedPart = { ref: 'J2', value: 'Conn_01x04', libId: 'Connector:Conn_01x04' };
+
+const PREVIEW_EXPIRED = {
+  en: 'Connection was reset, so this preview expired. Create it again.',
+  ko: '연결이 다시 설정돼 미리보기가 만료됐어요. 다시 만들어 주세요.'
 };
 
 function loadLocales() {
@@ -279,6 +292,96 @@ async function signInChatGPT(page) {
     plan: 'plus'
   });
   await page.waitForSelector('#chatgpt-auth-title');
+  // The signed-in card focuses its title after 100ms. Flush that before the dialog opens.
+  await advance(page, 250);
+}
+
+async function installHeadingFocusSpy(page) {
+  await page.evaluate(() => {
+    const heading = document.querySelector('#request-result-heading');
+    const focus = heading.focus.bind(heading);
+    window.__resultHeadingFocusCalls = 0;
+    heading.focus = (...args) => {
+      window.__resultHeadingFocusCalls += 1;
+      return focus(...args);
+    };
+  });
+}
+
+function headingFocusCalls(page) {
+  return page.evaluate(() => window.__resultHeadingFocusCalls);
+}
+
+function removalResult(expiresAt) {
+  return {
+    ...passedPreview,
+    patchId: 'patch_remove',
+    requiresApproval: true,
+    approved: false,
+    applied: false,
+    operation: 'generated',
+    expiresAt,
+    files: { project: '/tmp/demo-board/board.kicad_pro' },
+    removedComponents: [removedPart],
+    reason: { code: 'EXISTING_COMPONENTS_REMOVED', removedComponents: [removedPart] },
+    conversation: { messages: [] }
+  };
+}
+
+async function showRemovalLead(page, lead) {
+  await showReady(page);
+  const call = await sendProjectRequest(page, 'Remove the I2C connector J2');
+  const expiresAt = await page.evaluate(() => Date.now() + 600000);
+  await emitResult(page, call.id, removalResult(expiresAt));
+  const inspectCall = await waitForCall(page, 'project.inspect');
+  await emitResult(page, inspectCall.id, {
+    manifest: { freshness: { status: 'current', reason: 'Evidence matches.' } },
+    validation: {},
+    inspection: { projectDigest: 'digest-before' }
+  });
+  await page.waitForFunction((text) => {
+    const dialog = document.querySelector('#apply-remove-components-confirm');
+    return dialog && dialog.hidden === false && dialog.contains(document.activeElement)
+      && document.querySelector('#request-status')?.textContent === text;
+  }, lead, { timeout: 3000 });
+}
+
+async function showWithoutErcDialog(page) {
+  await showReady(page, skippedPreview);
+  await page.locator('#approve-patch-without-erc').click();
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('#apply-without-erc-confirm');
+    return dialog && dialog.hidden === false && dialog.contains(document.activeElement);
+  }, null, { timeout: 3000 });
+}
+
+async function showRemovalDialog(page) {
+  await showReady(page, { ...passedPreview, removedComponents: [removedPart] });
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('#apply-remove-components-confirm');
+    return dialog && dialog.hidden === false && dialog.contains(document.activeElement);
+  }, null, { timeout: 3000 });
+}
+
+function clickWithoutFocus(page, selector) {
+  return page.evaluate((sel) => {
+    const element = document.querySelector(sel);
+    if (!element) throw new Error(`missing ${sel}`);
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }, selector);
+}
+
+async function reconnectAndRefreshAuth(page) {
+  const authBefore = (await sentCalls(page, 'auth.chatgpt.status')).length;
+  const providerBefore = (await sentCalls(page, 'provider.status')).length;
+  await page.evaluate(() => window.__sockets.at(-1).close());
+  await advance(page, RECONNECT_DELAY_MS);
+  const authCall = await waitForNthCall(page, 'auth.chatgpt.status', authBefore);
+  const providerCall = await waitForNthCall(page, 'provider.status', providerBefore);
+  const signedIn = { state: 'signed_in', account: { email: 'ada@example.com' }, plan: 'plus' };
+  await emitResult(page, authCall.id, signedIn);
+  await emitResult(page, providerCall.id, { provider: 'chatgpt', status: 'signed-in', account: signedIn.account, plan: 'plus' });
+  await advance(page, 250);
 }
 
 test('approve reconcile settles a lost reply, a closed socket, and a late reply', async (t) => {
@@ -784,10 +887,13 @@ test('dropped approve and transaction.status replies time out to unconfirmed, an
       await advance(reconciled.page, APPROVE_TIMEOUT_MS);
       const statusCall = await waitForCall(reconciled.page, 'project.transaction.status');
       assert.equal((await sentCalls(reconciled.page, 'project.inspect')).length, 0);
+      await installHeadingFocusSpy(reconciled.page);
       await emitResult(reconciled.page, statusCall.id, appliedTransaction());
       await reconciled.page.waitForFunction(() => document.activeElement?.id === 'request-result-heading', null, { timeout: 3000 });
       assert.equal(await requestText(reconciled.page), en['patch.apply.applied']);
       assert.equal(await activeElementId(reconciled.page), 'request-result-heading');
+      const reconcileFocusCalls = await headingFocusCalls(reconciled.page);
+      assert.equal(reconcileFocusCalls, 1, `reconcile heading focus() was called ${reconcileFocusCalls} times`);
       assert.deepEqual(reconciled.pageErrors, []);
     } finally {
       await reconciled.page.close();
@@ -1206,11 +1312,14 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
     ), en['patch.apply.unconfirmed'], { timeout: 3000 });
     assert.equal(await activeElementId(page), 'request-result-heading');
     assert.deepEqual((await completionSnapshot(page)).reloads, []);
+    await installHeadingFocusSpy(page);
     await emitResult(page, statusCall.id, appliedTransaction());
     await page.waitForFunction((text) => (
       document.querySelector('#request-status')?.dataset.state === 'completed'
       && document.querySelector('#request-status')?.textContent === text
     ), en['patch.apply.applied'], { timeout: 3000 });
+    const upgradeFocusCalls = await headingFocusCalls(page);
+    assert.equal(upgradeFocusCalls, 1, `late upgrade heading focus() was called ${upgradeFocusCalls} times`);
     const shot = await completionSnapshot(page);
     assert.equal(shot.text, en['patch.apply.applied']);
     assert.equal(shot.state, 'completed');
@@ -1227,7 +1336,7 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
   }
 });
 
-test('late transaction status after reconcile timeout does not upgrade an empty record, another patch, needs-inspection, or rolled-back', async (t) => {
+test('late transaction status after reconcile timeout does not upgrade an empty record, another patch, needs-inspection, rolled-back, or ok:false', async (t) => {
   const browser = await launchPanelBrowser(t);
   if (!browser) return;
   const { en } = await loadLocales();
@@ -1237,7 +1346,8 @@ test('late transaction status after reconcile timeout does not upgrade an empty 
     { name: 'empty', result: { transactions: [] } },
     { name: 'other-patch', result: appliedTransaction('patch_other') },
     { name: 'needs-inspection', result: failedTransaction('needs-inspection') },
-    { name: 'rolled-back', result: failedTransaction('rolled-back') }
+    { name: 'rolled-back', result: failedTransaction('rolled-back') },
+    { name: 'ok-false', ok: false, result: appliedTransaction('patch_test') }
   ];
 
   try {
@@ -1256,7 +1366,7 @@ test('late transaction status after reconcile timeout does not upgrade an empty 
           && document.querySelector('#request-status')?.textContent === text
         ), en['patch.apply.unconfirmed'], { timeout: 3000 });
         assert.deepEqual((await completionSnapshot(opened.page)).reloads, [], row.name);
-        await emitResult(opened.page, statusCall.id, row.result);
+        await emitResult(opened.page, statusCall.id, row.result, row.ok !== false);
         await advance(opened.page, 50);
         const shot = await completionSnapshot(opened.page);
         assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
@@ -1571,4 +1681,331 @@ test('ERC count copy is singular for 1 and plural for 0 and 2', async (t) => {
     await new Promise((resolveClose) => server.close(resolveClose));
     await browser.close();
   }
+});
+
+test('approve reconcile and reconnect timers do not fire one millisecond early', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+
+  try {
+    const approve = await openPanel(browser, port);
+    try {
+      await showReady(approve.page);
+      await clickApply(approve.page);
+      await advance(approve.page, APPROVE_TIMEOUT_MS - 1);
+      assert.equal(await requestText(approve.page), en['patch.apply.summary']);
+      assert.equal((await sentCalls(approve.page, 'project.transaction.status')).length, 0);
+      await advance(approve.page, 1);
+      assert.equal(await requestText(approve.page), en['patch.apply.checking']);
+      assert.equal((await sentCalls(approve.page, 'project.transaction.status')).length, 1);
+      await advance(approve.page, RECONCILE_TIMEOUT_MS - 1);
+      assert.equal(await requestText(approve.page), en['patch.apply.checking']);
+      assert.equal(await approve.page.locator('#request-status').getAttribute('data-state'), 'running');
+      await advance(approve.page, 1);
+      await approve.page.waitForFunction((text) => (
+        document.querySelector('#request-status')?.dataset.state === 'failed'
+        && document.querySelector('#request-status')?.textContent === text
+      ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+      assert.deepEqual(approve.pageErrors, []);
+    } finally {
+      await approve.page.close();
+    }
+
+    const reconnect = await openPanel(browser, port);
+    try {
+      const count = await reconnect.page.evaluate(() => window.__sockets.length);
+      await reconnect.page.evaluate(() => window.__sockets.at(-1).close());
+      await reconnect.page.waitForFunction((text) => document.querySelector('#connection-status')?.textContent === text, en['connection.disconnected'], { timeout: 3000 });
+      await advance(reconnect.page, RECONNECT_DELAY_MS - 1);
+      assert.equal(await reconnect.page.evaluate(() => window.__sockets.length), count);
+      assert.equal(await reconnect.page.locator('#connection-status').innerText(), en['connection.disconnected']);
+      await advance(reconnect.page, 1);
+      await reconnect.page.waitForFunction((text) => document.querySelector('#connection-status')?.textContent === text, en['connection.connected'], { timeout: 3000 });
+      assert.equal(await reconnect.page.evaluate(() => window.__sockets.length), count + 1);
+      assert.deepEqual(reconnect.pageErrors, []);
+    } finally {
+      await reconnect.page.close();
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('panel programmatic focus goes through confirmDialogOwnsFocus', async () => {
+  const panel = await readFile(new URL('../apps/panel/panel.js', import.meta.url), 'utf8');
+  const focuses = panel.match(/\.focus\(/g) ?? [];
+  assert.equal(focuses.length, 1, `panel.js has ${focuses.length} .focus( calls`);
+  assert.match(panel, /function confirmDialogOwnsFocus\(\)/);
+  const helperStart = panel.indexOf('function focusProgrammatically(');
+  assert.notEqual(helperStart, -1, 'focusProgrammatically is missing');
+  const helperEnd = panel.indexOf('\nfunction ', helperStart + 1);
+  const helper = panel.slice(helperStart, helperEnd === -1 ? panel.length : helperEnd);
+  assert.match(helper, /confirmDialogOwnsFocus\(\)/);
+  assert.match(helper, /\.focus\(/);
+  const outside = `${panel.slice(0, helperStart)}${panel.slice(helperEnd === -1 ? panel.length : helperEnd)}`;
+  assert.equal(outside.includes('.focus('), false);
+  const calls = panel.match(/focusProgrammatically\(/g) ?? [];
+  assert.ok(calls.length >= 15, `focusProgrammatically calls: ${calls.length}`);
+});
+
+test('reconnect while a confirm dialog is open expires the preview and focuses the result heading', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en, ko } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    { name: 'removal-en', lang: 'en', kind: 'removal', lead: en['patch.remove.lead'], expired: PREVIEW_EXPIRED.en },
+    { name: 'removal-ko', lang: 'ko', kind: 'removal', lead: ko['patch.remove.lead'], expired: PREVIEW_EXPIRED.ko },
+    { name: 'without-erc-en', lang: 'en', kind: 'without-erc', lead: en['patch.remove.lead'], expired: PREVIEW_EXPIRED.en },
+    { name: 'without-erc-ko', lang: 'ko', kind: 'without-erc', lead: ko['patch.remove.lead'], expired: PREVIEW_EXPIRED.ko }
+  ];
+  const failures = [];
+
+  try {
+    for (const row of rows) {
+      const opened = await openPanel(browser, port, row.lang);
+      try {
+        await signInChatGPT(opened.page);
+        if (row.kind === 'removal') await showRemovalLead(opened.page, row.lead);
+        else await showWithoutErcDialog(opened.page);
+        const before = await dialogFocus(opened.page, row.kind === 'removal' ? '#apply-remove-components-confirm' : '#apply-without-erc-confirm');
+        assert.equal(before.open, true, row.name);
+        assert.equal(before.inside, true, `${row.name} ${before.activeId}`);
+        await reconnectAndRefreshAuth(opened.page);
+        const heading = await requestText(opened.page);
+        const progress = await opened.page.locator('#request-progress').innerText();
+        const removal = await dialogFocus(opened.page, '#apply-remove-components-confirm');
+        const without = await dialogFocus(opened.page, '#apply-without-erc-confirm');
+        const active = await activeElementId(opened.page);
+        const state = await opened.page.locator('#request-status').getAttribute('data-state');
+        const caption = await opened.page.locator('#workflow-caption').innerText();
+        const cardHidden = await opened.page.locator('#patch-approval-card').isHidden();
+        assert.equal(removal.open, false, row.name);
+        assert.equal(without.open, false, row.name);
+        assert.equal(heading, row.expired, `${row.name} heading: ${heading}`);
+        assert.equal(heading.includes(row.lead), false, `${row.name} lead stayed in heading: ${heading}`);
+        assert.equal(progress.includes(row.lead), false, `${row.name} lead stayed in progress: ${progress}`);
+        assert.equal(caption, row.expired, `${row.name} caption: ${caption}`);
+        assert.equal(state, 'failed', row.name);
+        assert.equal(active, 'request-result-heading', `${row.name} focused ${active}`);
+        assert.notEqual(active, 'chatgpt-auth-title', row.name);
+        assert.equal(cardHidden, true, row.name);
+        assert.equal(await opened.page.locator('#approve-patch-button').isDisabled(), true, row.name);
+        if (row.lang === 'en') assert.equal(en['request.preview-expired'], PREVIEW_EXPIRED.en);
+        else assert.equal(ko['request.preview-expired'], PREVIEW_EXPIRED.ko);
+        assert.deepEqual(opened.pageErrors, [], row.name);
+      } catch (error) {
+        failures.push(`${row.name}: ${error.message}`);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+  assert.deepEqual(failures, [], failures.join('\n'));
+});
+
+test('auth.chatgpt.changed while a confirm dialog is open keeps focus inside the dialog', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    { name: 'removal-en', lang: 'en', kind: 'removal' },
+    { name: 'removal-ko', lang: 'ko', kind: 'removal' },
+    { name: 'without-erc-en', lang: 'en', kind: 'without-erc' },
+    { name: 'without-erc-ko', lang: 'ko', kind: 'without-erc' }
+  ];
+  const failures = [];
+
+  try {
+    for (const row of rows) {
+      const opened = await openPanel(browser, port, row.lang);
+      try {
+        await signInChatGPT(opened.page);
+        const dialogId = row.kind === 'removal' ? '#apply-remove-components-confirm' : '#apply-without-erc-confirm';
+        if (row.kind === 'removal') await showRemovalDialog(opened.page);
+        else await showWithoutErcDialog(opened.page);
+        const before = await dialogFocus(opened.page, dialogId);
+        assert.equal(before.open, true, row.name);
+        assert.equal(before.inside, true, `${row.name} ${before.activeId}`);
+        await opened.page.evaluate(() => {
+          window.__sockets.at(-1).dispatchEvent(new MessageEvent('message', {
+            data: JSON.stringify({
+              version: 1,
+              id: 'auth_changed_dialog',
+              type: 'auth.chatgpt.changed',
+              createdAt: new Date().toISOString(),
+              payload: { state: 'signed_in', account: { email: 'ada@example.com' }, plan: 'plus' }
+            })
+          }));
+        });
+        await advance(opened.page, 250);
+        const after = await dialogFocus(opened.page, dialogId);
+        assert.equal(after.open, true, row.name);
+        assert.equal(after.inside, true, `${row.name} focused ${after.activeId}`);
+        assert.notEqual(after.activeId, 'chatgpt-auth-title', row.name);
+        assert.notEqual(after.activeId, 'request-result-heading', row.name);
+        assert.deepEqual(opened.pageErrors, [], row.name);
+      } catch (error) {
+        failures.push(`${row.name}: ${error.message}`);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+  assert.deepEqual(failures, [], failures.join('\n'));
+});
+
+test('an open confirm dialog keeps every other programmatic focus inside', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    {
+      name: 'new-project',
+      dialogs: ['removal', 'without-erc'],
+      run: (page) => clickWithoutFocus(page, '#new-project-again')
+    },
+    {
+      name: 'tab-trap',
+      dialogs: ['removal'],
+      run: async (page) => {
+        await page.evaluate(() => {
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+        });
+        assert.equal(await activeElementId(page), 'confirm-apply-remove-components');
+      }
+    },
+    {
+      name: 'locked-flow',
+      dialogs: ['removal', 'without-erc'],
+      run: (page) => clickWithoutFocus(page, '.workflow-lane[data-lane="layout"] .flow-btn[aria-disabled="true"]')
+    },
+    {
+      name: 'locked-lane',
+      dialogs: ['removal', 'without-erc'],
+      run: (page) => clickWithoutFocus(page, '.workflow-lane[data-lane="fab"] .lane-row[aria-disabled="true"]')
+    },
+    {
+      name: 'fix-erc',
+      dialogs: ['removal', 'without-erc'],
+      run: (page) => clickWithoutFocus(page, '#fix-patch-button')
+    },
+    {
+      name: 'focus-apply',
+      dialogs: ['removal', 'without-erc'],
+      run: (page) => page.evaluate(() => window.__chatpcbTest.focusApply())
+    },
+    {
+      name: 'approval-status',
+      // Disabling Apply closes the removal dialog on purpose. The steal is the without-ERC path.
+      dialogs: ['without-erc'],
+      run: (page) => page.evaluate(async () => {
+        const status = document.querySelector('#patch-approval-status');
+        const focus = status.focus.bind(status);
+        window.__statusFocusCalls = 0;
+        status.focus = (...args) => {
+          window.__statusFocusCalls += 1;
+          return focus(...args);
+        };
+        const cancel = document.querySelector('#apply-remove-components-confirm')?.hidden === false
+          ? document.querySelector('#cancel-apply-remove-components')
+          : document.querySelector('#cancel-apply-without-erc');
+        cancel.disabled = true;
+        document.querySelector('#approve-patch-button').disabled = true;
+        await new Promise((resolve) => queueMicrotask(resolve));
+        await new Promise((resolve) => queueMicrotask(resolve));
+        if (window.__statusFocusCalls !== 0) throw new Error(`patch approval status focus() ran ${window.__statusFocusCalls} times`);
+      })
+    },
+    {
+      name: 'result-heading',
+      dialogs: ['removal', 'without-erc'],
+      run: async (page) => {
+        const before = await page.evaluate(() => window.__sent.length);
+        await page.evaluate(() => {
+          document.querySelector('#project-name').value = 'Side quest';
+          document.querySelector('#new-project-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
+        await page.waitForFunction((start) => window.__sent.some((raw, index) => (
+          index >= start && JSON.parse(raw).payload?.name === 'project.create'
+        )), before, { timeout: 3000 });
+        const call = await page.evaluate((start) => {
+          const raw = window.__sent.find((entry, index) => (
+            index >= start && JSON.parse(entry).payload?.name === 'project.create'
+          ));
+          return JSON.parse(raw).payload;
+        }, before);
+        await emitPayload(page, call.id, { ok: false, error: { code: 'PROVIDER_FAILED', message: 'provider failed' } });
+        await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['request.failed'], { timeout: 3000 });
+      }
+    },
+    {
+      name: 'provider-select',
+      dialogs: ['removal', 'without-erc'],
+      run: async (page) => {
+        const before = (await sentCalls(page, 'auth.chatgpt.status')).length;
+        await page.evaluate(() => {
+          const provider = document.querySelector('#provider');
+          provider.value = 'chatgpt';
+          provider.dispatchEvent(new Event('change'));
+        });
+        const authCall = await waitForNthCall(page, 'auth.chatgpt.status', before);
+        await emitResult(page, authCall.id, { state: 'error', code: 'usage_limit' });
+        await advance(page, 250);
+        await page.evaluate((label) => {
+          const button = [...document.querySelectorAll('#chatgpt-auth-card button')].find((el) => el.textContent === label);
+          if (!button) throw new Error('missing provider button');
+          button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        }, en['auth.chatgpt.switch-provider']);
+      }
+    }
+  ];
+  const failures = [];
+
+  try {
+    for (const row of rows) {
+      for (const kind of row.dialogs) {
+        const name = `${row.name}/${kind}`;
+        const opened = await openPanel(browser, port);
+        try {
+          const dialogId = kind === 'removal' ? '#apply-remove-components-confirm' : '#apply-without-erc-confirm';
+          if (kind === 'removal') await showRemovalDialog(opened.page);
+          else await showWithoutErcDialog(opened.page);
+          const before = await dialogFocus(opened.page, dialogId);
+          assert.equal(before.open, true, name);
+          assert.equal(before.inside, true, `${name} ${before.activeId}`);
+          await row.run(opened.page);
+          const after = await dialogFocus(opened.page, dialogId);
+          assert.equal(after.open, true, name);
+          assert.equal(after.inside, true, `${name} focused ${after.activeId}`);
+          assert.notEqual(after.activeId, 'chatgpt-auth-title', name);
+          assert.notEqual(after.activeId, 'request-result-heading', name);
+          assert.notEqual(after.activeId, 'patch-approval-status', name);
+          assert.deepEqual(opened.pageErrors, [], name);
+        } catch (error) {
+          failures.push(`${name}: ${error.message}`);
+        } finally {
+          await opened.page.close();
+        }
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+  assert.deepEqual(failures, [], failures.join('\n'));
 });
