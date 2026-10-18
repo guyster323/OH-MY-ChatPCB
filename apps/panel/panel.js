@@ -405,19 +405,49 @@ function confirmDialogOwnsFocus() {
 }
 
 // Chromium's focus fixup moves focus to the body when the focused control becomes
-// disabled. An open confirm dialog puts that focus back on one of its own buttons.
+// disabled. The blur can land before the disabling statement returns, or on a later
+// rendering update under load. relatedTarget is null when focus falls through to the
+// viewport. Either way an open confirm dialog puts focus on one of its enabled buttons.
+let confirmFocusRestoreQueued = false;
+let restoringConfirmFocus = false;
+
+function confirmDialogHolds(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE || node.disabled === true) return false;
+  return confirmDialogs().some((dialog) => dialog.contains(node));
+}
+
 function keepConfirmDialogFocus() {
-  const dialogs = confirmDialogs();
-  if (dialogs.length === 0) return;
-  const active = document.activeElement;
-  if (active && dialogs.some((dialog) => dialog.contains(active))) return;
-  for (const dialog of dialogs) {
+  if (restoringConfirmFocus) return;
+  if (confirmDialogs().length === 0) return;
+  if (confirmDialogHolds(document.activeElement)) return;
+  for (const dialog of confirmDialogs()) {
     const target = [...dialog.querySelectorAll('button')].find((button) => !button.disabled);
     if (!target) continue;
-    focusProgrammatically(target);
+    restoringConfirmFocus = true;
+    try {
+      focusProgrammatically(target);
+    } finally {
+      restoringConfirmFocus = false;
+    }
     return;
   }
 }
+
+function restoreConfirmDialogFocusSoon() {
+  keepConfirmDialogFocus();
+  if (confirmFocusRestoreQueued) return;
+  confirmFocusRestoreQueued = true;
+  queueMicrotask(() => {
+    keepConfirmDialogFocus();
+    confirmFocusRestoreQueued = false;
+  });
+}
+
+document.addEventListener('focusout', (event) => {
+  if (confirmDialogs().length === 0) return;
+  if (confirmDialogHolds(event.relatedTarget)) return;
+  restoreConfirmDialogFocusSoon();
+}, true);
 
 // One focus path. An open confirm dialog keeps focus on its own controls.
 function focusProgrammatically(element, options) {
