@@ -566,8 +566,9 @@ function handleEnvelope(envelope) {
     return;
   }
   if (callName === 'schematic.patch.approve') {
-    // Missing applied, 'true', or 1 is not a boolean false. Reconcile instead of saying it was not applied.
-    if (nonBooleanApplied(envelope.payload?.result) && beginReconcileForUncertainApply(id)) return;
+    // Missing applied, 'true', or 1 is not a boolean false. Reconcile only when the
+    // envelope succeeded. ok:false is a rejection even if result has no applied field.
+    if (envelope.payload?.ok === true && nonBooleanApplied(envelope.payload?.result) && beginReconcileForUncertainApply(id)) return;
     disarmApproveFlight(id);
   }
 

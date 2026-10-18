@@ -238,6 +238,18 @@ function activeElementId(page) {
   });
 }
 
+function dialogFocus(page, dialogId) {
+  return page.evaluate((id) => {
+    const dialog = document.querySelector(id);
+    const active = document.activeElement;
+    return {
+      open: Boolean(dialog && dialog.hidden === false),
+      inside: Boolean(dialog && active && dialog.contains(active)),
+      activeId: active?.id || active?.tagName || ''
+    };
+  }, dialogId);
+}
+
 async function sentCalls(page, name) {
   return page.evaluate((tool) => window.__sent
     .map((raw) => JSON.parse(raw).payload)
@@ -983,7 +995,7 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
   }
 });
 
-test('a late non-boolean approve reply after reconcile timeout stays unconfirmed and sends no reload', async (t) => {
+test('a late non-boolean approve reply, or ok:false with applied:true, after reconcile timeout stays unconfirmed and sends no reload', async (t) => {
   const browser = await launchPanelBrowser(t);
   if (!browser) return;
   const { en } = await loadLocales();
@@ -994,7 +1006,8 @@ test('a late non-boolean approve reply after reconcile timeout stays unconfirmed
     { name: 'number', applied: 1 },
     { name: 'null', applied: null },
     { name: 'object', applied: {} },
-    { name: 'missing' }
+    { name: 'missing' },
+    { name: 'ok-false-applied-true', applied: true, ok: false }
   ];
 
   try {
@@ -1016,7 +1029,7 @@ test('a late non-boolean approve reply after reconcile timeout stays unconfirmed
           patchId: 'patch_test'
         };
         if (row.name !== 'missing') lateBody.applied = row.applied;
-        await emitResult(opened.page, approve.id, lateBody);
+        await emitResult(opened.page, approve.id, lateBody, row.ok !== false);
         await opened.page.waitForTimeout(50);
         const shot = await completionSnapshot(opened.page);
         assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
@@ -1178,6 +1191,173 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
     await emitResult(page, statusCall.id, appliedTransaction());
     await page.waitForTimeout(40);
     assert.equal((await completionSnapshot(page)).reloads.length, 1);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('late transaction status after reconcile timeout does not upgrade an empty record, another patch, needs-inspection, or rolled-back', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    { name: 'empty', result: { transactions: [] } },
+    { name: 'other-patch', result: appliedTransaction('patch_other') },
+    { name: 'needs-inspection', result: failedTransaction('needs-inspection') },
+    { name: 'rolled-back', result: failedTransaction('rolled-back') }
+  ];
+
+  try {
+    for (const row of rows) {
+      const opened = await openPanel(browser, port);
+      try {
+        await showReady(opened.page, 40);
+        await holdReconcileTimeout(opened.page);
+        await installHost(opened.page);
+        await clickApply(opened.page);
+        const statusCall = await waitForCall(opened.page, 'project.transaction.status');
+        assert.equal(await requestText(opened.page), en['patch.apply.checking'], row.name);
+        await expireReconcileTimeout(opened.page);
+        await opened.page.waitForFunction((text) => (
+          document.querySelector('#request-status')?.dataset.state === 'failed'
+          && document.querySelector('#request-status')?.textContent === text
+        ), en['patch.apply.unconfirmed'], { timeout: 3000 });
+        assert.deepEqual((await completionSnapshot(opened.page)).reloads, [], row.name);
+        await emitResult(opened.page, statusCall.id, row.result);
+        await opened.page.waitForTimeout(50);
+        const shot = await completionSnapshot(opened.page);
+        assert.equal(shot.text, en['patch.apply.unconfirmed'], row.name);
+        assert.equal(shot.state, 'failed', row.name);
+        assert.equal(shot.text.includes(en['patch.apply.applied']), false, row.name);
+        assert.deepEqual(shot.reloads, [], row.name);
+        assert.deepEqual(opened.pageErrors, [], row.name);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('a late error keeps focus inside the removal confirm dialog', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const removalPreview = {
+    ...passedPreview,
+    removedComponents: [{ ref: 'R1', value: '10k', libId: 'Device:R' }]
+  };
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 5000, removalPreview);
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('#apply-remove-components-confirm');
+      return dialog && dialog.hidden === false && dialog.contains(document.activeElement);
+    }, null, { timeout: 3000 });
+    // A project.request closes this dialog because the apply gate treats it as busy.
+    // project.create still settles a result and leaves the removal confirm open.
+    const before = await page.evaluate(() => window.__sent.length);
+    await page.evaluate(() => {
+      document.querySelector('#project-name').value = 'Side quest';
+      document.querySelector('#new-project-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await page.waitForFunction((start) => window.__sent.some((raw, index) => (
+      index >= start && JSON.parse(raw).payload?.name === 'project.create'
+    )), before, { timeout: 3000 });
+    const call = await page.evaluate((start) => {
+      const raw = window.__sent.find((entry, index) => (
+        index >= start && JSON.parse(entry).payload?.name === 'project.create'
+      ));
+      return JSON.parse(raw).payload;
+    }, before);
+    await page.locator('#cancel-apply-remove-components').focus();
+    const armed = await dialogFocus(page, '#apply-remove-components-confirm');
+    assert.equal(armed.open, true, armed.activeId);
+    assert.equal(armed.inside, true, armed.activeId);
+    await emitPayload(page, call.id, { ok: false, error: { code: 'PROVIDER_FAILED', message: 'provider failed' } });
+    await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['request.failed'], { timeout: 3000 });
+    const focus = await dialogFocus(page, '#apply-remove-components-confirm');
+    assert.equal(focus.open, true);
+    assert.equal(focus.inside, true, focus.activeId);
+    assert.notEqual(focus.activeId, 'request-result-heading');
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('a late error keeps focus inside the apply-without-ERC confirm dialog', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const skippedPreview = {
+    ...passedPreview,
+    validation: { ok: true, skipped: true, executed: false },
+    candidateVerification: { erc: { ok: true, skipped: true, executed: false } }
+  };
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 5000, skippedPreview);
+    const call = await sendProjectRequest(page, 'what is R3?');
+    await page.locator('#approve-patch-without-erc').click();
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('#apply-without-erc-confirm');
+      return dialog && dialog.hidden === false && dialog.contains(document.activeElement);
+    });
+    await emitPayload(page, call.id, { ok: false, error: { code: 'PROVIDER_FAILED', message: 'provider failed' } });
+    await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, en['request.failed'], { timeout: 3000 });
+    const focus = await dialogFocus(page, '#apply-without-erc-confirm');
+    assert.equal(focus.open, true);
+    assert.equal(focus.inside, true, focus.activeId);
+    assert.notEqual(focus.activeId, 'request-result-heading');
+    assert.equal(await dialogFocus(page, '#apply-remove-components-confirm').then((shot) => shot.open), false);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
+
+test('ok:false approve reply with a result object but no applied field renders the rejection immediately and sends no transaction.status', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const { page, pageErrors } = await openPanel(browser, port);
+
+  try {
+    await showReady(page, 5000);
+    await installHost(page);
+    await clickApply(page);
+    const approve = (await approveCalls(page)).at(-1);
+    await emitPayload(page, approve.id, { ok: false, result: { code: 'PATCH_STALE' } });
+    await page.waitForFunction((texts) => {
+      const text = document.querySelector('#request-status')?.textContent ?? '';
+      return text === texts.rejected || text === texts.checking;
+    }, { rejected: en['request.patch-failed'], checking: en['patch.apply.checking'] }, { timeout: 3000 });
+    assert.equal(await requestText(page), en['request.patch-failed']);
+    assert.equal(await page.locator('#request-status').getAttribute('data-state'), 'failed');
+    assert.equal((await sentCalls(page, 'project.transaction.status')).length, 0);
+    assert.equal((await requestText(page)).includes(en['patch.apply.checking']), false);
+    assert.equal((await requestText(page)).includes(en['patch.apply.unconfirmed']), false);
+    assert.deepEqual((await completionSnapshot(page)).reloads, []);
     assert.deepEqual(pageErrors, []);
   } finally {
     await page.close();
