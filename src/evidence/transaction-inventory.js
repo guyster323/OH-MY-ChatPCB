@@ -2,31 +2,17 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { compareArtifactPaths, digestArtifactKind, digestOfArtifacts, isExcludedFromDigest, isOwnRecordPath } from './digest-exclusions.js';
 import { assertInspectionTree } from '../workflow/inspection-copy.js';
-
-const TRANSACTION_EXTENSIONS = new Map([
-  ['.kicad_pro', 'project'],
-  ['.kicad_sch', 'schematic'],
-  ['.kicad_pcb', 'board'],
-  ['.kicad_sym', 'symbol-library'],
-  ['.kicad_mod', 'footprint'],
-  ['.kicad_dru', 'design-rules'],
-  ['.cir', 'spice']
-]);
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 export function transactionArtifactKind(relativePath) {
-  const normalized = relativePath.split(path.sep).join('/');
-  if (normalized.endsWith('.chatpcb.json')) return 'chatpcb-manifest';
-  if (path.posix.basename(normalized) === '.chatpcb-conversation.json') return 'conversation';
-  if (path.posix.basename(normalized) === 'sym-lib-table') return 'symbol-table';
-  if (path.posix.basename(normalized) === 'fp-lib-table') return 'footprint-table';
-  return TRANSACTION_EXTENSIONS.get(path.posix.extname(normalized)) ?? null;
-}
-
-function compareArtifactPaths(left, right) {
-  return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+  if (isOwnRecordPath(relativePath)) {
+    const base = String(relativePath ?? '').split(path.sep).join('/').split('/').at(-1) ?? '';
+    return base.toLowerCase().endsWith('.chatpcb.json') ? 'chatpcb-manifest' : null;
+  }
+  return digestArtifactKind(relativePath);
 }
 
 async function walk(directory) {
@@ -58,15 +44,18 @@ export async function collectTransactionSnapshot({ projectDir }) {
     });
   }
   files.sort(compareArtifactPaths);
-  const artifacts = files.map(({ path: artifactPath, kind, sha256: digest, size }) => ({
+  const tracked = files.map(({ path: artifactPath, kind, sha256: digest, size }) => ({
     path: artifactPath,
     kind,
     sha256: digest,
     size
   }));
+  // Manifest bytes stay on `files` for apply and rollback. Both freshness
+  // digests hash only `artifacts`, which omits ChatPCB's own records.
+  const artifacts = tracked.filter((item) => !isExcludedFromDigest(item.path));
   return {
     projectDir: root,
-    transactionDigest: sha256(JSON.stringify(artifacts)),
+    transactionDigest: digestOfArtifacts(artifacts),
     artifacts,
     files
   };

@@ -21,11 +21,12 @@
             <option value="claude">Claude Code</option>
             <option value="copilot">Copilot CLI</option>
             <option value="grok">Grok Build</option>
+            <option value="chatgpt" data-i18n="provider.chatgpt.label">ChatGPT (sign-in)</option>
           </select>
         </label>
         <div class="meta">
           <div class="meta-status">
-            <p id="connection-status" role="status" data-i18n="connection.connecting">Connecting</p>
+            <p id="connection-status" class="daemon-connection" role="status" data-role="daemon" data-i18n="connection.connecting">Connecting</p>
             <span id="provider-status" data-i18n="provider.pending">Provider pending</span>
           </div>
           <div class="hdr-side">
@@ -67,6 +68,15 @@
       </header>
 
       <div class="stage">
+      <div id="chatgpt-switch-offer" class="chatgpt-switch-offer" hidden role="group" aria-labelledby="chatgpt-switch-offer-text">
+        <p id="chatgpt-switch-offer-text"></p>
+        <div class="chatgpt-switch-offer-actions">
+          <button type="button" id="chatgpt-switch-offer-accept"></button>
+          <button type="button" id="chatgpt-switch-offer-dismiss" class="chatgpt-secondary-btn"></button>
+        </div>
+      </div>
+      <div id="auth-live-region" role="status" aria-live="polite" class="sr-only"></div>
+      <section id="chatgpt-auth-card" class="chatgpt-auth-card" hidden aria-labelledby="chatgpt-auth-title"></section>
       <section id="chatgpt-signin" class="card signin2" hidden inert>
         <h2 data-i18n="auth.chatgpt.title">Use ChatPCB with your ChatGPT plan</h2>
         <p data-i18n="auth.chatgpt.body">You'll sign in using your system browser. Never enter your password in ChatPCB.</p>
@@ -150,7 +160,8 @@
       </section>
 
       <section id="conversation-card" class="chat-column card">
-        <p id="request-status" role="status" aria-label="Request status" data-i18n-aria-label="request.status-label" data-state="idle" data-i18n="request.idle">Create a project to send a circuit request.</p>
+        <div id="request-status" aria-label="Request status" data-i18n-aria-label="request.status-label" data-state="idle"><h2 id="request-result-heading" tabindex="-1" data-i18n="request.idle">Create a project to send a circuit request.</h2></div>
+        <p id="request-status-live" class="sr-only" role="status" aria-live="polite"></p>
         <details id="request-technical-details" hidden>
           <summary data-i18n="dialog.technical">Technical details</summary>
           <pre id="request-technical-detail"></pre>
@@ -166,7 +177,13 @@
               <p id="patch-approval-lead" data-i18n="patch.lead">The schematic file does not change until you apply.</p>
             </div>
           </div>
-          <p id="patch-approval-status" data-state="idle" data-i18n="patch.idle">No patch preview active.</p>
+          <p id="patch-approval-source" class="patch-source" hidden></p>
+          <ul id="patch-approval-parts" class="patch-parts" hidden></ul>
+          <p id="patch-approval-status" tabindex="-1" data-state="idle" data-i18n="patch.idle">No patch preview active.</p>
+          <details id="patch-approval-technical-details" hidden>
+            <summary data-i18n="dialog.technical">Technical details</summary>
+            <pre id="patch-approval-technical-detail"></pre>
+          </details>
           <div id="patch-erc" class="erc" hidden></div>
           <div id="patch-erc-info" class="erc-info" hidden></div>
           <div class="patch-approval-actions">
@@ -175,11 +192,20 @@
             <button id="fix-patch-button" type="button" data-i18n="patch.fix">Ask ChatPCB to fix</button>
             <button id="cancel-patch-button" type="button" disabled aria-label="Cancel" data-i18n-aria-label="action.cancel" data-i18n="patch.cancel">Cancel</button>
           </div>
+          <div id="apply-remove-components-confirm" class="apply-remove-components-confirm" role="alertdialog" aria-labelledby="apply-remove-components-title" aria-describedby="apply-remove-components-lead apply-remove-components-parts" hidden>
+            <h2 id="apply-remove-components-title" data-i18n="patch.remove.title">Remove existing parts?</h2>
+            <p id="apply-remove-components-lead" data-i18n="patch.remove.lead">This draft removes existing parts. Applying deletes them from the schematic.</p>
+            <ul id="apply-remove-components-parts" class="patch-parts"></ul>
+            <div class="patch-approval-actions">
+              <button id="cancel-apply-remove-components" type="button" class="btn-primary" data-i18n="patch.remove.cancel">Don't apply</button>
+              <button id="confirm-apply-remove-components" type="button" class="btn-quiet-danger" data-i18n="patch.remove.confirm">Apply and remove these parts</button>
+            </div>
+          </div>
           <div id="apply-without-erc-confirm" class="apply-without-erc-confirm" role="alertdialog" aria-describedby="apply-without-erc-risk" data-i18n-aria-label="patch.apply.without-erc" aria-label="Apply without ERC" hidden>
             <p id="apply-without-erc-risk" data-i18n="patch.apply.without-erc.risk">ERC did not run, so circuit errors in this draft were not checked. Applying still changes the schematic.</p>
             <div class="row">
-              <button id="cancel-apply-without-erc" type="button" data-i18n="patch.apply.without-erc.cancel">Don't apply</button>
-              <button id="confirm-apply-without-erc" type="button" data-i18n="patch.apply.without-erc.confirm">Apply anyway</button>
+              <button id="cancel-apply-without-erc" type="button" class="btn-primary" data-i18n="patch.apply.without-erc.cancel">Don't apply</button>
+              <button id="confirm-apply-without-erc" type="button" class="btn-quiet-danger" data-i18n="patch.apply.without-erc.confirm">Apply anyway</button>
             </div>
           </div>
           <p id="apply-why" hidden></p>
@@ -277,6 +303,7 @@
 
     <script type="module" src="./erc-verdict.js?v=20261016-erc1"></script>
     <script src="./i18n.js?v=20261016-soft1"></script>
-    <script src="./panel.js?v=20261016-soft26"></script>
+    <script src="./daemon-reply.js?v=20261018-reply1"></script>
+    <script src="./panel.js?v=20261018-reply1"></script>
   </body>
 </html>

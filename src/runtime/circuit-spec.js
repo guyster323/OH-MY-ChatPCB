@@ -409,7 +409,7 @@ function invalidCountMessage(token) {
 function ambiguousNumberMessage(token) {
   const raw = token.raw;
   return {
-    en: `Is ${raw} a resistor in ohms, an LED count, or something else? Add a unit (330Ω) or a count (3개), then ask again.`,
+    en: `Is ${raw} a resistor in ohms, an LED count, or something else? Add a unit (330Ω) or a count (3 LEDs), then ask again.`,
     ko: `${withJosa(raw, '은/는')} 저항(Ω)인가요, LED 개수인가요? 단위(330Ω)나 개수(3개)를 붙여 다시 요청해 주세요.`
   };
 }
@@ -432,7 +432,7 @@ function ambiguousResistorMessage(tokens) {
   const labels = tokens.map((token) => formatOhms(token.value) ?? token.raw);
   return {
     en: `Which resistor should the LED use, ${joinResistorChoices(labels, true)}? Name one series resistor, then ask again.`,
-    ko: `어느 것을 직렬 저항으로 쓸까요, ${joinResistorChoices(labels, false)}? 저항을 하나만 적어 다시 요청해 주세요.`
+    ko: `${joinResistorChoices(labels, false)} 중 어느 것을 LED 직렬 저항으로 쓸까요? 저항을 하나만 적어 다시 요청해 주세요.`
   };
 }
 

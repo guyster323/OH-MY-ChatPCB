@@ -9,6 +9,14 @@ test('panel i18n keys are defined in both locales and every locale key is used',
   const en = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
   const ko = JSON.parse(await readFile(path.join(panelRoot, 'locales/ko.json'), 'utf8'));
   assert.deepEqual(Object.keys(en).sort(), Object.keys(ko).sort());
+  assert.equal(Object.hasOwn(en, 'request.applying'), false);
+  assert.equal(Object.hasOwn(en, 'request.apply-progress'), false);
+  assert.equal(Object.hasOwn(ko, 'request.applying'), false);
+  assert.equal(Object.hasOwn(ko, 'request.apply-progress'), false);
+  assert.equal(typeof en['patch.apply.summary'], 'string');
+  assert.equal(typeof en['patch.apply.progress'], 'string');
+  assert.equal(typeof ko['patch.apply.summary'], 'string');
+  assert.equal(typeof ko['patch.apply.progress'], 'string');
 
   const jsFiles = (await readdir(panelRoot)).filter((name) => name.endsWith('.js'));
   let source = await readFile(path.join(panelRoot, 'index.html'), 'utf8');

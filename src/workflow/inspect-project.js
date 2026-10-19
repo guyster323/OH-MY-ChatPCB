@@ -45,6 +45,12 @@ export async function inspectProject(options = {}) {
     validationClean: erc.ok === true && drc.ok === true,
     findings: boundAnalysis.findings
   };
+  if (typeof options.expectedDigest === 'string' && options.expectedDigest.length > 0) {
+    result.evidenceDigest = {
+      projectDigest: inventory.projectDigest,
+      matches: inventory.projectDigest === options.expectedDigest
+    };
+  }
   if (!hasSelection) return result;
 
   const finalTransactionInventory = await collectTransactionInventory({ projectDir });
