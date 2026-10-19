@@ -503,10 +503,14 @@ function syncConfirmModal() {
   }
 }
 
-// Chromium's focus fixup moves focus to the body when the focused control becomes
-// disabled. The blur can land before the disabling statement returns, or on a later
-// rendering update under load. relatedTarget is null when focus falls through to the
-// viewport. Either way an open confirm dialog puts focus on one of its enabled buttons.
+// One restore path while a confirm dialog is open: the capture focusout listener below.
+// Chromium drops focus to the body when the focused control becomes disabled or leaves
+// the document. That can happen inside the statement, or on a later rendering update;
+// both report focusout. relatedTarget is null when focus falls through to the viewport.
+// A relatedTarget that is still an enabled control in the dialog (Tab between its
+// buttons) stays where it is. focus() during the focusout of a node being removed does
+// not stick, so the same restore runs once more on a microtask after removal finishes.
+// restoringConfirmFocus ignores a nested focusout from that restore's own focus().
 let confirmFocusRestoreQueued = false;
 let restoringConfirmFocus = false;
 
@@ -551,10 +555,7 @@ document.addEventListener('focusout', (event) => {
 // One focus path. An open confirm dialog keeps focus on its own controls.
 function focusProgrammatically(element, options) {
   if (!element || typeof element.focus !== 'function') return;
-  if (confirmDialogOwnsFocus() && !confirmDialogs().some((dialog) => dialog.contains(element))) {
-    keepConfirmDialogFocus();
-    return;
-  }
+  if (confirmDialogOwnsFocus() && !confirmDialogs().some((dialog) => dialog.contains(element))) return;
   element.focus(options);
 }
 
@@ -3206,10 +3207,7 @@ function focusApplyButton() {
 }
 
 function reassertPatchApprovalFocus() {
-  if (confirmDialogOwnsFocus()) {
-    keepConfirmDialogFocus();
-    return;
-  }
+  if (confirmDialogOwnsFocus()) return;
   if (patchApplyBusy()) return;
   if (!patchApprovalCardEl || patchApprovalCardEl.hidden) return;
   const remembered = patchAreaFocusedEl;
@@ -3242,13 +3240,12 @@ function cancelApprovalStatusFocus() {
 
 function scheduleApprovalStatusFocus() {
   if (approvalStatusFocusTimer) return;
+  // After this turn, focus the status if Apply is still disabled. presentRemovalConfirm
+  // can cancel the timer if the dialog opens first. An open dialog is not restored here.
   approvalStatusFocusTimer = setTimeout(() => {
     approvalStatusFocusTimer = 0;
     removalClosedForFocus = false;
-    if (confirmDialogOwnsFocus()) {
-      keepConfirmDialogFocus();
-      return;
-    }
+    if (confirmDialogOwnsFocus()) return;
     if (!approvePatchButtonEl?.disabled) return;
     focusPatchApprovalStatus();
   }, 0);

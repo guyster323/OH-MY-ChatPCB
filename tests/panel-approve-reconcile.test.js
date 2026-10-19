@@ -1,9 +1,10 @@
-/* global document, window, MouseEvent, KeyboardEvent */
+/* global document, window, MouseEvent, KeyboardEvent, FocusEvent, HTMLElement */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import test from 'node:test';
+import * as espree from 'espree';
 
 import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 
@@ -1735,21 +1736,96 @@ test('approve reconcile and reconnect timers do not fire one millisecond early',
   }
 });
 
+const FOCUS_METHODS = new Set(['focus', 'blur']);
+
+function focusPropertyName(property) {
+  if (!property) return null;
+  if (property.type === 'Identifier') return property.name;
+  if (property.type === 'Literal' && typeof property.value === 'string') return property.value;
+  if (property.type === 'TemplateLiteral' && property.expressions.length === 0) {
+    return property.quasis[0]?.value?.cooked ?? null;
+  }
+  return null;
+}
+
+function isFocusMember(node) {
+  return node?.type === 'MemberExpression' && FOCUS_METHODS.has(focusPropertyName(node.property));
+}
+
+// Direct calls, optional calls, computed ['focus']/["focus"], .focus.call, and
+// aliases (`const f = el.focus`, `{ focus }`, `{ focus: f }`) outside focusProgrammatically.
+function focusBypasses(source) {
+  const ast = espree.parse(source, { ecmaVersion: 'latest', sourceType: 'module', loc: true });
+  const found = [];
+  let helperFocusCalls = 0;
+  let sawHelper = false;
+  const visit = (node, inHelper) => {
+    if (!node || typeof node.type !== 'string') return;
+    const entersHelper = node.type === 'FunctionDeclaration' && node.id?.name === 'focusProgrammatically';
+    if (entersHelper) sawHelper = true;
+    const here = inHelper || entersHelper;
+    if (!here && isFocusMember(node)) {
+      found.push({ line: node.loc.start.line, kind: 'member' });
+    }
+    if (here && node.type === 'CallExpression' && isFocusMember(node.callee) && focusPropertyName(node.callee.property) === 'focus') {
+      helperFocusCalls += 1;
+    }
+    if (node.type === 'ObjectPattern') {
+      for (const prop of node.properties) {
+        if (prop.type !== 'Property') continue;
+        if (!FOCUS_METHODS.has(focusPropertyName(prop.key))) continue;
+        found.push({ line: prop.loc.start.line, kind: 'pattern' });
+      }
+    }
+    if (node.type === 'ImportSpecifier' && FOCUS_METHODS.has(node.imported?.name)) {
+      found.push({ line: node.loc.start.line, kind: 'import' });
+    }
+    for (const key of Object.keys(node)) {
+      if (key === 'loc' || key === 'range') continue;
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const child of value) visit(child, here);
+      } else if (value && typeof value.type === 'string') visit(value, here);
+    }
+  };
+  visit(ast, false);
+  return { found, helperFocusCalls, sawHelper };
+}
+
 test('panel programmatic focus goes through confirmDialogOwnsFocus', async () => {
   const panel = await readFile(new URL('../apps/panel/panel.js', import.meta.url), 'utf8');
-  const focuses = panel.match(/\.focus\(/g) ?? [];
-  assert.equal(focuses.length, 1, `panel.js has ${focuses.length} .focus( calls`);
+  const bypass = focusBypasses(panel);
+  assert.equal(bypass.sawHelper, true, 'focusProgrammatically is missing');
+  assert.equal(bypass.helperFocusCalls, 1, `focus calls inside the helper: ${bypass.helperFocusCalls}`);
+  assert.deepEqual(bypass.found, [], bypass.found.map((item) => `${item.kind}@${item.line}`).join(', '));
   assert.match(panel, /function confirmDialogOwnsFocus\(\)/);
   const helperStart = panel.indexOf('function focusProgrammatically(');
-  assert.notEqual(helperStart, -1, 'focusProgrammatically is missing');
   const helperEnd = panel.indexOf('\nfunction ', helperStart + 1);
   const helper = panel.slice(helperStart, helperEnd === -1 ? panel.length : helperEnd);
   assert.match(helper, /confirmDialogOwnsFocus\(\)/);
-  assert.match(helper, /\.focus\(/);
-  const outside = `${panel.slice(0, helperStart)}${panel.slice(helperEnd === -1 ? panel.length : helperEnd)}`;
-  assert.equal(outside.includes('.focus('), false);
   const calls = panel.match(/focusProgrammatically\(/g) ?? [];
   assert.ok(calls.length >= 15, `focusProgrammatically calls: ${calls.length}`);
+
+  const allowed = 'function focusProgrammatically(element){ if (typeof element.focus !== "function") return; element.focus(); }\n';
+  const samples = [
+    'el?.focus?.();',
+    'el?.focus();',
+    "el['focus']();",
+    'el["focus"]();',
+    'const f = el.focus; f.call(el);',
+    'el.focus.call(el);',
+    'const { focus } = el; focus.call(el);',
+    'const { focus: focusAlias } = el;',
+    "const { ['focus']: computedFocus } = el;",
+    'const { "focus": quotedFocus } = el;',
+    "el['blur']();",
+    'const { blur } = el;'
+  ];
+  assert.deepEqual(focusBypasses(allowed).found, []);
+  for (const sample of samples) {
+    const hit = focusBypasses(`${allowed}${sample}`);
+    assert.ok(hit.found.length > 0, `${sample} was not caught`);
+  }
 });
 
 test('reconnect while a confirm dialog is open expires the preview and focuses the result heading', async (t) => {
@@ -1912,24 +1988,154 @@ test('an open confirm dialog keeps every other programmatic focus inside', async
     {
       name: 'approval-status',
       // Disabling Apply closes the removal dialog on purpose. The steal is the without-ERC path.
+      // Chromium may defer the disabled-control blur until a later frame. If it has not
+      // happened yet, blur() fires focusout now. The sync snapshot is before any microtask.
       dialogs: ['without-erc'],
-      run: (page) => page.evaluate(async () => {
-        const status = document.querySelector('#patch-approval-status');
-        const focus = status.focus.bind(status);
-        window.__statusFocusCalls = 0;
-        status.focus = (...args) => {
-          window.__statusFocusCalls += 1;
-          return focus(...args);
-        };
-        const cancel = document.querySelector('#apply-remove-components-confirm')?.hidden === false
-          ? document.querySelector('#cancel-apply-remove-components')
-          : document.querySelector('#cancel-apply-without-erc');
-        cancel.disabled = true;
-        document.querySelector('#approve-patch-button').disabled = true;
-        await new Promise((resolve) => queueMicrotask(resolve));
-        await new Promise((resolve) => queueMicrotask(resolve));
-        if (window.__statusFocusCalls !== 0) throw new Error(`patch approval status focus() ran ${window.__statusFocusCalls} times`);
-      })
+      run: async (page) => {
+        const result = await page.evaluate(() => {
+          const status = document.querySelector('#patch-approval-status');
+          const focus = status.focus.bind(status);
+          window.__statusFocusCalls = 0;
+          status.focus = (...args) => {
+            window.__statusFocusCalls += 1;
+            return focus(...args);
+          };
+          const dialog = document.querySelector('#apply-without-erc-confirm');
+          const focused = document.activeElement;
+          if (!dialog || dialog.hidden || !dialog.contains(focused)) {
+            throw new Error(`approval-status started on ${focused?.id || 'BODY'}`);
+          }
+          let focusInId = '';
+          const onFocusIn = (event) => {
+            if (dialog.contains(event.target) && event.target.disabled !== true) focusInId = event.target.id || '';
+          };
+          document.addEventListener('focusin', onFocusIn, true);
+          focused.disabled = true;
+          document.querySelector('#approve-patch-button').disabled = true;
+          if (document.activeElement === focused) focused.blur();
+          const active = document.activeElement;
+          const syncId = !active || active === document.body ? 'BODY' : (active.id || active.tagName);
+          const syncInside = Boolean(dialog.contains(active) && active.disabled !== true);
+          return new Promise((resolve) => {
+            queueMicrotask(() => {
+              document.removeEventListener('focusin', onFocusIn, true);
+              resolve({ syncId, syncInside, focusInId, calls: window.__statusFocusCalls });
+            });
+          });
+        });
+        assert.equal(result.calls, 0, `patch approval status focus() ran ${result.calls} times`);
+        assert.equal(result.syncInside, true, `approval-status sync focus ${result.syncId}`);
+        assert.notEqual(result.focusInId, '', 'approval-status did not observe focusin');
+        assert.notEqual(result.syncId, 'patch-approval-status');
+      }
+    },
+    {
+      name: 'sync-blur',
+      dialogs: ['removal', 'without-erc'],
+      run: async (page) => {
+        const result = await page.evaluate(() => {
+          const dialog = [...document.querySelectorAll('[role="alertdialog"]')].find((el) => el.hidden === false);
+          const button = document.activeElement;
+          if (!dialog?.contains(button)) throw new Error(`sync-blur started on ${button?.id || 'BODY'}`);
+          let focusInId = '';
+          const onFocusIn = (event) => {
+            if (dialog.contains(event.target)) focusInId = event.target.id || event.target.tagName;
+          };
+          document.addEventListener('focusin', onFocusIn, true);
+          button.blur();
+          const active = document.activeElement;
+          const syncId = !active || active === document.body ? 'BODY' : (active.id || active.tagName);
+          const syncInside = Boolean(dialog.contains(active) && active.disabled !== true);
+          return new Promise((resolve) => {
+            queueMicrotask(() => {
+              document.removeEventListener('focusin', onFocusIn, true);
+              resolve({ syncId, syncInside, focusInId });
+            });
+          });
+        });
+        assert.equal(result.syncInside, true, `sync-blur focused ${result.syncId}`);
+        assert.notEqual(result.focusInId, '', 'sync-blur did not observe focusin');
+      }
+    },
+    {
+      name: 'removed-button',
+      dialogs: ['removal', 'without-erc'],
+      run: async (page) => {
+        const result = await page.evaluate(() => new Promise((resolve, reject) => {
+          const dialog = [...document.querySelectorAll('[role="alertdialog"]')].find((el) => el.hidden === false);
+          const button = document.activeElement;
+          if (!dialog?.contains(button)) {
+            reject(new Error(`removed-button started on ${button?.id || 'BODY'}`));
+            return;
+          }
+          const parent = button.parentNode;
+          const next = button.nextSibling;
+          let focusInId = '';
+          const onFocusIn = (event) => {
+            if (event.target !== button && dialog.contains(event.target) && event.target.disabled !== true) {
+              focusInId = event.target.id || event.target.tagName;
+            }
+          };
+          document.addEventListener('focusin', onFocusIn, true);
+          button.remove();
+          queueMicrotask(() => {
+            document.removeEventListener('focusin', onFocusIn, true);
+            const active = document.activeElement;
+            const id = !active || active === document.body ? 'BODY' : (active.id || active.tagName);
+            const enabledInside = Boolean(dialog.contains(active) && active.disabled !== true);
+            if (next) parent.insertBefore(button, next);
+            else parent.append(button);
+            resolve({ id, enabledInside, focusInId });
+          });
+        }));
+        assert.equal(result.enabledInside, true, `removed-button focused ${result.id}`);
+        assert.notEqual(result.focusInId, '', 'removed-button did not observe focusin');
+      }
+    },
+    {
+      name: 'reentrant-focusout',
+      dialogs: ['removal', 'without-erc'],
+      run: async (page) => {
+        const result = await page.evaluate(() => {
+          const dialog = [...document.querySelectorAll('[role="alertdialog"]')].find((el) => el.hidden === false);
+          const button = document.activeElement;
+          if (!dialog?.contains(button)) throw new Error(`reentrant-focusout started on ${button?.id || 'BODY'}`);
+          const original = HTMLElement.prototype.focus;
+          let depth = 0;
+          HTMLElement.prototype.focus = function focusWithNestedFocusout(...args) {
+            if (depth > 8) throw new Error('confirm focus reentered');
+            depth += 1;
+            try {
+              const openDialog = this.closest?.('[role="alertdialog"]');
+              if (openDialog && openDialog.hidden === false) {
+                document.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+              }
+              return original.apply(this, args);
+            } finally {
+              depth -= 1;
+            }
+          };
+          let focusInId = '';
+          const onFocusIn = (event) => {
+            if (dialog.contains(event.target) && event.target.disabled !== true) focusInId = event.target.id || '';
+          };
+          document.addEventListener('focusin', onFocusIn, true);
+          button.blur();
+          const active = document.activeElement;
+          const syncId = !active || active === document.body ? 'BODY' : (active.id || active.tagName);
+          HTMLElement.prototype.focus = original;
+          document.removeEventListener('focusin', onFocusIn, true);
+          return {
+            syncId,
+            syncInside: Boolean(dialog.contains(active) && active.disabled !== true),
+            focusInId,
+            depth
+          };
+        });
+        assert.equal(result.syncInside, true, `reentrant-focusout focused ${result.syncId}`);
+        assert.equal(result.depth, 0, 'reentrant-focusout left the focus wrapper on the stack');
+        assert.notEqual(result.focusInId, '', 'reentrant-focusout did not observe focusin');
+      }
     },
     {
       name: 'result-heading',
