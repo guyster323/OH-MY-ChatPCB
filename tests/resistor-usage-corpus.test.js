@@ -102,7 +102,7 @@ const CORPUS = [
   { prompt: 'change LED resistor to 680 ohm without removing I2C', outcome: 'unclear', provider: false },
   { prompt: 'do not remove I2C and set LED resistor to 680Ω', outcome: 'unclear', provider: false },
   { prompt: 'LED 저항 삭제하지 말고 680Ω으로', outcome: 'unclear', provider: false },
-  { prompt: 'LED 저항은 그대로 두고 680Ω으로', outcome: 'unclear', provider: false },
+  { prompt: 'LED 저항은 그대로 두고 680Ω으로', outcome: 'negated', provider: false },
   { prompt: 'change the pull-up to 2.2k', outcome: 'unsupported', provider: false },
   { prompt: "don't touch R4, set the LED resistor to 680Ω", outcome: 'apply', ohms: 680, provider: false },
   { prompt: '풀업을 그대로 두지 말고 2.2k로', outcome: 'unsupported', provider: false },

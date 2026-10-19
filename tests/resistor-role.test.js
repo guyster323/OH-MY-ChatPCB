@@ -868,7 +868,7 @@ test('a Korean keep clause hides that role and still edits only the LED resistor
 
   const keptLedValue = classifyExistingProjectRequest('LED 저항은 그대로 두고 680Ω으로', spec);
   assert.equal(keptLedValue.mode, 'refuse');
-  assert.equal(keptLedValue.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(keptLedValue.code, 'RESISTOR_AMBIGUOUS');
   assert.equal(keptLedValue.edit, undefined);
   assert.equal(componentValue(spec, 'R3'), '1k');
 

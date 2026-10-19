@@ -2323,7 +2323,7 @@ test('Korean keep clause applies only R3', async () => {
     };
     const blocked = [
       ['LED 저항은 그대로 두고 풀업 저항 10k로', 'RESISTOR_REF_UNSUPPORTED'],
-      ['LED 저항은 그대로 두고 680Ω으로', 'RESISTOR_TARGET_UNCLEAR'],
+      ['LED 저항은 그대로 두고 680Ω으로', 'RESISTOR_AMBIGUOUS'],
       ['I2C는 그대로 두고 LED 저항 680옴으로', 'RESISTOR_TARGET_UNCLEAR'],
       ['I2C는 놔두고 LED 저항 680Ω으로', 'RESISTOR_TARGET_UNCLEAR']
     ];
@@ -2795,6 +2795,185 @@ test('negated or alternative resistor edits (\'do not change … to 680Ω\', \'n
         if (preview.error?.code !== code) failures.push(`${kind} ${prompt} e2e code ${preview.error?.code ?? 'none'} R3=${r3}`);
         if (schematic !== before.schematic) failures.push(`${kind} ${prompt} schematic R3=${r3}`);
         if (spice !== before.spice) failures.push(`${kind} ${prompt} spice RLED=${rledOhms(spice)}`);
+      }
+    }
+    assert.deepEqual(failures, []);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+const KEEP_TARGET_ROWS = [
+  "don't touch R3, set the LED resistor to 680Ω",
+  'keep R3, set the LED resistor to 680Ω',
+  'R3는 건드리지 말고 LED 저항 680Ω',
+  'keep R4 and the LED resistor, set 680Ω',
+  'keep the LED resistor, set R3 to 680Ω',
+  'keep R3 and set it to 680Ω',
+  "don't touch the LED resistor, set R3 to 680Ω",
+  'LED 저항은 건드리지 말고 R3 680Ω',
+  'LED 저항은 그대로 두고 680Ω으로'
+];
+
+const KEEP_OTHER_ROWS = [
+  "don't touch R4, set the LED resistor to 680Ω",
+  'keep R4, set the LED resistor to 680Ω',
+  'R4는 건드리지 말고 LED 저항 680Ω',
+  'keep the pull-ups, set LED resistor 680Ω',
+  'I2C 풀업 저항은 그대로 두고 LED 저항 680Ω'
+];
+
+function keepTargetPrompt(rng, self) {
+  const lang = rng() < 0.5 ? 'en' : 'ko';
+  if (!self) {
+    const ref = rng() < 0.5 ? 'R4' : 'R1';
+    const prompt = lang === 'en'
+      ? pickItem(rng, [
+        `don't touch ${ref}, set the LED resistor to 680Ω`,
+        `keep ${ref}, set the LED resistor to 680Ω`
+      ])
+      : pickItem(rng, [
+        `${ref}는 건드리지 말고 LED 저항 680Ω으로`,
+        `${ref}는 그대로 두고 LED 저항 680Ω으로`
+      ]);
+    return { prompt, apply: true };
+  }
+  const role = lang === 'en'
+    ? pickItem(rng, ['R3', 'the LED resistor', 'the current-limiting resistor', 'the status LED resistor'])
+    : pickItem(rng, ['R3', 'LED 저항', '전류 제한 저항', '상태 LED 저항']);
+  const edit = lang === 'en'
+    ? pickItem(rng, ['set the LED resistor to 680Ω', 'set R3 to 680Ω', 'set 680Ω'])
+    : pickItem(rng, ['LED 저항 680Ω으로', 'R3 680Ω', '680Ω으로']);
+  const prompt = lang === 'en'
+    ? pickItem(rng, [
+      `keep ${role}, ${edit}`,
+      `don't touch ${role}, ${edit}`,
+      `leave ${role} alone and ${edit}`,
+      `keep R4 and ${role}, set 680Ω`
+    ])
+    : pickItem(rng, [
+      role === 'R3' ? `R3는 건드리지 말고 ${edit}` : `${role}은 건드리지 말고 ${edit}`,
+      role === 'R3' ? `R3는 그대로 두고 ${edit}` : `${role}은 그대로 두고 ${edit}`,
+      role === 'R3' ? `R3는 유지하고 ${edit}` : `${role}은 유지하고 ${edit}`
+    ]);
+  return { prompt, apply: false };
+}
+
+test('a keep or don\'t-touch clause naming the edit target itself is RESISTOR_AMBIGUOUS', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const spec = await readChatPcbManifest(projectDir);
+  const message = resistorAmbiguousMessage();
+  const frozen = JSON.stringify(spec.schematic.components);
+  const failures = [];
+  try {
+    for (const prompt of KEEP_TARGET_ROWS) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse') failures.push(`${prompt} mode ${decision.mode} ohms ${decision.edit?.ohms ?? ''}`);
+      if (decision.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${prompt} code ${decision.code ?? decision.mode}`);
+      if (decision.message !== message) failures.push(`${prompt} message`);
+      if (decision.edit !== undefined) failures.push(`${prompt} edit ${decision.edit?.ohms ?? ''}`);
+      if (blocksBeforeProvider(prompt, decision) !== true) failures.push(`${prompt} blocks`);
+      if (appliesBeforeProvider(prompt, decision) !== false) failures.push(`${prompt} applies`);
+      if (JSON.stringify(spec.schematic.components) !== frozen) failures.push(`${prompt} spec mutated`);
+      for (const kind of ['native', 'malicious']) {
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_k1_self_${kind}_${prompt.length}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        const r3 = schematicRefValue(schematic, 'R3');
+        if (provider.calls() !== 0) failures.push(`${kind} ${prompt} calls ${provider.calls()} R3=${r3} code=${preview.error?.code ?? ''}`);
+        if (preview.ok !== false) failures.push(`${kind} ${prompt} preview ok R3=${r3}`);
+        if (preview.error?.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${kind} ${prompt} e2e ${preview.error?.code ?? 'none'} R3=${r3}`);
+        if (preview.error?.message !== message) failures.push(`${kind} ${prompt} e2e message`);
+        if (schematic !== before.schematic) failures.push(`${kind} ${prompt} schematic R3=${r3}`);
+        if (spice !== before.spice) failures.push(`${kind} ${prompt} spice RLED=${rledOhms(spice)}`);
+      }
+    }
+    for (const prompt of KEEP_OTHER_ROWS) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'merge') failures.push(`control ${prompt} mode ${decision.mode} code ${decision.code ?? ''}`);
+      if (decision.edit?.ohms !== 680 || decision.edit?.ref !== 'R3') failures.push(`control ${prompt} edit ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+      if (appliesBeforeProvider(prompt, decision) !== true) failures.push(`control ${prompt} applies`);
+      if (blocksBeforeProvider(prompt, decision) !== false) failures.push(`control ${prompt} blocks`);
+      for (const kind of ['native', 'malicious']) {
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_k1_other_${kind}_${prompt.length}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        if (provider.calls() !== 0) failures.push(`control ${kind} ${prompt} calls ${provider.calls()}`);
+        if (preview.ok !== true) failures.push(`control ${kind} ${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+        try {
+          assertOnlySeriesValueChanged(schematic, before.schematic, '680Ω', spice, before.spice, '680', `control ${kind} ${prompt}`);
+        } catch (error) {
+          failures.push(error.message);
+        }
+      }
+    }
+    assert.deepEqual(failures, []);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('property: a keep clause naming the target ref or its role is RESISTOR_AMBIGUOUS and a different resistor ref still applies', { timeout: 20000 }, async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const spec = await readChatPcbManifest(projectDir);
+  const message = resistorAmbiguousMessage();
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`keep-target property seed ${seed}`);
+  const failures = [];
+  try {
+    for (let index = 0; index < 8; index += 1) {
+      for (const self of [true, false]) {
+        const sample = keepTargetPrompt(rng, self);
+        const decision = classifyExistingProjectRequest(sample.prompt, spec);
+        const where = `seed ${seed} ${sample.prompt}`;
+        if (self) {
+          if (decision.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${where} code ${decision.code ?? decision.mode}`);
+          if (decision.message !== message) failures.push(`${where} message`);
+          if (decision.edit !== undefined) failures.push(`${where} edit`);
+          if (blocksBeforeProvider(sample.prompt, decision) !== true) failures.push(`${where} blocks`);
+          if (appliesBeforeProvider(sample.prompt, decision) !== false) failures.push(`${where} applies`);
+        } else if (decision.mode !== 'merge' || decision.edit?.ohms !== 680 || decision.edit?.ref !== 'R3') {
+          failures.push(`${where} edit ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+        }
+        for (const kind of ['native', 'malicious']) {
+          const provider = kind === 'native'
+            ? nativeNoPatchCounter()
+            : maliciousPatchCounter('LED 22Ω, R4 10k');
+          await writeGeneratedBytes(generated, before);
+          const preview = await requestAndMaybeApprove(services, projectDir, sample.prompt, provider.impl, `call_k1_prop_${index}_${self}_${kind}`);
+          const schematic = await readFile(generated.files.schematic, 'utf8');
+          const spice = await readFile(generated.files.spice, 'utf8');
+          const r3 = schematicRefValue(schematic, 'R3');
+          if (provider.calls() !== 0) failures.push(`${kind} ${where} calls ${provider.calls()} R3=${r3}`);
+          if (self) {
+            if (preview.ok !== false || preview.error?.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${kind} ${where} e2e ${preview.error?.code ?? 'ok'} R3=${r3}`);
+            if (schematic !== before.schematic || spice !== before.spice) failures.push(`${kind} ${where} board R3=${r3} RLED=${rledOhms(spice)}`);
+          } else {
+            try {
+              assert.equal(preview.ok, true, `${kind} ${where} ${preview.error?.code ?? ''}`);
+              assertOnlySeriesValueChanged(schematic, before.schematic, '680Ω', spice, before.spice, '680', `${kind} ${where}`);
+            } catch (error) {
+              failures.push(error.message);
+            }
+          }
+        }
       }
     }
     assert.deepEqual(failures, []);

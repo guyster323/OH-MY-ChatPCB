@@ -610,6 +610,15 @@ function coverageCatch(text, spec) {
 
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
+  // A keep, don't-touch, or leave-alone object that is this edit's own target
+  // is read here, before that object is stripped out of the sentence.
+  if (resistor.kind === 'resistor' && keepNamesEditTarget(text, spec)) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_AMBIGUOUS',
+      message: resistorAmbiguousMessage()
+    };
+  }
   const coverage = assessRequestCoverage(text);
   // A value belongs to the role in its own clause. Any non-LED role that has a
   // value refuses the whole request, so that ohms value cannot land on R3.
@@ -1776,7 +1785,8 @@ function maskGuardObjects(text) {
 }
 
 // "don't touch R4" keeps that reference. The LED edit in the other clause
-// still applies. "don't touch the LED resistor" is a negation, so it stays.
+// still applies. A role don't-touch is left visible; keepNamesEditTarget
+// already read it.
 function maskDontTouchRefs(chars, text) {
   const re = compileRegExp(String.raw`\b(?:don't|dont|do not|never)\s+touch\b`, 'giu');
   for (const match of text.matchAll(re)) {
@@ -1860,6 +1870,132 @@ function blankWordsAfter(chars, text, cueEnd, clauseEnd) {
 function blankRange(chars, from, to) {
   const end = Math.min(to, chars.length);
   for (let index = Math.max(0, from); index < end; index += 1) chars[index] = ' ';
+}
+
+// Keep-list words. "and" joins items in one keep ("keep R4 and the LED resistor").
+// An edit verb or a value ends the list, same as the stripper's walk.
+const KEEP_LIST_STOP = /^(?:change|set|update|make|modify|to)$|(?:바꿔|변경|수정)/iu;
+const KEEP_LIST_COORD = /^(?:and|그리고|하고|및|이랑)$/iu;
+const LEAVE_ALONE = /\bleave\b/giu;
+const DONT_TOUCH_CUE = /\b(?:don't|dont|do not|never)\s+touch\b/giu;
+
+function keepNamesEditTarget(text, spec) {
+  const found = findKeepClauses(text);
+  if (found.objects.length === 0) return false;
+  const series = seriesResistorRef(spec);
+  const kept = new Set();
+  for (const [start, end] of found.objects) addKeptIdentity(kept, text.slice(start, end), series);
+  if (kept.size === 0) return false;
+  // The cue word stays out of the edit remainder. "유지하고" must not sit on the LED noun.
+  const edit = new Set();
+  const remainder = blankCopy(text, found.objects.concat(found.cues));
+  addKeptIdentity(edit, remainder, series);
+  if (edit.size === 0 && bareSeriesRemainder(remainder, series)) edit.add(String(series).toUpperCase());
+  for (const key of kept) {
+    if (edit.has(key)) return true;
+  }
+  return false;
+}
+
+function findKeepClauses(text) {
+  const objects = [];
+  const cues = [];
+  const add = (object, ...cueSpans) => {
+    if (!object) return;
+    objects.push(object);
+    for (const cue of cueSpans) if (cue) cues.push(cue);
+  };
+  KOREAN_KEEP_CLAUSE.lastIndex = 0;
+  for (const match of text.matchAll(KOREAN_KEEP_CLAUSE)) {
+    add(objectBefore(text, match.index, 6), [match.index, match.index + match[0].length]);
+  }
+  for (const match of text.matchAll(compileRegExp(GUARD_BEFORE.source, 'giu'))) {
+    const after = text.slice(match.index + match[0].length);
+    if (koreanKeepCueNegated(after, false)) continue;
+    add(objectBefore(text, match.index, 2), [match.index, match.index + match[0].length]);
+  }
+  for (const match of text.matchAll(compileRegExp(GUARD_AFTER.source, 'giu'))) {
+    if (/^keep$/iu.test(match[0]) && englishKeepIsNegated(text, match.index)) continue;
+    add(objectAfter(text, match.index + match[0].length), [match.index, match.index + match[0].length]);
+  }
+  DONT_TOUCH_CUE.lastIndex = 0;
+  for (const match of text.matchAll(DONT_TOUCH_CUE)) {
+    add(objectAfter(text, match.index + match[0].length), [match.index, match.index + match[0].length]);
+  }
+  LEAVE_ALONE.lastIndex = 0;
+  for (const match of text.matchAll(LEAVE_ALONE)) {
+    if (englishKeepIsNegated(text, match.index)) continue;
+    const alone = leaveAloneObject(text, match.index + match[0].length);
+    if (!alone) continue;
+    add(alone.object, [match.index, match.index + match[0].length], alone.cue);
+  }
+  return { objects, cues };
+}
+
+function objectBefore(text, cueStart, limit) {
+  const before = text.slice(0, cueStart);
+  let boundary = -1;
+  for (const mark of [',', '.', '?', '!', '\n', '。', '？', '！', ';']) {
+    boundary = Math.max(boundary, before.lastIndexOf(mark));
+  }
+  const origin = boundary < 0 ? 0 : boundary + 1;
+  const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
+  const taken = [];
+  for (let index = words.length - 1; index >= 0 && taken.length < limit; index -= 1) {
+    if (/^\d/.test(words[index][0])) break;
+    taken.push(words[index]);
+  }
+  if (taken.length === 0) return null;
+  return [origin + taken[taken.length - 1].index, cueStart];
+}
+
+function objectAfter(text, cueEnd) {
+  const words = [...text.slice(cueEnd).matchAll(/\S+/gu)];
+  let end = cueEnd;
+  let count = 0;
+  for (const word of words) {
+    if (count >= 6) break;
+    const cut = word[0].search(/[.;!?,。！？]/u);
+    const token = (cut > 0 ? word[0].slice(0, cut) : word[0]).replace(/^[("'`]+|[)"'`]+$/gu, '');
+    if (cut === 0 || /^\d/.test(token) || KEEP_LIST_STOP.test(token)) break;
+    end = cueEnd + word.index + (cut > 0 ? cut : word[0].length);
+    if (!KEEP_LIST_COORD.test(token)) count += 1;
+    if (cut > 0) break;
+  }
+  return end > cueEnd ? [cueEnd, end] : null;
+}
+
+function leaveAloneObject(text, from) {
+  const rest = text.slice(from);
+  const alone = /\balone\b/iu.exec(rest);
+  if (!alone) return null;
+  const between = rest.slice(0, alone.index);
+  if (/[.;!?,。！？\n]/.test(between) || between.trim() === '') return null;
+  const lead = between.match(/^\s*/u)[0].length;
+  return {
+    object: [from + lead, from + alone.index],
+    cue: [from + alone.index, from + alone.index + alone[0].length]
+  };
+}
+
+function addKeptIdentity(keys, fragment, series) {
+  for (const ref of resistorReferenceTokens(fragment)) keys.add(ref.toUpperCase());
+  if (series && resistorNounKinds(fragment).includes('led')) keys.add(String(series).toUpperCase());
+}
+
+function bareSeriesRemainder(text, series) {
+  if (!series) return false;
+  if (resistorReferenceTokens(text).length > 0) return false;
+  if (resistorNounKinds(text).length > 0) return false;
+  if (textHasKnownRole(text) || textHasUsbRole(text)) return false;
+  if (componentDesignators(text).some((ref) => !/^R\d+$/.test(ref))) return false;
+  return clauseCarriesResistorValue(text) && hasResistorEditVerb(text);
+}
+
+function blankCopy(text, ranges) {
+  const chars = text.split('');
+  for (const [start, end] of ranges) blankRange(chars, start, end);
+  return chars.join('');
 }
 
 // Resistor breaks are not the deletion breaks. A comma inside 4,7 or 1,000
