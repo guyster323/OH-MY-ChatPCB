@@ -342,12 +342,16 @@ export function resistorValueAmbiguousMessage(ref, labels) {
   return `${en}\n${ko}`;
 }
 
-// A negation or an alternative never picks one of the values. Two parsed ohm
-// values still use resistorValueAmbiguousMessage, which names both.
-export function resistorChangeAmbiguousMessage() {
-  const en = 'It isn\'t clear which value to use, or whether to change it at all. Nothing was changed.';
-  const ko = '어느 값으로 바꿀지, 바꾸지 않을지 분명하지 않아요. 아무것도 바꾸지 않았어요.';
+// A negation never picks a value. Two ohm values, or a choice between them,
+// still use resistorValueAmbiguousMessage, which names both.
+export function resistorAmbiguousMessage() {
+  const en = 'It isn\'t clear whether to make the change or leave it. Nothing was changed.';
+  const ko = '바꾸라는 건지 바꾸지 말라는 건지 분명하지 않아요. 아무것도 바꾸지 않았어요.';
   return `${en}\n${ko}`;
+}
+
+export function resistorChangeAmbiguousMessage() {
+  return resistorAmbiguousMessage();
 }
 
 export function resistorUnitlessMessage() {
@@ -614,14 +618,22 @@ function finishResistor(text, spec, resistor) {
   if (foreignRoleClauseHasValue(text) && !(resistor.kind === 'resistor' && coverage.lengthClause)) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
   }
-  // Negation and alternatives ask which value before "not" or "never" can
-  // look like another role. A valued foreign role above still wins. Milli,
-  // unitless, and two named ohm values are not kind resistor.
-  if (coverage.negatedOrAlternative && resistor.kind === 'resistor') {
+  // Negation asks whether to change anything. A choice of values asks which
+  // value. A valued foreign role above still wins. Milli, unitless, and two
+  // named ohm values are not kind resistor, except a negation of that choice.
+  if (coverage.negated && (resistor.kind === 'resistor' || resistor.reason === 'ambiguous')) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_AMBIGUOUS',
+      message: resistorAmbiguousMessage()
+    };
+  }
+  if (coverage.alternative && resistor.kind === 'resistor') {
+    const label = resistor.label ? [resistor.label] : [];
     return {
       mode: 'refuse',
       code: 'RESISTOR_VALUE_AMBIGUOUS',
-      message: resistorChangeAmbiguousMessage()
+      message: resistorValueAmbiguousMessage(null, label)
     };
   }
   // A non-LED role is refused before the value is judged. 0.1Ω and 10mΩ on a
@@ -669,7 +681,7 @@ function finishResistor(text, spec, resistor) {
   if (resistor.kind === 'resistor' && (coverage.foreignRole || unkeptForeignRole(text))) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
   }
-  if (resistor.kind === 'resistor' && (coverage.unknownRoleValue || coverage.unknownLeftover || !coverage.covered)) {
+  if (resistor.kind === 'resistor' && !coverage.covered) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
   // An LED series edit needs the series resistor role. A lone LED symbol is not enough.
@@ -739,6 +751,7 @@ export function blocksBeforeProvider(text, decision) {
   if (decision.code === 'RESISTOR_VALUE_INVALID' && hasMalformedRkm(normalized)) return true;
   if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
+  if (decision.code === 'RESISTOR_AMBIGUOUS') return true;
   if (decision.code === 'RESISTOR_VALUE_AMBIGUOUS' && assessRequestCoverage(normalized).negatedOrAlternative) return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
@@ -1758,7 +1771,20 @@ function maskGuardObjects(text) {
   // "두고" splits on 고, so the whole keep phrase is masked on the raw text.
   // "건드리지 마" is not one of these; only "말고" closes that phrase.
   maskKoreanKeepClauses(chars, normalized);
+  maskDontTouchRefs(chars, normalized);
   return chars.join('');
+}
+
+// "don't touch R4" keeps that reference. The LED edit in the other clause
+// still applies. "don't touch the LED resistor" is a negation, so it stays.
+function maskDontTouchRefs(chars, text) {
+  const re = compileRegExp(String.raw`\b(?:don't|dont|do not|never)\s+touch\b`, 'giu');
+  for (const match of text.matchAll(re)) {
+    const from = match.index + match[0].length;
+    const ref = /^\s*(?:(?:the|a|an)\s+)?(?:resistor\s+)?R\d+\b/iu.exec(text.slice(from));
+    if (!ref) continue;
+    blankRange(chars, from, from + ref[0].length);
+  }
 }
 
 const KOREAN_KEEP_CLAUSE = /(?<![가-힣])(?:그대로\s*두고|건드리지\s*말고|유지하고|놔\s*두고|빼고)/gu;
@@ -2723,21 +2749,28 @@ function isQuestionShaped(text) {
   return false;
 }
 
-function questionStopsResistorEdit(text) {
-  if (isAdviceQuestion(text)) return true;
+function questionStopsResistorEdit(text, coverage = assessRequestCoverage(text)) {
+  // Permission allows the edit only when the sentence is not an advice question.
+  // "may I change …?" applies. "may I ask why …?" does not.
+  if (coverage.permittedEdit) return false;
+  if (coverage.adviceQuestion) return true;
   if (isPermittedEdit(text)) return false;
   return isQuestionShaped(text);
 }
 
 function interpretResistor(text) {
   const normalized = String(text ?? '').normalize('NFKC');
-  if (questionStopsResistorEdit(normalized)) return null;
+  // Question shape, a bare value choice, and "to 680Ω or 1k" share one scan.
+  const coverage = assessRequestCoverage(normalized);
+  if (questionStopsResistorEdit(normalized, coverage)) return null;
   const namedRefs = resistorReferenceTokens(normalized);
   const aboutLed = /led|저항|抵抗|resistor|\bstatus\b/i.test(normalized);
   const change = /change|set|update|modify|으로|바꿔|변경|수정|그대로|keep|->|→/i.test(normalized);
   const named = namedRefs[0] ?? null;
   const roleValue = textHasKnownRole(normalized) && CLEAR_OHM.test(normalized);
-  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0 && !roleValue) return null;
+  // "680Ω 또는 1k" has no resistor word. The choice is still a value refusal.
+  const valueChoice = coverage.alternative;
+  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0 && !roleValue && !valueChoice) return null;
 
   const tokens = scanResistorTokens(normalized);
   markNonResistorQuantities(tokens, normalized);
@@ -2748,7 +2781,8 @@ function interpretResistor(text) {
   if (parsed.malformed) return { kind: 'invalid', valued: true };
   if (parsed.outOfRange) return { kind: 'invalid', reason: 'range', valued: true };
 
-  const chosen = destinationAmount(normalized, parsed.valid);
+  // "to 680Ω or 1k" must not keep 680 just because "to" saw it first.
+  const chosen = coverage.alternative ? null : destinationAmount(normalized, parsed.valid);
   if (chosen) return resistorEdit(chosen);
   const distinct = new Set(parsed.valid.map((amount) => amount.ohmsText));
   if (distinct.size > 1) {
@@ -2820,6 +2854,10 @@ function unitlessSuffixCountsAsResistor(text, start, end) {
   // "4.99k로 바꿔줘" names no part. The marker still binds that token: it is the
   // edit object. "to rev 4k" and "4K display" already returned false above.
   if (SUFFIX_EDIT_BEFORE.test(before) || SUFFIX_EDIT_AFTER.test(after)) return true;
+  // "680Ω or 1k", "680Ω/1k", and "680Ω 또는 1k" name both values.
+  // A model, display, or pot after the token already returned false above.
+  if (/(?:Ω|옴|ohms?|\d\s*[kKrR])\s*(?:\/|또는|아니면|혹은|\bor\b)\s*$/iu.test(before)) return true;
+  if (/^\s*(?:\/|또는|아니면|혹은|\bor\b)\s*\d/iu.test(after)) return true;
   return false;
 }
 
@@ -2973,8 +3011,9 @@ function unitlessResistor(text, tokens) {
 
 // Sub-1k keeps the Ω suffix (680Ω, 1.5Ω). Kilo and mega keep every digit of
 // the canonical ohms string, so 4990 is 4.99k and 1050000 is 1.05M.
-// 1005 must not become "1.005k": three digits after one dot no longer parse.
-// RKM ("1k005") or plain ohms is used when that form would not re-parse.
+// 1005 must not become "1.005k" or "1k005": three digits after one dot, and
+// more than one digit after an RKM letter, no longer parse. Plain ohms is
+// the lossless form when the dotted multiplier would not re-parse.
 function formatResistorLabel(ohmsText) {
   const text = String(ohmsText);
   const value = Number(text);
@@ -2996,7 +3035,10 @@ function formatResistorLabel(ohmsText) {
 function dottedMultiplier(scaled, letter) {
   const dot = scaled.indexOf('.');
   if (dot < 0) return null;
-  return `${scaled.slice(0, dot)}${letter}${scaled.slice(dot + 1)}`;
+  const fraction = scaled.slice(dot + 1);
+  // 4.7k may also be written 4k7. 4.99k must not become 4k99.
+  if (fraction.length !== 1) return null;
+  return `${scaled.slice(0, dot)}${letter}${fraction}`;
 }
 
 function scaleOhms(text, places) {

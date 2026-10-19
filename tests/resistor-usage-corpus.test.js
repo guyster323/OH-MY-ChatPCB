@@ -104,11 +104,11 @@ const CORPUS = [
   { prompt: 'LED 저항 삭제하지 말고 680Ω으로', outcome: 'unclear', provider: false },
   { prompt: 'LED 저항은 그대로 두고 680Ω으로', outcome: 'unclear', provider: false },
   { prompt: 'change the pull-up to 2.2k', outcome: 'unsupported', provider: false },
-  { prompt: "don't touch R4, set the LED resistor to 680Ω", outcome: 'unsupported', provider: false },
+  { prompt: "don't touch R4, set the LED resistor to 680Ω", outcome: 'apply', ohms: 680, provider: false },
   { prompt: '풀업을 그대로 두지 말고 2.2k로', outcome: 'unsupported', provider: false },
-  { prompt: 'do not change the LED resistor to 680Ω', outcome: 'ambiguous', provider: false },
+  { prompt: 'do not change the LED resistor to 680Ω', outcome: 'negated', provider: false },
   { prompt: 'LED resistor to 680Ω or 1k', outcome: 'ambiguous', provider: false },
-  { prompt: 'LED 저항을 680Ω으로 바꾸지 말고', outcome: 'ambiguous', provider: false },
+  { prompt: 'LED 저항을 680Ω으로 바꾸지 말고', outcome: 'negated', provider: false },
   { prompt: 'why not change the LED resistor to 680Ω?', outcome: 'provider', provider: true },
   { prompt: 'should I change the LED resistor to 680Ω?', outcome: 'provider', provider: true },
   { prompt: 'LED 저항 680Ω으로 바꿔야 할까?', outcome: 'provider', provider: true }
@@ -117,7 +117,8 @@ const CORPUS = [
 const OUTCOME_CODE = {
   unclear: 'RESISTOR_TARGET_UNCLEAR',
   unsupported: 'RESISTOR_REF_UNSUPPORTED',
-  ambiguous: 'RESISTOR_VALUE_AMBIGUOUS'
+  ambiguous: 'RESISTOR_VALUE_AMBIGUOUS',
+  negated: 'RESISTOR_AMBIGUOUS'
 };
 
 function assertCorpusRow(spec, row) {

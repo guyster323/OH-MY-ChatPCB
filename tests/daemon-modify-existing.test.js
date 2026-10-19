@@ -21,7 +21,8 @@ import {
   modifyRefusalMessage,
   removalIntentUnclearMessage,
   removalNeedsVerbMessage,
-  resistorChangeAmbiguousMessage,
+  resistorAmbiguousMessage,
+  resistorValueAmbiguousMessage,
   resistorRefAmbiguousMessage,
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
@@ -2738,36 +2739,44 @@ test('negated or alternative resistor edits (\'do not change … to 680Ω\', \'n
   const { projectDir, generated } = await generatedStm32Project();
   const before = await materializeSeriesResistor(services, projectDir, generated);
   const spec = await readChatPcbManifest(projectDir);
-  const message = resistorChangeAmbiguousMessage();
+  const negationMessage = resistorAmbiguousMessage();
+  const valueMessage = resistorValueAmbiguousMessage(null, ['680Ω', '1k']);
   const prompts = [
-    'do not change the LED resistor to 680Ω',
-    'not the LED resistor, set 680Ω',
-    'LED 저항을 680Ω으로 바꾸지 말고',
-    'LED resistor to 680Ω, not',
-    'never set the LED resistor to 680Ω',
-    "don't change the LED resistor to 680Ω",
-    'LED 저항 680Ω으로 바꾸지 마',
-    'does not change the LED resistor to 680Ω',
-    'did not set the LED resistor to 680Ω',
-    'no, do not set the LED resistor to 680Ω',
-    'LED 저항을 680Ω으로 바꾸지 않',
-    '변경하지 마 LED 저항 680Ω',
-    'LED resistor to 680Ω or 1k',
-    'change the LED resistor to 680Ω or 1k',
-    'LED 저항 680Ω 또는 1k',
-    'LED 저항을 680Ω 또는 1k로 바꿔줘',
-    'LED 저항 680Ω 아니면 1k로',
-    'LED resistor 680Ω/1k'
+    ['do not change the LED resistor to 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['not the LED resistor, set 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['LED 저항을 680Ω으로 바꾸지 말고', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['LED resistor to 680Ω, not', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['never set the LED resistor to 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ["don't change the LED resistor to 680Ω", 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['LED 저항 680Ω으로 바꾸지 마', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['does not change the LED resistor to 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['did not set the LED resistor to 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['no, do not set the LED resistor to 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['LED 저항을 680Ω으로 바꾸지 않', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['변경하지 마 LED 저항 680Ω', 'RESISTOR_AMBIGUOUS', negationMessage],
+    ['LED resistor to 680Ω or 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['change the LED resistor to 680Ω or 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['LED 저항 680Ω 또는 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['LED 저항을 680Ω 또는 1k로 바꿔줘', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['LED 저항 680Ω 아니면 1k로', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['LED resistor 680Ω/1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['680Ω or 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['680Ω 또는 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['680Ω 아니면 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['680Ω 혹은 1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage],
+    ['680Ω/1k', 'RESISTOR_VALUE_AMBIGUOUS', valueMessage]
   ];
   const failures = [];
   try {
-    for (const [index, prompt] of prompts.entries()) {
+    for (const [index, [prompt, code, message]] of prompts.entries()) {
       const coverage = assessRequestCoverage(prompt);
       const decision = classifyExistingProjectRequest(prompt, spec);
       if (coverage.covered !== false) failures.push(`${prompt} covered`);
       if (coverage.negatedOrAlternative !== true) failures.push(`${prompt} negatedOrAlternative ${coverage.negatedOrAlternative}`);
+      if (code === 'RESISTOR_AMBIGUOUS' && coverage.negated !== true) failures.push(`${prompt} negated ${coverage.negated}`);
+      if (code === 'RESISTOR_VALUE_AMBIGUOUS' && coverage.alternative !== true) failures.push(`${prompt} alternative ${coverage.alternative}`);
       if (decision.mode !== 'refuse') failures.push(`${prompt} mode ${decision.mode} ohms ${decision.edit?.ohms ?? ''}`);
-      if (decision.code !== 'RESISTOR_VALUE_AMBIGUOUS') failures.push(`${prompt} code ${decision.code ?? decision.mode}`);
+      if (decision.code !== code) failures.push(`${prompt} code ${decision.code ?? decision.mode}`);
       if (decision.edit !== undefined) failures.push(`${prompt} edit ${decision.edit?.ohms ?? ''}`);
       if (decision.message !== message) failures.push(`${prompt} message ${decision.message ?? ''}`);
       if (blocksBeforeProvider(prompt, decision) !== true) failures.push(`${prompt} blocks ${blocksBeforeProvider(prompt, decision)}`);
@@ -2783,7 +2792,7 @@ test('negated or alternative resistor edits (\'do not change … to 680Ω\', \'n
         const r3 = schematicRefValue(schematic, 'R3');
         if (provider.calls() !== 0) failures.push(`${kind} ${prompt} calls ${provider.calls()} R3=${r3} code=${preview.error?.code ?? ''}`);
         if (preview.ok !== false) failures.push(`${kind} ${prompt} preview ok R3=${r3}`);
-        if (preview.error?.code !== 'RESISTOR_VALUE_AMBIGUOUS') failures.push(`${kind} ${prompt} e2e code ${preview.error?.code ?? 'none'} R3=${r3}`);
+        if (preview.error?.code !== code) failures.push(`${kind} ${prompt} e2e code ${preview.error?.code ?? 'none'} R3=${r3}`);
         if (schematic !== before.schematic) failures.push(`${kind} ${prompt} schematic R3=${r3}`);
         if (spice !== before.spice) failures.push(`${kind} ${prompt} spice RLED=${rledOhms(spice)}`);
       }
@@ -2900,6 +2909,7 @@ function buildMixedRoleCase(rng) {
   const dash = pickItem(rng, PROP_DASHES);
   const shape = Math.floor(rng() * 20);
   let foreign = [{ ohms: foreignValue.ohms, label: foreignValue.en }];
+  let negation = false;
   let prompt;
   if (shape === 0) {
     const count = 1 + Math.floor(rng() * 3);
@@ -2993,6 +3003,7 @@ function buildMixedRoleCase(rng) {
       `does not change the LED resistor to ${led.en}`
     ]);
     foreign[0] = { ohms: led.ohms, label: led.en };
+    negation = true;
   } else if (shape === 17) {
     prompt = pickItem(rng, [
       `LED 저항을 ${led.ko}으로 바꾸지 말고`,
@@ -3000,6 +3011,7 @@ function buildMixedRoleCase(rng) {
       `변경하지 마 LED 저항 ${led.ko}`
     ]);
     foreign[0] = { ohms: led.ohms, label: led.en };
+    negation = true;
   } else if (shape === 18) {
     prompt = pickItem(rng, [
       `LED resistor to ${led.en} or ${foreignValue.en}`,
@@ -3025,11 +3037,12 @@ function buildMixedRoleCase(rng) {
     prompt,
     foreign,
     ambiguous: shape >= 16,
+    negation,
     modelPrompt: `LED resistor to ${foreign[0].label}`
   };
 }
 
-function assertForeignValueDidNotLand(preview, calls, schematic, spice, before, prompt, seed, ambiguous = false) {
+function assertForeignValueDidNotLand(preview, calls, schematic, spice, before, prompt, seed, ambiguous = false, negation = false) {
   const where = `seed ${seed} ${prompt}`;
   const r3 = schematicRefValue(schematic, 'R3');
   const rled = rledOhms(spice);
@@ -3037,7 +3050,8 @@ function assertForeignValueDidNotLand(preview, calls, schematic, spice, before, 
   assert.equal(calls, 0, `${where} provider calls ${calls} R3=${r3} RLED=${rled} code=${code}`);
   assert.equal(preview.ok, false, `${where} code=${code}`);
   if (ambiguous) {
-    assert.equal(code, 'RESISTOR_VALUE_AMBIGUOUS', `${where} code=${code} ${preview.error?.message ?? ''}`);
+    const want = negation ? 'RESISTOR_AMBIGUOUS' : 'RESISTOR_VALUE_AMBIGUOUS';
+    assert.equal(code, want, `${where} code=${code} ${preview.error?.message ?? ''}`);
   } else {
     assert.ok(code === 'RESISTOR_REF_UNSUPPORTED' || code === 'RESISTOR_TARGET_UNCLEAR', `${where} code=${code} ${preview.error?.message ?? ''}`);
   }
@@ -3073,7 +3087,7 @@ test('random LED and non-LED role clauses never put a non-LED value on R3', { ti
         const schematic = await readFile(generated.files.schematic, 'utf8');
         const spice = await readFile(generated.files.spice, 'utf8');
         const label = `${kind} #${index} seed ${seed} ${sample.prompt}`;
-        assertForeignValueDidNotLand(preview, provider.calls(), schematic, spice, before, label, seed, sample.ambiguous === true);
+        assertForeignValueDidNotLand(preview, provider.calls(), schematic, spice, before, label, seed, sample.ambiguous === true, sample.negation === true);
         const rled = Number(rledOhms(spice));
         for (const role of sample.foreign) {
           assert.notEqual(rled, role.ohms, `${label} RLED took ${role.ohms}`);

@@ -6,7 +6,12 @@ import test from 'node:test';
 
 import { parseResistorOhms } from '../src/kicad/resistor-ohms.js';
 import { spiceResistorOhms } from '../src/kicad/project-generator.js';
-import { classifyExistingProjectRequest, resistorMilliSuffixMessage } from '../src/workflow/existing-project-edit.js';
+import {
+  blocksBeforeProvider,
+  classifyExistingProjectRequest,
+  resistorMilliSuffixMessage,
+  resistorValueAmbiguousMessage
+} from '../src/workflow/existing-project-edit.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 
@@ -444,6 +449,41 @@ test('a lone m suffix asks for M instead of guessing megaohms', () => {
   }
 });
 
+test('a lossless label never uses a multi-digit RKM form', () => {
+  const rows = [
+    ['change the LED resistor to 4.99k', '4.99k', 4990],
+    ['change the LED resistor to 4.75k', '4.75k', 4750],
+    ['change the LED resistor to 1005Ω', '1005Ω', 1005],
+    ['change the LED resistor to 2.2k', '2.2k', 2200]
+  ];
+  for (const [prompt, label, ohms] of rows) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'merge', prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(/\d+[kKrR]\d{2,}|\d+M\d{2,}/.test(decision.edit?.label ?? ''), false, decision.edit?.label);
+    assert.equal(parseResistorOhms(decision.edit?.label), decision.edit?.ohmsText, prompt);
+  }
+});
+
+test('a bare choice of two resistor values is RESISTOR_VALUE_AMBIGUOUS before the provider', () => {
+  const message = resistorValueAmbiguousMessage(null, ['680Ω', '1k']);
+  for (const prompt of ['680Ω or 1k', '680Ω 또는 1k', '680Ω 아니면 1k', '680Ω 혹은 1k', '680Ω/1k']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  }
+  for (const prompt of ['LED resistor 2K19 model', 'LED 저항 2K19 모델', '2K19 model']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''}`);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+  }
+});
+
 test('SPICE validation and edit classification agree after the range check', () => {
   const rows = [
     ['R47', null],
@@ -466,6 +506,19 @@ test('SPICE validation and edit classification agree after the range check', () 
     ['1.5 ohm', '1.5'],
     ['4.75k', '4750'],
     ['4.99k', '4990'],
+    ['4K7', '4700'],
+    ['4r7', '4.7'],
+    ['1r5', '1.5'],
+    ['4K75', null],
+    ['4k75', null],
+    ['1K05', null],
+    ['1k05', null],
+    ['4k60', null],
+    ['4K60', null],
+    ['1R50', null],
+    ['2M20', null],
+    ['4k99', null],
+    ['1k005', null],
     ['1.05M', '1050000'],
     ['1.24k', '1240'],
     ['1p', null],

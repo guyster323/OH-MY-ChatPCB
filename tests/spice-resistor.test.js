@@ -40,7 +40,9 @@ test('spiceResistorOhms parses RKM and SPICE suffixes into ohms', () => {
     ['680Ω', '680'],
     ['4700 ohm', '4700'],
     ['10ohms', '10'],
-    ['1k', '1000']
+    ['1k', '1000'],
+    ['4r7', '4.7'],
+    ['1r5', '1.5']
   ];
 
   for (const [input, ohms] of cases) {
@@ -53,7 +55,8 @@ test('spiceResistorOhms rejects unparseable and non-positive values', () => {
     '330Ω±5%', '1/4W 330', '-10', '10kk', 'abc', '1,000', '0', '',
     '1m', '10m', '2m2', '4m7', '4.7m', '1000m',
     '1.000', '1.000 ohm', '4.700 ohm', '1.000Ω', '1.000k', '1.000옴',
-    'R47', '1p', '100f', '1u', '10n', '1G', '1T', '0R', '1e3'
+    'R47', '1p', '100f', '1u', '10n', '1G', '1T', '0R', '1e3',
+    '4K75', '4k75', '1K05', '1k05', '4k60', '4K60', '1R50', '2M20', '4k99', '1k005'
   ]) {
     assert.equal(spiceResistorOhms(input), null, input);
   }

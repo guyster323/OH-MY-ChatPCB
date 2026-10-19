@@ -55,7 +55,9 @@ function parseResistorOhmsAllowingZero(value) {
 
   const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
   if (rkm) {
-    // 4K7 is RKM. 4K60 is not: an uppercase K needs a single fraction digit.
+    // 4k7, 4K7, 1R5, 4r7, and 2M2 are RKM: exactly one digit after the letter.
+    // Two or more digits (4k75, 4K60, 1R50, 2M20, 1k005) are not a value.
+    // k/K and R/r ignore case. Uppercase M is mega. Lowercase m stays milli.
     if (isRejectedUppercaseRkm(text)) return null;
     const multiplier = resistorScale(rkm[2]);
     return multiplier == null ? null : formatResistorOhms(resistorNumber(rkm[1], rkm[3], multiplier));
@@ -70,7 +72,8 @@ function parseResistorOhmsAllowingZero(value) {
   if (multiplier == null) return null;
   // "1.000" and "1.000k" are a thousands separator in some locales and a
   // decimal in others. Exactly three digits after one dot is refused with or
-  // without a prefix. "4.75k" and "1k005" stay exact.
+  // without a prefix. "4.75k" stays exact. "1k005" does not: the letter may
+  // stand in for one decimal digit only.
   if (/^\d+\.\d{3}$/.test(suffixed[1])) return null;
   const [whole, fraction = ''] = suffixed[1].split('.');
   return formatResistorOhms(resistorNumber(whole, fraction, multiplier));

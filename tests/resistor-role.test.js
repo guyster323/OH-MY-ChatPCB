@@ -1087,7 +1087,9 @@ test('transitions and resistor keep clauses still apply, and questions stay with
     ['if you could change the LED resistor to 680Ω', 680],
     ['the LED resistor should be 680Ω', 680],
     ['LED resistor to 680Ω if possible', 680],
-    ['R4는 건드리지 말고 LED 저항 680Ω으로', 680]
+    ['R4는 건드리지 말고 LED 저항 680Ω으로', 680],
+    ["don't touch R4, set the LED resistor to 680Ω", 680],
+    ['keep R4, set the LED resistor to 680Ω', 680]
   ];
   for (const [prompt, ohms] of merges) {
     const decision = classifyExistingProjectRequest(prompt, spec);
@@ -1135,8 +1137,7 @@ test('transitions and resistor keep clauses still apply, and questions stay with
   for (const prompt of [
     '풀업을 그대로 두지 말고 2.2k로',
     "don't leave the pull-up as is, change it to 2.2k",
-    'LED resistor to 680Ω or the pull-up to 2.2k',
-    "don't touch R4, set the LED resistor to 680Ω"
+    'LED resistor to 680Ω or the pull-up to 2.2k'
   ]) {
     const decision = classifyExistingProjectRequest(prompt, spec);
     assert.equal(decision.mode, 'refuse', prompt);

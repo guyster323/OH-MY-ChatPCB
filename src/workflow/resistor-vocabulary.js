@@ -355,16 +355,17 @@ export function approximateAfter(after) {
   return rx("^\\s*-ish\\b", "i").test(raw);
 }
 
-// Uppercase K with more than one fraction digit is not an RKM code. 4K7 stays. 4K60 does not.
+// One digit after k/K, R/r, or uppercase M is RKM. Two or more are not.
+// Lowercase m is milli (4m7, 2m2), not this rule. 4k7 and 2M2 stay. 4k75 and 2M20 do not.
 export function isRejectedUppercaseRkm(text) {
   const raw = String(text ?? '').trim().normalize('NFKC').replace(rx("(?:\\s*(?:Ω|옴|ohms?))$", "iu"), '').trim();
   const match = rx("^(\\d+)([rRkKmM])(\\d+)$").exec(raw);
-  if (!match) return false;
-  return match[2] === 'K' && match[3].length !== 1;
+  if (!match || match[2] === 'm') return false;
+  return match[3].length !== 1;
 }
 
 export function hasMalformedRkm(text) {
-  return rx("(?:^|[^\\d.])(\\d+)K(\\d{2,})(?!\\d)").test(String(text ?? ''));
+  return rx("(?:^|[^\\d.])(?:\\d+[kKrR]\\d{2,}|\\d+M\\d{2,})(?!\\d)").test(String(text ?? ''));
 }
 
 function pushBreak(breaks, start, end) {
@@ -681,8 +682,15 @@ function isKeepNonResistorClause(clause) {
   return nonRes && !resistorObject;
 }
 
+function isExplicitRRefDontTouch(clause) {
+  return isDontTouchResistorClause(clause) && rx("\\bR\\d+\\b", "i").test(String(clause ?? ''));
+}
+
 function isResistorKeepClause(clause) {
   if (isAmbiguousI2cPreservation(clause)) return false;
+  // "don't touch R4" keeps that ref. "don't touch the LED resistor" does not:
+  // that sentence negates the edit.
+  if (isExplicitRRefDontTouch(clause)) return true;
   if (!hasKeepCue(clause) || isNegatedKeep(clause)) return false;
   if (isKeepNonResistorClause(clause)) return false;
   const words = clauseWords(clause);
@@ -701,6 +709,13 @@ function isGenericKeep(clause) {
   return folded.includes('everything') || folded.includes('unchanged') || clause.includes('나머지') || clause.includes('기존');
 }
 
+function isApproximationWord(word) {
+  const key = lower(word);
+  if (key === 'about' || key === 'around' || key === 'approximately' || key === 'approx' || key === 'roughly') return true;
+  if (key === '-ish' || key === 'ish') return true;
+  return word === '약' || word === '대략' || word === '대충' || word === '정도' || word === '쯤' || word === '가량' || word === '내외';
+}
+
 function recognizedWord(word, clause) {
   if (!word) return true;
   if (isNegationOrAlternativeWord(word)) return true;
@@ -714,6 +729,7 @@ function recognizedWord(word, clause) {
   if (isKoreanRequestStem(word)) return true;
   // Same stems as isIgnorableWord. They are filler here, and still a noun modifier there.
   if (rx("^괜찮", "u").test(word) || rx("^가능", "u").test(word)) return true;
+  if (isApproximationWord(word)) return true;
   if (word === '될까' || word === '되나요' || word === '되나' || word === '돼' || word === '됨' || word === '됩니다') return true;
   if (PARTICLE_WORDS.has(word) || KEEP_CUES.some((cue) => word.includes(cue) || lower(word) === cue)) return true;
   return false;
@@ -766,24 +782,27 @@ function isExemptSignalClause(clause) {
   return isDontTouchResistorClause(clause);
 }
 
-const NEGATION_OR_ALTERNATIVE = [
+const NEGATION_SIGNALS = [
   String.raw`\b(?:do|does|did)\s+not\b`,
   String.raw`\b(?:don't|dont|not|no|never)\b`,
-  String.raw`\bor\b`,
   String.raw`지\s*말고`,
   String.raw`하지\s*마`,
   String.raw`지\s*마(?![가-힣])`,
   String.raw`말고`,
-  String.raw`않`,
+  String.raw`않`
+];
+
+const ALTERNATIVE_SIGNALS = [
+  String.raw`\bor\b`,
   String.raw`또는`,
   String.raw`아니면`,
   String.raw`혹은`,
   String.raw`\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[kKmMrR](?:\s*(?:Ω|옴|ohms?))?)\s*/\s*\d+(?:\.\d+)?\s*(?:[kKmMrR](?:\s*(?:Ω|옴|ohms?))?|Ω|옴|ohms?)`
 ];
 
-function signalIndexes(text) {
+function signalIndexes(text, sources) {
   const indexes = [];
-  for (const source of NEGATION_OR_ALTERNATIVE) {
+  for (const source of sources) {
     for (const match of text.matchAll(rx(source, 'giu'))) indexes.push(match.index);
   }
   return indexes;
@@ -796,13 +815,25 @@ function indexInRanges(index, ranges) {
 // Negation and alternatives reject the whole request. A resistor keep,
 // a don't-touch of an R ref or resistor role, and any don't-delete clause
 // are removed first, including the separator that closed them.
-function hasNegationOrAlternative(text) {
+function exemptSignalRanges(text) {
   const pieces = allowClausePieces(text);
   const exempt = [];
   for (const piece of pieces) {
     if (isExemptSignalClause(piece.text)) exempt.push([piece.start, piece.sepEnd]);
   }
-  return signalIndexes(text).some((index) => !indexInRanges(index, exempt));
+  return exempt;
+}
+
+function hasSignalOutsideExempt(text, sources, exempt = exemptSignalRanges(text)) {
+  return signalIndexes(text, sources).some((index) => !indexInRanges(index, exempt));
+}
+
+function hasNegation(text, exempt) {
+  return hasSignalOutsideExempt(text, NEGATION_SIGNALS, exempt);
+}
+
+function hasValueAlternative(text, exempt) {
+  return hasSignalOutsideExempt(text, ALTERNATIVE_SIGNALS, exempt);
 }
 
 function unknownRoleValue(clause) {
@@ -822,7 +853,11 @@ export function assessRequestCoverage(text) {
   const approximate = textHasApproximation(normalized);
   const malformedRkm = hasMalformedRkm(normalized);
   const clauses = splitAllowClauses(normalized);
-  const negatedOrAlternative = hasNegationOrAlternative(normalized);
+  // Keep and don't-delete clauses are exempt for both signals. Scan them once.
+  const exempt = exemptSignalRanges(normalized);
+  const negated = hasNegation(normalized, exempt);
+  const alternative = hasValueAlternative(normalized, exempt);
+  const negatedOrAlternative = negated || alternative;
   let foreignRole = false;
   let unknownLeftover = false;
   let lengthClause = false;
@@ -860,6 +895,8 @@ export function assessRequestCoverage(text) {
     && !negatedOrAlternative;
   return {
     covered,
+    negated,
+    alternative,
     negatedOrAlternative,
     foreignRole,
     unknownLeftover,
