@@ -24,12 +24,18 @@ import {
   isLedAllowWord,
   isModalOrParticleWord,
   isNegationOrAlternativeWord,
+  isAmbiguousI2cPreservation,
   isDontDeleteClause,
+  isKoreanRequestStem,
   isPermittedEdit,
+  isPoliteIfFiller,
+  isReplacedSourceValue,
+  isShuntSenseWord,
   isUnboundMeasureAfter,
+  libIdNamesResistor,
+  specRoleNamesResistor,
   textHasKnownRole,
   textHasLengthObject,
-  textHasPoliteIf,
   textHasUsbRole
 } from './resistor-vocabulary.js';
 
@@ -628,7 +634,7 @@ function finishResistor(text, spec, resistor) {
   if (roleKind === 'unknown' && resistor.kind === 'resistor') {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
-  if (roleKind === 'foreign' && !(resistor.kind === 'resistor' && coverage.lengthClause)) {
+  if (roleKind === 'foreign' && !(resistor.kind === 'resistor' && coverage.lengthClause) && !coverage.keepNonResistor) {
     const foreign = foreignRoleDecision(text, spec, resistor);
     if (foreign) return foreign;
   }
@@ -1766,7 +1772,7 @@ function maskKoreanKeepClauses(chars, text) {
     for (const mark of [',', '.', '?', '!', '\n', '。', '？', '！']) {
       boundary = Math.max(boundary, before.lastIndexOf(mark));
     }
-    blankWordsBefore(chars, text, boundary < 0 ? 0 : boundary + 1, phraseStart);
+    blankWordsBefore(chars, text, boundary < 0 ? 0 : boundary + 1, phraseStart, 6);
     blankRange(chars, phraseStart, phraseEnd);
   }
 }
@@ -1801,10 +1807,10 @@ function englishKeepIsNegated(clauseText, matchIndex) {
   return /(?:n't|\b(?:not|never|dont)\b)(?:\s+(?:please|just|you))?\s*$/iu.test(prefix);
 }
 
-function blankWordsBefore(chars, text, clauseStart, cueStart) {
+function blankWordsBefore(chars, text, clauseStart, cueStart, limit = 2) {
   const words = [...text.slice(clauseStart, cueStart).matchAll(/\S+/gu)];
   const taken = [];
-  for (let index = words.length - 1; index >= 0 && taken.length < 2; index -= 1) {
+  for (let index = words.length - 1; index >= 0 && taken.length < limit; index -= 1) {
     if (/^\d/.test(words[index][0])) break;
     taken.push(words[index]);
   }
@@ -1921,6 +1927,7 @@ function foreignRoleClauseHasValue(text) {
   const masked = maskGuardObjects(text);
   let pendingForeign = false;
   for (const clauseText of splitResistorClauses(masked)) {
+    if (isAmbiguousI2cPreservation(clauseText)) continue;
     const foreign = clauseHasForeignRole(clauseText);
     const valued = clauseCarriesResistorValue(clauseText);
     if (foreign && valued) return true;
@@ -1943,6 +1950,7 @@ function foreignRoleClauseHasValue(text) {
 function unkeptForeignRole(text) {
   const masked = maskGuardObjects(text);
   for (const clauseText of splitResistorClauses(masked)) {
+    if (isAmbiguousI2cPreservation(clauseText)) continue;
     if (isDontDeleteClause(clauseText)) continue;
     if (textHasKnownRole(clauseText) || textHasUsbRole(clauseText)) return true;
   }
@@ -2163,7 +2171,7 @@ function classifyModifiers(words, text) {
 function isAllowedLedContext(content) {
   // "current sense", "current-sense", and "current sensing" are shunt roles.
   // They must not match the LED phrase "current limiting" / "current-limiting".
-  if (content.some((word) => ['sense', 'senses', 'sensing', 'current-sense', 'shunt', 'shunts', '션트', '센스'].includes(String(word).toLowerCase()))) return false;
+  if (content.some((word) => isShuntSenseWord(word))) return false;
   if (!content.every((word) => isLedAllowWord(word))) return false;
   if (content.some((word) => /^(?:led|leds|엘이디|엘예디|status|상태|series|직렬)$/iu.test(word))) return true;
   const joined = content.map((word) => word.toLowerCase().replace(/-/g, ' ')).join(' ');
@@ -2172,7 +2180,7 @@ function isAllowedLedContext(content) {
 }
 
 function stemWord(word) {
-  let text = String(word ?? '').replace(/^[("'`[?？]+|[\])"'`,.:;?？]+$/gu, '');
+  let text = String(word ?? '').replace(/^[("'`[?？=]+|[\])"'`,.:;?？=]+$/gu, '');
   if (!text) return '';
   if (isNegationOrAlternativeWord(text)) return text;
   text = text.replace(WORD_PARTICLE, (match, offset) => (offset === 0 ? match : ''));
@@ -2186,10 +2194,10 @@ function stemWord(word) {
 function isIgnorableWord(word, text) {
   if (isFunctionWord(word) || isEditVerbWord(word) || isModalOrParticleWord(word)) return true;
   if (isNegationOrAlternativeWord(word)) return true;
-  if (String(word ?? '').toLowerCase() === 'if' && textHasPoliteIf(text)) return true;
-  if (/^[-–—<>→⇒~∼〜.±%]+$/u.test(word)) return true;
+  if (isPoliteIfFiller(word, text)) return true;
+  if (/^[-–—<>→⇒~∼〜.=±%]+$/u.test(word)) return true;
   if (/^괜찮/u.test(word) || /^가능/u.test(word)) return true;
-  return word.includes('바꿔') || word.includes('바꾸') || word.includes('변경') || word.includes('수정');
+  return isKoreanRequestStem(word);
 }
 
 function isDesignator(word) {
@@ -2235,8 +2243,8 @@ function isOtherResistor(spec, part) {
   if (isEditableLedSeriesResistor(spec, part)) return false;
   const libId = String(part?.libId ?? '');
   const role = String(part?.role || componentRole(spec, part?.ref) || '');
-  if (/^Device:R$/i.test(libId) || /PULLUP|PULLDOWN|RESISTOR/i.test(libId)) return true;
-  return /resistor|pull-?up|pull-?down|pulldown|pullup/i.test(role);
+  if (/^Device:R$/i.test(libId) || libIdNamesResistor(libId)) return true;
+  return specRoleNamesResistor(role);
 }
 
 function isForeignResistorRole(text) {
@@ -2296,10 +2304,13 @@ function componentDesignators(text) {
 function editTargetDesignators(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const refs = componentDesignators(normalized);
-  if (refs.length < 2) return refs;
   const masked = maskGuardObjects(normalized);
   const visible = new Set();
   for (const match of masked.matchAll(designatorPattern())) visible.add(match[0].toUpperCase());
+  if (refs.length < 2) {
+    if (refs.length === 1 && !visible.has(refs[0])) return [];
+    return refs;
+  }
   const targets = refs.filter((ref) => visible.has(ref));
   if (targets.length === 0) return refs;
   return targets;
@@ -2825,6 +2836,11 @@ function suffixRoleWord(word) {
 function markNonResistorQuantities(tokens, text) {
   for (const token of tokens) {
     const raw = token.raw.trim();
+    if (isReplacedSourceValue(text, token.index)) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
     // An approximate ohm value is not applied, with or without a unit.
     if (approximateResistorValue(text.slice(0, token.index), text.slice(token.end))) {
       token.quantity = true;

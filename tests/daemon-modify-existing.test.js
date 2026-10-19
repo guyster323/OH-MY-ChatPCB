@@ -2273,12 +2273,12 @@ test('Korean keep clause applies only R3', async () => {
   const { projectDir, generated } = await generatedStm32Project();
   const before = await materializeSeriesResistor(services, projectDir, generated);
   const prompts = [
-    'I2C는 그대로 두고 LED 저항 680옴으로',
     '풀업은 그대로 두고 LED 저항 680Ω으로 바꿔줘',
     '풀업 저항은 건드리지 말고 LED 저항 680Ω으로',
     'CC 저항은 유지하고 LED 저항 680Ω으로 바꿔줘',
     '풀업 빼고 LED 저항 680Ω으로',
-    'I2C는 놔두고 LED 저항 680Ω으로'
+    'I2C 풀업 저항은 그대로 두고 LED 저항 680Ω으로',
+    'R4는 건드리지 말고 LED 저항 680Ω으로'
   ];
   const paths = [
     ['patch', codexPatchRewrite('Change the LED resistor to 680Ω.')],
@@ -2322,7 +2322,9 @@ test('Korean keep clause applies only R3', async () => {
     };
     const blocked = [
       ['LED 저항은 그대로 두고 풀업 저항 10k로', 'RESISTOR_REF_UNSUPPORTED'],
-      ['LED 저항은 그대로 두고 680Ω으로', 'RESISTOR_TARGET_UNCLEAR']
+      ['LED 저항은 그대로 두고 680Ω으로', 'RESISTOR_TARGET_UNCLEAR'],
+      ['I2C는 그대로 두고 LED 저항 680옴으로', 'RESISTOR_TARGET_UNCLEAR'],
+      ['I2C는 놔두고 LED 저항 680Ω으로', 'RESISTOR_TARGET_UNCLEAR']
     ];
     for (const [prompt, code] of blocked) {
       calls = 0;

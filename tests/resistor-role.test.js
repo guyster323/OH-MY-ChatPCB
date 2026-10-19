@@ -92,11 +92,13 @@ test('an LED resistor edit still applies when the other role is only kept', () =
   const rows = [
     ['LED 저항 680옴으로', 680, '680Ω'],
     ['status LED resistor to 680Ω', 680, '680Ω'],
-    ['LED 저항 680옴으로. I2C는 그대로', 680, '680Ω'],
     ['LED 저항 680옴으로. I2C 저항은 그대로', 680, '680Ω'],
-    ['keep I2C, set LED resistor 680 ohm', 680, '680Ω'],
-    ['set the LED resistor to 680Ω, keep the pull-up', 680, '680Ω'],
-    ['change the LED resistor to 680 ohm without removing I2C', 680, '680Ω']
+    ['set the LED resistor to 680Ω, keep the pull-up', 680, '680Ω']
+  ];
+  const bareI2c = [
+    'LED 저항 680옴으로. I2C는 그대로',
+    'keep I2C, set LED resistor 680 ohm',
+    'change the LED resistor to 680 ohm without removing I2C'
   ];
   for (const [prompt, ohms, label] of rows) {
     const decision = classifyExistingProjectRequest(prompt, spec);
@@ -110,6 +112,16 @@ test('an LED resistor edit still applies when the other role is only kept', () =
     assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
     assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
     assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+  for (const prompt of bareI2c) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
   }
 });
 
@@ -814,11 +826,15 @@ test('an R ref with another role modifier is unsupported', () => {
 test('a Korean keep clause hides that role and still edits only the LED resistor', () => {
   const spec = seriesSpec('1k');
   const rows = [
-    'I2C는 그대로 두고 LED 저항 680옴으로',
     '풀업은 그대로 두고 LED 저항 680Ω으로 바꿔줘',
     '풀업 저항은 건드리지 말고 LED 저항 680Ω으로',
     'CC 저항은 유지하고 LED 저항 680Ω으로 바꿔줘',
     '풀업 빼고 LED 저항 680Ω으로',
+    'I2C 풀업 저항은 그대로 두고 LED 저항 680Ω으로',
+    'R4는 건드리지 말고 LED 저항 680Ω으로'
+  ];
+  const bareI2c = [
+    'I2C는 그대로 두고 LED 저항 680옴으로',
     'I2C는 놔두고 LED 저항 680Ω으로'
   ];
   for (const prompt of rows) {
@@ -832,6 +848,16 @@ test('a Korean keep clause hides that role and still edits only the LED resistor
     assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
     assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
     assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+  for (const prompt of bareI2c) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
   }
 
   const keptLed = classifyExistingProjectRequest('LED 저항은 그대로 두고 풀업 저항 10k로', spec);
@@ -1059,7 +1085,9 @@ test('transitions and resistor keep clauses still apply, and questions stay with
     ['LED resistor to 680Ω if you can', 680],
     ['LED resistor to 680Ω if you could', 680],
     ['if you could change the LED resistor to 680Ω', 680],
-    ['the LED resistor should be 680Ω', 680]
+    ['the LED resistor should be 680Ω', 680],
+    ['LED resistor to 680Ω if possible', 680],
+    ['R4는 건드리지 말고 LED 저항 680Ω으로', 680]
   ];
   for (const [prompt, ohms] of merges) {
     const decision = classifyExistingProjectRequest(prompt, spec);
@@ -1077,12 +1105,6 @@ test('transitions and resistor keep clauses still apply, and questions stay with
   assert.equal(bareFrom.edit, undefined);
   assert.equal(blocksBeforeProvider('from 1k to 680Ω', bareFrom), false);
   assert.equal(appliesBeforeProvider('from 1k to 680Ω', bareFrom), false);
-
-  const possible = classifyExistingProjectRequest('LED resistor to 680Ω if possible', spec);
-  assert.equal(possible.mode, 'refuse');
-  assert.equal(possible.code, 'RESISTOR_TARGET_UNCLEAR');
-  assert.equal(possible.edit, undefined);
-  assert.equal(appliesBeforeProvider('LED resistor to 680Ω if possible', possible), false);
 
   for (const prompt of [
     'why not change the LED resistor to 680Ω?',
@@ -1114,8 +1136,7 @@ test('transitions and resistor keep clauses still apply, and questions stay with
     '풀업을 그대로 두지 말고 2.2k로',
     "don't leave the pull-up as is, change it to 2.2k",
     'LED resistor to 680Ω or the pull-up to 2.2k',
-    "don't touch R4, set the LED resistor to 680Ω",
-    'R4는 건드리지 말고 LED 저항 680Ω으로'
+    "don't touch R4, set the LED resistor to 680Ω"
   ]) {
     const decision = classifyExistingProjectRequest(prompt, spec);
     assert.equal(decision.mode, 'refuse', prompt);

@@ -19,7 +19,7 @@ const FUNCTION_WORDS = new Set([
   'with', 'and', 'its', 'my', 'our', 'please', 'only', 'just', 'value', 'values',
   'it', 'them', 'one', 'also', 'now', 'too', 'is', 'be', 'are', 'was', 'were', 'am',
   'this', 'that', 'these', 'those', 'else', 'everything',
-  'unchanged', 'rest', 'as', 'so', 'then', 'than', 'into'
+  'unchanged', 'rest', 'as', 'so', 'then', 'than', 'into', 'instead'
 ]);
 
 const EDIT_VERBS = new Set([
@@ -104,6 +104,40 @@ export function isNegationOrAlternativeWord(word) {
 export function textHasPoliteIf(text) {
   const folded = String(text ?? '').toLowerCase();
   return rx("\\bif possible\\b|\\bif you can\\b|\\bif you could\\b").test(folded);
+}
+
+// "if" and "possible" are filler only inside the polite phrases above.
+export function isPoliteIfFiller(word, clause) {
+  if (!textHasPoliteIf(clause)) return false;
+  const key = lower(word);
+  return key === 'if' || key === 'possible';
+}
+
+export function isKoreanRequestStem(word) {
+  const text = String(word ?? '');
+  return text.includes('바꿔') || text.includes('바꾸') || text.includes('바꿀')
+    || text.includes('변경') || text.includes('수정') || text.includes('설정') || text.includes('부탁');
+}
+
+const SHUNT_SENSE_WORDS = new Set([
+  'sense', 'senses', 'sensing', 'current-sense', 'shunt', 'shunts', '션트', '센스'
+]);
+
+export function isShuntSenseWord(word) {
+  return SHUNT_SENSE_WORDS.has(lower(word));
+}
+
+export function specRoleNamesResistor(role) {
+  return rx("resistor|pull-?up|pull-?down|pulldown|pullup", "i").test(String(role ?? ''));
+}
+
+export function libIdNamesResistor(libId) {
+  return rx("PULLUP|PULLDOWN|RESISTOR", "i").test(String(libId ?? ''));
+}
+
+// "to 680Ω instead of 1k" names 680. The value after "instead of" is the old one.
+export function isReplacedSourceValue(text, index) {
+  return rx("\\binstead\\s+of\\s*$", "i").test(String(text ?? '').slice(0, index));
 }
 
 export function vocabularyAllowLists() {
@@ -438,6 +472,8 @@ function stripParticle(word) {
   if (!text || KEEP_CUES.some((cue) => text.includes(cue))) return text;
   // "또는" and "혹은" end in a particle character. They stay alternative signals.
   if (isNegationOrAlternativeWord(text)) return text;
+  // "주세요" is a whole particle. Stripping 요 would leave the unknown "주세".
+  if (PARTICLE_WORDS.has(text) || PARTICLE_WORDS.has(lower(text))) return text;
   for (const particle of PARTICLE_SUFFIXES) {
     if (text.endsWith(particle) && text.length > particle.length) {
       text = text.slice(0, -particle.length);
@@ -456,9 +492,9 @@ function clauseWords(clause) {
   for (const match of String(clause ?? '').matchAll(rx("\\S+", "gu"))) {
     // "R3(현재" is the reference plus the current-value marker, not one unknown word.
     for (const bit of match[0].split(rx("[()（）]+", "u"))) {
-      const cleaned = stripParticle(bit.replace(rx("^[(\"'`[•·±<>→⇒~∼〜]+|[)\\]\"'`,.:;?？!！<>→⇒~∼〜]+$", "gu"), ''));
-      // "->" loses the ">", leaving "-". A bare arrow is not a content word.
-      if (!cleaned || rx("^[-–—<>→⇒~∼〜.]+$", "u").test(cleaned)) continue;
+      const cleaned = stripParticle(bit.replace(rx("^[(\"'`[•·±<>→⇒~∼〜=]+|[)\\]\"'`,.:;?？!！<>→⇒~∼〜=]+$", "gu"), ''));
+      // "->" loses the ">", leaving "-". A bare arrow or "=" is not a content word.
+      if (!cleaned || rx("^[-–—<>→⇒~∼〜.=]+$", "u").test(cleaned)) continue;
       words.push(cleaned);
     }
   }
@@ -546,7 +582,7 @@ function parentheticalCurrentSpans(text) {
 // "from 330Ω to 680Ω" and "330옴에서 680옴으로" name the destination once.
 // A second value with no transition marker stays a second value.
 function logicalBoundTokens(text) {
-  const tokens = boundOhmTokens(text);
+  const tokens = boundOhmTokens(text).filter((token) => !isReplacedSourceValue(text, token.index));
   if (tokens.length <= 1) return tokens;
   if (rx("(?:\\bfrom\\b|\\bto\\b|에서|->|→)", "iu").test(text)) return [tokens[tokens.length - 1]];
   const spans = parentheticalCurrentSpans(text);
@@ -566,8 +602,73 @@ function isNonResistorRef(word) {
   return rx("^[A-Za-z]{1,3}\\d+$").test(word) && !rx("^R\\d+$", "i").test(word);
 }
 
+// A keep, don't-delete, or don't-touch whose object is bare I2C names either
+// the connector or the pull-ups. That object is not a resistor keep.
+function preserveAfterMatches(text) {
+  const re = rx("\\bwithout\\s+removing\\b|\\bdo\\s+not\\s+(?:remove|delete|touch)\\b|\\bdon't\\s+(?:remove|delete|touch)\\b|\\bdont\\s+(?:remove|delete|touch)\\b|\\bnever\\s+touch\\b|\\bkeep\\b|\\bleave\\b", "gi");
+  return [...String(text ?? '').matchAll(re)];
+}
+
+function preserveBeforeMatches(text) {
+  const re = rx("놔\\s*두고|그대로|지우지|삭제\\s*하지|건드리지|유지하고|빼고|남겨|남기|두고|유지|제거", "g");
+  return [...String(text ?? '').matchAll(re)];
+}
+
+function bareWord(word) {
+  return String(word ?? '').replace(rx("^[\"'`.,;:!?()\\[\\]<>→⇒~∼〜=]+|[\"'`.,;:!?()\\[\\]<>→⇒~∼〜=]+$", "gu"), '');
+}
+
+function objectAfter(text, from) {
+  const words = [...String(text ?? '').slice(from).matchAll(rx("\\S+", "gu"))];
+  const kept = [];
+  const stop = rx("^(?:alone|unchanged|please|and|then|set|change|make|update)$", "i");
+  for (const word of words) {
+    if (kept.length >= 6) break;
+    const bare = bareWord(word[0]);
+    if (!bare) continue;
+    if (rx("^\\d").test(bare) || stop.test(bare)) break;
+    kept.push(bare);
+  }
+  return kept.join(' ');
+}
+
+function objectBefore(text, cueStart) {
+  const words = [...String(text ?? '').slice(0, cueStart).matchAll(rx("\\S+", "gu"))];
+  const kept = [];
+  const stop = rx("^(?:set|change|make|update)$", "i");
+  for (let index = words.length - 1; index >= 0 && kept.length < 6; index -= 1) {
+    const bare = bareWord(words[index][0]);
+    if (!bare) continue;
+    if (rx("^\\d").test(bare) || rx("[Ω옴]").test(bare) || isKoreanRequestStem(bare) || stop.test(bare)) break;
+    kept.push(bare);
+  }
+  return kept.reverse().join(' ');
+}
+
+function objectNamesBareI2c(object) {
+  const raw = String(object ?? '');
+  if (!rx("\\bi2c\\b", "i").test(raw)) return false;
+  if (rx("\\bR\\d+\\b", "i").test(raw)) return false;
+  if (rx("저항|抵抗|resistors?", "iu").test(raw)) return false;
+  const withoutBus = raw.replace(rx("\\bi2c\\b", "gi"), ' ');
+  return !textHasKnownRole(withoutBus);
+}
+
+export function isAmbiguousI2cPreservation(text) {
+  const raw = String(text ?? '');
+  if (!raw) return false;
+  for (const match of preserveAfterMatches(raw)) {
+    if (objectNamesBareI2c(objectAfter(raw, match.index + match[0].length))) return true;
+  }
+  for (const match of preserveBeforeMatches(raw)) {
+    if (objectNamesBareI2c(objectBefore(raw, match.index))) return true;
+  }
+  return false;
+}
+
 function isKeepNonResistorClause(clause) {
   const raw = String(clause ?? '');
+  if (isAmbiguousI2cPreservation(raw)) return true;
   if (rx("건드리지\\s*마", "u").test(raw) && !rx("\\bR\\d+\\b", "i").test(raw)) {
     const words = clauseWords(raw);
     if (words.some((word) => isNonResistorRef(word) || NONRES_OBJECTS.has(lower(word)) || NONRES_OBJECTS.has(word) || isLengthObjectWord(word))) return true;
@@ -581,6 +682,7 @@ function isKeepNonResistorClause(clause) {
 }
 
 function isResistorKeepClause(clause) {
+  if (isAmbiguousI2cPreservation(clause)) return false;
   if (!hasKeepCue(clause) || isNegatedKeep(clause)) return false;
   if (isKeepNonResistorClause(clause)) return false;
   const words = clauseWords(clause);
@@ -588,6 +690,7 @@ function isResistorKeepClause(clause) {
 }
 
 function isForeignRoleClause(clause) {
+  if (isAmbiguousI2cPreservation(clause)) return false;
   if (isDontDelete(clause) || isResistorKeepClause(clause) || isKeepNonResistorClause(clause)) return false;
   if (isLengthClause(clause) && textHasUsbRole(clause)) return false;
   return textHasKnownRole(clause) || textHasUsbRole(clause);
@@ -601,14 +704,14 @@ function isGenericKeep(clause) {
 function recognizedWord(word, clause) {
   if (!word) return true;
   if (isNegationOrAlternativeWord(word)) return true;
-  if (lower(word) === 'if') return textHasPoliteIf(clause);
+  if (isPoliteIfFiller(word, clause)) return true;
   if (rx("^\\d").test(word) || rx("[Ω옴%]").test(word) || rx("^(?:ohm|ohms|meg)$", "i").test(word)) return true;
   if (isLedAllowWord(word) || isFunctionWord(word) || isEditVerbWord(word)) return true;
   if (isModalOrParticleWord(word) || isDemonstrativeWord(word)) return true;
   if (NOISE_WORDS.has(lower(word)) || NOISE_WORDS.has(word)) return true;
   if (rx("^R\\d+$", "i").test(word)) return true;
   if (isUnboundMeasureNoun(word) && rx("\\b(?:next|beside|near|옆)\\b", "iu").test(clause)) return true;
-  if (word.includes('바꿔') || word.includes('바꾸') || word.includes('바꿀') || word.includes('변경') || word.includes('수정')) return true;
+  if (isKoreanRequestStem(word)) return true;
   // Same stems as isIgnorableWord. They are filler here, and still a noun modifier there.
   if (rx("^괜찮", "u").test(word) || rx("^가능", "u").test(word)) return true;
   if (word === '될까' || word === '되나요' || word === '되나' || word === '돼' || word === '됨' || word === '됩니다') return true;
