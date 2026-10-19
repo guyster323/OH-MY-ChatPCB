@@ -41,7 +41,7 @@ const PARTICLE_WORDS = new Set([
 
 const DEMONSTRATIVES = new Set(['그', '저', '이', 'this', 'that', 'these', 'those']);
 
-const ENGLISH_ROLES = new Set([
+export const ENGLISH_ROLES = new Set([
   'pull-up', 'pull-ups', 'pullup', 'pullups', 'pull-down', 'pull-downs', 'pulldown', 'pulldowns',
   'termination', 'terminations', 'debounce', 'divider', 'dividers', 'feedback',
   'gate', 'gates', 'base', 'bases', 'button', 'buttons', 'shunt', 'shunts',
@@ -49,7 +49,11 @@ const ENGLISH_ROLES = new Set([
   'i2c', 'sda', 'scl'
 ]);
 
-const KOREAN_ROLES = ['풀업', '풀다운', '종단', '디바운스', '분압', '피드백', '게이트', '베이스', '버튼', '션트', '센스', '리셋', '바이어스'];
+export const KOREAN_ROLES = ['풀업', '풀다운', '종단', '디바운스', '분압', '피드백', '게이트', '베이스', '버튼', '션트', '센스', '리셋', '바이어스'];
+
+// The edit path imports these. A second copy there would be another I2C detector.
+export const I2C_PART_ID = 'i2c';
+export const I2C_PART_PATTERN = String.raw`\bi2c\b|아이\s*2\s*씨|아이씨`;
 
 const UNBOUND_NOUNS = new Set([
   'display', 'displays', 'monitor', 'monitors', 'tv', 'tvs', 'pot', 'pots', 'board', 'boards',
@@ -119,7 +123,7 @@ export function isKoreanRequestStem(word) {
     || text.includes('변경') || text.includes('수정') || text.includes('설정') || text.includes('부탁');
 }
 
-const SHUNT_SENSE_WORDS = new Set([
+export const SHUNT_SENSE_WORDS = new Set([
   'sense', 'senses', 'sensing', 'current-sense', 'shunt', 'shunts', '션트', '센스'
 ]);
 

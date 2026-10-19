@@ -10,6 +10,8 @@ import { normalizeMatchText } from '../runtime/match-text.js';
 import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
 import {
+  I2C_PART_ID,
+  I2C_PART_PATTERN,
   approximateAfter,
   approximateBefore,
   assessRequestCoverage,
@@ -233,7 +235,7 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
   subjects: Object.freeze(['i', 'you', 'we', 'they', 'he', 'she']),
   adverbPhrases: Object.freeze(['under any circumstances', 'under any circumstance']),
   targets: Object.freeze([
-    Object.freeze({ id: 'i2c', re: String.raw`\bi2c\b|아이\s*2\s*씨|아이씨` }),
+    Object.freeze({ id: I2C_PART_ID, re: I2C_PART_PATTERN }),
     Object.freeze({ id: 'led', re: String.raw`\bled\b|엘이디` }),
     Object.freeze({ id: 'resistor', re: String.raw`\bresistor\b|저항` }),
     Object.freeze({ id: 'pronoun', re: String.raw`\bit\b|그것|이거|그거` })
@@ -1142,10 +1144,10 @@ function closestMention(mentions, verbOffset) {
 function explicitPart(text) {
   const led = compileRegExp(targetPattern('led'), 'iu').test(text);
   const resistor = compileRegExp(targetPattern('resistor'), 'iu').test(text);
-  const i2c = compileRegExp(targetPattern('i2c'), 'iu').test(text);
+  const i2c = compileRegExp(targetPattern(I2C_PART_ID), 'iu').test(text);
   if (led && resistor) return 'led-resistor';
   if (led) return 'led';
-  if (i2c) return 'i2c';
+  if (i2c) return I2C_PART_ID;
   return null;
 }
 
@@ -1167,7 +1169,7 @@ function chooseTarget(windowText, verbOffset, verb) {
     ranked.push({ id: 'led', index: closestMention(leds, verbOffset).index });
   }
   for (const item of mentions) {
-    if (item.id === 'i2c' || item.id === 'pronoun' || isRefTarget(item.id)) ranked.push(item);
+    if (item.id === I2C_PART_ID || item.id === 'pronoun' || isRefTarget(item.id)) ranked.push(item);
   }
   if (ranked.length === 0) return null;
   ranked.sort((left, right) => Math.abs(left.index - verbOffset) - Math.abs(right.index - verbOffset));
@@ -1307,7 +1309,7 @@ function hasVerbScopeCue(text) {
 function isRestOnlyClause(text) {
   if (!hasCue(text, DELETION_INTENT_VOCABULARY.restPhrases)) return false;
   return !findMentions(text).some((item) => (
-    item.id === 'i2c' || item.id === 'led' || item.id === 'resistor' || isRefTarget(item.id)
+    item.id === I2C_PART_ID || item.id === 'led' || item.id === 'resistor' || isRefTarget(item.id)
   ));
 }
 
@@ -1505,7 +1507,7 @@ function applyTrailingCorrection(intents, normalized) {
 function applyMultiTargetBlock(intents, normalized) {
   const parts = [];
   for (const intent of intents) {
-    if (intent.target !== 'i2c' && intent.target !== 'led' && intent.target !== 'led-resistor') continue;
+    if (intent.target !== I2C_PART_ID && intent.target !== 'led' && intent.target !== 'led-resistor') continue;
     if (!parts.includes(intent.target)) parts.push(intent.target);
   }
   if (parts.length < 2) return;
@@ -1520,12 +1522,12 @@ function isRefTarget(target) {
 }
 
 function isTrackedTarget(target) {
-  return target === 'i2c' || target === 'led' || target === 'led-resistor' || isRefTarget(target);
+  return target === I2C_PART_ID || target === 'led' || target === 'led-resistor' || isRefTarget(target);
 }
 
 function namedRemovalIds(target) {
   if (target === 'led-resistor') return ['led', 'resistor'];
-  if (target === 'i2c' || target === 'led' || target === 'resistor') return [target];
+  if (target === I2C_PART_ID || target === 'led' || target === 'resistor') return [target];
   return [];
 }
 
@@ -1576,7 +1578,7 @@ function tailRejectsCoRemoval(tail) {
 
 function sortedPartMentions(text) {
   return findMentions(text)
-    .filter((item) => item.id === 'i2c' || item.id === 'led' || item.id === 'resistor' || isRefTarget(item.id))
+    .filter((item) => item.id === I2C_PART_ID || item.id === 'led' || item.id === 'resistor' || isRefTarget(item.id))
     .sort((left, right) => left.index - right.index || right.length - left.length);
 }
 
@@ -1623,7 +1625,7 @@ function alsoAttachedPartIds(text) {
       const after = clauseRemainder(text, match.index + match[0].length);
       if (hasPartScopeCue(after) || tailRejectsCoRemoval(after)) continue;
       for (const mention of findMentions(span)) {
-        if (mention.id === 'i2c' || mention.id === 'led' || mention.id === 'resistor' || isRefTarget(mention.id)) {
+        if (mention.id === I2C_PART_ID || mention.id === 'led' || mention.id === 'resistor' || isRefTarget(mention.id)) {
           ids.add(mention.id);
         }
       }
@@ -2564,7 +2566,7 @@ function machineryForRecord(spec, record) {
     return null;
   }
   if (libId === 'ChatPCB:I2C_CONNECTOR' || value === 'I2C_CONNECTOR' || role === 'i2c-sensor-header') {
-    return 'i2c';
+    return I2C_PART_ID;
   }
   if (libId === 'ChatPCB:STATUS_LED' || value === 'STATUS_LED' || role === 'status-led') {
     return 'led';
@@ -2653,7 +2655,7 @@ function resolvedRefConflicts(spec, text) {
     if (isRefTarget(id)) keptRefs.add(id.slice(4));
   }
   for (const mention of findMentions(text)) {
-    if (mention.id !== 'i2c' && mention.id !== 'led') continue;
+    if (mention.id !== I2C_PART_ID && mention.id !== 'led') continue;
     if (kept.has(mention.id) || roles.includes(mention.id)) continue;
     roles.push(mention.id);
   }
@@ -2707,7 +2709,7 @@ function removalDecision(text, spec) {
   const actionable = [];
   for (const intent of intents) {
     if (intent.polarity !== 'positive') continue;
-    if (intent.target !== 'i2c' && intent.target !== 'led') continue;
+    if (intent.target !== I2C_PART_ID && intent.target !== 'led') continue;
     if (!actionable.includes(intent.target)) actionable.push(intent.target);
   }
   if (actionable.length === 1 && !removalIsUnclear(intents, actionable)) {
@@ -3284,8 +3286,8 @@ function applyDeletionToSpec(spec, targets) {
       };
     }
   }
-  if (!targets.includes('i2c')) return;
-  spec.interfaces = (spec.interfaces ?? []).filter((iface) => iface?.kind !== 'i2c');
+  if (!targets.includes(I2C_PART_ID)) return;
+  spec.interfaces = (spec.interfaces ?? []).filter((iface) => iface?.kind !== I2C_PART_ID);
   spec.peripherals = (spec.peripherals ?? []).filter((peripheral) => peripheral?.kind !== 'i2c-pullups');
   if (Array.isArray(spec.boardProfile?.productionParts)) {
     spec.boardProfile = {
