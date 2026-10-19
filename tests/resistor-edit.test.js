@@ -12,7 +12,7 @@ import {
   resistorMilliSuffixMessage,
   resistorValueAmbiguousMessage
 } from '../src/workflow/existing-project-edit.js';
-import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { generateMcuPeripheralProject, writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../src/workflow/schematic-patch.js';
 
 const SPEC = {
@@ -36,6 +36,14 @@ const passingErc = async () => ({ ok: true, skipped: false, erc: { errorCount: 0
 function schematicRefValue(schematic, ref) {
   const match = schematic.match(new RegExp(`\\(property "Reference" "${ref}"[\\s\\S]*?\\(property "Value" "([^"]*)"`));
   return match?.[1] ?? null;
+}
+
+async function seedSeriesResistor(projectDir, generated, value = '1k') {
+  const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+  spec.peripherals = (spec.peripherals ?? []).filter((item) => item?.kind !== 'status-led-resistor');
+  spec.peripherals.push({ kind: 'status-led-resistor', value });
+  const projectName = path.basename(generated.files.spec, '.chatpcb.json');
+  await writeGeneratedProject({ projectDir, spec, projectName });
 }
 
 test('a resistor token the shared parser rejects is not applied', () => {
@@ -184,6 +192,7 @@ test('sequential resistor edits apply 330, then 680, then 1k, 4.7k, and 1M and k
       prompt: STM32_USER_PROMPT,
       projectName: 'stm32_i2c'
     });
+    await seedSeriesResistor(projectDir, generated);
     for (const [prompt, value] of steps) {
       const plan = await createSchematicPatchPlan({
         projectDir,
@@ -557,6 +566,7 @@ test('an RKM fraction is written to the schematic and the SPICE line', async () 
       prompt: STM32_USER_PROMPT,
       projectName: 'stm32_i2c'
     });
+    await seedSeriesResistor(projectDir, generated);
     plan = await createSchematicPatchPlan({
       projectDir,
       prompt,
@@ -595,6 +605,7 @@ test('4.99k is the schematic value and 4990 is the SPICE number', async () => {
       prompt: STM32_USER_PROMPT,
       projectName: 'stm32_i2c'
     });
+    await seedSeriesResistor(projectDir, generated);
     plan = await createSchematicPatchPlan({
       projectDir,
       prompt,

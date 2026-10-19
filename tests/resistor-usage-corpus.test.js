@@ -8,7 +8,7 @@ import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
 import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
-import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { generateMcuPeripheralProject, writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
 import {
   applyExistingProjectEdit,
   appliesBeforeProvider,
@@ -200,18 +200,6 @@ async function transactionServices() {
   };
 }
 
-function codexNoPatch() {
-  return {
-    checkProviderAvailabilityImpl: async ({ provider }) => ({
-      provider,
-      command: 'codex',
-      available: true,
-      status: 'available'
-    }),
-    runProviderProcessImpl: async () => ({ exitCode: 0, stderr: '', events: [] })
-  };
-}
-
 test('real usage corpus end to end applies or blocks without calling the provider', async () => {
   const services = await transactionServices();
   const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-corpus-'));
@@ -234,17 +222,14 @@ test('real usage corpus end to end applies or blocks without calling the provide
     }
   };
   try {
-    const seeded = await dispatchToolCall({
-      id: 'call_corpus_seed',
-      name: 'project.request',
-      args: { provider: 'codex', projectDir, prompt: 'set the LED resistor to 1kΩ' }
-    }, { ...services, ...codexNoPatch() });
-    assert.equal(seeded.ok, true, seeded.error?.message ?? '');
-    const seededOk = await dispatchToolCall({
-      name: 'schematic.patch',
-      args: { projectDir, approved: true, patchId: seeded.result.patchId }
-    }, services);
-    assert.equal(seededOk.result?.applied, true, JSON.stringify(seededOk.result?.reason ?? seededOk.error));
+    const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+    spec.peripherals = (spec.peripherals ?? []).filter((item) => item?.kind !== 'status-led-resistor');
+    spec.peripherals.push({ kind: 'status-led-resistor', value: '1k' });
+    await writeGeneratedProject({
+      projectDir,
+      spec,
+      projectName: path.basename(generated.files.spec, '.chatpcb.json')
+    });
     const before = {
       schematic: await readFile(generated.files.schematic, 'utf8'),
       spice: await readFile(generated.files.spice, 'utf8'),

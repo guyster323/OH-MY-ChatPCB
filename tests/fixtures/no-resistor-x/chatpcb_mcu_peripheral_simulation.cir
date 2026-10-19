@@ -1,0 +1,7 @@
+* OH-MY-ChatPCB SPICE fixture for STM32 No LED prompt still draws D1 and no resistor
+* Spice-only resistors are not schematic parts.
+VVBUS vbus 0 DC 5
+RREG vbus v3v3 1
+RLED v3v3 led 1000
+RBUTTON v3v3 button 10000
+.end

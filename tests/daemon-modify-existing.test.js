@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,8 +12,9 @@ import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.
 import { createPatchApprovalRegistry } from '../src/runtime/patch-approval-registry.js';
 import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
-import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { generateMcuPeripheralProject, writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
 import {
+  applyMergedProjectEdit,
   appliesBeforeProvider,
   blocksBeforeProvider,
   classifyExistingProjectRequest,
@@ -186,6 +187,9 @@ function assertBlockedRemoval(result, { mismatch = false } = {}) {
 
 async function withRemovalCandidate(prompt, fn) {
   const { projectDir, generated } = await generatedStm32Project();
+  // MODIFY changes an existing series resistor. A full redesign must stay on the
+  // generated board, which has no R3, so seeding only this prompt keeps J2/J3/J4.
+  if (prompt === MODIFY) await seedSeriesResistor(projectDir, generated);
   const before = await readFile(generated.files.schematic, 'utf8');
   const plan = await createSchematicPatchPlan({
     projectDir,
@@ -336,6 +340,7 @@ function codexPatchRewrite(modelPrompt) {
 
 async function withBoardResistor(ohms, fn) {
   const { projectDir, generated } = await generatedStm32Project();
+  await seedSeriesResistor(projectDir, generated);
   const prompt = `Change the status LED series resistor to ${ohms} ohm.`;
   const plan = await createSchematicPatchPlan({
     projectDir,
@@ -376,6 +381,15 @@ async function generatedStm32Project() {
   return { projectDir, generated };
 }
 
+// Test setup only. A resistor-edit request must not create this part.
+async function seedSeriesResistor(projectDir, generated, value = '1k') {
+  const spec = JSON.parse(await readFile(generated.files.spec, 'utf8'));
+  spec.peripherals = (spec.peripherals ?? []).filter((item) => item?.kind !== 'status-led-resistor');
+  spec.peripherals.push({ kind: 'status-led-resistor', value });
+  const projectName = path.basename(generated.files.spec, '.chatpcb.json');
+  await writeGeneratedProject({ projectDir, spec, projectName });
+}
+
 test('modify on an applied project keeps I2C when ChatGPT only inspects', async () => {
   const services = await transactionServices();
   const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
@@ -386,6 +400,7 @@ test('modify on an applied project keeps I2C when ChatGPT only inspects', async 
   }));
   const { projectDir, generated } = await generatedStm32Project();
   try {
+    await seedSeriesResistor(projectDir, generated);
     await withChatGptHome(async () => {
       const liveBefore = await readFile(generated.files.schematic, 'utf8');
       assert.match(liveBefore, /I2C_CONNECTOR/);
@@ -440,6 +455,7 @@ test('inspect then schematic.patch keeps I2C, applies 680 ohm, and leaves source
   });
   const { projectDir, generated } = await generatedStm32Project();
   try {
+    await seedSeriesResistor(projectDir, generated);
     await withChatGptHome(async () => {
       const result = await dispatchToolCall({
         id: 'call_mod_patch',
@@ -767,8 +783,9 @@ test('provider-emitted allowRemovedComponents cannot authorize an I2C removal', 
 test('model-written schematic.patch prompt cannot remove I2C when the user kept it', async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();
-  const before = await readFile(generated.files.schematic, 'utf8');
   try {
+    await seedSeriesResistor(projectDir, generated);
+    const before = await readFile(generated.files.schematic, 'utf8');
     const preview = await dispatchToolCall({
       id: 'call_model_remove_i2c',
       name: 'project.request',
@@ -2141,18 +2158,8 @@ function assertOnlySeriesValueChanged(schematic, beforeSchematic, label, spice, 
   assert.equal(spiceWithoutLed(spice), spiceWithoutLed(beforeSpice), prompt);
 }
 
-async function materializeSeriesResistor(services, projectDir, generated) {
-  const preview = await dispatchToolCall({
-    id: `call_materialize_${projectDir.length}`,
-    name: 'project.request',
-    args: { provider: 'codex', projectDir, prompt: 'set the LED resistor to 1kΩ' }
-  }, { ...services, ...codexNoPatch() });
-  assert.equal(preview.ok, true, preview.error?.message ?? '');
-  const approved = await dispatchToolCall({
-    name: 'schematic.patch',
-    args: { projectDir, approved: true, patchId: preview.result.patchId }
-  }, services);
-  assert.equal(approved.result?.applied, true, JSON.stringify(approved.result?.reason ?? approved.error));
+async function materializeSeriesResistor(_services, projectDir, generated) {
+  await seedSeriesResistor(projectDir, generated, '1k');
   const before = await readGeneratedBytes(generated);
   assert.equal(schematicRefValue(before.schematic, 'R3'), '1k');
   assert.match(before.spice, /^RLED\s+\S+\s+\S+\s+1000$/m);
@@ -3419,6 +3426,135 @@ test('current limiting resistor on a generated board without an LED series resis
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+const NO_RESISTOR_PROMPTS = [
+  '저항 680Ω으로 바꿔줘',
+  'current limiting resistor 470Ω',
+  '전류제한 저항 470Ω'
+];
+
+async function copyNoResistorBoard(name) {
+  const parent = await mkdtemp(path.join(tmpdir(), `chatpcb-${name}-`));
+  const projectDir = path.join(parent, 'board');
+  await cp(path.resolve(import.meta.dirname, 'fixtures', name), projectDir, { recursive: true });
+  return projectDir;
+}
+
+async function snapshotProjectBytes(projectDir) {
+  const files = {};
+  async function walk(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => (left.name < right.name ? -1 : 1));
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(absolute);
+      else if (entry.isFile()) files[path.relative(projectDir, absolute)] = await readFile(absolute);
+    }
+  }
+  await walk(projectDir);
+  return files;
+}
+
+function assertProjectBytes(after, before, where) {
+  assert.deepEqual(Object.keys(after).sort(), Object.keys(before).sort(), where);
+  for (const key of Object.keys(before)) {
+    assert.equal(after[key].equals(before[key]), true, `${where} ${key}`);
+  }
+}
+
+function resistorDesignators(files) {
+  const found = [];
+  for (const [name, bytes] of Object.entries(files)) {
+    const text = bytes.toString('utf8');
+    for (const match of text.matchAll(/\(property "Reference" "(R\d+)"/g)) found.push(`${name}:${match[1]}`);
+    for (const match of text.matchAll(/"ref"\s*:\s*"(R\d+)"/g)) found.push(`${name}:${match[1]}`);
+  }
+  return found;
+}
+
+function previewResistorRefs(preview) {
+  return (preview.result?.components ?? [])
+    .map((component) => String(component?.ref ?? ''))
+    .filter((ref) => /^R\d+$/i.test(ref));
+}
+
+function assertNoResistorShape(files, sourcePattern, where) {
+  const spec = JSON.parse(files['chatpcb_mcu_peripheral.chatpcb.json'].toString('utf8'));
+  assert.match(spec.sourcePrompt, sourcePattern, where);
+  assert.equal(spec.peripherals.some((item) => item.kind === 'status-led'), true, where);
+  assert.equal(spec.peripherals.some((item) => item.kind === 'status-led-resistor'), false, where);
+  assert.equal(spec.schematic.components.some((item) => item.ref === 'D1'), true, where);
+  assert.equal(spec.schematic.components.some((item) => /^R\d+$/.test(String(item.ref ?? ''))), false, where);
+  assert.deepEqual(resistorDesignators(files), [], where);
+  assert.match(files['chatpcb_mcu_peripheral_simulation.cir'].toString('utf8'), /^RLED\s/m, where);
+}
+
+// GEN_NOLED has no status-led peripheral. SPEC_NOLED still has R1 and R2.
+// F and X have status-led plus D1 and no schematic resistor at all.
+test('a board with no resistor at all (F and No-LED X shapes) never gets a new resistor from a resistor edit', async () => {
+  const services = await transactionServices();
+  const boards = [
+    ['F', 'no-resistor-f', /status LED/],
+    ['X', 'no-resistor-x', /No LED\./]
+  ];
+  const dirs = [];
+  try {
+    for (const [shape, fixture, sourcePattern] of boards) {
+      const guardDir = await copyNoResistorBoard(fixture);
+      dirs.push(guardDir);
+      const guardBefore = await snapshotProjectBytes(guardDir);
+      assertNoResistorShape(guardBefore, sourcePattern, shape);
+      await assert.rejects(
+        () => applyMergedProjectEdit({
+          projectDir: guardDir,
+          existingSpec: JSON.parse(guardBefore['chatpcb_mcu_peripheral.chatpcb.json'].toString('utf8')),
+          edit: { kind: 'resistor', ohms: 680, ohmsText: '680', label: '680Ω' }
+        }),
+        (error) => {
+          assert.equal(error.code, 'RESISTOR_TARGET_UNCLEAR', shape);
+          return true;
+        }
+      );
+      assertProjectBytes(await snapshotProjectBytes(guardDir), guardBefore, `${shape} apply`);
+
+      let index = 0;
+      for (const prompt of NO_RESISTOR_PROMPTS) {
+        for (const kind of ['native', 'malicious']) {
+          index += 1;
+          const projectDir = await copyNoResistorBoard(fixture);
+          dirs.push(projectDir);
+          const before = await snapshotProjectBytes(projectDir);
+          const where = `${shape} ${kind} ${prompt}`;
+          const provider = kind === 'native'
+            ? nativeNoPatchCounter()
+            : maliciousPatchCounter('add resistor R3 680Ω');
+          const preview = await dispatchToolCall({
+            id: `call_f1_${shape}_${index}`,
+            name: 'project.request',
+            args: { provider: 'codex', projectDir, prompt }
+          }, { ...services, ...provider.impl });
+          assert.equal(provider.calls(), 0, `${where} calls ${provider.calls()} code=${preview.error?.code ?? ''}`);
+          assert.equal(preview.ok, false, `${where} ${preview.error?.message ?? ''}`);
+          assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', `${where} ${preview.error?.code ?? ''}`);
+          assert.deepEqual(previewResistorRefs(preview), [], where);
+          if (preview.result?.patchId) {
+            await dispatchToolCall({
+              name: 'schematic.patch',
+              args: { projectDir, approved: true, patchId: preview.result.patchId }
+            }, services);
+          }
+          const after = await snapshotProjectBytes(projectDir);
+          assertProjectBytes(after, before, where);
+          assert.deepEqual(resistorDesignators(after), [], where);
+        }
+      }
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await Promise.all(dirs.map((dir) => rm(path.dirname(dir), { force: true, recursive: true })));
     await rm(services.stateRoot, { force: true, recursive: true });
   }
 });

@@ -248,6 +248,12 @@ function editError(message) {
   return error;
 }
 
+function resistorTargetUnclearError(ohmsText) {
+  const error = new Error(resistorTargetUnclearMessage(ohmsText));
+  error.code = 'RESISTOR_TARGET_UNCLEAR';
+  return error;
+}
+
 export function removalIntentUnclearMessage() {
   const en = 'Which part should I remove? Give its reference, like J2. Nothing was removed.';
   const ko = '어떤 부품을 뺄까요? 참조번호(예: J2)로 알려 주세요. 아무것도 빼지 않았어요.';
@@ -693,7 +699,8 @@ function finishResistor(text, spec, resistor) {
   if (resistor.kind === 'resistor' && !coverage.covered) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
-  // An LED series edit needs the series resistor role. A lone LED symbol is not enough.
+  // An LED series edit needs the saved series resistor. A status-led peripheral
+  // or a lone LED symbol is not that part, so the edit must not add one.
   if (!hasLedSeriesRole(spec) && resistor.kind === 'resistor') {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
@@ -1756,13 +1763,11 @@ function seriesResistorRef(spec) {
   return part ? String(part.ref) : null;
 }
 
-// The series role is the resistor, or a status-led peripheral that owns its
-// current limit. A lone LED symbol is not that role: the generator draws D1
-// even when the prompt never asked for an LED.
+// The series role is the saved series resistor. A status-led peripheral, even
+// one that carries currentLimit, is not that part. The generator still draws
+// D1 when the prompt says "No LED", and that symbol is not a resistor either.
 function hasLedSeriesRole(spec) {
-  if (seriesResistorRef(spec)) return true;
-  const peripherals = Array.isArray(spec?.peripherals) ? spec.peripherals : [];
-  return peripherals.some((item) => item?.kind === 'status-led' || item?.kind === 'status-led-resistor');
+  return Boolean(seriesResistorRef(spec));
 }
 
 // A kept part is not an edit target. The object is the few words before
@@ -3271,28 +3276,28 @@ function applyDeletionToSpec(spec, targets) {
 }
 
 export async function applyMergedProjectEdit({ projectDir, existingSpec, edit }) {
-  const next = applyExistingProjectEdit(existingSpec, edit);
   const projectName = await projectBaseName(projectDir);
+  if (edit.kind === 'resistor') {
+    const ref = seriesEditRef(existingSpec, edit);
+    // A resistor edit may change a series resistor that is already on the
+    // schematic. It must not synthesize one, including when classification
+    // returned merge without a target.
+    if (!ref || !(await schematicHasReference(projectDir, projectName, ref))) {
+      throw resistorTargetUnclearError(edit.ohmsText);
+    }
+  }
+  const next = applyExistingProjectEdit(existingSpec, edit);
   if (edit.kind === 'delete') {
     return writeGeneratedProject({ projectDir, spec: next, projectName });
   }
   if (edit.kind === 'resistor') {
-    const ref = seriesEditRef(next, edit) || seriesEditRef(existingSpec, edit);
-    if (ref && await schematicHasReference(projectDir, projectName, ref)) {
-      return writeResistorEdit({
-        projectDir,
-        spec: next,
-        label: edit.label,
-        ohmsText: edit.ohmsText,
-        ref
-      });
-    }
-    // Fixture boards draw the LED without a series resistor until this edit asks for one.
-    // Regeneration stores the exact ohms text, then the symbol and footprint values
-    // are patched back to the lossless label on the ref the generator assigned.
-    const generated = await writeGeneratedProject({ projectDir, spec: next, projectName });
-    await presentResistorLabel(generated, edit.label, seriesResistorRef(generated.spec));
-    return generated;
+    return writeResistorEdit({
+      projectDir,
+      spec: next,
+      label: edit.label,
+      ohmsText: edit.ohmsText,
+      ref: seriesEditRef(existingSpec, edit)
+    });
   }
   throw editError(modifyRefusalMessage());
 }
@@ -3312,31 +3317,6 @@ async function projectBaseName(projectDir) {
   const specName = names.find((name) => name.endsWith('.chatpcb.json'));
   if (!specName) throw editError(modifyRefusalMessage());
   return specName.slice(0, -'.chatpcb.json'.length);
-}
-
-async function presentResistorLabel(generated, label, ref) {
-  const target = ref || seriesResistorRef(generated.spec);
-  if (target) {
-    const schematic = await readFile(generated.files.schematic, 'utf8');
-    const updatedSchematic = replaceReferenceValue(schematic, target, label);
-    if (updatedSchematic !== schematic) await writeFile(generated.files.schematic, updatedSchematic, 'utf8');
-    if (generated.files.board) {
-      await writeOptionalValue(generated.files.board, (text) => replaceReferenceValue(text, target, label));
-    }
-  }
-  const spec = generated.spec;
-  if (!spec || typeof spec !== 'object') return;
-  for (const component of spec.schematic?.components ?? []) {
-    if (componentIsSeriesTarget(spec, component, target)) component.value = label;
-  }
-  if (Array.isArray(spec.boardProfile?.productionParts)) {
-    spec.boardProfile.productionParts = spec.boardProfile.productionParts.map((part) => (
-      componentIsSeriesTarget(spec, part, target) || (!target && part?.role === 'status-led-resistor')
-        ? { ...part, value: label }
-        : part
-    ));
-  }
-  await writeFile(generated.files.spec, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
 }
 
 async function writeResistorEdit({ projectDir, spec, label, ohmsText, ref }) {

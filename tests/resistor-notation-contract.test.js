@@ -665,8 +665,9 @@ test('a named resistor edit changes only the LED series resistor', () => {
   assert.equal(generic.edit, undefined);
   assert.equal(generic.message, resistorUnitRequiredMessage('470'));
   const genericKo = classifyExistingProjectRequest('LED 저항 470Ω으로', noSeries);
-  assert.equal(genericKo.mode, 'merge');
-  assert.equal(genericKo.edit?.ohms, 470);
+  assert.equal(genericKo.mode, 'refuse');
+  assert.equal(genericKo.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(genericKo.edit, undefined);
   const unnamedUnsupported = classifyExistingProjectRequest('change R1 to 470', noSeries);
   assert.equal(unnamedUnsupported.code, 'RESISTOR_REF_UNSUPPORTED');
   assert.equal(unnamedUnsupported.message, resistorRefUnsupportedMessage(null));
