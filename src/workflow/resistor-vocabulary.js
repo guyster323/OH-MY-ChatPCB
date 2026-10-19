@@ -16,10 +16,10 @@ const RESISTOR_NOUNS = new Set(['resistor', 'resistors', '저항', '抵抗']);
 
 const FUNCTION_WORDS = new Set([
   'a', 'an', 'the', 'of', 'for', 'to', 'from', 'into', 'onto', 'on', 'in', 'at', 'by',
-  'with', 'and', 'or', 'its', 'my', 'our', 'please', 'only', 'just', 'value', 'values',
+  'with', 'and', 'its', 'my', 'our', 'please', 'only', 'just', 'value', 'values',
   'it', 'them', 'one', 'also', 'now', 'too', 'is', 'be', 'are', 'was', 'were', 'am',
-  'not', 'no', 'do', 'does', 'did', 'this', 'that', 'these', 'those', 'else', 'everything',
-  'unchanged', 'rest', 'up', 'down', 'as', 'so', 'if', 'then', 'than', 'into'
+  'this', 'that', 'these', 'those', 'else', 'everything',
+  'unchanged', 'rest', 'as', 'so', 'then', 'than', 'into'
 ]);
 
 const EDIT_VERBS = new Set([
@@ -33,7 +33,7 @@ const MODAL_WORDS = new Set([
 
 const PARTICLE_WORDS = new Set([
   '으로', '로', '을', '를', '가', '은', '는', '의', '도', '만', '와', '과', '랑', '요', '에', '에서',
-  '이랑', '하고', '및', '그리고', '또는', '좀', '다시', '주세요', '해줘', '해주', '줄래', '줄래요',
+  '이랑', '하고', '및', '그리고', '좀', '다시', '주세요', '해줘', '해주', '줄래', '줄래요',
   '주실래요', '해줄래', '해주세요', '있어', '있나', '있을까요', '줄', '수', '할', '줘', '그냥', '값',
   '기존', '현재', '왜', '어떻게', '어떡', '뭐', '무엇', '몇', '할까', 'existing', 'currently',
   '용', '임', '입니다', '이다', '야', '이야'
@@ -85,6 +85,52 @@ const PERMIT_PHRASES = [
   '가능하면', '괜찮으면', 'is it ok to', 'can you', 'could you', 'would you',
   'can i', 'could i', 'may i', 'should be'
 ];
+
+// "if" is not a function word. These phrases are the only place it is filler.
+const POLITE_IF_PHRASES = ['if possible', 'if you can', 'if you could'];
+
+// Negation and alternatives are rejection signals, not allow-list words.
+// They are still filler for role detection, so "not" and "마" are not a second role.
+const NEGATION_OR_ALTERNATIVE_WORDS = new Set([
+  'not', 'no', 'never', "don't", 'dont', 'do', 'does', 'did', 'or',
+  '마', '말', '말고', '또는', '아니면', '혹은', '않', '하지'
+]);
+
+export function isNegationOrAlternativeWord(word) {
+  const key = lower(word);
+  return NEGATION_OR_ALTERNATIVE_WORDS.has(key) || NEGATION_OR_ALTERNATIVE_WORDS.has(word);
+}
+
+export function textHasPoliteIf(text) {
+  const folded = String(text ?? '').toLowerCase();
+  return rx("\\bif possible\\b|\\bif you can\\b|\\bif you could\\b").test(folded);
+}
+
+export function vocabularyAllowLists() {
+  return {
+    ledWords: LED_WORDS,
+    resistorNouns: RESISTOR_NOUNS,
+    functionWords: FUNCTION_WORDS,
+    editVerbs: EDIT_VERBS,
+    modalWords: MODAL_WORDS,
+    particleWords: PARTICLE_WORDS,
+    demonstratives: DEMONSTRATIVES,
+    englishRoles: ENGLISH_ROLES,
+    koreanRoles: KOREAN_ROLES,
+    unboundNouns: UNBOUND_NOUNS,
+    lengthEn: LENGTH_EN,
+    lengthKo: LENGTH_KO,
+    noiseWords: NOISE_WORDS,
+    nonresObjects: NONRES_OBJECTS,
+    keepCues: KEEP_CUES,
+    adviceKo: ADVICE_KO,
+    adviceEn: ADVICE_EN,
+    permitPhrases: PERMIT_PHRASES,
+    counterWords: COUNTER_WORDS,
+    counterLeadWords: COUNTER_LEAD_WORDS,
+    politeIfPhrases: POLITE_IF_PHRASES
+  };
+}
 
 const COUNTER_WORDS = [
   '년형', '개만', 'pieces', 'piece', 'models', 'model', 'years', 'year', 'times', 'time',
@@ -291,7 +337,7 @@ function pushBreak(breaks, start, end) {
   if (end > start) breaks.push([start, end]);
 }
 
-function splitAllowClauses(text) {
+function allowClausePieces(text) {
   const breaks = [];
   const lowerText = text.toLowerCase();
   for (const sep of [' and then ', ' and ', ' then ']) {
@@ -331,14 +377,24 @@ function splitAllowClauses(text) {
     kept.push(span);
     cursor = span[1];
   }
-  const parts = [];
+  const pieces = [];
   let start = 0;
   for (const span of kept) {
-    parts.push(text.slice(start, span[0]));
+    const raw = text.slice(start, span[0]);
+    if (raw.trim().length > 0) {
+      pieces.push({ text: raw.trim(), start, end: span[0], sepEnd: span[1] });
+    }
     start = span[1];
   }
-  parts.push(text.slice(start));
-  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+  const tail = text.slice(start);
+  if (tail.trim().length > 0) {
+    pieces.push({ text: tail.trim(), start, end: text.length, sepEnd: text.length });
+  }
+  return pieces;
+}
+
+function splitAllowClauses(text) {
+  return allowClausePieces(text).map((piece) => piece.text);
 }
 
 export function clauseAround(text, start, end) {
@@ -380,6 +436,8 @@ const PARTICLE_SUFFIXES = ['이랑', '으로', '에서', '에게', '은', '는',
 function stripParticle(word) {
   let text = String(word ?? '');
   if (!text || KEEP_CUES.some((cue) => text.includes(cue))) return text;
+  // "또는" and "혹은" end in a particle character. They stay alternative signals.
+  if (isNegationOrAlternativeWord(text)) return text;
   for (const particle of PARTICLE_SUFFIXES) {
     if (text.endsWith(particle) && text.length > particle.length) {
       text = text.slice(0, -particle.length);
@@ -542,6 +600,8 @@ function isGenericKeep(clause) {
 
 function recognizedWord(word, clause) {
   if (!word) return true;
+  if (isNegationOrAlternativeWord(word)) return true;
+  if (lower(word) === 'if') return textHasPoliteIf(clause);
   if (rx("^\\d").test(word) || rx("[Ω옴%]").test(word) || rx("^(?:ohm|ohms|meg)$", "i").test(word)) return true;
   if (isLedAllowWord(word) || isFunctionWord(word) || isEditVerbWord(word)) return true;
   if (isModalOrParticleWord(word) || isDemonstrativeWord(word)) return true;
@@ -576,6 +636,72 @@ function leftoverWords(clause) {
   return words.filter((word) => !recognizedWord(word, clause) && !isKnownRoleWord(word) && !isUnboundMeasureNoun(word));
 }
 
+// A don't-delete left piece loses 마 when 말고 is the separator. "바꾸지" is an
+// edit negation, not a deletion, so it stays a rejection signal.
+function isSplitDontDelete(clause) {
+  const raw = String(clause ?? '').trim();
+  if (rx("(?:삭제|제거|지우|버리|없애|빼)지\\s*$", "u").test(raw)) return true;
+  return rx("(?:삭제|제거)\\s*하지\\s*$", "u").test(raw);
+}
+
+// Don't-touch is exempt only when the object is an R ref or a resistor role.
+// "don't touch the LED resistor" negates the edit, so it is not exempt.
+function isDontTouchResistorClause(clause) {
+  const raw = String(clause ?? '');
+  const folded = raw.toLowerCase();
+  const english = rx("\\b(?:don't|dont|do not|does not|did not|never)\\s+touch\\b", "i").test(folded);
+  const korean = raw.includes('건드리지');
+  if (!english && !korean) return false;
+  if (rx("\\bR\\d+\\b", "i").test(raw)) return true;
+  return textHasKnownRole(raw);
+}
+
+function isExemptSignalClause(clause) {
+  if (isResistorKeepClause(clause) || isKeepNonResistorClause(clause)) return true;
+  if (isDontDelete(clause) || isSplitDontDelete(clause)) return true;
+  if (rx("\\b(?:does|did)\\s+not\\s+(?:remove|delete)\\b", "i").test(clause)) return true;
+  return isDontTouchResistorClause(clause);
+}
+
+const NEGATION_OR_ALTERNATIVE = [
+  String.raw`\b(?:do|does|did)\s+not\b`,
+  String.raw`\b(?:don't|dont|not|no|never)\b`,
+  String.raw`\bor\b`,
+  String.raw`지\s*말고`,
+  String.raw`하지\s*마`,
+  String.raw`지\s*마(?![가-힣])`,
+  String.raw`말고`,
+  String.raw`않`,
+  String.raw`또는`,
+  String.raw`아니면`,
+  String.raw`혹은`,
+  String.raw`\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[kKmMrR](?:\s*(?:Ω|옴|ohms?))?)\s*/\s*\d+(?:\.\d+)?\s*(?:[kKmMrR](?:\s*(?:Ω|옴|ohms?))?|Ω|옴|ohms?)`
+];
+
+function signalIndexes(text) {
+  const indexes = [];
+  for (const source of NEGATION_OR_ALTERNATIVE) {
+    for (const match of text.matchAll(rx(source, 'giu'))) indexes.push(match.index);
+  }
+  return indexes;
+}
+
+function indexInRanges(index, ranges) {
+  return ranges.some((range) => index >= range[0] && index < range[1]);
+}
+
+// Negation and alternatives reject the whole request. A resistor keep,
+// a don't-touch of an R ref or resistor role, and any don't-delete clause
+// are removed first, including the separator that closed them.
+function hasNegationOrAlternative(text) {
+  const pieces = allowClausePieces(text);
+  const exempt = [];
+  for (const piece of pieces) {
+    if (isExemptSignalClause(piece.text)) exempt.push([piece.start, piece.sepEnd]);
+  }
+  return signalIndexes(text).some((index) => !indexInRanges(index, exempt));
+}
+
 function unknownRoleValue(clause) {
   if (isForeignRoleClause(clause) || isLengthClause(clause) || isDontDelete(clause)) return false;
   if (isResistorKeepClause(clause) || isGenericKeep(clause)) return false;
@@ -593,6 +719,7 @@ export function assessRequestCoverage(text) {
   const approximate = textHasApproximation(normalized);
   const malformedRkm = hasMalformedRkm(normalized);
   const clauses = splitAllowClauses(normalized);
+  const negatedOrAlternative = hasNegationOrAlternative(normalized);
   let foreignRole = false;
   let unknownLeftover = false;
   let lengthClause = false;
@@ -626,9 +753,11 @@ export function assessRequestCoverage(text) {
     && !adviceQuestion
     && !approximate
     && !malformedRkm
-    && !pronounTarget(normalized);
+    && !pronounTarget(normalized)
+    && !negatedOrAlternative;
   return {
     covered,
+    negatedOrAlternative,
     foreignRole,
     unknownLeftover,
     lengthClause,

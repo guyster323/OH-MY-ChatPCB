@@ -15,10 +15,12 @@ import {
   resistorRefNotFoundMessage,
   resistorRefUnsupportedMessage,
   resistorTargetUnclearMessage,
+  resistorUnitlessMessage,
   resistorValueAmbiguousMessage,
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
+import { assessRequestCoverage, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -1014,4 +1016,125 @@ test('clause separators keep and and comma, and a digit comma stays inside the v
   assert.equal(splitResistorClauses('LED resistor to 680Ω and pull-up to 2.2k').length, 2);
   assert.equal(splitResistorClauses('LED resistor to 680Ω, pull-up to 2.2k').length, 2);
   assert.equal(splitResistorClauses('LED resistor to 4,7k').length, 1);
+});
+
+test('vocabulary allow lists contain no negation or alternative word', () => {
+  const lists = vocabularyAllowLists();
+  const forbiddenWords = ['not', 'no', "don't", 'dont', 'never', 'or', '말고', '또는', '아니면', '혹은'];
+  const forbiddenPhrases = ['do not', 'does not', 'did not', '지 말고', '지 마', '하지 마'];
+  for (const word of ['do', 'does', 'did', 'up', 'down', 'not', 'no', 'or', 'if']) {
+    assert.equal(lists.functionWords.has(word), false, `FUNCTION_WORDS has ${word}`);
+  }
+  for (const [name, list] of Object.entries(lists)) {
+    for (const value of list) {
+      const text = String(value);
+      const folded = text.toLowerCase();
+      assert.equal(text.includes('않'), false, `${name} ${text} contains 않`);
+      const tokens = folded.split(/[^a-z0-9가-힣']+/u).filter(Boolean);
+      if (name !== 'politeIfPhrases') {
+        assert.equal(tokens.includes('if'), false, `${name} ${text}`);
+      }
+      for (const word of forbiddenWords) {
+        assert.equal(tokens.includes(word), false, `${name} ${text} has ${word}`);
+      }
+      for (const phrase of forbiddenPhrases) {
+        assert.equal(folded.includes(phrase), false, `${name} ${text} has ${phrase}`);
+      }
+    }
+  }
+  assert.deepEqual([...lists.politeIfPhrases], ['if possible', 'if you can', 'if you could']);
+});
+
+test('transitions and resistor keep clauses still apply, and questions stay with the provider', () => {
+  const spec = seriesSpec('1k');
+  const merges = [
+    ['1k에서 680Ω으로', 680],
+    ['LED 저항을 1k에서 680Ω으로', 680],
+    ['change the LED resistor from 1k to 680Ω', 680],
+    ['LED resistor from 1k to 680Ω', 680],
+    ['LED resistor -> 680Ω', 680],
+    ['keep the pull-up resistors, set the LED resistor to 680Ω', 680],
+    ['풀업 저항은 건드리지 말고 LED 저항 680Ω으로', 680],
+    ['keep R4, set R3 to 680Ω', 680],
+    ['LED resistor to 680Ω if you can', 680],
+    ['LED resistor to 680Ω if you could', 680],
+    ['if you could change the LED resistor to 680Ω', 680],
+    ['the LED resistor should be 680Ω', 680]
+  ];
+  for (const [prompt, ohms] of merges) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(assessRequestCoverage(prompt).covered, true, prompt);
+    assert.notEqual(assessRequestCoverage(prompt).negatedOrAlternative, true, prompt);
+  }
+
+  const bareFrom = classifyExistingProjectRequest('from 1k to 680Ω', spec);
+  assert.equal(bareFrom.mode, 'refuse');
+  assert.equal(bareFrom.code, undefined);
+  assert.equal(bareFrom.edit, undefined);
+  assert.equal(blocksBeforeProvider('from 1k to 680Ω', bareFrom), false);
+  assert.equal(appliesBeforeProvider('from 1k to 680Ω', bareFrom), false);
+
+  const possible = classifyExistingProjectRequest('LED resistor to 680Ω if possible', spec);
+  assert.equal(possible.mode, 'refuse');
+  assert.equal(possible.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(possible.edit, undefined);
+  assert.equal(appliesBeforeProvider('LED resistor to 680Ω if possible', possible), false);
+
+  for (const prompt of [
+    'why not change the LED resistor to 680Ω?',
+    'what happens if I change the LED resistor to 680Ω?',
+    'how do I change the LED resistor to 680Ω?',
+    'what does R3 do?'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+  }
+
+  const unitless = classifyExistingProjectRequest('change R3 to 470 or 680', spec);
+  assert.equal(unitless.code, 'RESISTOR_VALUE_INVALID');
+  assert.equal(unitless.message, resistorUnitlessMessage());
+  assert.equal(unitless.edit, undefined);
+
+  const twoValues = classifyExistingProjectRequest('LED resistor 330 ohm or 680 ohm', spec);
+  assert.equal(twoValues.code, 'RESISTOR_VALUE_AMBIGUOUS');
+  assert.equal(twoValues.message, resistorValueAmbiguousMessage(null, ['330Ω', '680Ω']));
+  const twoRef = classifyExistingProjectRequest('set R3 330Ω 680Ω', spec);
+  assert.equal(twoRef.code, 'RESISTOR_VALUE_AMBIGUOUS');
+  assert.equal(twoRef.message, resistorValueAmbiguousMessage('R3', ['330Ω', '680Ω']));
+
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  for (const prompt of [
+    '풀업을 그대로 두지 말고 2.2k로',
+    "don't leave the pull-up as is, change it to 2.2k",
+    'LED resistor to 680Ω or the pull-up to 2.2k',
+    "don't touch R4, set the LED resistor to 680Ω",
+    'R4는 건드리지 말고 LED 저항 680Ω으로'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+  }
+
+  for (const prompt of [
+    'do not remove I2C and set LED resistor to 680Ω',
+    "don't delete I2C, LED resistor to 680Ω",
+    '680옴으로 바꿔줘. I2C는 삭제하지 마',
+    'LED 저항 삭제하지 말고 680Ω으로'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+  }
 });

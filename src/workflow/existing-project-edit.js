@@ -23,11 +23,13 @@ import {
   isKnownRoleWord,
   isLedAllowWord,
   isModalOrParticleWord,
+  isNegationOrAlternativeWord,
   isDontDeleteClause,
   isPermittedEdit,
   isUnboundMeasureAfter,
   textHasKnownRole,
   textHasLengthObject,
+  textHasPoliteIf,
   textHasUsbRole
 } from './resistor-vocabulary.js';
 
@@ -334,6 +336,14 @@ export function resistorValueAmbiguousMessage(ref, labels) {
   return `${en}\n${ko}`;
 }
 
+// A negation or an alternative never picks one of the values. Two parsed ohm
+// values still use resistorValueAmbiguousMessage, which names both.
+export function resistorChangeAmbiguousMessage() {
+  const en = 'It isn\'t clear which value to use, or whether to change it at all. Nothing was changed.';
+  const ko = '어느 값으로 바꿀지, 바꾸지 않을지 분명하지 않아요. 아무것도 바꾸지 않았어요.';
+  return `${en}\n${ko}`;
+}
+
 export function resistorUnitlessMessage() {
   const en = 'Add a unit (Ω, k, M), e.g. 330Ω. Nothing was changed.';
   const ko = '단위(Ω, k, M)를 붙여 주세요. 예: 330Ω. 아무것도 바꾸지 않았어요.';
@@ -598,6 +608,16 @@ function finishResistor(text, spec, resistor) {
   if (foreignRoleClauseHasValue(text) && !(resistor.kind === 'resistor' && coverage.lengthClause)) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
   }
+  // Negation and alternatives ask which value before "not" or "never" can
+  // look like another role. A valued foreign role above still wins. Milli,
+  // unitless, and two named ohm values are not kind resistor.
+  if (coverage.negatedOrAlternative && resistor.kind === 'resistor') {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_VALUE_AMBIGUOUS',
+      message: resistorChangeAmbiguousMessage()
+    };
+  }
   // A non-LED role is refused before the value is judged. 0.1Ω and 10mΩ on a
   // sense or shunt resistor are still "only the LED resistor", not a range error.
   // "current sense" is that role. It is not the LED current-limiting resistor.
@@ -713,6 +733,7 @@ export function blocksBeforeProvider(text, decision) {
   if (decision.code === 'RESISTOR_VALUE_INVALID' && hasMalformedRkm(normalized)) return true;
   if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
+  if (decision.code === 'RESISTOR_VALUE_AMBIGUOUS' && assessRequestCoverage(normalized).negatedOrAlternative) return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
 }
@@ -1993,7 +2014,7 @@ function nounModifierIsForeign(text) {
   const nouns = [...text.matchAll(RESISTOR_NOUN)];
   let previous = 0;
   for (const noun of nouns) {
-    if (classifyModifiers(wordsNearNoun(text, noun, previous)) === 'foreign') return true;
+    if (classifyModifiers(wordsNearNoun(text, noun, previous), text) === 'foreign') return true;
     previous = noun.index + noun[0].length;
   }
   return false;
@@ -2005,7 +2026,7 @@ function resistorNounKinds(text) {
   const kinds = [];
   let previous = 0;
   for (const noun of nouns) {
-    kinds.push(classifyModifiers(wordsNearNoun(text, noun, previous)));
+    kinds.push(classifyModifiers(wordsNearNoun(text, noun, previous), text));
     previous = noun.index + noun[0].length;
   }
   return kinds;
@@ -2029,7 +2050,7 @@ function bareNonLedSubject(text) {
   for (const clause of splitClauses(text)) {
     if (!OHM_VALUE_IN_CLAUSE.test(clause.text)) continue;
     const words = [...clause.text.matchAll(/\S+/gu)].map((match) => match[0]);
-    if (classifyModifiers(words) !== 'foreign') continue;
+    if (classifyModifiers(words, clause.text) !== 'foreign') continue;
     // pull-up, I2C, and USB are known roles. terminator, NRST, and BOOT0 are not.
     if (textHasKnownRole(clause.text) || textHasUsbRole(clause.text)) return 'foreign';
     unknown = true;
@@ -2042,12 +2063,12 @@ function wordsNearNoun(text, noun, previousEnd) {
   let start = 0;
   for (const match of before.matchAll(/[.;!?,。！？]/gu)) start = match.index + match[0].length;
   const prefix = [...before.slice(start).matchAll(/\S+/gu)].map((match) => match[0]);
-  return [...modifiersBefore(prefix), ...wordsAfterNoun(text, noun)];
+  return [...modifiersBefore(prefix, text), ...wordsAfterNoun(text, noun)];
 }
 
 // Modifiers sit against the noun. A place or time word ("프로젝트에서") ends
 // the phrase, so earlier words are not part of the resistor name.
-function modifiersBefore(words) {
+function modifiersBefore(words, text) {
   const picked = [];
   for (let index = words.length - 1; index >= 0; index -= 1) {
     const raw = words[index];
@@ -2058,7 +2079,7 @@ function modifiersBefore(words) {
       picked.push(raw);
       continue;
     }
-    if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
+    if (!stemmed || isIgnorableWord(stemmed, text) || isDesignator(stemmed)) continue;
     picked.push(raw);
     if (!isLedAllowWord(stemmed)) break;
   }
@@ -2105,7 +2126,7 @@ function wordsAfterNoun(text, noun) {
       kept.push(word);
       continue;
     }
-    if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) {
+    if (!stemmed || isIgnorableWord(stemmed, text) || isDesignator(stemmed)) {
       kept.push(word);
       continue;
     }
@@ -2121,7 +2142,7 @@ function wordsAfterNoun(text, noun) {
   return kept;
 }
 
-function classifyModifiers(words) {
+function classifyModifiers(words, text) {
   const content = [];
   let demonstrative = false;
   for (const raw of words) {
@@ -2131,7 +2152,7 @@ function classifyModifiers(words) {
       demonstrative = true;
       continue;
     }
-    if (!stemmed || isIgnorableWord(stemmed) || isDesignator(stemmed)) continue;
+    if (!stemmed || isIgnorableWord(stemmed, text) || isDesignator(stemmed)) continue;
     content.push(stemmed);
   }
   if (content.length === 0) return demonstrative ? 'demonstrative' : 'bare';
@@ -2153,6 +2174,7 @@ function isAllowedLedContext(content) {
 function stemWord(word) {
   let text = String(word ?? '').replace(/^[("'`[?？]+|[\])"'`,.:;?？]+$/gu, '');
   if (!text) return '';
+  if (isNegationOrAlternativeWord(text)) return text;
   text = text.replace(WORD_PARTICLE, (match, offset) => (offset === 0 ? match : ''));
   if (text.length > 1 && text.endsWith('들')) {
     const bare = text.slice(0, -1);
@@ -2161,8 +2183,10 @@ function stemWord(word) {
   return text;
 }
 
-function isIgnorableWord(word) {
+function isIgnorableWord(word, text) {
   if (isFunctionWord(word) || isEditVerbWord(word) || isModalOrParticleWord(word)) return true;
+  if (isNegationOrAlternativeWord(word)) return true;
+  if (String(word ?? '').toLowerCase() === 'if' && textHasPoliteIf(text)) return true;
   if (/^[-–—<>→⇒~∼〜.±%]+$/u.test(word)) return true;
   if (/^괜찮/u.test(word) || /^가능/u.test(word)) return true;
   return word.includes('바꿔') || word.includes('바꾸') || word.includes('변경') || word.includes('수정');

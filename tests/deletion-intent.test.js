@@ -718,7 +718,7 @@ test('the unclear hint example removes that reference instead of looping', () =>
 });
 
 test('cancel in a resistor edit is leftover content and asks which resistor', () => {
-  const decision = classifyExistingProjectRequest('set LED resistor 680 ohm. cancel is not this edit', REF_SPEC);
+  const decision = classifyExistingProjectRequest('set LED resistor 680 ohm. cancel this edit', REF_SPEC);
   assert.equal(decision.mode, 'refuse');
   assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR');
   assert.equal(decision.edit, undefined);
