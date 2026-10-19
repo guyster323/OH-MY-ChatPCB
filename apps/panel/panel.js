@@ -404,6 +404,105 @@ function confirmDialogOwnsFocus() {
   return confirmDialogs().length > 0;
 }
 
+let confirmBackdrop = [];
+let confirmLabelRestore = [];
+let syncingConfirmModal = false;
+
+function confirmDialogElements() {
+  return [applyRemoveConfirmEl, applyWithoutErcConfirmEl].filter(Boolean);
+}
+
+function releaseConfirmBackdrop() {
+  for (const entry of confirmBackdrop) {
+    if (!entry.el.isConnected) continue;
+    if (entry.inert) entry.el.removeAttribute('inert');
+    if (entry.ariaHidden) entry.el.removeAttribute('aria-hidden');
+  }
+  confirmBackdrop = [];
+}
+
+function releaseConfirmLabels() {
+  for (const entry of confirmLabelRestore) {
+    if (entry.el.isConnected) entry.el.setAttribute('aria-labelledby', entry.value);
+  }
+  confirmLabelRestore = [];
+}
+
+function backgroundSiblings(dialogs) {
+  const keep = new Set();
+  for (const dialog of dialogs) {
+    let node = dialog;
+    while (node) {
+      keep.add(node);
+      node = node.parentElement;
+    }
+  }
+  const siblings = [];
+  const seen = new Set();
+  for (const dialog of dialogs) {
+    let node = dialog;
+    while (node && node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (keep.has(sibling) || seen.has(sibling)) continue;
+        seen.add(sibling);
+        siblings.push(sibling);
+      }
+      if (node.parentElement === document.body) break;
+      node = node.parentElement;
+    }
+  }
+  return siblings;
+}
+
+function suspendAncestorLabels(dialogs) {
+  const seen = new Set();
+  for (const dialog of dialogs) {
+    let node = dialog.parentElement;
+    while (node && node !== document.body) {
+      if (!seen.has(node) && node.hasAttribute('aria-labelledby')) {
+        seen.add(node);
+        confirmLabelRestore.push({ el: node, value: node.getAttribute('aria-labelledby') });
+        node.removeAttribute('aria-labelledby');
+      }
+      node = node.parentElement;
+    }
+  }
+}
+
+// Both confirm alertdialogs use this on open and on every close. aria-modal and
+// inert hide the background from the browser accessibility tree. The same
+// siblings are aria-hidden because Playwright's ariaSnapshot ignores inert.
+// Ancestor labels are lifted so the card title is not a region around the dialog.
+function syncConfirmModal() {
+  if (syncingConfirmModal) return;
+  syncingConfirmModal = true;
+  try {
+    const open = confirmDialogs();
+    for (const dialog of confirmDialogElements()) {
+      if (open.includes(dialog)) dialog.setAttribute('aria-modal', 'true');
+      else dialog.removeAttribute('aria-modal');
+    }
+    releaseConfirmBackdrop();
+    releaseConfirmLabels();
+    if (open.length === 0) return;
+    suspendAncestorLabels(open);
+    for (const sibling of backgroundSiblings(open)) {
+      const entry = { el: sibling, inert: false, ariaHidden: false };
+      if (!sibling.hasAttribute('inert')) {
+        sibling.setAttribute('inert', '');
+        entry.inert = true;
+      }
+      if (sibling.getAttribute('aria-hidden') !== 'true') {
+        sibling.setAttribute('aria-hidden', 'true');
+        entry.ariaHidden = true;
+      }
+      if (entry.inert || entry.ariaHidden) confirmBackdrop.push(entry);
+    }
+  } finally {
+    syncingConfirmModal = false;
+  }
+}
+
 // Chromium's focus fixup moves focus to the body when the focused control becomes
 // disabled. The blur can land before the disabling statement returns, or on a later
 // rendering update under load. relatedTarget is null when focus falls through to the
@@ -2063,6 +2162,7 @@ function approvePatch() {
 
 function hideApplyWithoutErcConfirm() {
   if (applyWithoutErcConfirmEl) applyWithoutErcConfirmEl.hidden = true;
+  syncConfirmModal();
 }
 
 function revealApplyWithoutErcConfirm() {
@@ -2071,6 +2171,7 @@ function revealApplyWithoutErcConfirm() {
   const erc = ercBlockState();
   if (erc.skipped !== true || erc.failed || erc.passed === true) return;
   applyWithoutErcConfirmEl.hidden = false;
+  syncConfirmModal();
   focusProgrammatically(cancelApplyWithoutErcButtonEl);
 }
 
@@ -3056,6 +3157,7 @@ function applyRemovalConfirmCopy() {
 
 function hideRemovalConfirm() {
   if (applyRemoveConfirmEl) applyRemoveConfirmEl.hidden = true;
+  syncConfirmModal();
 }
 
 function presentRemovalConfirm() {
@@ -3075,6 +3177,7 @@ function presentRemovalConfirm() {
     }
   }
   applyRemoveConfirmEl.hidden = false;
+  syncConfirmModal();
   focusProgrammatically(cancelApplyRemoveButtonEl);
 }
 

@@ -1256,7 +1256,7 @@ test('EXISTING_COMPONENTS_REMOVED preview lists parts and cancel sends no apply'
     assert.equal(await page.locator('#apply-remove-components-lead').innerText(), en['patch.remove.lead']);
     assert.equal(await dialog.getAttribute('aria-labelledby'), 'apply-remove-components-title');
     assert.equal(await page.locator('#apply-remove-components-title').innerText(), en['patch.remove.title']);
-    assert.equal(await dialog.getAttribute('aria-describedby'), 'apply-remove-components-parts');
+    assert.equal(await dialog.getAttribute('aria-describedby'), 'apply-remove-components-lead apply-remove-components-parts');
     assert.equal(await dialog.getAttribute('aria-label'), null);
     await page.keyboard.press('Shift+Tab');
     await page.waitForFunction(() => document.activeElement?.id === 'confirm-apply-remove-components');
@@ -1451,7 +1451,7 @@ test('removed-part confirm dialog is localized in Korean', async (t) => {
     assert.equal(await page.locator('#apply-remove-components-lead').innerText(), ko['patch.remove.lead']);
     assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-labelledby'), 'apply-remove-components-title');
     assert.equal(await page.locator('#apply-remove-components-title').innerText(), ko['patch.remove.title']);
-    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-describedby'), 'apply-remove-components-parts');
+    assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-describedby'), 'apply-remove-components-lead apply-remove-components-parts');
     assert.equal(await page.locator('#apply-remove-components-confirm').getAttribute('aria-label'), null);
     const describedText = await describedRemovalText(page);
     for (const part of REMOVED_PARTS) {
@@ -1824,7 +1824,9 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
     await page.evaluate(() => { window.__holdRequest = true; });
     await page.locator('#prompt').fill('another removal while the dialog is open');
-    await page.locator('#composer button[type="submit"]').click();
+    // The open confirm marks <main> inert, so a pointer click cannot reach the composer.
+    // HTMLElement.click() still runs the submit listener and starts the request.
+    await page.locator('#composer button[type="submit"]').evaluate((button) => button.click());
     await page.waitForFunction((busy) => (
       document.querySelector('#apply-remove-components-confirm')?.hidden === true
       && document.querySelector('#patch-approval-status')?.textContent === busy

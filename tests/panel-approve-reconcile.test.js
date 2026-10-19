@@ -2009,3 +2009,170 @@ test('an open confirm dialog keeps every other programmatic focus inside', async
   }
   assert.deepEqual(failures, [], failures.join('\n'));
 });
+
+const REMOVAL_DESCRIBED_BY = ['apply-remove-components-lead', 'apply-remove-components-parts'];
+
+function bodySnapshot(page) {
+  return page.locator('body').ariaSnapshot();
+}
+
+function addedInert(page) {
+  return page.evaluate(() => [...document.querySelectorAll('[inert]')]
+    .filter((el) => el.id !== 'chatgpt-signin' && el.id !== 'chatgpt-plan')
+    .map((el) => el.id || el.tagName.toLowerCase()));
+}
+
+function describedNodes(page, selector) {
+  return page.locator(selector).evaluate((dialog) => {
+    const ids = (dialog.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    return ids.map((id) => {
+      const node = document.getElementById(id);
+      return {
+        id,
+        text: node?.textContent ?? '',
+        inside: Boolean(node && dialog.contains(node))
+      };
+    });
+  });
+}
+
+function assertDialogOnlySnapshot(snapshot, { title, lead, partRef, background }) {
+  assert.equal(snapshot.includes(`alertdialog "${title}"`), true, snapshot);
+  assert.equal(snapshot.includes(lead), true, snapshot);
+  if (partRef) assert.equal(snapshot.includes(partRef), true, snapshot);
+  for (const marker of background) {
+    assert.equal(snapshot.includes(marker), false, `background still exposed (${marker})\n${snapshot}`);
+  }
+}
+
+function assertBackgroundSnapshot(snapshot, { background }) {
+  assert.equal(snapshot.includes('alertdialog'), false, snapshot);
+  for (const marker of background) {
+    assert.equal(snapshot.includes(marker), true, `background missing (${marker})\n${snapshot}`);
+  }
+}
+
+async function approveFromConfirm(page) {
+  const before = await page.evaluate(() => window.__sent.length);
+  await page.locator('#confirm-apply-remove-components').click();
+  await page.waitForFunction((start) => window.__sent.slice(start).some((raw) => {
+    const call = JSON.parse(raw).payload;
+    return call.name === 'schematic.patch' && call.args?.approved === true;
+  }), before, { timeout: 3000 });
+  return page.evaluate((start) => {
+    const raw = window.__sent.slice(start).find((entry) => {
+      const call = JSON.parse(entry).payload;
+      return call.name === 'schematic.patch' && call.args?.approved === true;
+    });
+    return JSON.parse(raw).payload;
+  }, before);
+}
+
+test('removal confirm dialog exposes only itself and restores the background on every close', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const { en, ko } = await loadLocales();
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    { name: 'removal-cancel-en', lang: 'en', kind: 'removal', close: 'cancel' },
+    { name: 'removal-escape-ko', lang: 'ko', kind: 'removal', close: 'escape' },
+    { name: 'removal-reconnect-en', lang: 'en', kind: 'removal', close: 'reconnect' },
+    { name: 'removal-reconnect-ko', lang: 'ko', kind: 'removal', close: 'reconnect' },
+    { name: 'removal-done-en', lang: 'en', kind: 'removal', close: 'confirm-done' },
+    { name: 'removal-error-ko', lang: 'ko', kind: 'removal', close: 'error' },
+    { name: 'without-erc-cancel-en', lang: 'en', kind: 'without-erc', close: 'cancel' },
+    { name: 'without-erc-escape-ko', lang: 'ko', kind: 'without-erc', close: 'escape' }
+  ];
+  const failures = [];
+
+  try {
+    for (const row of rows) {
+      const copy = row.lang === 'ko' ? ko : en;
+      const opened = await openPanel(browser, port, row.lang);
+      const dialogId = row.kind === 'removal' ? '#apply-remove-components-confirm' : '#apply-without-erc-confirm';
+      const shell = [
+        'heading "ChatPCB"',
+        `combobox "${copy['provider.label']}"`,
+        `heading "${copy['workflow.title']}"`,
+        `textbox "${copy['composer.label']}"`
+      ];
+      const hiddenWhileOpen = [...shell, copy['patch.title']];
+      try {
+        if (row.close === 'reconnect') await signInChatGPT(opened.page);
+        if (row.kind === 'removal') await showRemovalDialog(opened.page);
+        else await showWithoutErcDialog(opened.page);
+        const dialog = opened.page.locator(dialogId);
+        assert.equal(await dialog.getAttribute('role'), 'alertdialog', row.name);
+        assert.equal(await dialog.getAttribute('aria-modal'), 'true', row.name);
+        const described = await describedNodes(opened.page, dialogId);
+        if (row.kind === 'removal') {
+          assert.deepEqual(described.map((item) => item.id), REMOVAL_DESCRIBED_BY, row.name);
+          assert.equal(described[0].text, copy['patch.remove.lead'], row.name);
+          assert.equal(described[0].inside, true, row.name);
+          assert.equal(described[1].text.includes(removedPart.ref), true, described[1].text);
+          assert.equal(described[1].text.includes(removedPart.value), true, described[1].text);
+          assert.equal(described[1].text.includes(removedPart.libId), true, described[1].text);
+          assert.equal(described[1].inside, true, row.name);
+        } else {
+          assert.deepEqual(described.map((item) => item.id), ['apply-without-erc-risk'], row.name);
+          assert.equal(described[0].text, copy['patch.apply.without-erc.risk'], row.name);
+        }
+        const title = row.kind === 'removal'
+          ? copy['patch.remove.title']
+          : await dialog.getAttribute('aria-label');
+        const lead = row.kind === 'removal'
+          ? copy['patch.remove.lead']
+          : copy['patch.apply.without-erc.risk'];
+        assertDialogOnlySnapshot(await bodySnapshot(opened.page), {
+          title,
+          lead,
+          partRef: row.kind === 'removal' ? removedPart.ref : '',
+          background: hiddenWhileOpen
+        });
+        assert.equal((await addedInert(opened.page)).length > 0, true, `${row.name} background was not inert`);
+        assert.equal(await dialog.getAttribute('inert'), null, row.name);
+
+        if (row.close === 'cancel') {
+          const cancelId = row.kind === 'removal' ? '#cancel-apply-remove-components' : '#cancel-apply-without-erc';
+          await opened.page.locator(cancelId).click();
+        } else if (row.close === 'escape') {
+          await opened.page.keyboard.press('Escape');
+        } else if (row.close === 'reconnect') {
+          await reconnectAndRefreshAuth(opened.page);
+        } else if (row.close === 'confirm-done') {
+          const approve = await approveFromConfirm(opened.page);
+          await emitResult(opened.page, approve.id, {
+            applied: true,
+            operation: 'patched',
+            validation: { ok: true },
+            patchId: 'patch_test'
+          });
+          const done = copy['patch.apply.done'].replaceAll('{refs}', removedPart.ref);
+          await opened.page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, done, { timeout: 3000 });
+        } else if (row.close === 'error') {
+          const approve = await approveFromConfirm(opened.page);
+          await emitPayload(opened.page, approve.id, { ok: false, error: { code: 'APPLY_REJECTED', message: 'apply rejected' } });
+          await opened.page.waitForFunction((text) => (
+            document.querySelector('#request-status')?.dataset.state === 'failed'
+            && document.querySelector('#request-status')?.textContent === text
+          ), copy['request.patch-failed'], { timeout: 3000 });
+        }
+        await opened.page.waitForFunction((id) => document.querySelector(id)?.hidden === true, dialogId, { timeout: 3000 });
+        assert.equal(await dialog.getAttribute('aria-modal'), null, `${row.name} aria-modal left behind`);
+        assert.equal(await opened.page.locator('#patch-approval-card').getAttribute('aria-labelledby'), 'patch-approval-title', `${row.name} card label`);
+        assert.deepEqual(await addedInert(opened.page), [], `${row.name} inert left on ${JSON.stringify(await addedInert(opened.page))}`);
+        assertBackgroundSnapshot(await bodySnapshot(opened.page), { background: shell });
+        assert.deepEqual(opened.pageErrors, [], row.name);
+      } catch (error) {
+        failures.push(`${row.name}: ${error.message}`);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+  assert.deepEqual(failures, [], failures.join('\n'));
+});
