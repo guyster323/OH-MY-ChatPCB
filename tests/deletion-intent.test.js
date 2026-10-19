@@ -40,8 +40,8 @@ const REMOVAL_UNCLEAR_MESSAGE = [
 //   choosing I2C.
 // - "remove I2C? no, keep it" and "remove I2C. actually keep it" stay
 //   refuse-clarify. The keep cue marks that I2C intent negated.
-// - "I2C 빼지 마. LED 저항 680옴" stays a 680Ω edit. 빼 is a removal verb,
-//   so the I2C intent is negated.
+// - "I2C 빼지 마. LED 저항 680옴" asks which resistor. 빼 is a removal verb,
+//   so the I2C intent is negated. The don't-delete clause is leftover content.
 // - "LED 삭제하고 I2C는 남겨", "LED 삭제하고 나서 I2C는 유지", and
 //   "LED는 삭제하지만 I2C는 남겨" were refusals. A single clean LED removal
 //   with I2C only kept is removal-candidate:LED.
@@ -97,20 +97,20 @@ const CONTRACT = [
   { prompt: 'I2C 제거 말고 LED 삭제', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: ['i2c'] },
   { prompt: 'I2C 삭제하지 말고 LED 삭제', outcome: 'refuse-clarify', ask: true, positive: ['led'], negated: ['i2c'] },
   { prompt: 'reset 버튼 삭제. I2C 커넥터는 유지하세요.', outcome: 'refuse-clarify', ask: false, positive: [], negated: [] },
-  { prompt: 'I2C는 버리지 말고 LED 저항 680옴', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
-  { prompt: 'I2C 없애지 말고 LED 저항 680옴', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
-  { prompt: 'I2C 빼지 마. LED 저항 680옴', outcome: 'edit-applied', ohms: 680, positive: [], negated: ["i2c"] },
-  { prompt: "you shouldn't remove I2C; LED resistor 680 ohm", outcome: 'edit-applied', ohms: 680, positive: [], negated: ["i2c"] },
+  { prompt: 'I2C는 버리지 말고 LED 저항 680옴', outcome: 'resistor-unclear', positive: [], negated: [] },
+  { prompt: 'I2C 없애지 말고 LED 저항 680옴', outcome: 'resistor-unclear', positive: [], negated: [] },
+  { prompt: 'I2C 빼지 마. LED 저항 680옴', outcome: 'resistor-unclear', positive: [], negated: ["i2c"] },
+  { prompt: "you shouldn't remove I2C; LED resistor 680 ohm", outcome: 'resistor-unclear', positive: [], negated: ["i2c"] },
   { prompt: 'change LED resistor to 680 ohm without removing I2C', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
   { prompt: 'keep I2C, set LED resistor 680 ohm', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
-  { prompt: 'I2C 제거 말고 LED 저항 680옴', outcome: 'edit-applied', ohms: 680, positive: [], negated: ["i2c"] },
-  { prompt: "Change the status LED series resistor to 680 ohm. don't remove I2C.", outcome: 'edit-applied', ohms: 680, positive: [], negated: ["i2c"] },
+  { prompt: 'I2C 제거 말고 LED 저항 680옴', outcome: 'resistor-unclear', positive: [], negated: ["i2c"] },
+  { prompt: "Change the status LED series resistor to 680 ohm. don't remove I2C.", outcome: 'resistor-unclear', positive: [], negated: ["i2c"] },
   { prompt: 'I2C는 삭제하거나 변경하지 마세요', outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
   { prompt: 'I2C는 삭제하거나 변경하지 마', outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
   { prompt: 'I2C는 삭제나 변경 하지 마', outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
   { prompt: "don't remove or change I2C", outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
   { prompt: "do not change or remove I2C", outcome: 'refuse-clarify', ask: true, positive: [], negated: ["i2c"] },
-  { prompt: '기존 프로젝트에서 상태 LED D1의 전류 제한 저항 R3 값만 330Ω에서 680Ω으로 변경하는 편집을 미리보기로 준비하세요. I2C는 절대 삭제하거나 변경하지 마세요.', outcome: 'edit-applied', ohms: 680, positive: [], negated: ["i2c"] },
+  { prompt: '기존 프로젝트에서 상태 LED D1의 전류 제한 저항 R3 값만 330Ω에서 680Ω으로 변경하는 편집을 미리보기로 준비하세요. I2C는 절대 삭제하거나 변경하지 마세요.', outcome: 'resistor-unclear', positive: [], negated: ["i2c"] },
   { prompt: 'change R3 from 330Ω to 680Ω', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
   { prompt: 'R3 330 ohm -> 680 ohm', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
   { prompt: 'LED 저항 330옴에서 680옴으로', outcome: 'edit-applied', ohms: 680, positive: [], negated: [] },
@@ -324,6 +324,17 @@ test('deletion intent contract is fail-closed', () => {
 
   for (const row of CONTRACT) {
     const decision = classifyExistingProjectRequest(row.prompt, SPEC);
+    if (row.outcome === 'resistor-unclear') {
+      assert.equal(decision.mode, 'refuse', row.prompt);
+      assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', row.prompt);
+      assert.equal(decision.edit, undefined, row.prompt);
+      assert.match(decision.message, /Nothing was changed/, row.prompt);
+      assert.match(decision.message, /아무것도 바꾸지 않았어요/, row.prompt);
+      assert.deepEqual(boundTargets(row.prompt, false), row.positive, `${row.prompt} positive`);
+      assert.deepEqual(boundTargets(row.prompt, true), row.negated, `${row.prompt} negated`);
+      assert.equal(removesI2c(decision), false, row.prompt);
+      continue;
+    }
     if (row.outcome === 'resistor-ambiguous') {
       assert.equal(decision.mode, 'refuse', row.prompt);
       assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', row.prompt);
@@ -426,16 +437,20 @@ test('removal intent follows the original prompt when the tool text was rewritte
     SPEC,
     '680옴으로 바꿔줘. I2C는 삭제하지 마'
   );
-  assert.equal(outcomeOf(kept), 'edit-applied');
-  assert.equal(kept.edit.ohms, 680);
+  assert.equal(kept.mode, 'refuse');
+  assert.equal(kept.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(kept.edit, undefined);
+  assert.equal(removesI2c(kept), false);
 
   const rewrittenKeep = classifyExistingProjectRequest(
     '기존 프로젝트에서 R3 값만 330Ω에서 680Ω으로 변경하세요. I2C는 삭제하거나 변경하지 마세요.',
     SPEC,
     '680옴으로 바꿔줘. I2C는 삭제하지 마'
   );
-  assert.equal(outcomeOf(rewrittenKeep), 'edit-applied');
-  assert.equal(rewrittenKeep.edit.ohms, 680);
+  assert.equal(rewrittenKeep.mode, 'refuse');
+  assert.equal(rewrittenKeep.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(rewrittenKeep.edit, undefined);
+  assert.equal(removesI2c(rewrittenKeep), false);
   assert.deepEqual(
     classifyDeletionIntents('680옴으로 바꿔줘. I2C는 삭제하지 마')
       .filter((item) => item.negated === false && item.target)
@@ -734,8 +749,9 @@ test('a removal mixed with a resistor edit asks for one change', () => {
   }
 
   const kept = classifyExistingProjectRequest('680옴으로 바꿔줘. I2C는 삭제하지 마', SPEC);
-  assert.equal(outcomeOf(kept), 'edit-applied');
-  assert.equal(kept.edit.ohms, 680);
+  assert.equal(kept.mode, 'refuse');
+  assert.equal(kept.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(kept.edit, undefined);
   assert.equal(removesI2c(kept), false);
 
   const removal = classifyExistingProjectRequest('remove I2C', SPEC);

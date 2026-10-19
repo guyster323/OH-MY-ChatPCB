@@ -571,11 +571,28 @@ for (const prompt of [
   });
 }
 
-test('a resistor edit that says not to remove I2C keeps I2C and changes the resistor', async () => {
-  await assertNegationOutcome(
-    "Change the status LED series resistor to 680 ohm. don't remove I2C.",
-    'edit-applied'
-  );
+test('a resistor edit that says not to remove I2C asks which resistor and does not change the board', async () => {
+  const prompt = "Change the status LED series resistor to 680 ohm. don't remove I2C.";
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await readFile(generated.files.schematic, 'utf8');
+  try {
+    await assert.rejects(
+      () => createSchematicPatchPlan({
+        projectDir,
+        prompt,
+        projectName: 'stm32_i2c',
+        validateProjectImpl: passingErc,
+        validateBoardImpl: passingDrc
+      }),
+      (error) => {
+        assert.equal(error.code, 'RESISTOR_TARGET_UNCLEAR', `${prompt}: ${error.message}`);
+        return true;
+      }
+    );
+  } finally {
+    assert.equal(await readFile(generated.files.schematic, 'utf8'), before);
+    await rm(projectDir, { force: true, recursive: true });
+  }
 });
 
 test("don't remove the LED, remove I2C refuses instead of removing I2C", async () => {
@@ -833,36 +850,41 @@ test('a pronoun with no resistor target asks which resistor and does not apply t
   }
 });
 
-test('Korean keep-I2C edit applies 680 ohm when the model rewrites the negation', async () => {
+test('a don\'t-delete of I2C asks which resistor and does not call the provider', async () => {
   const services = await transactionServices();
+  const prompts = [
+    "Change it to 680 ohm. Don't delete the I2C.",
+    '680옴으로 바꿔줘. I2C는 삭제하지 마'
+  ];
   try {
     await withBoardResistor(330, async ({ projectDir, generated }) => {
       const before = await readFile(generated.files.schematic, 'utf8');
-      const preview = await dispatchToolCall({
-        id: 'call_ko_680',
-        name: 'project.request',
-        args: {
-          provider: 'codex',
-          projectDir,
-          prompt: '680옴으로 바꿔줘. I2C는 삭제하지 마'
-        }
-      }, {
-        ...services,
-        ...codexPatchRewrite('기존 프로젝트에서 상태 LED D1의 전류 제한 저항 R3 값만 330Ω에서 680Ω으로 변경하는 편집을 미리보기로 준비하세요. I2C는 절대 삭제하거나 변경하지 마세요.')
-      });
-      assert.equal(preview.ok, true, preview.error?.message);
-      assert.equal(hasI2c(preview.result.components), true, JSON.stringify(preview.result.components));
-      assert.equal(hasOhm680(preview.result.components), true, JSON.stringify(preview.result.components));
-      assert.equal(removalBlocker(preview.result.review), null);
-      const approved = await dispatchToolCall({
-        name: 'schematic.patch',
-        args: { projectDir, approved: true, patchId: preview.result.patchId }
-      }, services);
-      assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
-      const schematic = await readFile(generated.files.schematic, 'utf8');
-      assert.match(schematic, /I2C_CONNECTOR/);
-      assert.match(schematic, /680/);
-      assert.notEqual(schematic, before);
+      for (const [index, prompt] of prompts.entries()) {
+        let calls = 0;
+        const preview = await dispatchToolCall({
+          id: `call_keep_i2c_${index}`,
+          name: 'project.request',
+          args: { provider: 'codex', projectDir, prompt }
+        }, {
+          ...services,
+          checkProviderAvailabilityImpl: async ({ provider }) => ({
+            provider,
+            command: 'codex',
+            available: true,
+            status: 'available'
+          }),
+          runProviderProcessImpl: async () => {
+            calls += 1;
+            throw new Error('provider must not be called');
+          }
+        });
+        assert.equal(calls, 0, prompt);
+        assert.equal(preview.ok, false, `${prompt} ${preview.error?.message ?? ''}`);
+        assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+        assert.match(preview.error?.message ?? '', /Nothing was changed|아무것도 바꾸지 않았어요/, prompt);
+        assert.equal(preview.result?.patchId, undefined, prompt);
+        assert.equal(await readFile(generated.files.schematic, 'utf8'), before, prompt);
+      }
     });
   } finally {
     services.patchApprovalRegistry.disposeAll();
@@ -2018,7 +2040,9 @@ test('the pre-provider gate sends non-resistor edits to the provider and blocks 
     ['set the LED resistor to 470', 'RESISTOR_UNIT_REQUIRED'],
     ['LED 저항 4m7으로', 'RESISTOR_VALUE_INVALID'],
     ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID'],
-    ['change R3 to 2.2kΩ and keep the 1 m cable', 'RESISTOR_TARGET_UNCLEAR']
+    ['change R3 to 2.2kΩ and keep the 1 m cable', 'RESISTOR_TARGET_UNCLEAR'],
+    ["Change it to 680 ohm. Don't delete the I2C.", 'RESISTOR_TARGET_UNCLEAR'],
+    ['680옴으로 바꿔줘. I2C는 삭제하지 마', 'RESISTOR_TARGET_UNCLEAR']
   ];
   let calls = 0;
   const provider = {
@@ -2767,6 +2791,14 @@ function shuffleItems(rng, list) {
 
 const PROP_DASHES = ['\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212', '\uFE58', '\uFE63', '\uFF0D'];
 const UNKNOWN_ROLE_WORDS = ['terminator', 'NRST', 'BOOT0', 'transistor', 'opamp', 'ADC', '플업', '풀 업'];
+const DONT_DELETE_OBJECTS = [
+  { en: 'I2C connector', ko: 'I2C 커넥터' },
+  { en: 'J2', ko: 'J2' },
+  { en: 'U1', ko: 'U1' },
+  { en: 'USB', ko: 'USB' },
+  { en: 'cable', ko: '케이블' },
+  { en: 'J4', ko: 'J4' }
+];
 
 function propertySeed() {
   const raw = process.env.CHATPCB_PROP_SEED;
@@ -2795,7 +2827,7 @@ function buildMixedRoleCase(rng) {
   const unknown = pickItem(rng, UNKNOWN_ROLE_WORDS);
   const lang = rng() < 0.5 ? 'en' : 'ko';
   const dash = pickItem(rng, PROP_DASHES);
-  const shape = Math.floor(rng() * 12);
+  const shape = Math.floor(rng() * 16);
   const foreign = [{ ohms: foreignValue.ohms, label: foreignValue.en }];
   let prompt;
   if (shape === 0) {
@@ -2861,8 +2893,26 @@ function buildMixedRoleCase(rng) {
     prompt = lang === 'ko'
       ? `LED 저항 ${led.ko}으로\n• ${role.ko} ${foreignValue.ko}`
       : `LED resistor to ${led.en}\n• ${role.en} ${foreignValue.en}`;
-  } else {
+  } else if (shape === 11) {
     prompt = `LED resistor to ${led.en} / ${unknown} ${foreignValue.en}`;
+  } else {
+    const object = pickItem(rng, DONT_DELETE_OBJECTS);
+    const ledKo = mixedLedClause(led, 'ko');
+    const ledEn = mixedLedClause(led, 'en');
+    const before = rng() < 0.5;
+    if (shape === 12) {
+      const guard = `${object.ko}는 삭제하지 마`;
+      prompt = before ? `${guard}. ${ledKo}` : `${ledKo}. ${guard}`;
+    } else if (shape === 13) {
+      prompt = `${object.ko} 지우지 말고 ${ledKo}`;
+    } else if (shape === 14) {
+      const guard = `don't remove ${object.en}`;
+      prompt = before ? `${guard}. ${ledEn}` : `${ledEn}. ${guard}`;
+    } else {
+      const guard = `do not delete the ${object.en}`;
+      prompt = before ? `${guard}. ${ledEn}` : `${ledEn}. ${guard}`;
+    }
+    foreign[0] = { ohms: led.ohms, label: led.en };
   }
   return {
     prompt,
@@ -3012,10 +3062,9 @@ function resistorRefs(schematic) {
   return Object.keys(referenceValues(schematic)).filter((ref) => /^R\d+$/i.test(ref)).sort();
 }
 
-// The test name still says "reaches the provider". The board has a status LED
-// symbol and no LED series resistor, so the edit is RESISTOR_TARGET_UNCLEAR
-// and the provider is not called. Approval cannot add a resistor.
-test('current limiting resistor on a generated board without a status LED reaches the provider and adds no resistor', async () => {
+// The board has a status LED symbol and no LED series resistor, so the edit
+// is RESISTOR_TARGET_UNCLEAR and the provider is not called.
+test('current limiting resistor on a generated board without an LED series resistor asks which resistor and adds no resistor', async () => {
   const services = await transactionServices();
   const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-gen-noled-'));
   const generated = await generateMcuPeripheralProject({

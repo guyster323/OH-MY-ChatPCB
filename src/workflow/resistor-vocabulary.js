@@ -556,8 +556,21 @@ function recognizedWord(word, clause) {
   return false;
 }
 
+// Drop a don't-delete clause only when it names a resistor, a resistor role,
+// or an R ref. A bus, connector, cable, or other ref (I2C, J2, U1, USB, C1)
+// stays a content word in either language.
+function dontDeleteNamesResistor(clause) {
+  const raw = String(clause ?? '');
+  if (rx("\\bR\\d+\\b", "i").test(raw)) return true;
+  if (rx("저항|抵抗|\\bresistors?\\b", "iu").test(raw)) return true;
+  if (rx("\\bleds?\\b|엘이디|엘예디|발광|전류\\s*제한|current[-\\s]+limiting", "iu").test(raw)) return true;
+  const withoutBus = raw.replace(rx("\\b(?:i2c|sda|scl)\\b", "gi"), ' ');
+  return textHasKnownRole(withoutBus);
+}
+
 function leftoverWords(clause) {
-  if (isDontDelete(clause) || isResistorKeepClause(clause) || isGenericKeep(clause) || isKeepNonResistorClause(clause)) return [];
+  if (isGenericKeep(clause) || isResistorKeepClause(clause) || isKeepNonResistorClause(clause)) return [];
+  if (isDontDelete(clause) && dontDeleteNamesResistor(clause)) return [];
   if (isLengthClause(clause) || isForeignRoleClause(clause)) return [];
   const words = clauseWords(clause);
   return words.filter((word) => !recognizedWord(word, clause) && !isKnownRoleWord(word) && !isUnboundMeasureNoun(word));

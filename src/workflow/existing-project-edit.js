@@ -507,7 +507,7 @@ function classifyEditText(text, spec) {
 
 // A positive removal beside a resistor value is one request with two changes.
 // Applying either half would drop the other. A negated removal ("삭제하지 마")
-// is not affirmative, so the value edit still applies.
+// is not affirmative, so it is not this mixed refusal.
 function isMixedRemovalAndEdit(removal, resistor) {
   if (!removal?.affirmative) return false;
   if (resistor?.kind === 'resistor') return true;
@@ -1917,7 +1917,8 @@ function foreignRoleClauseHasValue(text) {
 }
 
 // A known role that survives keep-masking is still part of the request.
-// "풀업용" and "for SDA" refuse. "I2C는 삭제하지 마" and "keep the pull-up" do not.
+// "풀업용" and "for SDA" refuse. A don't-delete clause is not this role.
+// "keep the pull-up" is masked before this walk.
 function unkeptForeignRole(text) {
   const masked = maskGuardObjects(text);
   for (const clauseText of splitResistorClauses(masked)) {
@@ -2022,7 +2023,7 @@ function foreignRoleKind(text) {
 
 // No resistor noun. A value clause that still names something else (pull-up,
 // gate, I2C) is not the LED resistor. A clause with only the value and a verb
-// stays an LED edit, including "680옴으로. I2C는 삭제하지 마".
+// stays an LED edit. A don't-delete of I2C is leftover content in coverage.
 function bareNonLedSubject(text) {
   let unknown = false;
   for (const clause of splitClauses(text)) {
