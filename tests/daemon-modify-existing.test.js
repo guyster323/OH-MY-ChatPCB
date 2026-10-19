@@ -3718,6 +3718,99 @@ test('mutant A4 the daemon gate refuses an uncovered resistor merge even if the 
   assert.deepEqual(localResistorGate(decision, covered), { action: 'local' });
 });
 
+const UNCOVERED_RESISTOR_MERGE = 'change the LED resistor to 680Ω and the widget';
+const COVERED_RESISTOR_MERGE = 'change the LED resistor to 680Ω';
+
+// The real classifier never merges an uncovered sentence, so the call-site
+// gate is unreachable without this test-only classifier. Covered sentences
+// still use the real classifier and apply locally.
+function classifyCallSiteResistorMerge(prompt, spec, userPrompt) {
+  if (prompt === UNCOVERED_RESISTOR_MERGE) {
+    return {
+      mode: 'merge',
+      edit: { kind: 'resistor', ref: 'R3', ohms: 680, ohmsText: '680Ω' }
+    };
+  }
+  return classifyExistingProjectRequest(prompt, spec, userPrompt);
+}
+
+test('the daemon refuses an uncovered resistor merge at the call site with zero provider calls', async () => {
+  assert.equal(assessRequestCoverage(UNCOVERED_RESISTOR_MERGE).covered, false);
+  assert.equal(assessRequestCoverage(COVERED_RESISTOR_MERGE).covered, true);
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const beforeBytes = await snapshotProjectBytes(projectDir);
+  try {
+    const provider = nativeNoPatchCounter();
+    const preview = await requestAndMaybeApprove(services, projectDir, UNCOVERED_RESISTOR_MERGE, {
+      ...provider.impl,
+      classifyExistingProjectRequest: classifyCallSiteResistorMerge
+    }, 'call_a4_callsite_uncovered');
+    assert.equal(provider.calls(), 0, `calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
+    assert.equal(preview.ok, false, preview.error?.message ?? '');
+    assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', preview.error?.code ?? '');
+    assert.equal(preview.error?.message, resistorTargetUnclearMessage('680Ω'));
+    assert.equal(preview.result?.patchId, undefined);
+    assertProjectBytes(await snapshotProjectBytes(projectDir), beforeBytes, 'uncovered merge');
+
+    const coveredProvider = nativeNoPatchCounter();
+    const covered = await dispatchToolCall({
+      id: 'call_a4_callsite_covered',
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, prompt: COVERED_RESISTOR_MERGE }
+    }, {
+      ...services,
+      ...coveredProvider.impl,
+      classifyExistingProjectRequest: classifyCallSiteResistorMerge
+    });
+    assert.equal(coveredProvider.calls(), 0, `covered calls ${coveredProvider.calls()} code=${covered.error?.code ?? ''}`);
+    assert.equal(covered.ok, true, `${covered.error?.code ?? ''} ${covered.error?.message ?? ''}`);
+    assert.equal(covered.result?.source?.via, 'native-fallback');
+    const approved = await dispatchToolCall({
+      name: 'schematic.patch',
+      args: { projectDir, approved: true, patchId: covered.result.patchId }
+    }, services);
+    assert.equal(approved.ok, true, approved.error?.message ?? JSON.stringify(approved.result?.reason));
+    assert.equal(approved.result.applied, true, JSON.stringify(approved.result?.reason));
+    const schematic = await readFile(generated.files.schematic, 'utf8');
+    const spice = await readFile(generated.files.spice, 'utf8');
+    assertOnlySeriesValueChanged(schematic, before.schematic, '680Ω', spice, before.spice, '680', COVERED_RESISTOR_MERGE);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('an uncovered resistor sentence is RESISTOR_TARGET_UNCLEAR with zero provider calls', async () => {
+  assert.equal(assessRequestCoverage(UNCOVERED_RESISTOR_MERGE).covered, false);
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  await materializeSeriesResistor(services, projectDir, generated);
+  const beforeBytes = await snapshotProjectBytes(projectDir);
+  try {
+    const provider = nativeNoPatchCounter();
+    const preview = await requestAndMaybeApprove(
+      services,
+      projectDir,
+      UNCOVERED_RESISTOR_MERGE,
+      provider.impl,
+      'call_a4_plain_uncovered'
+    );
+    assert.equal(provider.calls(), 0, `calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
+    assert.equal(preview.ok, false, preview.error?.message ?? '');
+    assert.equal(preview.error?.code, 'RESISTOR_TARGET_UNCLEAR', `${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+    assert.equal(preview.result?.patchId, undefined);
+    assertProjectBytes(await snapshotProjectBytes(projectDir), beforeBytes, 'plain uncovered');
+    assert.equal(schematicRefValue(await readFile(generated.files.schematic, 'utf8'), 'R3'), '1k');
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
 test("'바꿔야 할까?' and '<value> ok?' are questions and do not create an R3 patch", async () => {
   const rows = QUESTION_PROVIDER_ROWS.filter((row) => (
     row.prompt === 'LED 저항 680Ω으로 바꿔야 할까?'

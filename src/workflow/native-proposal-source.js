@@ -442,7 +442,9 @@ export async function createNativeProposal({
   validateCandidateImpl,
   generateProjectImpl = generateMcuPeripheralProject,
   conversationBytes,
-  source
+  source,
+  // Test-only. Unset uses classifyExistingProjectRequest.
+  classifyRequest = classifyExistingProjectRequest
 } = {}) {
   if (!projectDir) {
     throw new Error('projectDir is required.');
@@ -462,7 +464,7 @@ export async function createNativeProposal({
     throwIfAborted(signal);
 
     const existingSpec = await readChatPcbManifest(candidateDir);
-    const decision = classifyExistingProjectRequest(prompt, existingSpec, userPromptFrom(request));
+    const decision = classifyRequest(prompt, existingSpec, userPromptFrom(request));
     let proposed;
     if (decision.mode === 'refuse') {
       if (decision.code === 'REMOVAL_INTENT_UNCLEAR') {

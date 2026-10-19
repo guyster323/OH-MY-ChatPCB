@@ -196,7 +196,8 @@ export async function createSchematicPatchPlan({
   context,
   signal,
   conversationBytes,
-  source
+  source,
+  classifyRequest
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
@@ -209,7 +210,8 @@ export async function createSchematicPatchPlan({
     validateCandidateImpl: validateCandidateImpl ?? createCandidateValidator({
       validateProjectImpl,
       validateBoardImpl
-    })
+    }),
+    classifyRequest
   });
 }
 

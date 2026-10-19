@@ -759,7 +759,12 @@ async function requestProject(call, ctx) {
           // CHATPCB_MANIFEST_INVALID and other read failures keep the prior path.
         }
         if (existingSpec) {
-          const decision = classifyExistingProjectRequest(generatePrompt, existingSpec, prompt);
+          // Test-only. Production leaves ctx.classifyExistingProjectRequest unset,
+          // so this is classifyExistingProjectRequest. A test injects a classifier
+          // that returns a resistor merge the real classifier would refuse. The
+          // same function is forwarded into the local preview below.
+          const classifyRequest = ctx.classifyExistingProjectRequest ?? classifyExistingProjectRequest;
+          const decision = classifyRequest(generatePrompt, existingSpec, prompt);
           // Counts, pins, frequencies, colors, and questions still reach the provider.
           if (decision.mode === 'refuse' && decision.code && blocksBeforeProvider(prompt, decision)) {
             const refused = new Error(decision.message);
@@ -1484,7 +1489,8 @@ async function previewNativeChange({ projectDir, prompt, userPrompt, projectName
       validateProjectImpl: ctx.validateProjectImpl,
       validateBoardImpl: ctx.validateBoardImpl,
       conversationBytes,
-      source: ctx.designSource ?? proposalSource()
+      source: ctx.designSource ?? proposalSource(),
+      classifyRequest: ctx.classifyExistingProjectRequest
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(prompt);
