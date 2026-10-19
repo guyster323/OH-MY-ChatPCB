@@ -2166,6 +2166,56 @@ async function materializeSeriesResistor(_services, projectDir, generated) {
   return before;
 }
 
+test('English LED resistor 4m7 is rejected locally with zero provider calls', async () => {
+  const services = await transactionServices();
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'chatpcb-en-milli-'));
+  const spec = {
+    sourcePrompt: 'existing board',
+    mcu: { family: 'STM32' },
+    peripherals: [
+      { kind: 'status-led' },
+      { kind: 'status-led-resistor', value: '1000' }
+    ],
+    schematic: {
+      components: [
+        { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '1k' }
+      ]
+    }
+  };
+  const schematic = [
+    '(kicad_sch (version 20250114) (generator chatpcb)',
+    '  (symbol (lib_id "ChatPCB:LED_RESISTOR") (at 0 0 0)',
+    '    (property "Reference" "R3" (at 0 0 0))',
+    '    (property "Value" "1k" (at 0 0 0))))'
+  ].join('\n');
+  const specText = `${JSON.stringify(spec, null, 2)}\n`;
+  const specPath = path.join(projectDir, 'board.chatpcb.json');
+  const schematicPath = path.join(projectDir, 'board.kicad_sch');
+  await writeFile(specPath, specText);
+  await writeFile(schematicPath, schematic);
+  try {
+    for (const [index, prompt] of ['LED resistor 4m7', 'LED resistor 2m2'].entries()) {
+      const provider = nativeNoPatchCounter();
+      const preview = await dispatchToolCall({
+        id: `call_en_milli_${index}`,
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt }
+      }, { ...services, ...provider.impl });
+      assert.equal(provider.calls(), 0, prompt);
+      assert.equal(preview.ok, false, prompt);
+      assert.equal(preview.error?.code, 'RESISTOR_VALUE_INVALID', `${prompt} ${preview.error?.code ?? ''} ${preview.error?.message ?? ''}`);
+      assert.match(preview.error?.message ?? '', /Nothing was changed|아무것도 바꾸지 않았어요/, prompt);
+      assert.equal(await readFile(schematicPath, 'utf8'), schematic, prompt);
+      assert.equal(await readFile(specPath, 'utf8'), specText, prompt);
+      assert.equal(schematicRefValue(schematic, 'R3'), '1k', prompt);
+    }
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
 test('a polite question with an LED target, edit verb, and unit value applies R3=680Ω and RLED 680', async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();

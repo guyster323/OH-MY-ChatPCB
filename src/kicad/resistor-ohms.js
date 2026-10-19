@@ -41,6 +41,9 @@ function formatResistorOhms(ohms) {
 }
 
 const OHM_UNIT_TAIL = /(?:\s*(?:Ω|옴|ohms?))$/iu;
+// "4k 7", "1R 5", "2M 2". The space splits the RKM fraction off the multiplier.
+// Lowercase m is milli, not this form. One digit glued on (4k7, 2M2) stays valid.
+const SPACED_RKM = /^\d+(?:\.\d+)?\s*[kKrRM]\s+\d+$/;
 
 // One resistor-value parser. Unparseable text returns null. Callers must fail
 // closed instead of guessing a value. Zero is null here so a 0Ω token is not a
@@ -52,6 +55,7 @@ function parseResistorOhmsAllowingZero(value) {
     .replace(OHM_UNIT_TAIL, '')
     .trim();
   if (!text) return null;
+  if (SPACED_RKM.test(text)) return null;
 
   const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
   if (rkm) {
@@ -92,6 +96,11 @@ function bareResistorText(value) {
     .normalize('NFKC')
     .replace(OHM_UNIT_TAIL, '')
     .trim();
+}
+
+// 4k 7, 1R 5, 2M 2, 4.7k 2. The whole token, after the ohm-unit tail is removed.
+export function isSpacedRkmValue(value) {
+  return SPACED_RKM.test(bareResistorText(value));
 }
 
 // 4m7, 1m, 2m2, and 4.7m. Uppercase M and meg/MEG/Meg are not this suffix.

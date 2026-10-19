@@ -877,7 +877,7 @@ test('non-resistor units, additions, questions, and non-edit numbers are not res
     ['change the LED resistor to 4m7', 'RESISTOR_VALUE_INVALID', true],
     ['4m7 resistor', 'RESISTOR_VALUE_INVALID', false],
     ['LED 5V 4m7', 'RESISTOR_VALUE_INVALID', false],
-    ['LED resistor 4m7', 'RESISTOR_VALUE_INVALID', false],
+    ['LED resistor 4m7', 'RESISTOR_VALUE_INVALID', true],
     ['4.7mΩ', 'RESISTOR_VALUE_INVALID', true],
     ['4.7 mΩ', 'RESISTOR_VALUE_INVALID', true],
     ['4.7m ohm', 'RESISTOR_VALUE_INVALID', true],

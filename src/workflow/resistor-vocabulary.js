@@ -364,8 +364,10 @@ export function isRejectedUppercaseRkm(text) {
   return match[3].length !== 1;
 }
 
+// A bare digit after the multiplier ("4k 7", "1R 5", "2M 2") is the same refusal.
+// "4k 5%" is not: the percent token is not a bare digit.
 export function hasMalformedRkm(text) {
-  return rx("(?:^|[^\\d.])(?:\\d+[kKrR]\\d{2,}|\\d+M\\d{2,})(?!\\d)").test(String(text ?? ''));
+  return rx("(?:^|[^\\d.])(?:\\d+[kKrR]\\d{2,}|\\d+M\\d{2,}|\\d+(?:\\.\\d+)?\\s*[kKrRM]\\s+\\d+(?![\\d%]))(?!\\d)").test(String(text ?? ''));
 }
 
 function pushBreak(breaks, start, end) {

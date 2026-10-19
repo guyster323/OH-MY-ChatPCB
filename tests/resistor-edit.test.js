@@ -46,6 +46,32 @@ async function seedSeriesResistor(projectDir, generated, value = '1k') {
   await writeGeneratedProject({ projectDir, spec, projectName });
 }
 
+test("a bare digit right after a bound value ('4k 7', '1R 5', '2M 2') is RESISTOR_VALUE_INVALID", () => {
+  assert.equal(parseResistorOhms('4k 7'), null);
+  assert.equal(parseResistorOhms('1R 5'), null);
+  assert.equal(parseResistorOhms('2M 2'), null);
+  assert.equal(parseResistorOhms('4K 7'), null);
+  assert.equal(parseResistorOhms('4k7'), '4700');
+  assert.equal(parseResistorOhms('1R5'), '1.5');
+  assert.equal(parseResistorOhms('2M2'), '2200000');
+  for (const prompt of [
+    'set the LED resistor to 4k 7',
+    'LED resistor 1R 5',
+    'LED resistor 2M 2',
+    'change the LED resistor to 4k 7',
+    'change the LED resistor to 4K 7',
+    'LED 저항 4k 7로 바꿔줘',
+    'LED 저항 1R 5로 바꿔줘',
+    'set the LED resistor to 2M 2'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  }
+});
+
 test('a resistor token the shared parser rejects is not applied', () => {
   for (const prompt of [
     'LED resistor to 1,000 ohm',

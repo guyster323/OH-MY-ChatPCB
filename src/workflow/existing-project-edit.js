@@ -5,7 +5,7 @@ function compileRegExp(source, flags) {
   return new RegExp(source, flags);
 }
 
-import { classifyResistorValue, isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { classifyResistorValue, isLoneMilliResistorSuffix, isSpacedRkmValue, parseResistorOhms } from '../kicad/resistor-ohms.js';
 import { normalizeMatchText } from '../runtime/match-text.js';
 import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
@@ -748,6 +748,11 @@ function hasResistorEditVerb(text) {
   return RESISTOR_EDIT_VERB.test(text);
 }
 
+function englishResistorMilli(text) {
+  const match = /\bresistor\s+(\S+)/.exec(text);
+  return match != null && isLoneMilliResistorSuffix(match[1]);
+}
+
 function hasResistorTargetText(text) {
   if (/저항|抵抗|\bresistor\b/iu.test(text)) return true;
   return resistorReferenceTokens(text).length > 0;
@@ -765,6 +770,9 @@ export function blocksBeforeProvider(text, decision) {
   if (valueOnlyDecision(normalized)) return true;
   if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
   if (decision.code === 'RESISTOR_VALUE_INVALID' && hasMalformedRkm(normalized)) return true;
+  // "LED resistor 4m7" names the value on the resistor word. Korean marks that
+  // same object with 로 ("LED 저항 4m7로") and stops here. No English verb.
+  if (decision.code === 'RESISTOR_VALUE_INVALID' && englishResistorMilli(normalized)) return true;
   if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
   if (decision.code === 'RESISTOR_AMBIGUOUS') return true;
@@ -2731,6 +2739,7 @@ const RESISTOR_TOKEN = compileRegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\
   String.raw`\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
   String.raw`\d+[rRkKmM]\d+[A-Za-z]+`,
   String.raw`\d+[rRkKmM]\d+`,
+  String.raw`\d+(?:\.\d+)?\s*[kKrRM]\s+\d+(?![\d%])`,
   String.raw`\d+(?:\.\d+)?\s*meg(?![A-Za-z])`,
   String.raw`\d+(?:\.\d+)?\s*[rRkKmMuUnNpPfFgGtT](?![A-Za-z])`,
   String.raw`\d+(?:\.\d+)?[A-Za-z]{2,}`,
@@ -3045,7 +3054,8 @@ function markNonResistorQuantities(tokens, text) {
     }
     // Unitless k/K/R (4k, 4K, 4k7, 2R2) is a value only when it is bound to the
     // resistor target. "rev 4k", "4K display", and "10k pot" are not.
-    if (isUnitlessKRSuffix(raw) && !unitlessSuffixCountsAsResistor(text, token.index, token.end)) {
+    // "4k 7" / "1R 5" / "2M 2" follow that same binding. A bound one is malformed.
+    if ((isUnitlessKRSuffix(raw) || isSpacedRkmValue(raw)) && !unitlessSuffixCountsAsResistor(text, token.index, token.end)) {
       token.quantity = true;
       token.attempt = false;
       continue;
