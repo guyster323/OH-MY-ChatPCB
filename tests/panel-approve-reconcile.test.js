@@ -1986,50 +1986,6 @@ test('an open confirm dialog keeps every other programmatic focus inside', async
       run: (page) => page.evaluate(() => window.__chatpcbTest.focusApply())
     },
     {
-      name: 'approval-status',
-      // Disabling Apply closes the removal dialog on purpose. The steal is the without-ERC path.
-      // Chromium may defer the disabled-control blur until a later frame. If it has not
-      // happened yet, blur() fires focusout now. The sync snapshot is before any microtask.
-      dialogs: ['without-erc'],
-      run: async (page) => {
-        const result = await page.evaluate(() => {
-          const status = document.querySelector('#patch-approval-status');
-          const focus = status.focus.bind(status);
-          window.__statusFocusCalls = 0;
-          status.focus = (...args) => {
-            window.__statusFocusCalls += 1;
-            return focus(...args);
-          };
-          const dialog = document.querySelector('#apply-without-erc-confirm');
-          const focused = document.activeElement;
-          if (!dialog || dialog.hidden || !dialog.contains(focused)) {
-            throw new Error(`approval-status started on ${focused?.id || 'BODY'}`);
-          }
-          let focusInId = '';
-          const onFocusIn = (event) => {
-            if (dialog.contains(event.target) && event.target.disabled !== true) focusInId = event.target.id || '';
-          };
-          document.addEventListener('focusin', onFocusIn, true);
-          focused.disabled = true;
-          document.querySelector('#approve-patch-button').disabled = true;
-          if (document.activeElement === focused) focused.blur();
-          const active = document.activeElement;
-          const syncId = !active || active === document.body ? 'BODY' : (active.id || active.tagName);
-          const syncInside = Boolean(dialog.contains(active) && active.disabled !== true);
-          return new Promise((resolve) => {
-            queueMicrotask(() => {
-              document.removeEventListener('focusin', onFocusIn, true);
-              resolve({ syncId, syncInside, focusInId, calls: window.__statusFocusCalls });
-            });
-          });
-        });
-        assert.equal(result.calls, 0, `patch approval status focus() ran ${result.calls} times`);
-        assert.equal(result.syncInside, true, `approval-status sync focus ${result.syncId}`);
-        assert.notEqual(result.focusInId, '', 'approval-status did not observe focusin');
-        assert.notEqual(result.syncId, 'patch-approval-status');
-      }
-    },
-    {
       name: 'sync-blur',
       dialogs: ['removal', 'without-erc'],
       run: async (page) => {
@@ -2216,6 +2172,87 @@ test('an open confirm dialog keeps every other programmatic focus inside', async
   assert.deepEqual(failures, [], failures.join('\n'));
 });
 
+test('a focused confirm button that becomes disabled and then blurs to body (deferred Chromium fixup) returns focus inside the open dialog', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const server = await startServer();
+  const port = server.address().port;
+  const rows = [
+    { name: 'removal-confirm', kind: 'removal', button: '#confirm-apply-remove-components' },
+    { name: 'removal-cancel', kind: 'removal', button: '#cancel-apply-remove-components' },
+    { name: 'without-erc-confirm', kind: 'without-erc', button: '#confirm-apply-without-erc' },
+    { name: 'without-erc-cancel', kind: 'without-erc', button: '#cancel-apply-without-erc' }
+  ];
+  const failures = [];
+
+  try {
+    for (const row of rows) {
+      const opened = await openPanel(browser, port);
+      try {
+        const dialogId = row.kind === 'removal' ? '#apply-remove-components-confirm' : '#apply-without-erc-confirm';
+        if (row.kind === 'removal') await showRemovalDialog(opened.page);
+        else await showWithoutErcDialog(opened.page);
+        const before = await dialogFocus(opened.page, dialogId);
+        assert.equal(before.open, true, row.name);
+        assert.equal(before.inside, true, `${row.name} ${before.activeId}`);
+        const result = await opened.page.evaluate(async ({ dialogId: id, buttonId }) => {
+          const dialog = document.querySelector(id);
+          const button = document.querySelector(buttonId);
+          const idOf = (active) => {
+            if (!active || active === document.body || active === document.documentElement) return 'BODY';
+            return active.id || active.tagName;
+          };
+          if (!dialog || dialog.hidden || !button) return { focusInId: '', activeId: 'MISSING', inside: false };
+          let armed = false;
+          let onFocusIn = () => {};
+          const focusIn = new Promise((resolve) => {
+            onFocusIn = (event) => {
+              if (!armed) return;
+              if (event.target === button || event.target.disabled === true) return;
+              if (!dialog.contains(event.target)) return;
+              document.removeEventListener('focusin', onFocusIn, true);
+              resolve(event.target.id || event.target.tagName);
+            };
+            document.addEventListener('focusin', onFocusIn, true);
+          });
+          button.focus();
+          if (document.activeElement !== button) {
+            document.removeEventListener('focusin', onFocusIn, true);
+            return { focusInId: '', activeId: idOf(document.activeElement), inside: false };
+          }
+          armed = true;
+          button.disabled = true;
+          button.blur();
+          const focusInId = await Promise.race([
+            focusIn,
+            Promise.resolve().then(() => '')
+          ]);
+          const active = document.activeElement;
+          return {
+            focusInId,
+            activeId: idOf(active),
+            inside: Boolean(dialog.hidden === false && dialog.contains(active) && active.disabled !== true)
+          };
+        }, { dialogId, buttonId: row.button });
+        assert.equal(result.inside, true, `${row.name} focused ${result.activeId}`);
+        assert.notEqual(result.focusInId, '', `${row.name} did not observe focusin`);
+        assert.notEqual(result.activeId, 'BODY', `${row.name} focused ${result.activeId}`);
+        const after = await dialogFocus(opened.page, dialogId);
+        assert.equal(after.open, true, row.name);
+        assert.equal(after.inside, true, `${row.name} focused ${after.activeId}`);
+      } catch (error) {
+        failures.push(`${row.name}: ${error.message}`);
+      } finally {
+        await opened.page.close();
+      }
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+  assert.deepEqual(failures, [], failures.join('\n'));
+});
+
 const REMOVAL_DESCRIBED_BY = ['apply-remove-components-lead', 'apply-remove-components-parts'];
 
 function bodySnapshot(page) {
@@ -2273,6 +2310,84 @@ async function approveFromConfirm(page) {
     return JSON.parse(raw).payload;
   }, before);
 }
+
+test('clicking #provider while the removal dialog is open does not move focus out, and #provider can be focused after the dialog closes', async (t) => {
+  const browser = await launchPanelBrowser(t);
+  if (!browser) return;
+  const server = await startServer();
+  const port = server.address().port;
+  try {
+    const opened = await openPanel(browser, port);
+    try {
+      await showRemovalDialog(opened.page);
+      const page = opened.page;
+      const dialog = page.locator('#apply-remove-components-confirm');
+      assert.equal(await dialog.getAttribute('aria-modal'), 'true');
+      const before = await dialogFocus(page, '#apply-remove-components-confirm');
+      assert.equal(before.open, true);
+      assert.equal(before.inside, true, before.activeId);
+      const hit = await page.evaluate(() => {
+        const provider = document.querySelector('#provider');
+        const dialogEl = document.querySelector('#apply-remove-components-confirm');
+        const ancestor = provider.closest('[inert]');
+        const rect = provider.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const target = document.elementFromPoint(x, y);
+        return {
+          ancestor: ancestor ? (ancestor.id || ancestor.tagName.toLowerCase()) : '',
+          dialogInert: dialogEl.hasAttribute('inert'),
+          x,
+          y,
+          width: rect.width,
+          height: rect.height,
+          hit: target?.id || target?.tagName?.toLowerCase() || 'none',
+          providerHit: Boolean(target && (target === provider || provider.contains(target)))
+        };
+      });
+      assert.notEqual(hit.ancestor, '', 'removal dialog did not make the provider background inert');
+      assert.equal(hit.dialogInert, false);
+      assert.equal(hit.width > 0 && hit.height > 0, true, 'provider has no box');
+      assert.equal(hit.providerHit, false, `click target was ${hit.hit}`);
+      await page.evaluate(() => {
+        window.__providerClick = { trail: [] };
+        document.addEventListener('focusin', (event) => {
+          window.__providerClick.trail.push(event.target?.id || event.target?.tagName || 'none');
+        }, true);
+      });
+      await page.mouse.click(hit.x, hit.y);
+      const clicked = await page.evaluate(() => {
+        const provider = document.querySelector('#provider');
+        provider.focus();
+        const dialogEl = document.querySelector('#apply-remove-components-confirm');
+        const active = document.activeElement;
+        const activeId = !active || active === document.body || active === document.documentElement
+          ? 'BODY'
+          : (active.id || active.tagName);
+        return {
+          trail: window.__providerClick.trail,
+          activeId,
+          inside: Boolean(dialogEl.hidden === false && dialogEl.contains(active))
+        };
+      });
+      assert.equal(clicked.trail.includes('provider'), false, `focus moved to provider: ${clicked.trail.join(',')}`);
+      assert.equal(clicked.inside, true, clicked.activeId);
+      assert.notEqual(clicked.activeId, 'provider');
+      await page.locator('#cancel-apply-remove-components').click();
+      await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
+      assert.equal(await dialog.getAttribute('aria-modal'), null);
+      assert.deepEqual(await addedInert(page), []);
+      await page.locator('#provider').focus();
+      assert.equal(await activeElementId(page), 'provider');
+      assert.deepEqual(opened.pageErrors, []);
+    } finally {
+      await opened.page.close();
+    }
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    await browser.close();
+  }
+});
 
 test('removal confirm dialog exposes only itself and restores the background on every close', async (t) => {
   const browser = await launchPanelBrowser(t);

@@ -546,6 +546,7 @@ function restoreConfirmDialogFocusSoon() {
   });
 }
 
+// Registered once and never removed, by design.
 document.addEventListener('focusout', (event) => {
   if (confirmDialogs().length === 0) return;
   if (confirmDialogHolds(event.relatedTarget)) return;
