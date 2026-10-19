@@ -38,7 +38,7 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
     }, daemon.url);
     await page.goto(`${staticServer.url}/index.html`);
     await page.evaluate(() => window.chatpcbI18n.ready);
-    await page.getByText('Connected', { exact: true }).waitFor();
+    await page.getByText('Daemon connected', { exact: true }).waitFor();
     await page.evaluate(() => {
       window.__busyCycle = 0;
       window.__sawRunning = false;
@@ -80,7 +80,7 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
     assert.equal(await page.getByRole('button', { name: 'Send' }).isEnabled(), true);
 
     await page.getByRole('button', { name: panelLocale['draft.create'] }).click();
-    await page.getByText(panelLocale['request.preview-ready']).waitFor();
+    await page.locator('#request-result-heading', { hasText: panelLocale['request.preview-ready'] }).waitFor();
     await page.waitForFunction(() => {
       const button = document.querySelector('#approve-patch-button');
       return button && button.disabled === false;
@@ -174,6 +174,8 @@ function responseFor(call, calls) {
       ok: true,
       result: {
         requiresApproval: true,
+        approved: false,
+        applied: false,
         patchId: 'patch-1',
         expiresAt: Date.now() + 120000,
         files: {},

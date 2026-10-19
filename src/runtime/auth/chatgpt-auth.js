@@ -2002,8 +2002,8 @@ function createExpiredPage() {
 <head><meta charset="utf-8"><title>Sign-in expired</title></head>
 <body>
   <h1>This sign-in attempt expired</h1>
-  <p>Nothing was saved. Go back to ChatPCB and start sign-in again.</p>
-  <p>로그인 시도가 만료되었습니다. 저장된 내용은 없습니다. ChatPCB로 돌아가서 로그인을 다시 시작하세요.</p>
+  <p>Nothing was saved. Go back to ChatPCB and press "Continue with ChatGPT" again.</p>
+  <p>로그인 시도가 만료되었습니다. 저장된 내용은 없습니다. ChatPCB로 돌아가서 "Continue with ChatGPT"를 다시 누르세요.</p>
 </body>
 </html>`;
 }

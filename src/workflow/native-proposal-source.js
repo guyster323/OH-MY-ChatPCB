@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { isExcludedFromDigest } from '../evidence/digest-exclusions.js';
 import { collectTransactionSnapshot, transactionArtifactKind } from '../evidence/transaction-inventory.js';
 import { CONVERSATION_FILE } from '../runtime/request-conversation.js';
 import {
@@ -28,7 +29,6 @@ const RISKS = [
 ];
 const WHY = 'Replace live ChatPCB project artifacts with a regenerated native candidate from the requested circuit specification.';
 const MAX_DIFF_BYTES = 5 * 1024 * 1024;
-const TRANSIENT_NAMES = new Set(['chatpcb-erc.json', 'chatpcb-drc.json']);
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
@@ -96,8 +96,7 @@ function requiredFromChanges(changes) {
 }
 
 function isTransient(relativePath) {
-  const base = path.posix.basename(relativePath);
-  return TRANSIENT_NAMES.has(base) || base.endsWith('.kicad_prl');
+  return isExcludedFromDigest(relativePath);
 }
 
 async function walkFiles(directory) {

@@ -145,6 +145,12 @@ async function callChatGPTResponsesUnlogged({
       if (!response.ok) throw await httpError(response, accessToken);
       return readResponseStream(response);
     });
+    // Once per Responses API call. The reported model is the stream's model
+    // when the API sends one, otherwise the model we requested.
+    const reportedModel = typeof streamed.model === 'string' && streamed.model.trim()
+      ? streamed.model
+      : selectedModel;
+    logChatGptUsage(reportedModel, streamed.usage, accessToken);
     const turnCalls = collectTurnCalls(streamed, allowed);
     const prose = stripToolCallLines(streamed.text);
     const mutating = turnCalls.filter((call) => !READ_ONLY_TOOLS.has(call.name));
@@ -203,6 +209,28 @@ async function callChatGPTResponsesUnlogged({
       output
     }))
   };
+}
+
+// Same stderr channel as the project.request decision line. Only the model
+// slug and numeric token counts are included. maskSecrets covers a model
+// string or usage payload that echoes a credential.
+function logChatGptUsage(model, usage, accessToken) {
+  console.error(maskSecrets(formatChatGptUsageLog(model, usage), accessToken));
+}
+
+function formatChatGptUsageLog(model, usage) {
+  const parts = [`provider chatgpt: model ${loggedModelName(model)}`];
+  for (const key of ['input_tokens', 'output_tokens', 'total_tokens']) {
+    const value = usage?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) parts.push(`${key}=${value}`);
+  }
+  return parts.join(' ');
+}
+
+function loggedModelName(model) {
+  const text = typeof model === 'string' ? model.replace(/[\r\n]+/g, ' ').trim() : '';
+  if (!text) return 'unknown';
+  return text.length > 200 ? text.slice(0, 200) : text;
 }
 
 function persistSession(creds, generation, clientId, refreshTokens) {
@@ -649,7 +677,7 @@ async function readResponseStream(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const state = { text: '', completed: false, calls: new Map(), order: [] };
+  const state = { text: '', completed: false, calls: new Map(), order: [], model: null, usage: null };
 
   try {
     while (!state.completed) {
@@ -670,7 +698,7 @@ async function readResponseStream(response) {
     throw err;
   }
 
-  return { text: state.text, functionCalls: state.order };
+  return { text: state.text, functionCalls: state.order, model: state.model, usage: state.usage };
 }
 
 function consumeSseBuffer(buffer, state) {
@@ -712,6 +740,7 @@ function interpretSseLine(line, state) {
   if (event.type === 'response.completed') {
     state.completed = true;
     noteCompletedOutput(state, event);
+    noteResponseUsage(state, event);
     return;
   }
   if (event.type === 'response.failed' || event.type === 'error') {
@@ -724,6 +753,13 @@ function interpretSseLine(line, state) {
     err.code = 'response_incomplete';
     throw err;
   }
+}
+
+function noteResponseUsage(state, event) {
+  const response = event?.response;
+  const usage = response && typeof response === 'object' ? response.usage ?? event.usage : event?.usage;
+  if (typeof response?.model === 'string' && response.model.trim()) state.model = response.model;
+  if (usage && typeof usage === 'object') state.usage = usage;
 }
 
 function failureFromResponseEvent(event) {

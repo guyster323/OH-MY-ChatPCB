@@ -128,8 +128,8 @@ test('isolate-home hook sets a private home before the entry module and removes 
   if (parentHomeExisted) assert.equal(existsSync(parentHome), true);
 });
 
-test('auth and provider-registry tests import the home hook on their own', async () => {
-  for (const name of ['auth-chatgpt.test.js', 'provider-registry.test.js']) {
+test('auth, provider-registry, and panel tests import the home hook on their own', async () => {
+  for (const name of ['auth-chatgpt.test.js', 'provider-registry.test.js', 'chatgpt-panel-ui.test.js']) {
     const source = await readFile(new URL(`./${name}`, import.meta.url), 'utf8');
     assert.equal(sourceImportsHomeHook(source), true, name);
   }
