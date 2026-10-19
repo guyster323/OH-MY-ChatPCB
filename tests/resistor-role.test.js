@@ -183,6 +183,43 @@ test('a kept reference is not a second resistor target', () => {
   assert.equal(componentValue(spec, 'R4'), '4.7k');
 });
 
+test("two values for one resistor target ('680Ω and 1k', '1k~680Ω', 'vs', '|', '이나', '둘 중') are RESISTOR_VALUE_AMBIGUOUS regardless of the current value", () => {
+  const rows = [
+    ['change the LED resistor to 680Ω and 1k', ['680Ω', '1k']],
+    ['LED resistor 470~680Ω', ['470Ω', '680Ω']],
+    ['LED 저항 470~680Ω으로', ['470Ω', '680Ω']],
+    ['LED resistor 680Ω vs 1k', ['680Ω', '1k']],
+    ['LED resistor 680Ω | 1kΩ', ['680Ω', '1k']],
+    ['set the LED resistor to either 680Ω or 1k', ['680Ω', '1k']],
+    ['LED 저항 680Ω, 1k 둘 중 하나로', ['680Ω', '1k']],
+    ['LED 저항을 680Ω이나 1k로 바꿔줘', ['680Ω', '1k']],
+    ['LED 저항 680Ω하고 1kΩ으로', ['680Ω', '1k']],
+    ['680Ω이나 1kΩ', ['680Ω', '1k']],
+    ['LED 저항 680Ω이나 1kΩ으로', ['680Ω', '1k']],
+    ['1k and 680Ω', ['1k', '680Ω']],
+    ['1k~680Ω', ['1k', '680Ω']]
+  ];
+  for (const current of ['330Ω', '1k']) {
+    const spec = seriesSpec(current);
+    for (const [prompt, labels] of rows) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      assert.equal(decision.mode, 'refuse', `${current} ${prompt} ${decision.code ?? ''}`);
+      assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', `${current} ${prompt} ${decision.code ?? ''} ${decision.edit?.label ?? ''}`);
+      assert.equal(decision.edit, undefined, prompt);
+      assert.equal(decision.message, resistorValueAmbiguousMessage(null, labels), `${current} ${prompt}`);
+      assert.equal(assessRequestCoverage(prompt).alternative, true, prompt);
+      assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+      assert.equal(componentValue(spec, 'R3'), current, prompt);
+    }
+  }
+  for (const prompt of ['change R3 to 470 or 680', 'set R3 to 330 680', 'LED 저항 330 680']) {
+    const decision = classifyExistingProjectRequest(prompt, seriesSpec('330Ω'));
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', `${prompt} ${decision.code ?? ''}`);
+    assert.match(decision.message ?? '', /단위/, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+});
+
 test('naming R3 on a board with no series resistor points at the LED resistor wording', () => {
   const hinted = [
     'There is no part R3 in this project. Say "LED resistor" instead, like "LED resistor to 470Ω". Nothing was changed.',

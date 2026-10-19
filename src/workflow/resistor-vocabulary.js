@@ -335,11 +335,23 @@ export function isPermittedEdit(text) {
   return rx("\\b(?:change|set|make|use|update|replace)\\b|바꿔|변경|수정").test(folded);
 }
 
+// "470~680Ω" and "1k~680Ω" name two values. The unit may sit only on the last
+// number. A leading "~680Ω" stays an approximation.
+const VALUE_RANGE_SOURCE = String.raw`\d+(?:\.\d+)?\s*[kKmMrR]?(?:\s*(?:Ω|옴|ohms?))?\s*[~∼〜]\s*\d+(?:\.\d+)?\s*(?:[kKmMrR](?:\s*(?:Ω|옴|ohms?))?|Ω|옴|ohms?)`;
+
 export function textHasApproximation(text) {
   const raw = String(text ?? '');
-  if (rx("[~∼〜]").test(raw) || rx("(?:^|[\\s\\d])(?:약|대략|대충)", "u").test(raw)) return true;
+  const withoutRanges = raw.replace(rx(VALUE_RANGE_SOURCE, 'giu'), ' ');
+  if (rx("[~∼〜]").test(withoutRanges) || rx("(?:^|[\\s\\d])(?:약|대략|대충)", "u").test(raw)) return true;
   if (rx("(?:정도|쯤|가량|내외)", "u").test(raw)) return true;
   return rx("\\b(?:about|around|approximately|approx|roughly)\\b|-ish\\b", "i").test(raw);
+}
+
+// The tilde in "470~680Ω" is the range, not "about 680Ω".
+export function tildeJoinsResistorRange(before, raw) {
+  const head = rx("\\d(?:\\.\\d+)?\\s*[kKmMrR]?(?:\\s*(?:Ω|옴|ohms?))?\\s*[~∼〜]\\s*$", "iu");
+  const tail = rx("^\\d+(?:\\.\\d+)?\\s*(?:[kKmMrR](?:\\s*(?:Ω|옴|ohms?))?|Ω|옴|ohms?)", "iu");
+  return head.test(String(before ?? '')) && tail.test(String(raw ?? '').trim());
 }
 
 export function approximateBefore(before) {
@@ -834,8 +846,63 @@ function hasNegation(text, exempt) {
   return hasSignalOutsideExempt(text, NEGATION_SIGNALS, exempt);
 }
 
+function clauseAt(pieces, index) {
+  return pieces.find((piece) => index >= piece.start && index < piece.end) ?? null;
+}
+
+// "1k 둘 중 하나로" is the other half of one choice. "terminator to 120Ω" is not.
+function isChoiceRemainder(clause) {
+  return rx("둘\\s*중|하나|\\bvs\\b|\\beither\\b|\\|", "iu").test(String(clause ?? ''));
+}
+
+// A value in another role, a keep, a length, or a don't-delete clause is not
+// a second choice for this resistor. "X 말고" names the value being replaced.
+// An unknown role ("terminator to 120Ω", "680Ω / ADC 5.1k") stays which-resistor
+// even when the same clause also names the LED. "vs", "|", "either", and "둘 중" do not.
+function clauseDropsChoiceValue(piece, text) {
+  if (!piece) return false;
+  const clause = piece.text;
+  if (isForeignRoleClause(clause) || isResistorKeepClause(clause) || isKeepNonResistorClause(clause)) return true;
+  if (isLengthClause(clause) || isDontDelete(clause)) return true;
+  if (unknownRoleValue(clause) && !isChoiceRemainder(clause)) return true;
+  return text.slice(piece.end, piece.sepEnd).includes('말고');
+}
+
+// "from 330Ω to 680Ω" and "330옴에서 680옴으로" name one destination.
+// "to 680Ω and 1k" does not: "to" there is the edit verb.
+function isValueTransition(text, tokens) {
+  if (tokens.length < 2) return false;
+  const between = text.slice(tokens[0].end, tokens[tokens.length - 1].index);
+  if (rx("->|→|에서").test(between)) return true;
+  return rx("\\bfrom\\b", "i").test(text.slice(0, tokens[0].index)) && rx("\\bto\\b", "i").test(between);
+}
+
+// Two unit-bearing values, or a range whose unit is only on the last number,
+// are the same choice as "680Ω or 1k".
+function hasMultiValueChoice(text) {
+  const pieces = allowClausePieces(text);
+  const hidden = parentheticalCurrentSpans(text);
+  const tokens = boundOhmTokens(text).filter((token) => {
+    if (isReplacedSourceValue(text, token.index)) return false;
+    if (hidden.some(([start, end]) => token.index >= start && token.index < end)) return false;
+    return !clauseDropsChoiceValue(clauseAt(pieces, token.index), text);
+  });
+  let count = tokens.length;
+  for (const match of text.matchAll(rx(VALUE_RANGE_SOURCE, 'giu'))) {
+    const at = match.index ?? 0;
+    if (hidden.some(([start, end]) => at >= start && at < end)) continue;
+    if (clauseDropsChoiceValue(clauseAt(pieces, at), text)) continue;
+    const head = rx("^\\d+(?:\\.\\d+)?").exec(match[0]);
+    if (!head) continue;
+    const headEnd = at + head[0].length;
+    if (!tokens.some((token) => token.index >= at && token.index < headEnd)) count += 1;
+  }
+  if (count < 2 || isValueTransition(text, tokens)) return false;
+  return true;
+}
+
 function hasValueAlternative(text, exempt) {
-  return hasSignalOutsideExempt(text, ALTERNATIVE_SIGNALS, exempt);
+  return hasSignalOutsideExempt(text, ALTERNATIVE_SIGNALS, exempt) || hasMultiValueChoice(text);
 }
 
 function unknownRoleValue(clause) {

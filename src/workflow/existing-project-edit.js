@@ -30,6 +30,7 @@ import {
   isPermittedEdit,
   isPoliteIfFiller,
   isReplacedSourceValue,
+  tildeJoinsResistorRange,
   isShuntSenseWord,
   isUnboundMeasureAfter,
   libIdNamesResistor,
@@ -643,6 +644,7 @@ function finishResistor(text, spec, resistor) {
       message: resistorAmbiguousMessage()
     };
   }
+  if (coverage.alternative && resistor.reason === 'ambiguous') return invalidResistor(resistor);
   if (coverage.alternative && resistor.kind === 'resistor') {
     const label = resistor.label ? [resistor.label] : [];
     return {
@@ -2792,7 +2794,8 @@ function promoteCoordinatedBareValues(tokens, text) {
     for (const other of ohmValues) {
       const left = token.index < other.index ? token : other;
       const right = token.index < other.index ? other : token;
-      if (!RESISTOR_COORDINATOR.test(text.slice(left.end, right.index).trim())) continue;
+      const gap = text.slice(left.end, right.index).trim();
+      if (!RESISTOR_COORDINATOR.test(gap) && !/^[~∼〜]$/u.test(gap)) continue;
       token.attempt = true;
       break;
     }
@@ -2998,7 +3001,7 @@ function unitlessSuffixCountsAsResistor(text, start, end) {
   const after = text.slice(end);
   if (SUFFIX_EXCLUDE_BEFORE.test(before)) return false;
   if (isUnboundMeasureAfter(after)) return false;
-  if (approximateResistorValue(before, after)) return false;
+  if (!tildeJoinsResistorRange(before, text.slice(start, end)) && approximateResistorValue(before, after)) return false;
   if (SUFFIX_CUE_BEFORE.test(before) || SUFFIX_CUE_AFTER.test(after)) return true;
   if (suffixRoleWord(lastWord(before))) return true;
   // "4.99k로 바꿔줘" names no part. The marker still binds that token: it is the
@@ -3008,6 +3011,16 @@ function unitlessSuffixCountsAsResistor(text, start, end) {
   // A model, display, or pot after the token already returned false above.
   if (/(?:Ω|옴|ohms?|\d\s*[kKrR])\s*(?:\/|또는|아니면|혹은|\bor\b)\s*$/iu.test(before)) return true;
   if (/^\s*(?:\/|또는|아니면|혹은|\bor\b)\s*\d/iu.test(after)) return true;
+  // "680Ω and 1k", "1k vs 680Ω", "1k~680Ω", and "680Ω, 1k 둘 중" name that suffix too.
+  return hasSiblingOhmUnit(text, start, end);
+}
+
+function hasSiblingOhmUnit(text, start, end) {
+  const re = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?)|\d+(?:\.\d+)?\s*[kKrR](?![A-Za-z])/giu;
+  for (const match of String(text ?? '').matchAll(re)) {
+    const at = match.index ?? 0;
+    if (at + match[0].length <= start || at >= end) return true;
+  }
   return false;
 }
 
@@ -3030,7 +3043,8 @@ function markNonResistorQuantities(tokens, text) {
       continue;
     }
     // An approximate ohm value is not applied, with or without a unit.
-    if (approximateResistorValue(text.slice(0, token.index), text.slice(token.end))) {
+    const beforeToken = text.slice(0, token.index);
+    if (!tildeJoinsResistorRange(beforeToken, token.raw) && approximateResistorValue(beforeToken, text.slice(token.end))) {
       token.quantity = true;
       token.attempt = false;
       continue;

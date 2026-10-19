@@ -2862,6 +2862,39 @@ test('negated or alternative resistor edits (\'do not change … to 680Ω\', \'n
   }
 });
 
+test("two ohm values joined by 이나 ('680Ω이나 1kΩ', 'LED 저항 680Ω이나 1kΩ으로') ask which value and change nothing", async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const prompts = ['680Ω이나 1kΩ', 'LED 저항 680Ω이나 1kΩ으로'];
+  const failures = [];
+  try {
+    for (const [index, prompt] of prompts.entries()) {
+      for (const kind of ['native', 'malicious']) {
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_ina_${index}_${kind}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        const message = preview.error?.message ?? '';
+        if (provider.calls() !== 0) failures.push(`${kind} ${prompt} calls ${provider.calls()}`);
+        if (preview.ok !== false) failures.push(`${kind} ${prompt} preview ok`);
+        if (preview.error?.code !== 'RESISTOR_VALUE_AMBIGUOUS') failures.push(`${kind} ${prompt} code ${preview.error?.code ?? 'none'}`);
+        if (!message.includes('680Ω') || !message.includes('1k')) failures.push(`${kind} ${prompt} message ${message}`);
+        if (schematic !== before.schematic) failures.push(`${kind} ${prompt} schematic`);
+        if (spice !== before.spice) failures.push(`${kind} ${prompt} spice`);
+      }
+    }
+    assert.deepEqual(failures, []);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
 const KEEP_TARGET_ROWS = [
   "don't touch R3, set the LED resistor to 680Ω",
   'keep R3, set the LED resistor to 680Ω',
