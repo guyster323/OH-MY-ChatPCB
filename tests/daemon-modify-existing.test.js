@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { dispatchToolCall, withProjectContext } from '../src/runtime/agent-daemon.js';
+import { dispatchToolCall, localResistorGate, withProjectContext } from '../src/runtime/agent-daemon.js';
 import { saveCredentials } from '../src/runtime/auth/chatgpt-auth.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
@@ -3296,6 +3296,28 @@ test('should/why not/how do I/what happens if questions with an edit verb reach 
     await rm(projectDir, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });
   }
+});
+
+// finishResistor refuses an uncovered resistor edit before this gate, so an
+// end-to-end request never reaches it. A synthetic merge is what the gate
+// sees when that earlier refusal is missing.
+test('mutant A4 the daemon gate refuses an uncovered resistor merge even if the classifier let it through', () => {
+  const decision = { mode: 'merge', edit: { kind: 'resistor', ohmsText: '680Ω' } };
+  const message = resistorTargetUnclearMessage(decision.edit.ohmsText);
+  const uncovered = [
+    'change the LED resistor to 680Ω and the widget',
+    'LED 저항 680Ω으로 바꾸지 말고'
+  ];
+  for (const prompt of uncovered) {
+    assert.equal(assessRequestCoverage(prompt).covered, false, prompt);
+    const gate = localResistorGate(decision, prompt);
+    assert.equal(gate.action, 'refuse', prompt);
+    assert.equal(gate.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(gate.message, message, prompt);
+  }
+  const covered = 'change the LED resistor to 680Ω';
+  assert.equal(assessRequestCoverage(covered).covered, true);
+  assert.deepEqual(localResistorGate(decision, covered), { action: 'local' });
 });
 
 test("'바꿔야 할까?' and '<value> ok?' are questions and do not create an R3 patch", async () => {

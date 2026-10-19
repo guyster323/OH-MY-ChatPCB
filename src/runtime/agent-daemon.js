@@ -631,6 +631,23 @@ async function invokeProvider(call, ctx) {
   }
 }
 
+// A covered resistor merge applies locally. An uncovered one asks which
+// resistor, even when an earlier classifier returned merge.
+export function localResistorGate(decision, prompt) {
+  const coverage = assessRequestCoverage(prompt);
+  if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && !coverage.covered) {
+    return {
+      action: 'refuse',
+      code: 'RESISTOR_TARGET_UNCLEAR',
+      message: resistorTargetUnclearMessage(decision.edit.ohmsText)
+    };
+  }
+  if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && coverage.covered) {
+    return { action: 'local' };
+  }
+  return { action: 'continue' };
+}
+
 async function requestProject(call, ctx) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
@@ -748,13 +765,13 @@ async function requestProject(call, ctx) {
           }
           // The same allow list gates a local apply. A covered resistor edit
           // never calls the provider. A merge that is not covered asks which resistor.
-          const coverage = assessRequestCoverage(prompt);
-          if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && !coverage.covered) {
-            const refused = new Error(resistorTargetUnclearMessage(decision.edit.ohmsText));
-            refused.code = 'RESISTOR_TARGET_UNCLEAR';
+          const gate = localResistorGate(decision, prompt);
+          if (gate.action === 'refuse') {
+            const refused = new Error(gate.message);
+            refused.code = gate.code;
             throw refused;
           }
-          if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && coverage.covered) {
+          if (gate.action === 'local') {
             const generated = await previewNativeChange({
               projectDir,
               prompt: generatePrompt,
