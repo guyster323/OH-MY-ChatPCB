@@ -3330,7 +3330,7 @@ function assertForeignValueDidNotLand(preview, calls, schematic, spice, before, 
   assert.equal(spice, before.spice, where);
 }
 
-test('random LED and non-LED role clauses never put a non-LED value on R3', { timeout: 20000 }, async () => {
+test('random LED and non-LED role clauses never put a non-LED value on R3', { timeout: 30000 }, async () => {
   const services = await transactionServices();
   const { projectDir, generated } = await generatedStm32Project();
   const before = await materializeSeriesResistor(services, projectDir, generated);
@@ -3364,7 +3364,8 @@ test('random LED and non-LED role clauses never put a non-LED value on R3', { ti
         }
       }
     }
-    assert.ok(Date.now() - started < 5000, `property seed ${seed} took ${Date.now() - started}ms`);
+    // The cap only catches runaway generation; Windows CI runners are ~6x slower.
+    assert.ok(Date.now() - started < 15000, `property seed ${seed} took ${Date.now() - started}ms`);
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
