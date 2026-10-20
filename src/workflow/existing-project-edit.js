@@ -504,6 +504,8 @@ function classifySeparateIntent(editText, intentText, spec) {
   if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
+  const valuedKeep = valuedKeepRefusal(intentText);
+  if (valuedKeep) return valuedKeep;
   const finishedUser = finishResistor(intentText, spec, fromUser);
   if (finishedUser) return finishedUser;
   if (removal.kind === 'unclear') return unclearRemoval();
@@ -528,6 +530,10 @@ function classifyEditText(text, spec) {
   if (isMixedRemovalAndEdit(removal, resistor)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
+  // Bind a value inside a keep clause before that clause is stripped. The ohms
+  // name the kept part, so they must not land on R3.
+  const valuedKeep = valuedKeepRefusal(text);
+  if (valuedKeep) return valuedKeep;
   const finished = finishResistor(text, spec, resistor);
   if (finished) return finished;
   const caught = coverageCatch(text, spec);
@@ -617,6 +623,23 @@ function coverageCatch(text, spec) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_TARGET_UNCLEAR');
   }
   return null;
+}
+
+function valuedKeepFragmentDefers(fragment) {
+  return /커패시터|콘덴서|캐패시터|capacitor|\bcaps?\b|케이블|cable|connector|커넥터/iu.test(fragment);
+}
+
+function valuedKeepRefusal(text) {
+  const objects = keepClauseSpans(text).objects.filter((object) => object.valued === true);
+  if (objects.length === 0) return null;
+  // A capacitor or cable keep keeps its own refusal. A resistor keep that
+  // carries the ohms must not lend that value to R3.
+  if (objects.every((object) => valuedKeepFragmentDefers(text.slice(object.start, object.end)))) return null;
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_AMBIGUOUS',
+    message: resistorAmbiguousMessage()
+  };
 }
 
 function finishResistor(text, spec, resistor) {

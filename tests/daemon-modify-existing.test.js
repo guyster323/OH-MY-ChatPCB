@@ -3216,6 +3216,122 @@ function keepPhraseSpec() {
   };
 }
 
+const KEEP_VALUE_REFS = ['R1', 'R4', 'the pull-up'];
+const KEEP_VALUE_FORMS = ['at', '으로'];
+const KEEP_VALUE_POSITIONS = ['leading', 'trailing', 'next'];
+
+function valuedKeepClause(cue, ref, form) {
+  const value = '680Ω';
+  if (cue.slot === 'after') {
+    return form === 'at' ? `${cue.text} ${ref} at ${value}` : `${cue.text} ${ref} ${value}으로`;
+  }
+  if (cue.slot === 'before') {
+    return form === 'at' ? `${ref} at ${value} ${cue.text}` : `${ref}는 ${value}으로 ${cue.text}`;
+  }
+  if (cue.slot === 'leave') {
+    return form === 'at' ? `leave ${ref} at ${value} ${cue.text}` : `leave ${ref} ${value}으로 ${cue.text}`;
+  }
+  return form === 'at' ? `${cue.text} ${ref} at ${value}` : `${cue.text} ${ref} ${value}으로`;
+}
+
+function placeValuedKeep(clause, position) {
+  if (position === 'leading') return clause;
+  if (position === 'trailing') return `please ${clause}`;
+  return `ok. ${clause}.`;
+}
+
+test('a keep clause that carries a value never applies that value to R3', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  const before = await materializeSeriesResistor(services, projectDir, generated);
+  const spec = await readChatPcbManifest(projectDir);
+  const message = resistorAmbiguousMessage();
+  const prompts = [
+    'keep R4 at 680Ω',
+    'keep R4 at 680Ω please',
+    'leave the pull-up at 2.2k',
+    'R4는 680Ω으로 유지',
+    'hold R4 at 10k'
+  ];
+  const frozen = JSON.stringify(spec.schematic.components);
+  const failures = [];
+  try {
+    for (const prompt of prompts) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse') failures.push(`${prompt} mode ${decision.mode} ohms ${decision.edit?.ohms ?? ''}`);
+      if (decision.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${prompt} code ${decision.code ?? decision.mode}`);
+      if (decision.message !== message) failures.push(`${prompt} message`);
+      if (decision.edit !== undefined) failures.push(`${prompt} edit ${decision.edit?.ohms ?? ''}`);
+      if (blocksBeforeProvider(prompt, decision) !== true) failures.push(`${prompt} blocks`);
+      if (appliesBeforeProvider(prompt, decision) !== false) failures.push(`${prompt} applies`);
+      if (JSON.stringify(spec.schematic.components) !== frozen) failures.push(`${prompt} spec mutated`);
+      for (const kind of ['native', 'malicious']) {
+        const provider = kind === 'native'
+          ? nativeNoPatchCounter()
+          : maliciousPatchCounter('LED 22Ω, R4 10k');
+        await writeGeneratedBytes(generated, before);
+        const preview = await requestAndMaybeApprove(services, projectDir, prompt, provider.impl, `call_h1_keepval_${kind}_${prompt.length}`);
+        const schematic = await readFile(generated.files.schematic, 'utf8');
+        const spice = await readFile(generated.files.spice, 'utf8');
+        const r3 = schematicRefValue(schematic, 'R3');
+        if (provider.calls() !== 0) failures.push(`${kind} ${prompt} calls ${provider.calls()} R3=${r3} code=${preview.error?.code ?? ''}`);
+        if (preview.ok !== false) failures.push(`${kind} ${prompt} preview ok R3=${r3}`);
+        if (preview.error?.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${kind} ${prompt} e2e ${preview.error?.code ?? 'none'} R3=${r3}`);
+        if (preview.error?.message !== message) failures.push(`${kind} ${prompt} e2e message`);
+        if (schematic !== before.schematic) failures.push(`${kind} ${prompt} schematic R3=${r3}`);
+        if (spice !== before.spice) failures.push(`${kind} ${prompt} spice RLED=${rledOhms(spice)}`);
+      }
+    }
+    const control = 'keep R4, set the LED resistor to 680Ω';
+    const decision = classifyExistingProjectRequest(control, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ohms !== 680 || decision.edit?.ref !== 'R3') {
+      failures.push(`control ${control} ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    assert.deepEqual(failures, []);
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('property: a keep cue with another ref and a value in the clause is RESISTOR_AMBIGUOUS', () => {
+  const spec = keepPhraseSpec();
+  const message = resistorAmbiguousMessage();
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`keep-value property seed ${seed}`);
+  const cues = KEEP_CUES.filter((cue) => cue.slot !== 'filler');
+  const cases = [];
+  for (const cue of cues) {
+    for (const ref of KEEP_VALUE_REFS) {
+      for (const form of KEEP_VALUE_FORMS) {
+        for (const position of KEEP_VALUE_POSITIONS) {
+          const prompt = placeValuedKeep(valuedKeepClause(cue, ref, form), position);
+          cases.push({ prompt, cue: cue.text, ref, form, position });
+        }
+      }
+    }
+  }
+  shuffleItems(rng, cases);
+  const started = Date.now();
+  const failures = [];
+  const r3Before = spec.schematic.components.find((part) => part.ref === 'R3')?.value;
+  for (const sample of cases) {
+    const decision = classifyExistingProjectRequest(sample.prompt, spec);
+    const where = `${sample.cue} ${sample.form} ${sample.position} ${sample.prompt}`;
+    if (decision.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${where} code ${decision.code ?? decision.mode} ohms ${decision.edit?.ohms ?? ''}`);
+    if (decision.message !== message) failures.push(`${where} message`);
+    if (decision.edit !== undefined) failures.push(`${where} edit`);
+    if (blocksBeforeProvider(sample.prompt, decision) !== true) failures.push(`${where} blocks`);
+    if (appliesBeforeProvider(sample.prompt, decision) !== false) failures.push(`${where} applies`);
+    if (spec.schematic.components.find((part) => part.ref === 'R3')?.value !== r3Before) failures.push(`${where} R3 changed`);
+  }
+  console.log(`keep-value property cases ${cases.length} ${Date.now() - started}ms`);
+  assert.equal(cases.length > 0, true);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
+
 test('property: a KEEP_CUES phrase at each position names the edit target as RESISTOR_AMBIGUOUS and R4 applies on R3 only', () => {
   const spec = keepPhraseSpec();
   const message = resistorAmbiguousMessage();

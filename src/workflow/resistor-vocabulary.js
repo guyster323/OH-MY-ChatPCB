@@ -96,6 +96,7 @@ export const KEEP_CUES = Object.freeze([
   Object.freeze({ text: 'do not touch', slot: 'after', mask: 'ref', signal: false }),
   Object.freeze({ text: 'never touch', slot: 'after', mask: 'ref', signal: false }),
   Object.freeze({ text: 'keep', slot: 'after', mask: 'all', signal: true }),
+  Object.freeze({ text: 'hold', slot: 'after', mask: 'all', signal: true }),
   Object.freeze({ text: 'without', slot: 'after', mask: 'all', signal: true }),
   Object.freeze({ text: 'leave', slot: 'leave-verb', mask: 'all', signal: true }),
   Object.freeze({ text: '그대로 두고', slot: 'before', mask: 'all', signal: true }),
@@ -197,6 +198,36 @@ function keepTokenBare(word) {
   return String(word ?? '').replace(/^[("'` ,]+|[)"'` ,.;!?。！？]+$/gu, '');
 }
 
+// A value word inside the keep clause belongs to that clause. A bare number
+// (a count, a year, a package) is not a value here. "at" is only the glue.
+function isKeepValueWord(token) {
+  const stem = keepTokenBare(token)
+    .replace(/(?:으로|로|은|는|이|가|을|를|도|만)$/u, '')
+    .replace(/\s+/gu, '');
+  if (!/^\d/u.test(stem)) return false;
+  return /^(?:\d+(?:\.\d+)?(?:Ω|옴|ohms?|meg|[kKmMrR](?:Ω|옴)?)|\d+[rRkKmM]\d+)$/iu.test(stem);
+}
+
+function spanCarriesKeepValue(text, start, end) {
+  const words = String(text ?? '').slice(start, end).match(/\S+/gu) ?? [];
+  return words.some((word) => isKeepValueWord(word));
+}
+
+// A decimal point inside 2.2k is not the end of the clause.
+function keepStopIndex(raw) {
+  const text = String(raw ?? '');
+  for (let index = 0; index < text.length; index += 1) {
+    const ch = text[index];
+    if (ch === '.' && /\d/u.test(text[index - 1] ?? '') && /\d/u.test(text[index + 1] ?? '')) continue;
+    if (/[.;!?。！？]/u.test(ch)) return index;
+  }
+  return -1;
+}
+
+function keepNamesResistorHead(token) {
+  return /(?:저항|抵抗|resistors?|leds?|엘이디|엘예디)/iu.test(String(token ?? ''));
+}
+
 const KEEP_LIST_STOP_EN = new Set(['change', 'set', 'update', 'make', 'modify', 'to']);
 
 export function isKeepListStop(token) {
@@ -252,29 +283,51 @@ function keepObjectBefore(text, cueStart) {
   const origin = keepClauseOrigin(text, cueStart);
   const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
   const taken = [];
-  for (let index = words.length - 1; index >= 0 && taken.length < 6; index -= 1) {
-    if (/^\d/u.test(words[index][0])) break;
+  let tookObject = false;
+  for (let index = words.length - 1; index >= 0 && taken.length < 8; index -= 1) {
+    const token = keepTokenBare(words[index][0]);
+    const value = isKeepValueWord(token);
+    // "R4는 680Ω으로 유지": the value sits between the ref and the cue.
+    // "680Ω R4 unchanged": the value is left of the ref, so it stays an edit.
+    if (value || (token.toLowerCase() === 'at' && taken.some((word) => isKeepValueWord(word[0])))) {
+      if (tookObject) break;
+      taken.push(words[index]);
+      continue;
+    }
+    if (/^\d/u.test(token) || isKeepListStop(token)) break;
     taken.push(words[index]);
+    tookObject = true;
   }
-  if (taken.length === 0) return null;
+  if (!taken.some((word) => !isKeepValueWord(word[0]) && keepTokenBare(word[0]).toLowerCase() !== 'at')) return null;
   return [origin + taken[taken.length - 1].index, cueStart];
 }
 
 // A comma stays inside the keep list ("don't touch R4, LED"). A period or an
-// edit verb ends it. The value word ends it too, so the ohms stay an edit.
+// edit verb ends it. A value before that end is part of the keep ("keep R4 at
+// 680Ω"). The ohms after "set" or "to" stay an edit.
 function keepObjectAfter(text, cueEnd) {
   const words = [...text.slice(cueEnd).matchAll(/\S+/gu)];
   let end = cueEnd;
   let count = 0;
+  let afterComma = false;
+  let commaThenHead = false;
   for (const word of words) {
     if (count >= 6) break;
     const raw = word[0];
-    const stopPunct = raw.search(/[.;!?。！？]/u);
+    const stopPunct = keepStopIndex(raw);
     const token = keepTokenBare(stopPunct > 0 ? raw.slice(0, stopPunct) : raw);
-    if (stopPunct === 0 || /^\d/u.test(token) || isKeepListStop(token)) break;
+    if (stopPunct === 0 || isKeepListStop(token)) break;
+    // "R4, LED 저항 680Ω" keeps R4. The ohms belong to the LED head.
+    if (isKeepValueWord(token)) {
+      if (commaThenHead) break;
+    } else if (/^\d/u.test(token)) {
+      break;
+    }
+    if (!isKeepValueWord(token) && afterComma && keepNamesResistorHead(token)) commaThenHead = true;
     end = cueEnd + word.index + (stopPunct > 0 ? stopPunct : raw.length);
-    if (token && !isKeepListCoord(token)) count += 1;
+    if (token && !isKeepListCoord(token) && !isKeepValueWord(token)) count += 1;
     if (stopPunct > 0) break;
+    if (raw.includes(',') || raw.includes('，')) afterComma = true;
   }
   return end > cueEnd ? [cueEnd, end] : null;
 }
@@ -312,7 +365,12 @@ export function keepClauseSpans(text) {
   const occupied = [];
   const take = (object, mask, ...cueSpans) => {
     if (!object) return false;
-    objects.push({ start: object[0], end: object[1], mask });
+    objects.push({
+      start: object[0],
+      end: object[1],
+      mask,
+      valued: spanCarriesKeepValue(raw, object[0], object[1])
+    });
     for (const span of cueSpans) {
       if (!span) continue;
       cues.push({ start: span[0], end: span[1] });
@@ -322,10 +380,18 @@ export function keepClauseSpans(text) {
   };
   for (const [start, end] of findCueHits(raw, 'leave')) {
     if (englishKeepVerbNegated(raw, start)) continue;
+    if (keepSpansOverlap(occupied, start, end)) continue;
     const found = leaveComplementObject(raw, end);
-    if (!found) continue;
-    if (keepSpansOverlap(occupied, start, end) || keepSpansOverlap(occupied, found.cue[0], found.cue[1])) continue;
-    take(found.object, 'all', [start, end], found.cue);
+    if (found) {
+      if (keepSpansOverlap(occupied, found.cue[0], found.cue[1])) continue;
+      take(found.object, 'all', [start, end], found.cue);
+      continue;
+    }
+    // "leave the pull-up at 2.2k" has no alone/as-is complement. "leave R1,
+    // set the LED resistor" is still a keep of R1.
+    const object = keepObjectAfter(raw, end);
+    if (!object) continue;
+    take(object, 'all', [start, end]);
   }
   const phrases = KEEP_CUES
     .filter((cue) => cue.slot === 'before' || cue.slot === 'after')

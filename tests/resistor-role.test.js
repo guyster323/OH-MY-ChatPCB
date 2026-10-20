@@ -1191,6 +1191,44 @@ test('a keep of the LED itself is not a keep of its resistor', () => {
   }
 });
 
+test('a keep clause that carries a value never applies that value to R3', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const prompts = [
+    'keep R4 at 680Ω',
+    'keep R4 at 680Ω please',
+    'leave the pull-up at 2.2k',
+    'R4는 680Ω으로 유지',
+    'hold R4 at 10k'
+  ];
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
+
+  const control = 'keep R4, set the LED resistor to 680Ω';
+  const applied = classifyExistingProjectRequest(control, spec);
+  assert.equal(applied.mode, 'merge', `${control} ${applied.code ?? ''}`);
+  assert.equal(applied.edit?.ohms, 680, control);
+  assert.equal(applied.edit?.label, '680Ω', control);
+  assert.equal(applied.edit?.ref, 'R3', control);
+  assert.equal(appliesBeforeProvider(control, applied), true, control);
+  assert.equal(blocksBeforeProvider(control, applied), false, control);
+  const next = applyExistingProjectEdit(spec, applied.edit);
+  assert.equal(componentValue(next, 'R3'), '680Ω', control);
+  assert.equal(componentValue(next, 'R4'), '4.7k', control);
+  assert.equal(componentValue(spec, 'R3'), '1k', control);
+});
+
 test('a unitless from-value is compared with the saved R3 value', () => {
   const mismatched = [
     'change the LED resistor from 220 to 680Ω',
