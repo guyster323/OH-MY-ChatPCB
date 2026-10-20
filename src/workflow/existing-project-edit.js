@@ -705,6 +705,13 @@ function orSoApproximation(text, end) {
   return /^\s+so\b/iu.test(String(text ?? '').slice(end));
 }
 
+// "오든 말든" means "whether or not someone comes". It is not a resistor choice.
+function regardlessComingOrNot(text, start, end) {
+  const bare = bareGlueWord(text.slice(start, end));
+  if (bare === '오든' && /^\s*말든/u.test(text.slice(end))) return true;
+  return bare === '말든' && /오든\s*$/u.test(text.slice(0, start));
+}
+
 // A CHOICE_JOINERS word touches the keep. A valued keep joined by one stays in
 // the sentence. "or so" is an approximation, not that choice.
 // null tells the caller not to strip that keep.
@@ -750,12 +757,20 @@ function isChoiceClauseBreak(text, index) {
   return ch === '.' && !(/\d/u.test(text[index - 1] ?? '') && /\d/u.test(text[index + 1] ?? ''));
 }
 
-// and, -고, and 말고 close a clause for this check. 하거나's 고 does not.
-function choiceClauseMarks(text) {
+// Punctuation ends the clause the value search reads. and, -고, and 말고 do
+// not: "680Ω and rebuild or leave R4" still carries 680Ω on the left of "or".
+function choiceValueMarks(text) {
   const marks = [];
   for (let index = 0; index < text.length; index += 1) {
     if (isChoiceClauseBreak(text, index)) marks.push([index, index + 1]);
   }
+  return marks;
+}
+
+// and, -고, and 말고 close a clause for the keep-list check only. 하거나's 고
+// does not. The list nouns sit against the joiner; the edit value may not.
+function choiceClauseMarks(text) {
+  const marks = choiceValueMarks(text);
   for (const match of text.matchAll(/\band\b/giu)) marks.push([match.index, match.index + match[0].length]);
   for (const match of text.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
     marks.push([match.index, match.index + match[0].length]);
@@ -870,10 +885,12 @@ function rangesOverlap(ranges, start, end) {
 }
 
 // A choice word between an edit value and a keep, valued or not, asks which
-// alternative to apply. "R1 or the pull-ups" coordinates the keep list; the
-// edit value sits in another clause (and, -고, 말고, or punctuation), so that
-// "or" is not the choice. Two keep-list nouns on the joiner's sides are a list
-// too, unless one of them is the series ref or an LED-resistor synonym.
+// alternative to apply. "R1 or the pull-ups" coordinates the keep list; and,
+// -고, and 말고 put that list in its own clause, so that "or" is not the
+// choice. The ohm value is not cut by those words. It reaches back to
+// punctuation, so "680Ω and rebuild or leave R4" is still the choice. Two
+// keep-list nouns on the joiner's sides are a list too, unless one of them is
+// the series ref or an LED-resistor synonym.
 function choiceJoinsAnyKeep(text, spec) {
   const found = keepClauseSpans(text);
   const ranges = [];
@@ -882,23 +899,28 @@ function choiceJoinsAnyKeep(text, spec) {
   for (const span of asIsChoiceSpans(text)) ranges.push(span);
   if (ranges.length === 0) return false;
   const marks = choiceClauseMarks(text);
+  const valueMarks = choiceValueMarks(text);
   const series = seriesResistorRef(spec);
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
     if (!choiceJoinerWord(word[0], text.slice(end))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
+    // "오든 말든" is the idiom "regardless", not an alternative about the resistor.
+    // "바꾸든 말든" is still that alternative. A valued keep uses choiceKeepJoiner.
+    if (regardlessComingOrNot(text, start, end)) continue;
     if (!rangesOverlap(ranges, start, end)
       && !ranges.some(([spanStart, spanEnd]) => (
         (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
         || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
       ))) continue;
     const [left, right] = choiceClauseBounds(start, end, marks, text.length);
+    const [valueLeft] = choiceClauseBounds(start, end, valueMarks, text.length);
     const leftText = text.slice(left, start);
     const rightText = text.slice(end, right);
     const leftKeep = rangesOverlap(ranges, left, start);
     const rightKeep = rangesOverlap(ranges, end, right);
-    const leftValue = clauseCarriesResistorValue(leftText);
+    const leftValue = clauseCarriesResistorValue(text.slice(valueLeft, start));
     const rightValue = clauseCarriesResistorValue(rightText);
     if (!(leftValue && rightKeep) && !(rightValue && leftKeep)) continue;
     const leftPhrase = choiceSidePhrase(leftText, 'left');

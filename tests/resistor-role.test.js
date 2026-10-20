@@ -2607,6 +2607,95 @@ test('property: or/또는/혹은 between keep-list targets applies R3 and a real
   assert.deepEqual(failures.slice(0, 16), []);
 });
 
+// and / -고 / 말고 bound a keep list. They do not wall the ohms off from a
+// later choice joiner, so "and rebuild or leave R4" stays a choice. A comma
+// still ends that value. R4 or R5 on the joiner is a list and applies R3.
+const VERB_BEFORE_CHOICE = [
+  { id: 'and rebuild' },
+  { id: '빌드하고' },
+  { id: '-고 BOM도 고치' }
+];
+
+const VERB_CHOICE_JOINERS = [
+  { id: 'or', text: 'or', place: 'word' },
+  { id: '거나', text: '거나', place: 'ending' },
+  { id: '든지', text: '든지', place: 'ending' },
+  { id: '아니면', text: '아니면', place: 'word' }
+];
+
+const UNVALUED_CHOICE_KEEPS = [
+  'leave R4 alone',
+  'R4는 그대로 둬',
+  'R4는 건드리지 마'
+];
+
+function verbBeforeChoiceSentence(middle, joiner, keep) {
+  const ending = joiner.place === 'ending';
+  if (middle.id === 'and rebuild') {
+    const verb = ending ? `rebuild${joiner.text}` : `rebuild ${joiner.text}`;
+    return `set the LED resistor to 680Ω and ${verb} ${keep}`;
+  }
+  if (middle.id === '빌드하고') {
+    const verb = ending ? `빌드하${joiner.text}` : `빌드하고 ${joiner.text}`;
+    return `LED 저항을 680Ω으로 바꾸고 ${verb} ${keep}`;
+  }
+  const verb = ending ? `고치${joiner.text}` : `고치고 ${joiner.text}`;
+  return `LED 저항을 680Ω으로 바꾸고 BOM도 ${verb} ${keep}`;
+}
+
+test('property: a verb between the ohms and an unvalued choice keep is RESISTOR_AMBIGUOUS and a keep list applies R3', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [];
+  for (const middle of VERB_BEFORE_CHOICE) {
+    for (const joiner of VERB_CHOICE_JOINERS) {
+      for (const keep of UNVALUED_CHOICE_KEEPS) ambiguous.push(verbBeforeChoiceSentence(middle, joiner, keep));
+    }
+  }
+  ambiguous.push('LED 저항을 680Ω으로 바꾸고 빌드하거나 아니면 R4는 4.7k로 유지');
+  const applies = [
+    'keep R4 or R5 and set the LED resistor to 680Ω',
+    'R4 또는 R5는 그대로 두고 LED 저항 680Ω으로',
+    'set the LED resistor to 680Ω and keep R4 or R5',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R4는 그대로 둬'
+  ];
+  const comma = 'set the LED resistor to 680Ω and rebuild, or leave R4 alone';
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  const commaBefore = structuredClone(spec);
+  const commaDecision = classifyExistingProjectRequest(comma, spec);
+  if (commaDecision.code !== 'RESISTOR_TARGET_UNCLEAR' || commaDecision.edit != null) {
+    failures.push(`${comma} => ${commaDecision.mode} ${commaDecision.code ?? ''} ${commaDecision.edit?.ref ?? ''}`);
+  }
+  if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(commaBefore)) {
+    failures.push(`${comma} mutated`);
+  }
+  assert.equal(ambiguous.length, VERB_BEFORE_CHOICE.length * VERB_CHOICE_JOINERS.length * UNVALUED_CHOICE_KEEPS.length + 1);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
+
 test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', () => {
   const spec = seriesSpec('1k');
   const failures = [];
