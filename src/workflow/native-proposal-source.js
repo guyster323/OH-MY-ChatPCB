@@ -22,6 +22,9 @@ import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
 import { classifyRecordedErc } from '../../apps/panel/erc-verdict.js';
 
+// The daemon passes the classifier it already resolved. String keys cannot set this.
+export const nativeProposalClassifier = Symbol('nativeProposalClassifier');
+
 const WHAT = 'Regenerate the supported ChatPCB project artifact set from the requested circuit specification.';
 const RISKS = [
   'This NativeProposalSource performs full project regeneration rather than a surgical selection edit.',
@@ -443,9 +446,11 @@ export async function createNativeProposal({
   generateProjectImpl = generateMcuPeripheralProject,
   conversationBytes,
   source,
-  // Test-only. Unset uses classifyExistingProjectRequest.
-  classifyRequest = classifyExistingProjectRequest
+  [nativeProposalClassifier]: nativeProposalClassifierFn
 } = {}) {
+  const resolvedClassifier = typeof nativeProposalClassifierFn === 'function'
+    ? nativeProposalClassifierFn
+    : classifyExistingProjectRequest;
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
@@ -464,7 +469,7 @@ export async function createNativeProposal({
     throwIfAborted(signal);
 
     const existingSpec = await readChatPcbManifest(candidateDir);
-    const decision = classifyRequest(prompt, existingSpec, userPromptFrom(request));
+    const decision = resolvedClassifier(prompt, existingSpec, userPromptFrom(request));
     let proposed;
     if (decision.mode === 'refuse') {
       if (decision.code === 'REMOVAL_INTENT_UNCLEAR') {

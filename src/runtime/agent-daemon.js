@@ -11,7 +11,7 @@ import { parseProviderMessage, runProviderProcess } from './provider-process.js'
 import { buildProviderLaunchArgs, buildProviderPrompt, checkProviderAvailability, getProviderDefinition, grokMutatingToolNames, listProviderDefinitions, summarizeProjectInspection } from './provider-registry.js';
 import { callChatGPTResponses } from './providers/chatgpt-provider.js';
 import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPlan } from '../workflow/schematic-patch.js';
-import { proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
+import { nativeProposalClassifier, proposalSource, publicProposal } from '../workflow/native-proposal-source.js';
 import { rollbackProjectTransaction } from '../workflow/project-transaction.js';
 import { ercApprovalDecision, normalizeRecordedErc, recordedErcSource } from './erc-gate.js';
 import { createPatchApprovalRegistry } from './patch-approval-registry.js';
@@ -113,7 +113,29 @@ function emitProviderEvent(ctx, event) {
   }
 }
 
+// Drops the test hook and the old classifier option names before a spread.
+function omitDaemonTestSeam(dispatchOptions = {}) {
+  const options = dispatchOptions && typeof dispatchOptions === 'object' ? { ...dispatchOptions } : {};
+  delete options.testOnly;
+  delete options.classifyExistingProjectRequest;
+  delete options.classifyRequest;
+  return options;
+}
+
 export async function dispatchToolCall(call, dispatchOptions = {}) {
+  const dispatchSource = dispatchOptions && typeof dispatchOptions === 'object' ? dispatchOptions : {};
+  const normalizedOptions = { ...dispatchSource };
+  if (!normalizedOptions.testOnly || typeof normalizedOptions.testOnly !== 'object' || Array.isArray(normalizedOptions.testOnly)) {
+    normalizedOptions.testOnly = {};
+  }
+  // The only classifier override. Honored only under node --test (NODE_TEST_CONTEXT).
+  const { testOnly: { classifyRequest: testOnlyClassifyRequest } = {} } = normalizedOptions;
+  const resolvedClassifier = typeof testOnlyClassifyRequest === 'function'
+    && typeof process.env.NODE_TEST_CONTEXT === 'string'
+    && process.env.NODE_TEST_CONTEXT.length > 0
+    ? testOnlyClassifyRequest
+    : classifyExistingProjectRequest;
+  const seamFreeOptions = omitDaemonTestSeam(dispatchSource);
   const {
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
@@ -130,12 +152,12 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     ngspicePath,
     runCommandImpl,
     verifyAppliedProjectImpl
-  } = dispatchOptions;
+  } = seamFreeOptions;
   // Only server configuration selects executables. Never bind tool-call args.
   const validateProjectImpl = (options) => validateProjectImplementation({ ...options, kicadCliPath });
   const validateBoardImpl = (options) => validateBoardImplementation({ ...options, kicadCliPath });
   const ctx = {
-    ...dispatchOptions,
+    ...seamFreeOptions,
     checkProviderAvailabilityImpl,
     runProviderProcessImpl,
     inspectProjectImpl,
@@ -152,7 +174,10 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     runCommandImpl,
     verifyAppliedProjectImpl
   };
-  if (dispatchOptions[projectLockHeld] === true) ctx[projectLockHeld] = true;
+  delete ctx.testOnly;
+  delete ctx.classifyExistingProjectRequest;
+  delete ctx.classifyRequest;
+  if (dispatchSource[projectLockHeld] === true) ctx[projectLockHeld] = true;
 
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');
@@ -178,7 +203,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
         prompt: call.args?.prompt,
         projectName: call.args?.projectName,
         context: call.args?.context ?? call.args?.selection
-      }, ctx);
+      }, ctx, resolvedClassifier);
 
     case 'project.inspect':
       return okOrInspectionFailure(inspectProjectImpl({
@@ -199,7 +224,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
       return okOrInspectionFailure(dispatchCopiedValidation('drc', call, ctx));
 
     case 'schematic.patch':
-      return dispatchSchematicPatch(call.args ?? {}, ctx);
+      return dispatchSchematicPatch(call.args ?? {}, ctx, resolvedClassifier);
 
     case 'provider.status':
       return ok(await checkProviderAvailabilityImpl({ provider: call.args?.provider ?? 'codex' }));
@@ -260,7 +285,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
 
     case 'project.request':
       try {
-        return ok(await requestProject(call, ctx));
+        return ok(await requestProject(call, ctx, resolvedClassifier));
       } catch (error) {
         if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(call.args?.prompt);
         const extra = { conversation: error.conversation };
@@ -320,7 +345,7 @@ function candidateErcBindingStale(record, patchId) {
   return ids.some((id) => typeof id === 'string' && id.length > 0 && id !== patchId);
 }
 
-async function dispatchSchematicPatch(args, ctx) {
+async function dispatchSchematicPatch(args, ctx, resolvedClassifier = classifyExistingProjectRequest) {
   const projectDir = args.projectDir;
   const {
     patchApprovalRegistry,
@@ -347,7 +372,7 @@ async function dispatchSchematicPatch(args, ctx) {
       userPrompt: args.userPrompt,
       projectName: args.projectName,
       context: args.context ?? args.selection
-    }, ctx);
+    }, ctx, resolvedClassifier);
   }
 
   if (!args.patchId) return failure('PATCH_APPROVAL_REQUIRED', 'patchId is required to approve a patch preview.');
@@ -651,7 +676,7 @@ export function localResistorGate(decision, prompt) {
   return { action: 'continue' };
 }
 
-async function requestProject(call, ctx) {
+async function requestProject(call, ctx, resolvedClassifier = classifyExistingProjectRequest) {
   const args = call.args ?? {};
   const projectDir = args.projectDir;
   const prompt = args.prompt;
@@ -759,12 +784,9 @@ async function requestProject(call, ctx) {
           // CHATPCB_MANIFEST_INVALID and other read failures keep the prior path.
         }
         if (existingSpec) {
-          // Test-only. Production leaves ctx.classifyExistingProjectRequest unset,
-          // so this is classifyExistingProjectRequest. A test injects a classifier
-          // that returns a resistor merge the real classifier would refuse. The
-          // same function is forwarded into the local preview below.
-          const classifyRequest = ctx.classifyExistingProjectRequest ?? classifyExistingProjectRequest;
-          const decision = classifyRequest(generatePrompt, existingSpec, prompt);
+          // resolvedClassifier is testOnly.classifyRequest only while node --test
+          // set NODE_TEST_CONTEXT. Otherwise it is the real classifier.
+          const decision = resolvedClassifier(generatePrompt, existingSpec, prompt);
           // Counts, pins, frequencies, colors, and questions still reach the provider.
           if (decision.mode === 'refuse' && decision.code && blocksBeforeProvider(prompt, decision)) {
             const refused = new Error(decision.message);
@@ -784,7 +806,7 @@ async function requestProject(call, ctx) {
               projectDir,
               prompt: generatePrompt,
               context: args.selection
-            }, providerDispatchContext(ctx, proposalSource()));
+            }, providerDispatchContext(ctx, proposalSource()), resolvedClassifier);
             if (!generated.ok) {
               const error = new Error(generated.error.message);
               error.code = generated.error.code;
@@ -869,7 +891,7 @@ async function requestProject(call, ctx) {
           projectDir,
           prompt: generatePrompt,
           context: args.selection
-        }, providerDispatchContext(ctx, proposalSource({ via: 'native-fallback' })));
+        }, providerDispatchContext(ctx, proposalSource({ via: 'native-fallback' })), resolvedClassifier);
         if (!generated.ok) {
           if (providerResult?.disallowedCalls?.length > 0 && retryAttempted) {
             const disallowedError = new Error(providerDisallowedMessage(prompt, providerResult.disallowedCalls));
@@ -1370,8 +1392,9 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     portAttempts: dispatchOptions.chatgptPortAttempts,
     timeoutMs: dispatchOptions.chatgptAuthTimeoutMs
   });
+  const daemonOptions = omitDaemonTestSeam(dispatchOptions);
   const resolvedDispatchOptions = {
-    ...dispatchOptions,
+    ...daemonOptions,
     chatgptAuthManager,
     providerControllers,
     patchApprovalRegistry,
@@ -1380,6 +1403,9 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     reconciledProjects,
     allowedWorkspaceRoot: dispatchOptions.allowedWorkspaceRoot ?? process.env.CHATPCB_WORKSPACE_ROOT
   };
+  delete resolvedDispatchOptions.testOnly;
+  delete resolvedDispatchOptions.classifyExistingProjectRequest;
+  delete resolvedDispatchOptions.classifyRequest;
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -1394,7 +1420,8 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
 
       if (request.method === 'POST' && request.url === '/tool') {
         const body = await readJson(request);
-        sendJson(response, 200, await dispatchToolCall(body, resolvedDispatchOptions));
+        const httpOptions = omitDaemonTestSeam(resolvedDispatchOptions);
+        sendJson(response, 200, await dispatchToolCall(body, httpOptions));
         return;
       }
 
@@ -1457,7 +1484,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
   };
 }
 
-async function previewNativeChange({ projectDir, prompt, userPrompt, projectName, context }, ctx) {
+async function previewNativeChange({ projectDir, prompt, userPrompt, projectName, context }, ctx, resolvedClassifier = classifyExistingProjectRequest) {
   emitProgress(ctx, {
     stage: 'preview',
     sprite: 'draft',
@@ -1490,7 +1517,7 @@ async function previewNativeChange({ projectDir, prompt, userPrompt, projectName
       validateBoardImpl: ctx.validateBoardImpl,
       conversationBytes,
       source: ctx.designSource ?? proposalSource(),
-      classifyRequest: ctx.classifyExistingProjectRequest
+      [nativeProposalClassifier]: resolvedClassifier
     }));
   } catch (error) {
     if (error?.code === 'PROJECT_BUSY') return projectBusyFailure(prompt);
@@ -1804,11 +1831,15 @@ function scheduleSocketMessage(socket, payload, dispatchOptions, enqueue) {
 
 async function handleSocketEnvelope(socket, envelope, dispatchOptions) {
   if (envelope.type === 'tool.call') {
+    const socketOptions = omitDaemonTestSeam(dispatchOptions);
     const callCtx = {
-      ...dispatchOptions,
+      ...socketOptions,
       progressRequestId: envelope.payload.id,
       emit: (type, payload) => sendWebSocketJson(socket, createEnvelope(type, payload))
     };
+    delete callCtx.testOnly;
+    delete callCtx.classifyExistingProjectRequest;
+    delete callCtx.classifyRequest;
     sendWebSocketJson(
       socket,
       createEnvelope('tool.result', {

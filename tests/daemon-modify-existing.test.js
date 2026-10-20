@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { randomInt } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { dispatchToolCall, localResistorGate, withProjectContext } from '../src/runtime/agent-daemon.js';
+import { dispatchToolCall, localResistorGate, startDaemon, withProjectContext } from '../src/runtime/agent-daemon.js';
 import { saveCredentials } from '../src/runtime/auth/chatgpt-auth.js';
 import { createEnvelope } from '../src/runtime/envelope.js';
 import { callChatGPTResponses } from '../src/runtime/providers/chatgpt-provider.js';
@@ -3925,7 +3926,7 @@ test('the daemon refuses an uncovered resistor merge at the call site with zero 
     const provider = nativeNoPatchCounter();
     const preview = await requestAndMaybeApprove(services, projectDir, UNCOVERED_RESISTOR_MERGE, {
       ...provider.impl,
-      classifyExistingProjectRequest: classifyCallSiteResistorMerge
+      testOnly: { classifyRequest: classifyCallSiteResistorMerge }
     }, 'call_a4_callsite_uncovered');
     assert.equal(provider.calls(), 0, `calls ${provider.calls()} code=${preview.error?.code ?? preview.result?.applied}`);
     assert.equal(preview.ok, false, preview.error?.message ?? '');
@@ -3942,7 +3943,7 @@ test('the daemon refuses an uncovered resistor merge at the call site with zero 
     }, {
       ...services,
       ...coveredProvider.impl,
-      classifyExistingProjectRequest: classifyCallSiteResistorMerge
+      testOnly: { classifyRequest: classifyCallSiteResistorMerge }
     });
     assert.equal(coveredProvider.calls(), 0, `covered calls ${coveredProvider.calls()} code=${covered.error?.code ?? ''}`);
     assert.equal(covered.ok, true, `${covered.error?.code ?? ''} ${covered.error?.message ?? ''}`);
@@ -3957,6 +3958,233 @@ test('the daemon refuses an uncovered resistor merge at the call site with zero 
     const spice = await readFile(generated.files.spice, 'utf8');
     assertOnlySeriesValueChanged(schematic, before.schematic, '680Ω', spice, before.spice, '680', COVERED_RESISTOR_MERGE);
   } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+function countingMergeClassifier() {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    fn: () => {
+      calls += 1;
+      return { mode: 'merge', edit: { kind: 'resistor', ref: 'R3', ohms: 680, ohmsText: '680Ω' } };
+    }
+  };
+}
+
+function maskedClientTextFrame(text) {
+  const payload = Buffer.from(text);
+  const mask = randomBytes(4);
+  const masked = Buffer.alloc(payload.length);
+  for (let index = 0; index < payload.length; index += 1) masked[index] = payload[index] ^ mask[index % 4];
+  const header = payload.length < 126
+    ? Buffer.from([0x81, 0x80 | payload.length])
+    : Buffer.from([0x81, 0x80 | 126, payload.length >> 8, payload.length & 0xff]);
+  return Buffer.concat([header, mask, masked]);
+}
+
+function daemonToolCallOverWebSocket(url, call) {
+  const { port } = new URL(url);
+  const key = randomBytes(16).toString('base64');
+  const socket = net.connect(Number(port), '127.0.0.1');
+  const frame = maskedClientTextFrame(JSON.stringify(createEnvelope('tool.call', call)));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('websocket seam timed out'));
+    }, 10000);
+    let buffer = Buffer.alloc(0);
+    let upgraded = false;
+    const fail = (error) => {
+      clearTimeout(timer);
+      socket.destroy();
+      reject(error);
+    };
+    socket.on('error', fail);
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (!upgraded) {
+        const split = buffer.indexOf('\r\n\r\n');
+        if (split < 0) return;
+        const head = buffer.subarray(0, split).toString('utf8');
+        if (!head.startsWith('HTTP/1.1 101')) {
+          fail(new Error(head.split('\r\n')[0] || 'websocket upgrade failed'));
+          return;
+        }
+        buffer = buffer.subarray(split + 4);
+        upgraded = true;
+        socket.write(frame);
+      }
+      while (buffer.length >= 2) {
+        const opcode = buffer[0] & 0x0f;
+        let length = buffer[1] & 0x7f;
+        let offset = 2;
+        if (length === 126) {
+          if (buffer.length < 4) return;
+          length = buffer.readUInt16BE(2);
+          offset = 4;
+        } else if (length === 127) {
+          if (buffer.length < 10) return;
+          length = Number(buffer.readBigUInt64BE(2));
+          offset = 10;
+        }
+        if (buffer.length < offset + length) return;
+        const data = buffer.subarray(offset, offset + length);
+        buffer = buffer.subarray(offset + length);
+        if (opcode !== 0x1) continue;
+        const envelope = JSON.parse(data.toString('utf8'));
+        if (envelope.type !== 'tool.result') continue;
+        clearTimeout(timer);
+        socket.end();
+        resolve(envelope.payload);
+        return;
+      }
+    });
+    socket.once('connect', () => {
+      socket.write([
+        'GET /ws HTTP/1.1',
+        'Host: 127.0.0.1',
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        `Sec-WebSocket-Key: ${key}`,
+        'Sec-WebSocket-Version: 13',
+        '',
+        ''
+      ].join('\r\n'));
+    });
+  });
+}
+
+test('tool-call arguments and startup options can never replace the classifier', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  await materializeSeriesResistor(services, projectDir, generated);
+  const beforeBytes = await snapshotProjectBytes(projectDir);
+  try {
+    const argProvider = nativeNoPatchCounter();
+    const fromArgs = await dispatchToolCall({
+      id: 'call_seam_args',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir,
+        prompt: UNCOVERED_RESISTOR_MERGE,
+        classifyExistingProjectRequest: 'merge',
+        classifyRequest: { mode: 'merge', edit: { kind: 'resistor', ref: 'R3', ohms: 680, ohmsText: '680Ω' } }
+      }
+    }, { ...services, ...argProvider.impl });
+    assert.equal(argProvider.calls(), 0, `arg calls ${argProvider.calls()} code=${fromArgs.error?.code ?? ''}`);
+    assert.equal(fromArgs.ok, false, fromArgs.error?.message ?? '');
+    assert.equal(fromArgs.error?.code, 'RESISTOR_TARGET_UNCLEAR', fromArgs.error?.code ?? '');
+    assertProjectBytes(await snapshotProjectBytes(projectDir), beforeBytes, 'tool args');
+
+    const optionClassifier = countingMergeClassifier();
+    const optionProvider = nativeNoPatchCounter();
+    const fromOption = await dispatchToolCall({
+      id: 'call_seam_option',
+      name: 'project.request',
+      args: { provider: 'codex', projectDir, prompt: UNCOVERED_RESISTOR_MERGE }
+    }, {
+      ...services,
+      ...optionProvider.impl,
+      classifyExistingProjectRequest: optionClassifier.fn
+    });
+    assert.equal(optionClassifier.calls(), 0, 'startup option classifyExistingProjectRequest was called');
+    assert.equal(optionProvider.calls(), 0, `option calls ${optionProvider.calls()} code=${fromOption.error?.code ?? ''}`);
+    assert.equal(fromOption.ok, false, fromOption.error?.message ?? '');
+    assert.equal(fromOption.error?.code, 'RESISTOR_TARGET_UNCLEAR', fromOption.error?.code ?? '');
+    assertProjectBytes(await snapshotProjectBytes(projectDir), beforeBytes, 'startup option');
+
+    const outside = countingMergeClassifier();
+    const outsideProvider = nativeNoPatchCounter();
+    const previousContext = process.env.NODE_TEST_CONTEXT;
+    delete process.env.NODE_TEST_CONTEXT;
+    let outsideResult;
+    try {
+      outsideResult = await dispatchToolCall({
+        id: 'call_seam_outside',
+        name: 'project.request',
+        args: { provider: 'codex', projectDir, prompt: UNCOVERED_RESISTOR_MERGE }
+      }, {
+        ...services,
+        ...outsideProvider.impl,
+        testOnly: { classifyRequest: outside.fn }
+      });
+    } finally {
+      if (previousContext === undefined) delete process.env.NODE_TEST_CONTEXT;
+      else process.env.NODE_TEST_CONTEXT = previousContext;
+    }
+    assert.equal(outside.calls(), 0, 'testOnly classifier ran outside the test context');
+    assert.equal(outsideProvider.calls(), 0, `outside calls ${outsideProvider.calls()} code=${outsideResult.error?.code ?? ''}`);
+    assert.equal(outsideResult.ok, false, outsideResult.error?.message ?? '');
+    assert.equal(outsideResult.error?.code, 'RESISTOR_TARGET_UNCLEAR', outsideResult.error?.code ?? '');
+    assertProjectBytes(await snapshotProjectBytes(projectDir), beforeBytes, 'outside test context');
+  } finally {
+    services.patchApprovalRegistry.disposeAll();
+    await rm(projectDir, { force: true, recursive: true });
+    await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('startDaemon HTTP and WebSocket options drop testOnly', async () => {
+  const services = await transactionServices();
+  const { projectDir, generated } = await generatedStm32Project();
+  await materializeSeriesResistor(services, projectDir, generated);
+  const beforeBytes = await snapshotProjectBytes(projectDir);
+  const seam = countingMergeClassifier();
+  const namedOption = countingMergeClassifier();
+  const provider = nativeNoPatchCounter();
+  const daemon = await startDaemon({
+    port: 0,
+    dispatchOptions: {
+      ...services,
+      ...provider.impl,
+      testOnly: { classifyRequest: seam.fn },
+      classifyExistingProjectRequest: namedOption.fn,
+      classifyRequest: namedOption.fn
+    }
+  });
+  try {
+    const httpResult = await fetch(`${daemon.url}/tool`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'call_seam_http',
+        name: 'project.request',
+        args: {
+          provider: 'codex',
+          projectDir,
+          prompt: UNCOVERED_RESISTOR_MERGE,
+          classifyExistingProjectRequest: 'merge',
+          classifyRequest: { mode: 'merge', edit: { kind: 'resistor', ref: 'R3', ohms: 680, ohmsText: '680Ω' } }
+        }
+      })
+    }).then((response) => response.json());
+    assert.equal(httpResult.ok, false, httpResult.error?.message ?? '');
+    assert.equal(httpResult.error?.code, 'RESISTOR_TARGET_UNCLEAR', httpResult.error?.code ?? '');
+
+    const wsResult = await daemonToolCallOverWebSocket(daemon.url, {
+      id: 'call_seam_ws',
+      name: 'project.request',
+      args: {
+        provider: 'codex',
+        projectDir,
+        prompt: UNCOVERED_RESISTOR_MERGE,
+        classifyRequest: 'merge',
+        classifyExistingProjectRequest: { mode: 'merge', edit: { kind: 'resistor', ref: 'R3', ohms: 680, ohmsText: '680Ω' } }
+      }
+    });
+    assert.equal(wsResult.ok, false, wsResult.error?.message ?? '');
+    assert.equal(wsResult.error?.code, 'RESISTOR_TARGET_UNCLEAR', wsResult.error?.code ?? '');
+    assert.equal(seam.calls(), 0, 'startDaemon forwarded testOnly.classifyRequest');
+    assert.equal(namedOption.calls(), 0, 'startDaemon forwarded a classifier option');
+    assert.equal(provider.calls(), 0, `daemon calls ${provider.calls()}`);
+    assertProjectBytes(await snapshotProjectBytes(projectDir), beforeBytes, 'daemon seam');
+  } finally {
+    await daemon.close();
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });

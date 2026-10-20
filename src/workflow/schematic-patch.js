@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createPatchApprovalRegistry } from '../runtime/patch-approval-registry.js';
 import { createProjectMutexRegistry } from '../runtime/project-mutex-registry.js';
 import { createTransactionJournal } from '../runtime/transaction-journal.js';
-import { createCandidateValidator, createNativeProposal, disposeNativeProposal, proposalSource, publicProposal } from './native-proposal-source.js';
+import { createCandidateValidator, createNativeProposal, disposeNativeProposal, nativeProposalClassifier, proposalSource, publicProposal } from './native-proposal-source.js';
 import { applyProjectTransaction } from './project-transaction.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 import { reviewCircuitReadiness } from './review-project.js';
@@ -197,7 +197,7 @@ export async function createSchematicPatchPlan({
   signal,
   conversationBytes,
   source,
-  classifyRequest
+  [nativeProposalClassifier]: nativeProposalClassifierFn
 } = {}) {
   return createNativeProposal({
     projectDir: assertSafeProjectDir(projectDir),
@@ -211,7 +211,7 @@ export async function createSchematicPatchPlan({
       validateProjectImpl,
       validateBoardImpl
     }),
-    classifyRequest
+    [nativeProposalClassifier]: nativeProposalClassifierFn
   });
 }
 
