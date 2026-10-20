@@ -46,6 +46,7 @@ import {
   libIdNamesResistor,
   specRoleNamesResistor,
   textHasKnownRole,
+  textHasLedResistorSynonym,
   textHasLengthObject,
   textHasUsbRole
 } from './resistor-vocabulary.js';
@@ -66,6 +67,7 @@ const CHOICE_JOINER_ENDING = compileRegExp(
   `(?:${CHOICE_JOINERS.filter((item) => item.place === 'ending').map((item) => item.re).join('|')})(?:요|도|나)?$`,
   'iu'
 );
+const DEUN_CHOICE = compileRegExp(choiceJoinerRow('deun').re, 'gu');
 
 const DELETION_COORDINATORS = Object.freeze([
   choiceJoinerRow('or'),
@@ -666,9 +668,18 @@ function bareGlueWord(token) {
   return token.replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
 }
 
-function choiceJoinerWord(token) {
+function choiceJoinerWord(token, following = '') {
   const bare = bareGlueWord(token);
-  return CHOICE_JOINER_WORD.test(bare) || CHOICE_JOINER_ENDING.test(bare);
+  if (CHOICE_JOINER_WORD.test(bare) || CHOICE_JOINER_ENDING.test(bare)) return true;
+  // "X든 말든" is the pair even when X's last syllable is not a listed stem.
+  // The deun row's second alternative sees the text after this token.
+  if (!following) return false;
+  const source = `${bare}${following}`;
+  DEUN_CHOICE.lastIndex = 0;
+  for (const match of source.matchAll(DEUN_CHOICE)) {
+    if (match.index + match[0].length === bare.length) return true;
+  }
+  return false;
 }
 
 // A decimal in 4.7k hides a before-cue from the span list. The fragment still
@@ -676,7 +687,8 @@ function choiceJoinerWord(token) {
 function decimalChoiceKeep(text) {
   return decimalBeforeKeepFragments(text).some((fragment) => {
     const word = fragment.match(/\S+/u);
-    return word != null && choiceJoinerWord(word[0]);
+    if (word == null) return false;
+    return choiceJoinerWord(word[0], fragment.slice(word.index + word[0].length));
   });
 }
 
@@ -692,7 +704,7 @@ function choiceKeepJoiner(text, ranges) {
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
-    if (!choiceJoinerWord(word[0])) continue;
+    if (!choiceJoinerWord(word[0], text.slice(end))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
     const joined = ranges.some(([spanStart, spanEnd]) => (
       (start < spanEnd && end > spanStart)
@@ -717,7 +729,8 @@ function asIsChoiceSpans(text) {
   for (const match of text.matchAll(/그대로/gu)) {
     if (hangulCharBefore(text, match.index)) continue;
     const glued = /^\s*두(\S*)/u.exec(text.slice(match.index + match[0].length));
-    if (!glued?.[1] || !CHOICE_JOINER_ENDING.test(glued[1])) continue;
+    // The ending regex sees the stem, so bare 든 matches only after 두.
+    if (!glued?.[1] || !CHOICE_JOINER_ENDING.test(`두${glued[1]}`)) continue;
     ranges.push([match.index, match.index + match[0].length + glued[0].length]);
   }
   return ranges;
@@ -729,18 +742,68 @@ function isChoiceClauseBreak(text, index) {
   return ch === '.' && !(/\d/u.test(text[index - 1] ?? '') && /\d/u.test(text[index + 1] ?? ''));
 }
 
-function choiceClauseStart(text, index) {
-  for (let at = index - 1; at >= 0; at -= 1) {
-    if (isChoiceClauseBreak(text, at)) return at + 1;
+// and, -고, and 말고 close a clause for this check. 하거나's 고 does not.
+function choiceClauseMarks(text) {
+  const marks = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (isChoiceClauseBreak(text, index)) marks.push([index, index + 1]);
   }
-  return 0;
+  for (const match of text.matchAll(/\band\b/giu)) marks.push([match.index, match.index + match[0].length]);
+  for (const match of text.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
+    marks.push([match.index, match.index + match[0].length]);
+  }
+  for (const match of text.matchAll(/말고/gu)) marks.push([match.index, match.index + match[0].length]);
+  marks.sort((left, right) => left[0] - right[0] || right[1] - left[1]);
+  return marks;
 }
 
-function choiceClauseEnd(text, index) {
-  for (let at = index; at < text.length; at += 1) {
-    if (isChoiceClauseBreak(text, at)) return at;
+function choiceClauseBounds(wordStart, wordEnd, marks, textLength) {
+  let start = 0;
+  let end = textLength;
+  for (const [from, to] of marks) {
+    if (to <= wordStart) start = to;
+    if (from >= wordEnd && from < end) end = from;
   }
-  return text.length;
+  return [start, end];
+}
+
+const CHOICE_SIDE_STOP = /^(?:keep|hold|leave|set|change|update|modify|make|don't|don’t|dont|do|not|touch|and|but|또는|혹은|아니면|유지|그대로|건드리지|손대지|바꿔|변경|수정|두고|말고|놔두고|하지|두지)$/iu;
+
+function choiceSideStem(token) {
+  const bare = bareGlueWord(token);
+  if (!bare || CHOICE_SIDE_STOP.test(bare)) return bare;
+  return bare.replace(/(?:으로|로|은|는|이|가|을|를|도|만)$/u, '') || bare;
+}
+
+// The noun phrase sitting against the joiner. A keep verb or a value stops it,
+// so "or keep R4" and "680Ω or" are not two list nouns.
+function choiceSidePhrase(clause, side) {
+  const tokens = [...String(clause ?? '').matchAll(/\S+/gu)];
+  if (side === 'left') tokens.reverse();
+  const kept = [];
+  for (const token of tokens) {
+    const stem = choiceSideStem(token[0]);
+    if (!stem) continue;
+    if (/^(?:the|a|an)$/iu.test(stem)) continue;
+    if (CHOICE_SIDE_STOP.test(stem)) break;
+    if (/\d/u.test(stem) && !/^R\d+$/iu.test(stem)) break;
+    kept.push(stem);
+    if (/^R\d+$/iu.test(stem) || textHasKnownRole(stem) || textHasLedResistorSynonym(stem)) break;
+    if (kept.length >= 3) break;
+  }
+  if (side === 'left') kept.reverse();
+  return kept.join(' ');
+}
+
+// R4 or R5, and R1 or the pull-ups, name a keep list. R3 and an LED-resistor
+// synonym on either side are still a choice.
+function choiceSideIsListTarget(phrase, seriesRef) {
+  const text = String(phrase ?? '').trim();
+  if (!text || textHasLedResistorSynonym(text)) return false;
+  const series = String(seriesRef ?? '').toUpperCase();
+  const refs = resistorReferenceTokens(text);
+  if (refs.length > 0) return refs.every((ref) => ref.toUpperCase() !== series);
+  return textHasKnownRole(text);
 }
 
 function rangesOverlap(ranges, start, end) {
@@ -749,31 +812,40 @@ function rangesOverlap(ranges, start, end) {
 
 // A choice word between an edit value and a keep, valued or not, asks which
 // alternative to apply. "R1 or the pull-ups" coordinates the keep list; the
-// edit value sits in another clause, so that "or" is not the choice.
-function choiceJoinsAnyKeep(text) {
+// edit value sits in another clause (and, -고, 말고, or punctuation), so that
+// "or" is not the choice. Two keep-list nouns on the joiner's sides are a list
+// too, unless one of them is the series ref or an LED-resistor synonym.
+function choiceJoinsAnyKeep(text, spec) {
   const found = keepClauseSpans(text);
   const ranges = [];
   for (const object of found.objects) ranges.push([object.start, object.end]);
   for (const cue of found.cues) ranges.push([cue.start, cue.end]);
   for (const span of asIsChoiceSpans(text)) ranges.push(span);
   if (ranges.length === 0) return false;
+  const marks = choiceClauseMarks(text);
+  const series = seriesResistorRef(spec);
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
-    if (!choiceJoinerWord(word[0])) continue;
+    if (!choiceJoinerWord(word[0], text.slice(end))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
     if (!rangesOverlap(ranges, start, end)
       && !ranges.some(([spanStart, spanEnd]) => (
         (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
         || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
       ))) continue;
-    const left = choiceClauseStart(text, start);
-    const right = choiceClauseEnd(text, end);
+    const [left, right] = choiceClauseBounds(start, end, marks, text.length);
+    const leftText = text.slice(left, start);
+    const rightText = text.slice(end, right);
     const leftKeep = rangesOverlap(ranges, left, start);
     const rightKeep = rangesOverlap(ranges, end, right);
-    const leftValue = clauseCarriesResistorValue(text.slice(left, start));
-    const rightValue = clauseCarriesResistorValue(text.slice(end, right));
-    if ((leftValue && rightKeep) || (rightValue && leftKeep)) return true;
+    const leftValue = clauseCarriesResistorValue(leftText);
+    const rightValue = clauseCarriesResistorValue(rightText);
+    if (!(leftValue && rightKeep) && !(rightValue && leftKeep)) continue;
+    const leftPhrase = choiceSidePhrase(leftText, 'left');
+    const rightPhrase = choiceSidePhrase(rightText, 'right');
+    if (choiceSideIsListTarget(leftPhrase, series) && choiceSideIsListTarget(rightPhrase, series)) continue;
+    return true;
   }
   return false;
 }
@@ -843,7 +915,7 @@ function valuedKeepRefusal(text, spec) {
   // when it names this edit before the empty-span return.
   if (decimalKeepNamesEditTarget(text, spec)) return ambiguousValuedKeep();
   if (decimalChoiceKeep(text)) return ambiguousValuedKeep();
-  if (choiceJoinsAnyKeep(text)) return ambiguousValuedKeep();
+  if (choiceJoinsAnyKeep(text, spec)) return ambiguousValuedKeep();
   const found = keepClauseSpans(text);
   const objects = found.objects.filter((object) => object.valued === true);
   if (objects.length === 0) return null;

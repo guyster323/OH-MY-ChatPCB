@@ -2521,6 +2521,142 @@ test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a con
   assert.deepEqual(failures.slice(0, 12), [], `choice joiner property seed ${seed}`);
 });
 
+// Keep-list nouns joined by or/또는/혹은. The edit sits in another clause.
+// list target × joiner × keep cue × position. Each one applies R3=680Ω.
+const KEEP_LIST_PAIRS = [
+  { lang: 'en', joiner: 'or', pair: 'R4 or R5' },
+  { lang: 'en', joiner: 'or', pair: 'R1 or the pull-ups' },
+  { lang: 'ko', joiner: '또는', pair: 'R4 또는 R5' },
+  { lang: 'ko', joiner: '혹은', pair: 'R4 혹은 R5' }
+];
+
+const KEEP_LIST_CUES = {
+  en: ['keep', "don't touch"],
+  ko: ['그대로 두고', '건드리지 말고']
+};
+
+function keepListSentence(pair, cue, position, link) {
+  if (pair.lang === 'en') {
+    const kept = `${cue} ${pair.pair}`;
+    const edit = 'set the LED resistor to 680Ω';
+    if (position === 'keep-first') return link === 'and' ? `${kept} and ${edit}` : `${kept} ${edit}`;
+    return link === 'and' ? `${edit} and ${kept}` : `${edit} ${kept}`;
+  }
+  const edit = 'LED 저항 680Ω으로';
+  if (position === 'keep-first') return `${pair.pair}는 ${cue} ${edit}`;
+  const tail = cue.startsWith('건드리지') ? '건드리지 마' : '그대로';
+  return `${edit} 바꾸고 ${pair.pair}는 ${tail}`;
+}
+
+test('property: or/또는/혹은 between keep-list targets applies R3 and a real choice stays RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const applies = [];
+  for (const pair of KEEP_LIST_PAIRS) {
+    const cues = KEEP_LIST_CUES[pair.lang];
+    const links = pair.lang === 'en' ? ['and', 'space'] : ['고'];
+    for (const cue of cues) {
+      for (const position of ['keep-first', 'edit-first']) {
+        for (const link of links) applies.push(keepListSentence(pair, cue, position, link));
+      }
+    }
+  }
+  const ambiguous = [
+    'LED 저항 680Ω으로 바꾸든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든 말든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 하든 R4는 4.7k 그대로',
+    'LED 저항 680Ω으로 바꾸거나요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든지요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나도 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든가나 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나요, R4는 4.7k로 유지',
+    'set the LED resistor to 680Ω or keep R4',
+    'set the LED resistor to 680Ω or leave R4 alone',
+    'LED 저항 680Ω으로 바꾸거나 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸든 R4는 건드리지 마',
+    'keep R4 or R3 and set the LED resistor to 680Ω',
+    'keep R4 or the LED resistor and set the LED resistor to 680Ω',
+    'set the LED resistor to 680Ω or keep the LED resistor',
+    "don't touch R4 or the LED resistor and set the LED resistor to 680Ω"
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  assert.equal(applies.length, 24);
+  assert.deepEqual(failures.slice(0, 16), []);
+});
+
+test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', () => {
+  const spec = seriesSpec('1k');
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  const applies = ['어쨌든', '어쨨든', '어떻든', '얼마든', '골든'].map((word) => (
+    `LED 저항 680Ω으로 바꾸고 ${word} R4는 그대로 둠`
+  ));
+  applies.push('LED 저항을 680Ω으로 바꾸고 언제든 R4는 그대로 둬');
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+    }
+  }
+  const provider = [
+    'LED 저항을 680Ω으로 바꾸고 무엇이든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 뭐든 R4는 그대로',
+    '뭐든 LED 저항 680Ω으로'
+  ];
+  for (const prompt of provider) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code != null || decision.edit != null || blocksBeforeProvider(prompt, decision)) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? 'nocode'} block ${blocksBeforeProvider(prompt, decision)}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  const when = '언제든 LED 저항 680Ω으로 바꿔줘';
+  const whenDecision = classifyExistingProjectRequest(when, spec);
+  if (whenDecision.code !== 'RESISTOR_REF_UNSUPPORTED') failures.push(`${when} => ${whenDecision.code ?? whenDecision.mode}`);
+  const ambiguous = [
+    'LED 저항 680Ω으로 바꾸든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 하든 R4는 4.7k 그대로',
+    'LED 저항 680Ω으로 바꾸든 말든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 두든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 쓰든 R4는 그대로 둬'
+  ];
+  for (const prompt of ambiguous) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 // Part (c) outcome for each r35 probe. A valued keep is dropped. One remaining
 // LED resistor and one value apply on R3. A keep with nothing left stays
 // ambiguous. The map is the sentence list and the expected outcome.

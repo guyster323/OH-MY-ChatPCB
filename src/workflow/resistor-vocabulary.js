@@ -597,12 +597,22 @@ const PERMIT_PHRASES = [
 // "if" is not a function word. These phrases are the only place it is filler.
 const POLITE_IF_PHRASES = ['if possible', 'if you can', 'if you could'];
 
+// Predicate-final syllables -거나 already sits on (하 in 하거나, 꾸 in 바꾸거나,
+// 두 in 두거나). Bare 든 is that same ending only after one of these, or when
+// 말든 follows. Lexical 든 (어쨌든, 얼마든, 골든, 무엇이든, 뭐든) is not a stem.
+const VERB_STEM_BEFORE_DEUN = [
+  '하', '꾸', '두', '쓰', '말', '밝', '리', '시', '가', '오', '보', '주', '되',
+  '먹', '살', '추', '들', '있', '없', '좋', '워', '와', '어', '아', '여', '해',
+  '돼', '우', '으', '꿀', '둡', '받', '신', '같', '알', '울', '열', '놓', '넣',
+  '싶', '읽', '앉', '걸', '켜', '끄'
+].join('');
+
 // One choice-joiner list. Clause split, valued-keep checks, alternative
 // signals, and the value-suffix join all read these rows. "and", "나", and "·"
 // coordinate a clause and are not a choice. "하거나" contains 고, but that 고
 // is not a new clause. An ending matches (?:거나|든지|든가|던지|든)(?:요|도|나)?$
-// on one word. 뭐든, 언제든, 어디든, and 누구든 are indefinite pronouns, so bare
-// 든 excludes those stems. "or so" is an approximation, not a choice.
+// on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
+// "or so" is an approximation, not a choice.
 export const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
   Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
@@ -613,7 +623,13 @@ export const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending' }),
   Object.freeze({ id: 'deunga', lang: 'ko', text: '든가', re: '든가', place: 'ending' }),
   Object.freeze({ id: 'deonji', lang: 'ko', text: '던지', re: '던지', place: 'ending' }),
-  Object.freeze({ id: 'deun', lang: 'ko', text: '든', re: '(?<!뭐|언제|어디|누구)든', place: 'ending' })
+  Object.freeze({
+    id: 'deun',
+    lang: 'ko',
+    text: '든',
+    re: `(?<=[${VERB_STEM_BEFORE_DEUN}])든|든(?=\\s*말든)`,
+    place: 'ending'
+  })
 ]);
 
 export function choiceWordJoinerSources({ exceptApprox = false } = {}) {
