@@ -875,8 +875,18 @@ export function expandLedRefResistorAliases(text, ledRef) {
   return next;
 }
 
+// "the series one" puts the article and "one" on the synonym word list.
+// They are glue, not fragments. Counting them rejects a plain edit that also
+// names a current or a voltage ("set the LED resistor to 680Ω for 20mA").
+function excludedSynonymFragment(word) {
+  const key = lower(word);
+  if (key === 'one') return true;
+  return FUNCTION_WORDS.has(key) && (key === 'a' || key === 'an' || key === 'the');
+}
+
 // A token of the shared set, including "limit" inside "current-limit" and "제한용".
 export function isLedResistorSynonymPiece(word) {
+  if (excludedSynonymFragment(word)) return false;
   const key = lower(word);
   const stripped = stripYong(key);
   const folded = synonymFold(stripped);
@@ -1624,7 +1634,8 @@ function clauseHasLooseSynonymFragment(clause) {
   const words = clauseWords(clause);
   const inside = modifierPieceIndexes(clause);
   return words.some((word, index) => (
-    isLedResistorSynonymPiece(word)
+    !excludedSynonymFragment(word)
+    && isLedResistorSynonymPiece(word)
     && !RESISTOR_NOUNS.has(lower(word))
     && !inside.has(index)
   ));

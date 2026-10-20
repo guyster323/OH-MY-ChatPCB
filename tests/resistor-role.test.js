@@ -3604,3 +3604,48 @@ test('property: an LED-resistor alias keep is RESISTOR_AMBIGUOUS and a direct ed
   }
   assert.deepEqual(failures.slice(0, 16), []);
 });
+
+// "the" and "one" are articles and a pronoun in the synonym table. A current
+// or voltage on the LED resistor phrase is still the edit, with or without "the".
+test('property: a measured LED resistor phrase merges R3 with or without the article', () => {
+  const articles = ['the', ''];
+  const phrases = ['LED resistor', 'status LED resistor', 'current limiting resistor'];
+  const tails = ['for 20mA', 'at 3.3V', '(20mA)'];
+  const spec = seriesLedBoard('1k');
+  const prompts = [];
+  for (const article of articles) {
+    for (const phrase of phrases) {
+      for (const tail of tails) {
+        const head = article === '' ? phrase : `${article} ${phrase}`;
+        prompts.push(`set ${head} to 680Ω ${tail}`);
+      }
+    }
+  }
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  const keep = classifyExistingProjectRequest('keep the series one and set R3 to 680Ω', spec);
+  if (keep.mode !== 'refuse' || keep.code !== 'RESISTOR_AMBIGUOUS' || keep.edit != null) {
+    failures.push(`keep the series one and set R3 to 680Ω => ${keep.mode} ${keep.code ?? ''} ${keep.edit?.ref ?? ''}`);
+  }
+  const series = classifyExistingProjectRequest('set the series one to 680Ω', spec);
+  if (series.mode !== 'merge' || series.edit?.ref !== 'R3' || series.edit?.ohms !== 680 || series.edit?.label !== '680Ω') {
+    failures.push(`set the series one to 680Ω => ${series.mode} ${series.code ?? ''} ${series.edit?.ref ?? ''} ${series.edit?.ohms ?? ''}`);
+  }
+  assert.equal(prompts.length, articles.length * phrases.length * tails.length);
+  assert.deepEqual(failures, []);
+});
