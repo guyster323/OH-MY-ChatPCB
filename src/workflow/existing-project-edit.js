@@ -1963,9 +1963,9 @@ function maskGuardObjects(text) {
   return chars.join('');
 }
 
-// "don't touch R4" keeps that reference. The LED edit in the other clause
-// still applies. A role don't-touch is left visible; keepNamesEditTarget
-// already read it.
+// "don't touch R4" keeps that reference. "don't touch the pull-ups" keeps that
+// role. The LED edit in the other clause still applies. keepNamesEditTarget
+// already read the object, including a don't-touch of this resistor.
 function maskDontTouchRefs(chars, text) {
   const re = compileRegExp(String.raw`\b(?:don't|dont|do not|never)\s+touch\b`, 'giu');
   for (const match of text.matchAll(re)) {
@@ -2051,8 +2051,8 @@ function blankRange(chars, from, to) {
   for (let index = Math.max(0, from); index < end; index += 1) chars[index] = ' ';
 }
 
-// Don't-touch blanks only R refs. leave / as-is / 그대로 blank the whole object.
-// A value-owning tail ("R4, LED 저항 680Ω") stays visible, so that noun is the edit.
+// keep, leave, and don't-touch blank the whole object. A value-owning tail
+// ("R4, LED 저항 680Ω") stays visible, so that noun is the edit.
 function maskKeepVocabulary(chars, text) {
   const found = keepClauseSpans(text);
   for (const cue of found.cues) blankRange(chars, cue.start, cue.end);

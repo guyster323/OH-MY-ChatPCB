@@ -127,6 +127,81 @@ test('an LED resistor edit still applies when the other role is only kept', () =
   }
 });
 
+test('a bare leave of the target is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const ambiguous = [
+    'leave R3, set the LED resistor to 680Ω',
+    'leave R3 and set the LED resistor to 680Ω',
+    'leave R3 alone and set the LED resistor to 680Ω',
+    'leave the LED resistor and set R3 to 680Ω'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  }
+
+  const applies = [
+    ['leave R1, set the LED resistor to 680Ω', 680, '680Ω'],
+    ['leave R1 and change the LED resistor to 680Ω', 680, '680Ω']
+  ];
+  for (const [prompt, ohms, label] of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), label, prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
+test("don't touch of another resistor role applies the LED edit", () => {
+  const spec = seriesSpec('1k');
+  const prompts = [
+    "don't touch the pull-ups, set the LED resistor to 680Ω",
+    "don't touch the I2C pull-up, set the LED resistor to 680Ω",
+    "don't touch R1 or the pull-ups, set the LED resistor to 680Ω",
+    "don't touch the I2C pull-up R1 and set the LED resistor to 680Ω",
+    "don't touch R1 the pull-up and set the LED resistor to 680Ω"
+  ];
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
 test('an LED edit and another role edit in one request asks instead of changing R3', () => {
   const spec = seriesSpec('1k');
   const decision = classifyExistingProjectRequest('LED 저항이랑 I2C 저항 2.2k로', spec);

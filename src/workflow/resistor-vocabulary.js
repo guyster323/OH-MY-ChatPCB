@@ -91,11 +91,13 @@ export const KEEP_CUES = Object.freeze([
   Object.freeze({ text: 'unchanged', slot: 'before', mask: 'all', signal: true }),
   Object.freeze({ text: 'alone', slot: 'leave', mask: 'all', signal: true }),
   Object.freeze({ text: 'be', slot: 'leave', mask: 'all', signal: false }),
-  Object.freeze({ text: "don't touch", slot: 'after', mask: 'ref', signal: false }),
-  Object.freeze({ text: 'don’t touch', slot: 'after', mask: 'ref', signal: false }),
-  Object.freeze({ text: 'dont touch', slot: 'after', mask: 'ref', signal: false }),
-  Object.freeze({ text: 'do not touch', slot: 'after', mask: 'ref', signal: false }),
-  Object.freeze({ text: 'never touch', slot: 'after', mask: 'ref', signal: false }),
+  // mask 'all' hides the role, the same way "keep the pull-ups" does. mask 'ref'
+  // left "pull-ups" visible and the LED edit was refused as another resistor.
+  Object.freeze({ text: "don't touch", slot: 'after', mask: 'all', signal: false }),
+  Object.freeze({ text: 'don’t touch', slot: 'after', mask: 'all', signal: false }),
+  Object.freeze({ text: 'dont touch', slot: 'after', mask: 'all', signal: false }),
+  Object.freeze({ text: 'do not touch', slot: 'after', mask: 'all', signal: false }),
+  Object.freeze({ text: 'never touch', slot: 'after', mask: 'all', signal: false }),
   Object.freeze({ text: 'keep', slot: 'after', mask: 'all', signal: true }),
   Object.freeze({ text: 'hold', slot: 'after', mask: 'all', signal: true }),
   Object.freeze({ text: 'without', slot: 'after', mask: 'all', signal: true }),
@@ -1322,15 +1324,12 @@ function isKeepNonResistorClause(clause) {
   return nonRes && !resistorObject;
 }
 
-function isExplicitRRefDontTouch(clause) {
-  return isDontTouchResistorClause(clause) && rx("\\bR\\d+\\b", "i").test(String(clause ?? ''));
-}
-
 function isResistorKeepClause(clause) {
   if (isAmbiguousI2cPreservation(clause)) return false;
-  // "don't touch R4" keeps that ref. "don't touch the LED resistor" does not:
-  // that sentence negates the edit.
-  if (isExplicitRRefDontTouch(clause)) return true;
+  // "don't touch R4" keeps that ref. "don't touch the pull-ups" keeps that role,
+  // the same way "keep the pull-ups" does. "don't touch the LED resistor" has
+  // no role word, so it stays a negation of the edit.
+  if (isDontTouchResistorClause(clause)) return true;
   if (!hasKeepCue(clause) || isNegatedKeep(clause)) return false;
   if (isKeepNonResistorClause(clause)) return false;
   const words = clauseWords(clause);
