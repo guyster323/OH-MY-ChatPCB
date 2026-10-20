@@ -694,6 +694,19 @@ function finishResistor(text, spec, resistor) {
   const foreign = foreignRoleDecision(text, spec, resistor);
   if (foreign && !(resistor.kind === 'resistor' && coverage.lengthClause)) return foreign;
   if (resistor.kind === 'invalid') return invalidResistor(resistor);
+  // "from 2.2k to 680Ω" applies only when the saved value is 2.2k.
+  // A different saved value means the from-value names some other part.
+  const mismatch = statedFromMismatch(text, spec);
+  if (resistor.kind === 'resistor' && mismatch) {
+    return {
+      mode: 'refuse',
+      code: 'RESISTOR_VALUE_AMBIGUOUS',
+      message: resistorValueAmbiguousMessage(namedResistorRef(text), [
+        formatResistorLabel(mismatch.source.ohmsText),
+        formatResistorLabel(mismatch.destination.ohmsText)
+      ])
+    };
+  }
   const unchanged = unchangedResistor(spec, resistor);
   if (unchanged) return unchanged;
   if (resistor.kind === 'resistor' && coverage.lengthClause) {
@@ -755,7 +768,9 @@ function hasResistorEditVerb(text) {
 }
 
 function englishResistorMilli(text) {
-  const match = /\bresistor\s+(\S+)/.exec(text);
+  const spaced = /\bresistor\s+(\d+\s+m\d+)/iu.exec(text);
+  if (spaced && isLoneMilliResistorSuffix(spaced[1])) return true;
+  const match = /\bresistor\s+(\S+)/iu.exec(text);
   return match != null && isLoneMilliResistorSuffix(match[1]);
 }
 
@@ -776,13 +791,13 @@ export function blocksBeforeProvider(text, decision) {
   if (valueOnlyDecision(normalized)) return true;
   if (OPEN_QUESTION.test(normalized) && !hasResistorEditVerb(normalized)) return false;
   if (decision.code === 'RESISTOR_VALUE_INVALID' && hasMalformedRkm(normalized)) return true;
-  // "LED resistor 4m7" names the value on the resistor word. Korean marks that
-  // same object with 로 ("LED 저항 4m7로") and stops here. No English verb.
+  // "LED resistor 4m7" and "LED resistor 4 m7" name the value on the resistor
+  // word. Korean marks that same object with 로 ("LED 저항 4m7로", "LED 저항 4 m7로").
   if (decision.code === 'RESISTOR_VALUE_INVALID' && englishResistorMilli(normalized)) return true;
   if (decision.code === 'RESISTOR_UNIT_REQUIRED') return true;
   if (decision.code === 'RESISTOR_VALUE_UNCHANGED' || decision.code === 'RESISTOR_TARGET_UNCLEAR') return true;
   if (decision.code === 'RESISTOR_AMBIGUOUS') return true;
-  if (decision.code === 'RESISTOR_VALUE_AMBIGUOUS' && assessRequestCoverage(normalized).negatedOrAlternative) return true;
+  if (decision.code === 'RESISTOR_VALUE_AMBIGUOUS') return true;
   if (hasResistorTargetText(normalized) && hasResistorEditVerb(normalized)) return true;
   return decision.code.startsWith('RESISTOR_REF_');
 }
@@ -2363,7 +2378,8 @@ function isIgnorableWord(word, text) {
   if (isFunctionWord(word) || isEditVerbWord(word) || isModalOrParticleWord(word)) return true;
   if (isNegationOrAlternativeWord(word)) return true;
   if (isPoliteIfFiller(word, text)) return true;
-  if (/^[-–—<>→⇒~∼〜.=±%]+$/u.test(word)) return true;
+  // "&" joins two spellings of one value ("1k & 1000Ω"), same as "and".
+  if (/^[-–—<>→⇒~∼〜.=±%&]+$/u.test(word)) return true;
   if (/^괜찮/u.test(word) || /^가능/u.test(word)) return true;
   return isKoreanRequestStem(word);
 }
@@ -2418,6 +2434,33 @@ function isOtherResistor(spec, part) {
 function isForeignResistorRole(text) {
   const kind = foreignRoleKind(text);
   return kind === 'foreign' || kind === 'ambiguous';
+}
+
+// Two unit values joined by from/to, 에서, or an arrow. The first is the stated
+// current value. It has to be the saved series value.
+function transitionValuePair(text) {
+  const tokens = scanResistorTokens(text);
+  markNonResistorQuantities(tokens, text);
+  promoteCoordinatedBareValues(tokens, text);
+  dropLeadingDesignators(tokens);
+  const amounts = classifyResistorAttempts(tokens).valid;
+  if (amounts.length < 2) return null;
+  const source = amounts[0];
+  const destination = amounts[amounts.length - 1];
+  const between = text.slice(source.end, destination.index);
+  const head = text.slice(0, source.index);
+  const arrow = /->|→|에서/.test(between);
+  const fromTo = /\bfrom\b/i.test(head) && /\bto\b/i.test(between);
+  if (!arrow && !fromTo) return null;
+  return { source, destination };
+}
+
+function statedFromMismatch(text, spec) {
+  const pair = transitionValuePair(text);
+  if (!pair) return null;
+  const current = currentSeriesOhms(spec);
+  if (!current || pair.source.ohmsText === current.ohmsText) return null;
+  return pair;
 }
 
 // The saved series value wins over the user's spelling. 330Ω, 330R, and 0.33k
@@ -2947,7 +2990,8 @@ function interpretResistor(text) {
   const roleValue = textHasKnownRole(normalized) && CLEAR_OHM.test(normalized);
   // "680Ω 또는 1k" has no resistor word. The choice is still a value refusal.
   const valueChoice = coverage.alternative;
-  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0 && !roleValue && !valueChoice) return null;
+  // "1k & 1000Ω" is one value and has no edit verb. A bare "from 1k to 680Ω" stays out.
+  if (!aboutLed && !change && !named && componentDesignators(normalized).length === 0 && !roleValue && !valueChoice && !coverage.duplicateOhm) return null;
 
   const tokens = scanResistorTokens(normalized);
   markNonResistorQuantities(tokens, normalized);

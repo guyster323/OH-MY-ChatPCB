@@ -2194,7 +2194,7 @@ test('English LED resistor 4m7 is rejected locally with zero provider calls', as
   await writeFile(specPath, specText);
   await writeFile(schematicPath, schematic);
   try {
-    for (const [index, prompt] of ['LED resistor 4m7', 'LED resistor 2m2'].entries()) {
+    for (const [index, prompt] of ['LED resistor 4m7', 'LED resistor 2m2', 'LED resistor 4 m7', 'LED 저항 4 m7로'].entries()) {
       const provider = nativeNoPatchCounter();
       const preview = await dispatchToolCall({
         id: `call_en_milli_${index}`,

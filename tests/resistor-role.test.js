@@ -1112,6 +1112,88 @@ test('vocabulary allow lists contain no negation or alternative word', () => {
   assert.deepEqual([...lists.politeIfPhrases], ['if possible', 'if you can', 'if you could']);
 });
 
+test('a from-value that does not match the current R3 value is RESISTOR_VALUE_AMBIGUOUS', () => {
+  const mismatched = [
+    'change the LED resistor from 2.2k to 680Ω',
+    '2.2k에서 680Ω으로',
+    '2.2k -> 680Ω'
+  ];
+  const spec = seriesSpec('1k');
+  const message = resistorValueAmbiguousMessage(null, ['2.2k', '680Ω']);
+  for (const prompt of mismatched) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+
+  const matched = seriesSpec('2.2k');
+  for (const prompt of mismatched) {
+    const decision = classifyExistingProjectRequest(prompt, matched);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(componentValue(matched, 'R3'), '2.2k', prompt);
+  }
+
+  const kept = classifyExistingProjectRequest('change the LED resistor from 1k to 680Ω', spec);
+  assert.equal(kept.mode, 'merge');
+  assert.equal(kept.edit?.ohms, 680);
+  assert.equal(kept.edit?.ref, 'R3');
+  assert.equal(appliesBeforeProvider('change the LED resistor from 1k to 680Ω', kept), true);
+});
+
+test("'&' is a value separator", () => {
+  const rows = [
+    ['LED resistor 680Ω & 1k', ['680Ω', '1k']],
+    ['LED 저항 680Ω & 1kΩ', ['680Ω', '1k']]
+  ];
+  for (const current of ['330Ω', '1k']) {
+    const spec = seriesSpec(current);
+    for (const [prompt, labels] of rows) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      assert.equal(decision.mode, 'refuse', `${current} ${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+      assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', prompt);
+      assert.equal(decision.edit, undefined, prompt);
+      assert.equal(decision.message, resistorValueAmbiguousMessage(null, labels), prompt);
+      assert.equal(assessRequestCoverage(prompt).alternative, true, prompt);
+      assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+      assert.equal(componentValue(spec, 'R3'), current, prompt);
+    }
+  }
+});
+
+test('duplicate equal values apply once', () => {
+  const spec = seriesSpec('330Ω');
+  const rows = [
+    ['LED resistor 4k7 and 4.7k', 4700, '4.7k'],
+    ['1k & 1000Ω', 1000, '1k']
+  ];
+  for (const [prompt, ohms, label] of rows) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(assessRequestCoverage(prompt).alternative, false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), label, prompt);
+    assert.equal(componentValue(spec, 'R3'), '330Ω', prompt);
+  }
+
+  const same = seriesSpec('1k');
+  const unchanged = classifyExistingProjectRequest('1k & 1000Ω', same);
+  assert.equal(unchanged.code, 'RESISTOR_VALUE_UNCHANGED');
+  assert.equal(unchanged.edit, undefined);
+  assert.equal(componentValue(same, 'R3'), '1k');
+});
+
 test('transitions and resistor keep clauses still apply, and questions stay with the provider', () => {
   const spec = seriesSpec('1k');
   const merges = [

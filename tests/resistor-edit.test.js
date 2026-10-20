@@ -122,7 +122,7 @@ test('resistor notation uses the same values the SPICE parser accepts', () => {
     ['LED resistor 680 ohm', 680, '680Ω'],
     ['LED 저항 680옴', 680, '680Ω'],
     ['change the LED resistor from 680 to 1k', 1000, '1k'],
-    ['LED 저항 680옴에서 1k옴으로', 1000, '1k']
+    ['LED 저항 123옴에서 1k옴으로', 1000, '1k']
   ];
 
   for (const [prompt, ohms, label] of rows) {
@@ -399,10 +399,10 @@ test('mixed sentences keep only real resistor tokens', () => {
 
 test('explicit transition forms pick the destination value', () => {
   for (const [prompt, ohms, label] of [
-    ['change the LED resistor from 330Ω to 680Ω', 680, '680Ω'],
-    ['R3 330 ohm -> 680 ohm', 680, '680Ω'],
-    ['LED 저항 330옴에서 680옴으로', 680, '680Ω'],
-    ['LED 저항 330Ω에서 680Ω로', 680, '680Ω'],
+    ['change the LED resistor from 123Ω to 680Ω', 680, '680Ω'],
+    ['R3 123 ohm -> 680 ohm', 680, '680Ω'],
+    ['LED 저항 123옴에서 680옴으로', 680, '680Ω'],
+    ['LED 저항 123Ω에서 680Ω로', 680, '680Ω'],
     ['change the LED resistor from 680 to 1k', 1000, '1k']
   ]) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
@@ -453,6 +453,8 @@ test('a lone m suffix asks for M instead of guessing megaohms', () => {
   const milli = resistorMilliSuffixMessage();
   for (const prompt of [
     'LED resistor 4m7',
+    'LED resistor 4 m7',
+    'LED 저항 4 m7로',
     'LED resistor 1m',
     'LED resistor 2m2',
     'LED resistor 4.7m',

@@ -666,7 +666,7 @@ function pushBreak(breaks, start, end) {
 function allowClausePieces(text) {
   const breaks = [];
   const lowerText = text.toLowerCase();
-  for (const sep of [' and then ', ' and ', ' then ']) {
+  for (const sep of [' and then ', ' and ', ' & ', ' then ']) {
     let from = 0;
     while (from < lowerText.length) {
       const at = lowerText.indexOf(sep, from);
@@ -871,8 +871,52 @@ function parentheticalCurrentSpans(text) {
   return spans;
 }
 
+// "4k7" and "4.7k" are one resistance. A choice needs two different ohms.
+function ohmNumber(whole, fraction, multiplier) {
+  const scale = 10 ** fraction.length;
+  return (Number(whole) * scale + Number(fraction || 0)) * multiplier / scale;
+}
+
+function ohmKey(raw) {
+  let text = String(raw ?? '').trim().normalize('NFKC').replace(rx("(?:\\s*(?:Ω|옴|ohms?))$", "iu"), '').trim();
+  if (!text) return null;
+  const rkm = rx("^(\\d+)([rRkK])(\\d)$").exec(text) || rx("^(\\d+)(M)(\\d)$").exec(text);
+  let ohms;
+  if (rkm) {
+    const letter = rkm[2];
+    const multiplier = letter === 'M' ? 1e6 : letter.toLowerCase() === 'k' ? 1e3 : 1;
+    ohms = ohmNumber(rkm[1], rkm[3], multiplier);
+  } else {
+    const suffixed = rx("^(\\d+(?:\\.\\d+)?)(?:\\s*(meg|MEG|Meg|[kKrR]|M))?$").exec(text);
+    if (!suffixed) return null;
+    const suffix = suffixed[2] ?? '';
+    const multiplier = suffix === 'meg' || suffix === 'MEG' || suffix === 'Meg' || suffix === 'M'
+      ? 1e6
+      : suffix.toLowerCase() === 'k'
+        ? 1e3
+        : (suffix === '' || suffix.toLowerCase() === 'r')
+          ? 1
+          : null;
+    if (multiplier == null) return null;
+    const [whole, fraction = ''] = suffixed[1].split('.');
+    ohms = ohmNumber(whole, fraction, multiplier);
+  }
+  if (!Number.isFinite(ohms) || ohms <= 0) return null;
+  const rounded = Math.round(ohms);
+  if (Math.abs(ohms - rounded) <= 1e-9 * Math.max(1, Math.abs(ohms))) return String(rounded);
+  return Number(ohms.toPrecision(12)).toFixed(12).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function sameOhmTokens(tokens) {
+  if (tokens.length < 2) return false;
+  const keys = tokens.map((token) => ohmKey(token.raw));
+  if (keys.some((key) => key == null)) return false;
+  return keys.every((key) => key === keys[0]);
+}
+
 // "from 330Ω to 680Ω" and "330옴에서 680옴으로" name the destination once.
 // A second value with no transition marker stays a second value.
+// "4k7 and 4.7k" is one value written twice.
 function logicalBoundTokens(text) {
   const tokens = boundOhmTokens(text).filter((token) => !isReplacedSourceValue(text, token.index));
   if (tokens.length <= 1) return tokens;
@@ -882,6 +926,7 @@ function logicalBoundTokens(text) {
     const outside = tokens.filter((token) => !spans.some(([start, end]) => token.index >= start && token.index < end));
     if (outside.length === 1 && outside.length < tokens.length) return outside;
   }
+  if (sameOhmTokens(tokens)) return [tokens[tokens.length - 1]];
   return tokens;
 }
 
@@ -1178,6 +1223,7 @@ function hasMultiValueChoice(text) {
     if (!tokens.some((token) => token.index >= at && token.index < headEnd)) count += 1;
   }
   if (count < 2 || isValueTransition(text, tokens)) return false;
+  if (sameOhmTokens(tokens) && count === tokens.length) return false;
   return true;
 }
 
@@ -1229,7 +1275,10 @@ export function assessRequestCoverage(text) {
     if (leftoverWords(clause).length > 0) unknownLeftover = true;
     if (isUnboundOnlyClause(clause) && allBound.length > 0 && boundOhmTokens(clause).length === 0) unknownLeftover = true;
   }
-  const hasTarget = explicitTarget(normalized) || (!pronounTarget(normalized) && allBound.length === 1 && rx("(?:으로|로\\b|\\bto\\b|바꿔|변경|수정|\\b(?:change|set|make|use)\\b)", "iu").test(normalized));
+  const rawBound = boundOhmTokens(normalized).filter((token) => !isReplacedSourceValue(normalized, token.index));
+  const duplicateOhm = sameOhmTokens(rawBound);
+  // "2.2k -> 680Ω" is a transition with no resistor noun. "1k & 1000Ω" is one value.
+  const hasTarget = explicitTarget(normalized) || (!pronounTarget(normalized) && allBound.length === 1 && (rx("(?:으로|로\\b|\\bto\\b|->|→|바꿔|변경|수정|\\b(?:change|set|make|use)\\b)", "iu").test(normalized) || duplicateOhm));
   const covered = hasTarget
     && allBound.length === 1
     && !foreignRole
@@ -1256,6 +1305,7 @@ export function assessRequestCoverage(text) {
     permittedEdit,
     approximate,
     malformedRkm,
+    duplicateOhm,
     resistorMention: mentionsResistor(normalized),
     hasBoundValue: allBound.length > 0,
     valueToken

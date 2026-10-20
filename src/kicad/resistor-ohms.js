@@ -104,10 +104,10 @@ export function isSpacedRkmValue(value) {
   return SPACED_RKM.test(bareResistorText(value));
 }
 
-// 4m7, 1m, 2m2, and 4.7m. Uppercase M and meg/MEG/Meg are not this suffix.
+// 4m7, 4 m7, 1m, 2m2, and 4.7m. Uppercase M and meg/MEG/Meg are not this suffix.
 export function isLoneMilliResistorSuffix(value) {
   const text = bareResistorText(value);
-  return /^\d+m\d+$/.test(text) || /^\d+(?:\.\d+)?\s*m$/.test(text);
+  return /^\d+m\d+$/.test(text) || /^\d+\s+m\d+$/.test(text) || /^\d+(?:\.\d+)?\s*m$/.test(text);
 }
 
 // Shared by the edit path and SPICE. A lone m is refused with the M hint.
