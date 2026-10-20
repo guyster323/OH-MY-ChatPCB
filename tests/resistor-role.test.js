@@ -3649,3 +3649,154 @@ test('property: a measured LED resistor phrase merges R3 with or without the art
   assert.equal(prompts.length, articles.length * phrases.length * tails.length);
   assert.deepEqual(failures, []);
 });
+
+// Specs match probe40.mjs. D1 stands in for the status LED only when the spec
+// has no D-designator part. A Schottky or power LED already on D1 is not that part.
+function probeBoard(kind) {
+  const comps = [
+    { ref: 'R1', libId: 'Device:R', value: '5.1k' },
+    { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '1k' },
+    { ref: 'R4', libId: 'ChatPCB:I2C_PULLUP', value: '4.7k' }
+  ];
+  const parts = [
+    { ref: 'R1', role: 'usb-c-cc1-pulldown', value: '5.1k' },
+    { ref: 'R3', role: 'status-led-resistor', value: '1k' },
+    { ref: 'R4', role: 'i2c-scl-pullup', value: '4.7k' }
+  ];
+  const per = [{ kind: 'status-led' }, { kind: 'status-led-resistor', value: '1k' }];
+  if (kind === 'noled') {
+    return {
+      mcu: { family: 'STM32' },
+      schematic: { components: [comps[0], comps[2]] },
+      peripherals: [{ kind: 'status-led' }],
+      boardProfile: { productionParts: [parts[0], parts[2]] }
+    };
+  }
+  if (kind === 'd1led') {
+    comps.push({ ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' });
+    parts.push({ ref: 'D1', role: 'status-led' });
+  }
+  if (kind === 'd2status') {
+    comps.push(
+      { ref: 'D1', libId: 'Device:LED', value: 'PWR_LED' },
+      { ref: 'D2', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' },
+      { ref: 'R5', libId: 'Device:R', value: '2.2k' }
+    );
+    parts.push(
+      { ref: 'D1', role: 'power-led' },
+      { ref: 'D2', role: 'status-led' },
+      { ref: 'R5', role: 'power-led-resistor', value: '2.2k' }
+    );
+  }
+  if (kind === 'd1schottky') {
+    comps.push({ ref: 'D1', libId: 'Device:D_Schottky', value: 'SS14' });
+    parts.push({ ref: 'D1', role: 'reverse-polarity-diode' });
+  }
+  if (kind === 'multiled') {
+    comps.push(
+      { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' },
+      { ref: 'D2', libId: 'Device:LED', value: 'PWR_LED' },
+      { ref: 'R5', libId: 'Device:R', value: '2.2k' }
+    );
+    parts.push(
+      { ref: 'D1', role: 'status-led' },
+      { ref: 'D2', role: 'power-led' },
+      { ref: 'R5', role: 'power-led-resistor', value: '2.2k' }
+    );
+  }
+  return {
+    mcu: { family: 'STM32' },
+    schematic: { components: comps },
+    peripherals: per,
+    boardProfile: { productionParts: parts }
+  };
+}
+
+test('D1 aliases the LED resistor only when the spec has no D-designator part', () => {
+  const d1Edits = [
+    'D1 저항 680Ω으로',
+    "set D1's resistor to 680Ω",
+    'D1저항 680Ω'
+  ];
+  const rows = [
+    // No D-designator at all: D1 is still the status-LED substitute.
+    ['base', 'D1 저항 680Ω으로', 'R3'],
+    ['base', "set D1's resistor to 680Ω", 'R3'],
+    ['base', 'D1저항 680Ω', 'R3'],
+    ['base', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['base', 'set the current limiter to 680Ω', 'R3'],
+    ['base', 'set the indicator resistor to 680Ω', 'R3'],
+    // D1 is the status LED.
+    ['d1led', 'D1 저항 680Ω으로', 'R3'],
+    ['d1led', "set D1's resistor to 680Ω", 'R3'],
+    ['d1led', 'D1저항 680Ω', 'R3'],
+    ['d1led', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['d1led', 'set the current limiter to 680Ω', 'R3'],
+    ['d1led', 'set the indicator resistor to 680Ω', 'R3'],
+    // D2 is the status LED. D1 is a power LED, so it is not the alias.
+    ['d2status', 'D1 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d2status', "set D1's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['d2status', 'D1저항 680Ω', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d2status', 'D2 저항 680Ω으로', 'R3'],
+    ['d2status', "set D2's resistor to 680Ω", 'R3'],
+    ['d2status', 'set the current limiter to 680Ω', 'R3'],
+    ['d2status', 'set the indicator resistor to 680Ω', 'R3'],
+    // D1 is a Schottky diode. Naming it must not edit R3.
+    ['d1schottky', 'D1 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d1schottky', "set D1's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['d1schottky', 'D1저항 680Ω', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d1schottky', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['d1schottky', 'set the current limiter to 680Ω', 'R3'],
+    ['d1schottky', 'set the indicator resistor to 680Ω', 'R3'],
+    // D1 is the status LED. D2 is a power LED.
+    ['multiled', 'D1 저항 680Ω으로', 'R3'],
+    ['multiled', "set D1's resistor to 680Ω", 'R3'],
+    ['multiled', 'D1저항 680Ω', 'R3'],
+    ['multiled', 'D2 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['multiled', "set D2's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['multiled', 'set the current limiter to 680Ω', 'R3'],
+    ['multiled', 'set the indicator resistor to 680Ω', 'R3'],
+    // No LED parts and no series resistor. The alias must not add one.
+    ['noled', 'D1 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['noled', "set D1's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['noled', 'D1저항 680Ω', 'RESISTOR_REF_NOT_FOUND'],
+    ['noled', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['noled', 'set the current limiter to 680Ω', 'RESISTOR_TARGET_UNCLEAR'],
+    ['noled', 'set the indicator resistor to 680Ω', 'RESISTOR_TARGET_UNCLEAR']
+  ];
+  const failures = [];
+  for (const [kind, prompt, expectCode] of rows) {
+    const spec = probeBoard(kind);
+    const before = structuredClone(spec);
+    const r3 = componentValue(spec, 'R3');
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    const got = decision.mode === 'merge' ? decision.edit?.ref : decision.code;
+    if (got !== expectCode || (expectCode === 'R3' && (decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω'))) {
+      failures.push(`${kind} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${kind} ${prompt} mutated`);
+    if (componentValue(spec, 'R3') !== r3) failures.push(`${kind} ${prompt} R3 changed before apply`);
+    if (decision.mode === 'refuse') {
+      if (decision.edit != null) failures.push(`${kind} ${prompt} edit set`);
+      if (!blocksBeforeProvider(prompt, decision)) failures.push(`${kind} ${prompt} reached provider`);
+    }
+    if (decision.mode === 'merge' && decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${kind} ${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${kind} ${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(spec, 'R5') !== undefined && componentValue(next, 'R5') !== '2.2k') {
+        failures.push(`${kind} ${prompt} R5 ${componentValue(next, 'R5')}`);
+      }
+    }
+    if (kind === 'd1schottky' && d1Edits.includes(prompt)) {
+      if (decision.code !== 'RESISTOR_REF_UNSUPPORTED' || componentValue(spec, 'R3') !== '1k') {
+        failures.push(`${kind} ${prompt} must stay RESISTOR_REF_UNSUPPORTED with R3 unchanged`);
+      }
+      if (componentValue(spec, 'D1') !== 'SS14') failures.push(`${kind} ${prompt} D1 changed`);
+    }
+    if (kind === 'noled' && componentValue(spec, 'R3') !== undefined) {
+      failures.push(`${kind} ${prompt} added R3`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});

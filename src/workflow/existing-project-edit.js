@@ -2334,12 +2334,21 @@ function seriesLedDesignator(spec) {
   return null;
 }
 
+function specHasDDesignator(spec) {
+  const rows = [];
+  if (Array.isArray(spec?.schematic?.components)) rows.push(...spec.schematic.components);
+  if (Array.isArray(spec?.boardProfile?.productionParts)) rows.push(...spec.boardProfile.productionParts);
+  return rows.some((row) => /^D\d+$/i.test(String(row?.ref ?? '')));
+}
+
 // The generator draws the status LED as D1. A spec that saved the series
 // resistor but not that diode still uses D1 for "{led}'s resistor" / "{led} 저항".
+// A saved D part that is not the status LED is not that substitute.
 function ledResistorAliasRef(spec) {
   const found = seriesLedDesignator(spec);
   if (found) return found;
   if (!seriesResistorRef(spec)) return null;
+  if (specHasDDesignator(spec)) return null;
   return 'D1';
 }
 
