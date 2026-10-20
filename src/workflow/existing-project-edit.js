@@ -53,8 +53,10 @@ const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그�
 // One choice-joiner list. Coordinators that are choices use these same rows,
 // so the clause split and the valued-keep check do not keep a second word list.
 // "and", "나", and "·" coordinate a clause and are not a choice. "하거나" contains
-// 고, but that 고 is not a new clause. An ending matches (?:거나|든지|든가|던지)$
-// on one word. "or so" is an approximation, not a choice.
+// 고, but that 고 is not a new clause. An ending matches
+// (?:거나|든지|든가|던지|든)(?:요|도|나)?$ on one word. 뭐든, 언제든, 어디든, and
+// 누구든 are indefinite pronouns, so bare 든 excludes those stems. "or so" is an
+// approximation, not a choice.
 const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'or', lang: 'en', re: String.raw`\bor\b`, place: 'word' }),
   Object.freeze({ id: 'ttoneun', lang: 'ko', re: '또는', place: 'word' }),
@@ -64,7 +66,8 @@ const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'geona', lang: 'ko', re: '거나', place: 'ending' }),
   Object.freeze({ id: 'deunji', lang: 'ko', re: '든지', place: 'ending' }),
   Object.freeze({ id: 'deunga', lang: 'ko', re: '든가', place: 'ending' }),
-  Object.freeze({ id: 'deonji', lang: 'ko', re: '던지', place: 'ending' })
+  Object.freeze({ id: 'deonji', lang: 'ko', re: '던지', place: 'ending' }),
+  Object.freeze({ id: 'deun', lang: 'ko', re: '(?<!뭐|언제|어디|누구)든', place: 'ending' })
 ]);
 
 function choiceJoinerRow(id) {
@@ -76,7 +79,7 @@ const CHOICE_JOINER_WORD = compileRegExp(
   'iu'
 );
 const CHOICE_JOINER_ENDING = compileRegExp(
-  `(?:${CHOICE_JOINERS.filter((item) => item.place === 'ending').map((item) => item.re).join('|')})$`,
+  `(?:${CHOICE_JOINERS.filter((item) => item.place === 'ending').map((item) => item.re).join('|')})(?:요|도|나)?$`,
   'iu'
 );
 
@@ -717,6 +720,80 @@ function choiceKeepJoiner(text, ranges) {
   return false;
 }
 
+function hangulCharBefore(text, index) {
+  if (index <= 0) return false;
+  const code = text.codePointAt(index - 1);
+  return code >= 0xAC00 && code <= 0xD7A3;
+}
+
+// "그대로 두고" is the keep cue. "그대로 두거나" glues a CHOICE_JOINERS ending
+// onto that stem, and a sentence-initial cue has no object for the span list.
+function asIsChoiceSpans(text) {
+  const ranges = [];
+  for (const match of text.matchAll(/그대로/gu)) {
+    if (hangulCharBefore(text, match.index)) continue;
+    const glued = /^\s*두(\S*)/u.exec(text.slice(match.index + match[0].length));
+    if (!glued?.[1] || !CHOICE_JOINER_ENDING.test(glued[1])) continue;
+    ranges.push([match.index, match.index + match[0].length + glued[0].length]);
+  }
+  return ranges;
+}
+
+function isChoiceClauseBreak(text, index) {
+  const ch = text[index];
+  if (ch === ',' || ch === '，' || ch === ';' || ch === '\n' || ch === '。' || ch === '？' || ch === '！' || ch === '?' || ch === '!') return true;
+  return ch === '.' && !(/\d/u.test(text[index - 1] ?? '') && /\d/u.test(text[index + 1] ?? ''));
+}
+
+function choiceClauseStart(text, index) {
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if (isChoiceClauseBreak(text, at)) return at + 1;
+  }
+  return 0;
+}
+
+function choiceClauseEnd(text, index) {
+  for (let at = index; at < text.length; at += 1) {
+    if (isChoiceClauseBreak(text, at)) return at;
+  }
+  return text.length;
+}
+
+function rangesOverlap(ranges, start, end) {
+  return ranges.some(([spanStart, spanEnd]) => start < spanEnd && end > spanStart);
+}
+
+// A choice word between an edit value and a keep, valued or not, asks which
+// alternative to apply. "R1 or the pull-ups" coordinates the keep list; the
+// edit value sits in another clause, so that "or" is not the choice.
+function choiceJoinsAnyKeep(text) {
+  const found = keepClauseSpans(text);
+  const ranges = [];
+  for (const object of found.objects) ranges.push([object.start, object.end]);
+  for (const cue of found.cues) ranges.push([cue.start, cue.end]);
+  for (const span of asIsChoiceSpans(text)) ranges.push(span);
+  if (ranges.length === 0) return false;
+  for (const word of text.matchAll(/\S+/gu)) {
+    const start = word.index;
+    const end = start + word[0].length;
+    if (!choiceJoinerWord(word[0])) continue;
+    if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
+    if (!rangesOverlap(ranges, start, end)
+      && !ranges.some(([spanStart, spanEnd]) => (
+        (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
+        || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
+      ))) continue;
+    const left = choiceClauseStart(text, start);
+    const right = choiceClauseEnd(text, end);
+    const leftKeep = rangesOverlap(ranges, left, start);
+    const rightKeep = rangesOverlap(ranges, end, right);
+    const leftValue = clauseCarriesResistorValue(text.slice(left, start));
+    const rightValue = clauseCarriesResistorValue(text.slice(end, right));
+    if ((leftValue && rightKeep) || (rightValue && leftKeep)) return true;
+  }
+  return false;
+}
+
 // "but" and "and" are not a clause break. They are only the glue beside a valued keep.
 function valuedKeepGlueRanges(text, ranges) {
   if (choiceKeepJoiner(text, ranges)) return null;
@@ -782,6 +859,7 @@ function valuedKeepRefusal(text, spec) {
   // when it names this edit before the empty-span return.
   if (decimalKeepNamesEditTarget(text, spec)) return ambiguousValuedKeep();
   if (decimalChoiceKeep(text)) return ambiguousValuedKeep();
+  if (choiceJoinsAnyKeep(text)) return ambiguousValuedKeep();
   const found = keepClauseSpans(text);
   const objects = found.objects.filter((object) => object.valued === true);
   if (objects.length === 0) return null;

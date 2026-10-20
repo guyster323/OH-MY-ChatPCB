@@ -2225,6 +2225,13 @@ test('a verb-ending or 혹은 choice keep is RESISTOR_AMBIGUOUS and a but or 고
     'LED 저항 680Ω으로 바꾸든지 R4는 4.7k로 유지',
     'LED 저항 680Ω으로 바꾸든가 R4는 4.7k로 유지',
     'LED 저항 680Ω으로 바꾸던지 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든지요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든가도 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸던지나 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나요, R4는 4.7k로 유지',
     'LED 저항 680Ω으로 혹은 R4는 4.7k로 유지',
     'LED는 그대로 두고 저항 680Ω'
   ];
@@ -2265,15 +2272,17 @@ test('a verb-ending or 혹은 choice keep is RESISTOR_AMBIGUOUS and a but or 고
   }
 });
 
+const CHOICE_ENDING_TEXTS = ['거나', '든지', '든가', '던지', '든'];
+const CHOICE_ENDING_PARTICLES = ['', '요', '도', '나'];
+
 const CHOICE_KEEP_JOINERS = [
   { kind: 'en', text: 'or' },
   { kind: 'ko-word', text: '또는' },
   { kind: 'ko-word', text: '아니면' },
   { kind: 'ko-word', text: '혹은' },
-  { kind: 'ko-end', text: '거나' },
-  { kind: 'ko-end', text: '든지' },
-  { kind: 'ko-end', text: '든가' },
-  { kind: 'ko-end', text: '던지' }
+  ...CHOICE_ENDING_TEXTS.flatMap((ending) => (
+    CHOICE_ENDING_PARTICLES.map((particle) => ({ kind: 'ko-end', text: `${ending}${particle}` }))
+  ))
 ];
 
 const CONTROL_KEEP_JOINERS = [
@@ -2304,6 +2313,155 @@ function valuedKeepJoinerSentence(joiner, keep, order) {
   return order === 'edit-first' ? `${edit} ${keep.ko}` : `${kept} LED 저항 680Ω으로`;
 }
 
+// Full clauses. English already includes the verb. As-is Korean is "그대로 두" plus the ending.
+const CHOICE_KEEP_KINDS = [
+  { id: 'valued', en: 'keep R4 at 4.7k', ko: 'R4는 4.7k로 유지' },
+  { id: 'unvalued', en: 'keep R4', ko: 'R4 유지' },
+  { id: 'as-is', en: 'leave it as is', ko: '그대로 두거나' }
+];
+
+function choiceKeepKindSentence(joiner, kind, order) {
+  if (joiner.kind === 'en') {
+    const edit = 'set the LED resistor to 680Ω';
+    return order === 'edit-first' ? `${edit} ${joiner.text} ${kind.en}` : `${kind.en} ${joiner.text} ${edit}`;
+  }
+  if (joiner.kind === 'ko-word') {
+    const edit = 'LED 저항 680Ω으로';
+    return order === 'edit-first' ? `${edit} ${joiner.text} ${kind.ko}` : `${kind.ko} ${joiner.text} ${edit}`;
+  }
+  const edit = `LED 저항 680Ω으로 바꾸${joiner.text}`;
+  const kept = kind.id === 'as-is'
+    ? `그대로 두${joiner.text}`
+    : kind.ko.replace(/유지$/u, `유지하${joiner.text}`);
+  const keepClause = kind.id === 'as-is' ? '그대로 두거나' : kind.ko;
+  return order === 'edit-first' ? `${edit} ${keepClause}` : `${kept} LED 저항 680Ω으로`;
+}
+
+test('뭐든 and 언제든 keep today\'s outcome and are not choice joiners', () => {
+  const spec = seriesSpec('1k');
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  const bare = '뭐든 LED 저항 680Ω으로';
+  const bareBefore = structuredClone(spec);
+  const bareDecision = classifyExistingProjectRequest(bare, spec);
+  assert.equal(bareDecision.mode, 'refuse', bare);
+  assert.equal(bareDecision.code, undefined, bare);
+  assert.equal(bareDecision.message, undefined, bare);
+  assert.equal(bareDecision.edit, undefined, bare);
+  assert.equal(blocksBeforeProvider(bare, bareDecision), false, bare);
+  assert.equal(appliesBeforeProvider(bare, bareDecision), false, bare);
+  assert.equal(componentValue(spec, 'R3'), '1k', bare);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', bare);
+  assert.deepEqual(spec, bareBefore, bare);
+
+  const when = '언제든 LED 저항 680Ω으로 바꿔줘';
+  const whenBefore = structuredClone(spec);
+  const whenDecision = classifyExistingProjectRequest(when, spec);
+  assert.equal(whenDecision.mode, 'refuse', when);
+  assert.equal(whenDecision.code, 'RESISTOR_REF_UNSUPPORTED', when);
+  assert.equal(whenDecision.message, unsupported, when);
+  assert.equal(whenDecision.edit, undefined, when);
+  assert.equal(blocksBeforeProvider(when, whenDecision), true, when);
+  assert.equal(appliesBeforeProvider(when, whenDecision), false, when);
+  assert.equal(componentValue(spec, 'R3'), '1k', when);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', when);
+  assert.deepEqual(spec, whenBefore, when);
+});
+
+test('a choice joiner before any keep, valued or not, or before leaving it as is, is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const ambiguous = [
+    'LED 저항 680Ω으로 바꾸거나 R4 유지',
+    'LED 저항을 680Ω으로 바꾸거나 그대로 두거나',
+    'set the LED resistor to 680Ω or keep R4',
+    'set the LED resistor to 680Ω or leave it as is'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const applies = [
+    'LED 저항 680Ω으로 바꾸고 R4 유지',
+    'set the LED resistor to 680Ω and keep R4'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
+test('UAT over-block rows stay at today\'s code', () => {
+  const spec = seriesSpec('1k');
+  const unclear = resistorTargetUnclearMessage('680');
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  const bare = '바꿔주시거나 하면 좋겠어요';
+  const bareBefore = structuredClone(spec);
+  const bareDecision = classifyExistingProjectRequest(bare, spec);
+  assert.equal(bareDecision.mode, 'refuse', bare);
+  assert.equal(bareDecision.code, undefined, bare);
+  assert.equal(bareDecision.message, undefined, bare);
+  assert.equal(bareDecision.edit, undefined, bare);
+  assert.equal(blocksBeforeProvider(bare, bareDecision), false, bare);
+  assert.equal(appliesBeforeProvider(bare, bareDecision), false, bare);
+  assert.equal(componentValue(spec, 'R3'), '1k', bare);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', bare);
+  assert.deepEqual(spec, bareBefore, bare);
+
+  const unclearPrompt = '너무 밝거나 해서 680Ω으로 바꿔줘';
+  const unclearBefore = structuredClone(spec);
+  const unclearDecision = classifyExistingProjectRequest(unclearPrompt, spec);
+  assert.equal(unclearDecision.mode, 'refuse', unclearPrompt);
+  assert.equal(unclearDecision.code, 'RESISTOR_TARGET_UNCLEAR', unclearPrompt);
+  assert.equal(unclearDecision.message, unclear, unclearPrompt);
+  assert.equal(unclearDecision.edit, undefined, unclearPrompt);
+  assert.equal(blocksBeforeProvider(unclearPrompt, unclearDecision), true, unclearPrompt);
+  assert.equal(appliesBeforeProvider(unclearPrompt, unclearDecision), false, unclearPrompt);
+  assert.equal(componentValue(spec, 'R3'), '1k', unclearPrompt);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', unclearPrompt);
+  assert.deepEqual(spec, unclearBefore, unclearPrompt);
+
+  const unsupportedPrompts = [
+    '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
+    '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘'
+  ];
+  for (const prompt of unsupportedPrompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
 test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a control joiner applies R3', () => {
   const spec = seriesSpec('1k');
   const seed = propertySeed();
@@ -2314,6 +2472,9 @@ test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a con
   for (const joiner of CHOICE_KEEP_JOINERS) {
     for (const keep of VALUED_KEEP_CLAUSES) {
       for (const order of orders) ambiguous.push(valuedKeepJoinerSentence(joiner, keep, order));
+    }
+    for (const kind of CHOICE_KEEP_KINDS) {
+      for (const order of orders) ambiguous.push(choiceKeepKindSentence(joiner, kind, order));
     }
   }
   for (const joiner of CONTROL_KEEP_JOINERS) {
@@ -2354,7 +2515,7 @@ test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a con
       if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
     }
   }
-  assert.equal(ambiguous.length, CHOICE_KEEP_JOINERS.length * VALUED_KEEP_CLAUSES.length * orders.length);
+  assert.equal(ambiguous.length, CHOICE_KEEP_JOINERS.length * (VALUED_KEEP_CLAUSES.length + CHOICE_KEEP_KINDS.length) * orders.length);
   assert.equal(applies.length, CONTROL_KEEP_JOINERS.length * VALUED_KEEP_CLAUSES.length * orders.length);
   if (failures.length > 0) console.log(`choice joiner property seed ${seed}`);
   assert.deepEqual(failures.slice(0, 12), [], `choice joiner property seed ${seed}`);
