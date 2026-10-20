@@ -664,13 +664,20 @@ function decimalChoiceKeep(text) {
   });
 }
 
+// "4.7k or so" approximates 4.7k. That "or" does not join a second choice.
+function orSoApproximation(text, end) {
+  return /^\s+so\b/iu.test(String(text ?? '').slice(end));
+}
+
 // "or", "또는", and "아니면" are a choice. A valued keep joined by one of them
-// stays in the sentence. null tells the caller not to strip that keep.
+// stays in the sentence. "or so" is an approximation, not that choice.
+// null tells the caller not to strip that keep.
 function choiceKeepJoiner(text, ranges) {
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
     if (!choiceJoinerWord(word[0])) continue;
+    if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
     const joined = ranges.some(([spanStart, spanEnd]) => (
       (start < spanEnd && end > spanStart)
       || (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))

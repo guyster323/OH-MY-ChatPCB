@@ -2070,6 +2070,51 @@ test('a valued keep of another part still applies the LED resistor', () => {
   assert.deepEqual(spec, before, prompt);
 });
 
+test('or so approximates a value and does not join a valued keep as a choice', () => {
+  const spec = seriesSpec('1k');
+  const merges = [
+    'set the LED resistor to 680Ω and keep R4 at 4.7k or so',
+    'keep R4 at 4.7k or so, set the LED resistor to 680Ω',
+    'set the LED resistor to 680Ω or so'
+  ];
+  for (const prompt of merges) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const message = resistorAmbiguousMessage();
+  const ambiguous = [
+    'set the LED resistor to 680Ω or keep R4 at 4.7k',
+    'keep R4 at 4.7k or so'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
 test('a valued keep joined by or, 또는, or 아니면 is RESISTOR_AMBIGUOUS', () => {
   const spec = seriesSpec('1k');
   const message = resistorAmbiguousMessage();

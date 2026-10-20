@@ -1496,7 +1496,8 @@ const NEGATION_SIGNALS = [
 ];
 
 const ALTERNATIVE_SIGNALS = [
-  String.raw`\bor\b`,
+  // "or so" approximates the ohms before it. It is not a second value.
+  String.raw`\bor\b(?!\s+so\b)`,
   String.raw`또는`,
   String.raw`아니면`,
   String.raw`혹은`,
