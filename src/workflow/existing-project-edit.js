@@ -642,15 +642,50 @@ function valuedKeepCueTouches(text, cue, object) {
   return object.end <= cue.start && /^\s*$/u.test(text.slice(object.end, cue.start));
 }
 
-// "but" is not a clause break. It is only the glue beside a valued keep.
+function bareGlueWord(token) {
+  return token.replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+}
+
+function choiceJoinerWord(token) {
+  return /^(?:or|또는|아니면)$/iu.test(bareGlueWord(token));
+}
+
+// A decimal in 4.7k hides a before-cue from the span list. The fragment still
+// begins with the choice word when that word joins the keep.
+function decimalChoiceKeep(text) {
+  return decimalBeforeKeepFragments(text).some((fragment) => {
+    const word = fragment.match(/\S+/u);
+    return word != null && choiceJoinerWord(word[0]);
+  });
+}
+
+// "or", "또는", and "아니면" are a choice. A valued keep joined by one of them
+// stays in the sentence. null tells the caller not to strip that keep.
+function choiceKeepJoiner(text, ranges) {
+  for (const word of text.matchAll(/\S+/gu)) {
+    const start = word.index;
+    const end = start + word[0].length;
+    if (!choiceJoinerWord(word[0])) continue;
+    const joined = ranges.some(([spanStart, spanEnd]) => (
+      (start < spanEnd && end > spanStart)
+      || (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
+      || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
+    ));
+    if (joined) return true;
+  }
+  return false;
+}
+
+// "but" and "and" are not a clause break. They are only the glue beside a valued keep.
 function valuedKeepGlueRanges(text, ranges) {
+  if (choiceKeepJoiner(text, ranges)) return null;
   const extra = [];
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
     if (ranges.some(([spanStart, spanEnd]) => start < spanEnd && end > spanStart)) continue;
-    const bare = word[0].replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
-    if (!/^(?:but|and|or|그리고|하고|및|이랑)$/iu.test(bare)) continue;
+    const bare = bareGlueWord(word[0]);
+    if (!/^(?:but|and|그리고|하고|및|이랑)$/iu.test(bare)) continue;
     const touches = ranges.some(([spanStart, spanEnd]) => (
       (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
       || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
@@ -705,6 +740,7 @@ function valuedKeepRefusal(text, spec) {
   // A decimal value hides a before-cue from the span list. Refuse that keep
   // when it names this edit before the empty-span return.
   if (decimalKeepNamesEditTarget(text, spec)) return ambiguousValuedKeep();
+  if (decimalChoiceKeep(text)) return ambiguousValuedKeep();
   const found = keepClauseSpans(text);
   const objects = found.objects.filter((object) => object.valued === true);
   if (objects.length === 0) return null;
@@ -717,7 +753,9 @@ function valuedKeepRefusal(text, spec) {
   for (const cue of found.cues) {
     if (dropping.some((object) => valuedKeepCueTouches(text, cue, object))) ranges.push([cue.start, cue.end]);
   }
-  const remainder = blankCopy(text, [...ranges, ...valuedKeepGlueRanges(text, ranges)]);
+  const glue = valuedKeepGlueRanges(text, ranges);
+  if (glue == null) return ambiguousValuedKeep();
+  const remainder = blankCopy(text, [...ranges, ...glue]);
   const targets = ledResistorTargetCount(remainder);
   const values = distinctRemainderOhms(remainder);
   if (targets === 0 && values === 0) return ambiguousValuedKeep();

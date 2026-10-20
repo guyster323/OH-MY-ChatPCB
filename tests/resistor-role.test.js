@@ -1576,6 +1576,30 @@ test('a valued keep of another part still applies the LED resistor', () => {
   assert.deepEqual(spec, before, prompt);
 });
 
+test('a valued keep joined by or, 또는, or 아니면 is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const prompts = [
+    'set the LED resistor to 680Ω or keep R4 at 4.7k',
+    'keep R4 at 4.7k or set the LED resistor to 680Ω',
+    'LED 저항을 680Ω으로 또는 R4는 4.7k로 유지',
+    'LED 저항을 680Ω으로 아니면 R4는 4.7k로 유지'
+  ];
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
 // Part (c) outcome for each r35 probe. A valued keep is dropped. One remaining
 // LED resistor and one value apply on R3. A keep with nothing left stays
 // ambiguous. The map is the sentence list and the expected outcome.
