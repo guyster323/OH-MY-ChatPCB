@@ -501,6 +501,8 @@ function classifySeparateIntent(editText, intentText, spec) {
   if (valueOnly) return valueOnly;
   const bare = bareRefDecision(intentText, spec);
   if (bare) return bare;
+  const grouping = groupingFromRefusal(intentText);
+  if (grouping) return grouping;
   const removal = removalDecision(intentText, spec);
   const fromUser = nonRemovalEdit(intentText);
   if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
@@ -529,6 +531,8 @@ function classifyEditText(text, spec) {
   if (valueOnly) return valueOnly;
   const bare = bareRefDecision(text, spec);
   if (bare) return bare;
+  const grouping = groupingFromRefusal(text);
+  if (grouping) return grouping;
   const removal = removalDecision(text, spec);
   const resistor = nonRemovalEdit(text);
   if (isMixedRemovalAndEdit(removal, resistor)) return mixedRemovalAndEdit();
@@ -2769,6 +2773,58 @@ function promoteUnitlessTransitionSource(tokens, text) {
     if (!afterFrom && !beforeMarker) continue;
     token.attempt = true;
   }
+}
+
+// d{1,3}[.,]ddd: exactly three digits after one separator. "1.000" is 1Ω in
+// one locale and 1000 in another. A from-value of that shape is ambiguous,
+// so the destination is not applied. "1000", "1k", and "1.5k" are not this form.
+const GROUPING_SEPARATOR_FROM = /^\d{1,3}[.,]\d{3}$/;
+
+function continuesGroupedNumber(text, end) {
+  return /^[.,]\d{3}/.test(String(text ?? '').slice(end));
+}
+
+function groupingSeparatorFromValue(text) {
+  for (const token of scanResistorTokens(text)) {
+    const raw = token.raw.trim();
+    if (!GROUPING_SEPARATOR_FROM.test(raw)) continue;
+    if (continuesGroupedNumber(text, token.end)) continue;
+    const before = text.slice(0, token.index);
+    const after = text.slice(token.end);
+    const afterFrom = /\bfrom\s*$/iu.test(before);
+    const beforeMarker = /^\s*(?:from\b|->|→|에서)/iu.test(after);
+    if (!afterFrom && !beforeMarker) continue;
+    return token;
+  }
+  return null;
+}
+
+function transitionDestinationLabel(text, fromEnd) {
+  const after = text.slice(fromEnd);
+  const marker = /->|→|에서|\bto\b/iu.exec(after);
+  const slice = text.slice(fromEnd + (marker ? marker.index + marker[0].length : 0));
+  for (const token of scanResistorTokens(slice)) {
+    const raw = token.raw.trim();
+    if (RESISTOR_PACKAGE.test(raw) || /^[A-Za-z]{1,3}\d+$/.test(raw)) continue;
+    if (GROUPING_SEPARATOR_FROM.test(raw) && !continuesGroupedNumber(slice, token.end)) return raw;
+    const parsed = parseResistorOhms(raw);
+    if (parsed) return formatResistorLabel(parsed);
+  }
+  return null;
+}
+
+function groupingFromRefusal(text) {
+  if (questionStopsResistorEdit(text)) return null;
+  const source = groupingSeparatorFromValue(text);
+  if (!source) return null;
+  const labels = [source.raw.trim()];
+  const destination = transitionDestinationLabel(text, source.end);
+  if (destination) labels.push(destination);
+  return {
+    mode: 'refuse',
+    code: 'RESISTOR_VALUE_AMBIGUOUS',
+    message: resistorValueAmbiguousMessage(namedResistorRef(text), labels)
+  };
 }
 
 function statedFromMismatch(text, spec) {

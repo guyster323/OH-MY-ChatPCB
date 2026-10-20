@@ -1694,6 +1694,79 @@ test('a unitless from-value is compared with the saved R3 value', () => {
   assert.equal(componentValue(spec, 'R3'), '1k');
 });
 
+test('a from-value with a grouping separator (1.000, 1,000) is RESISTOR_VALUE_AMBIGUOUS', () => {
+  // d{1,3}[.,]ddd is one separator and exactly three digits. 1Ω and 1000 are both readings.
+  const grouped = [
+    ['change the LED resistor from 1.000 to 680Ω', '1.000'],
+    ['from 1,000 to 680Ω', '1,000'],
+    ['1.000에서 680Ω으로', '1.000'],
+    ['1,000에서 680Ω으로', '1,000'],
+    ['LED resistor 1.000 -> 680Ω', '1.000'],
+    ['change the LED resistor from 12.345 to 680Ω', '12.345'],
+    ['from 4,700 to 680Ω', '4,700']
+  ];
+  for (const current of ['1k', '330Ω']) {
+    const spec = seriesSpec(current);
+    for (const [prompt, fromRaw] of grouped) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      const detail = `${current} ${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`;
+      assert.equal(decision.mode, 'refuse', detail);
+      assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', detail);
+      assert.equal(decision.edit, undefined, detail);
+      assert.equal(decision.message, resistorValueAmbiguousMessage(null, [fromRaw, '680Ω']), detail);
+      assert.equal(blocksBeforeProvider(prompt, decision), true, detail);
+      assert.equal(appliesBeforeProvider(prompt, decision), false, detail);
+      assert.deepEqual(spec, before, detail);
+      assert.equal(componentValue(spec, 'R3'), current, detail);
+    }
+  }
+
+  const matched = [
+    ['change the LED resistor from 1000 to 680Ω', '1k'],
+    ['change the LED resistor from 1k to 680Ω', '1k'],
+    ['1000에서 680Ω으로', '1k'],
+    ['1k에서 680Ω으로', '1k'],
+    ['change the LED resistor from 1000.0 to 680Ω', '1k'],
+    ['change the LED resistor from 1.5k to 680Ω', '1.5k'],
+    ['1.5k에서 680Ω으로', '1.5k']
+  ];
+  for (const [prompt, current] of matched) {
+    const spec = seriesSpec(current);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), current, prompt);
+  }
+
+  const bare = seriesSpec('1k');
+  for (const prompt of ['from 1k to 680Ω', 'from 1000 to 680Ω', 'from 1.5k to 680Ω']) {
+    const decision = classifyExistingProjectRequest(prompt, bare);
+    assert.equal(decision.code, undefined, `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(bare, 'R3'), '1k', prompt);
+  }
+
+  const mismatch = classifyExistingProjectRequest('change the LED resistor from 1.5k to 680Ω', bare);
+  assert.equal(mismatch.code, 'RESISTOR_VALUE_AMBIGUOUS');
+  assert.equal(mismatch.message, resistorValueAmbiguousMessage(null, ['1.5k', '680Ω']));
+  assert.equal(mismatch.edit, undefined);
+  assert.equal(componentValue(bare, 'R3'), '1k');
+
+  for (const prompt of ['change the LED resistor from 680 to 1,000 ohm', 'LED 저항 1.000', 'change the LED resistor from 1.000 ohm to 680Ω']) {
+    const decision = classifyExistingProjectRequest(prompt, bare);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(componentValue(bare, 'R3'), '1k', prompt);
+  }
+});
+
 test("'&' is a value separator", () => {
   const rows = [
     ['LED resistor 680Ω & 1k', ['680Ω', '1k']],
