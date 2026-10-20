@@ -165,6 +165,17 @@ function daemonCtxFromOptions(options) {
   return ctx;
 }
 
+// Test-only view of the ctx object dispatchToolCall actually built.
+// The hook stays on dispatchSource.testOnly, which stripTestOnlyKeys removes,
+// so a spread of the options would put the hook and any unknown key on ctx.
+function notifyDispatchCtxForTest(dispatchSource, ctx) {
+  if (typeof process.env.NODE_TEST_CONTEXT !== 'string' || process.env.NODE_TEST_CONTEXT.length === 0) return;
+  const testOnly = dispatchSource?.testOnly;
+  if (!testOnly || typeof testOnly !== 'object' || Array.isArray(testOnly)) return;
+  if (typeof testOnly.observeCtx !== 'function') return;
+  testOnly.observeCtx(ctx);
+}
+
 export async function dispatchToolCall(call, dispatchOptions = {}) {
   const dispatchSource = dispatchOptions && typeof dispatchOptions === 'object' ? dispatchOptions : {};
   const normalizedOptions = { ...dispatchSource };
@@ -218,6 +229,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     verifyAppliedProjectImpl
   };
   if (dispatchSource[projectLockHeld] === true) ctx[projectLockHeld] = true;
+  notifyDispatchCtxForTest(dispatchSource, ctx);
 
   if (!call || typeof call !== 'object') {
     return failure('INVALID_TOOL_CALL', 'Tool call must be an object.');

@@ -98,7 +98,7 @@ export const KEEP_CUES = Object.freeze([
   Object.freeze({ text: 'dont touch', slot: 'after', mask: 'all', signal: false }),
   Object.freeze({ text: 'do not touch', slot: 'after', mask: 'all', signal: false }),
   Object.freeze({ text: 'never touch', slot: 'after', mask: 'all', signal: false }),
-  Object.freeze({ text: 'keep', slot: 'after', mask: 'all', signal: true }),
+  Object.freeze({ text: 'keep', slot: 'after', mask: 'all', signal: true, negatable: true }),
   Object.freeze({ text: 'hold', slot: 'after', mask: 'all', signal: true }),
   Object.freeze({ text: 'without', slot: 'after', mask: 'all', signal: true }),
   Object.freeze({ text: 'leave', slot: 'leave-verb', mask: 'all', signal: true }),
@@ -128,6 +128,36 @@ const KEEP_FILLER_TEXTS = KEEP_CUES
   .filter((cue) => cue.signal && !cue.text.includes(' ') && !cue.text.includes("'") && !cue.text.includes('’'))
   .map((cue) => cue.text);
 const KEEP_SIGNAL_TEXTS = KEEP_CUES.filter((cue) => cue.signal).map((cue) => cue.text);
+
+// Leave, untouched, and hold are rows in KEEP_CUES. Callers read these
+// projections so deleting a row changes the verb scan, the signal regex, and
+// the LED keep skip set together.
+export function keepLeaveVerbTexts() {
+  return KEEP_CUES.filter((cue) => cue.slot === 'leave-verb').map((cue) => cue.text);
+}
+
+function negatedKeepVerbTexts() {
+  const leave = [];
+  const rest = [];
+  for (const cue of KEEP_CUES) {
+    if (cue.slot === 'leave-verb') leave.push(cue.text);
+    else if (cue.negatable === true) rest.push(cue.text);
+  }
+  return [...leave, ...rest];
+}
+
+export function ledKeepVerbSkipTexts() {
+  return KEEP_CUES
+    .filter((cue) => cue.signal === true && (cue.slot === 'after' || cue.slot === 'leave-verb') && /^[a-z]+$/i.test(cue.text))
+    .map((cue) => cue.text.toLowerCase());
+}
+
+function englishSignalWordSource() {
+  const words = KEEP_CUES
+    .filter((cue) => cue.signal === true && /^[a-z]+$/i.test(cue.text))
+    .map((cue) => cue.text.toLowerCase());
+  return words.length > 0 ? `\\b(?:${words.join('|')})\\b` : null;
+}
 
 function isAsciiWordChar(ch) {
   if (!ch) return false;
@@ -307,7 +337,7 @@ function negatedKeepVerbBefore(text, phraseStart) {
   const head = text.slice(origin, phraseStart);
   const lower = head.toLowerCase();
   let verbAt = -1;
-  for (const verb of ['leave', 'keep']) {
+  for (const verb of negatedKeepVerbTexts()) {
     let from = 0;
     while (from < lower.length) {
       const at = lower.indexOf(verb, from);
@@ -514,20 +544,22 @@ export function keepClauseSpans(text) {
     }
     return true;
   };
-  for (const [start, end] of findCueHits(raw, 'leave')) {
-    if (englishKeepVerbNegated(raw, start)) continue;
-    if (keepSpansOverlap(occupied, start, end)) continue;
-    const found = leaveComplementObject(raw, end);
-    if (found) {
-      if (keepSpansOverlap(occupied, found.cue[0], found.cue[1])) continue;
-      take(found.object, 'all', [start, end], found.cue);
-      continue;
+  for (const verb of keepLeaveVerbTexts()) {
+    for (const [start, end] of findCueHits(raw, verb)) {
+      if (englishKeepVerbNegated(raw, start)) continue;
+      if (keepSpansOverlap(occupied, start, end)) continue;
+      const found = leaveComplementObject(raw, end);
+      if (found) {
+        if (keepSpansOverlap(occupied, found.cue[0], found.cue[1])) continue;
+        take(found.object, 'all', [start, end], found.cue);
+        continue;
+      }
+      // "leave the pull-up at 2.2k" has no alone/as-is complement. "leave R1,
+      // set the LED resistor" is still a keep of R1.
+      const object = keepObjectAfter(raw, end);
+      if (!object) continue;
+      take(object, 'all', [start, end]);
     }
-    // "leave the pull-up at 2.2k" has no alone/as-is complement. "leave R1,
-    // set the LED resistor" is still a keep of R1.
-    const object = keepObjectAfter(raw, end);
-    if (!object) continue;
-    take(object, 'all', [start, end]);
   }
   const phrases = KEEP_CUES
     .filter((cue) => cue.slot === 'before' || cue.slot === 'after')
@@ -544,7 +576,7 @@ export function keepClauseSpans(text) {
         if (!take(object, cue.mask, [start, end])) continue;
         continue;
       }
-      if (cue.text === 'keep' && englishKeepVerbNegated(raw, start)) continue;
+      if (cue.negatable === true && englishKeepVerbNegated(raw, start)) continue;
       take(keepObjectAfter(raw, end), cue.mask, [start, end]);
     }
   }
@@ -565,11 +597,37 @@ const PERMIT_PHRASES = [
 // "if" is not a function word. These phrases are the only place it is filler.
 const POLITE_IF_PHRASES = ['if possible', 'if you can', 'if you could'];
 
+// One choice-joiner list. Clause split, valued-keep checks, alternative
+// signals, and the value-suffix join all read these rows. "and", "나", and "·"
+// coordinate a clause and are not a choice. "하거나" contains 고, but that 고
+// is not a new clause. An ending matches (?:거나|든지|든가|던지|든)(?:요|도|나)?$
+// on one word. 뭐든, 언제든, 어디든, and 누구든 are indefinite pronouns, so bare
+// 든 excludes those stems. "or so" is an approximation, not a choice.
+export const CHOICE_JOINERS = Object.freeze([
+  Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
+  Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
+  Object.freeze({ id: 'animyeon', lang: 'ko', text: '아니면', re: '아니면', place: 'word' }),
+  Object.freeze({ id: 'hogeun', lang: 'ko', text: '혹은', re: '혹은', place: 'word' }),
+  Object.freeze({ id: 'hageona', lang: 'ko', text: '하거나', re: '하거나', place: 'word' }),
+  Object.freeze({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending' }),
+  Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending' }),
+  Object.freeze({ id: 'deunga', lang: 'ko', text: '든가', re: '든가', place: 'ending' }),
+  Object.freeze({ id: 'deonji', lang: 'ko', text: '던지', re: '던지', place: 'ending' }),
+  Object.freeze({ id: 'deun', lang: 'ko', text: '든', re: '(?<!뭐|언제|어디|누구)든', place: 'ending' })
+]);
+
+export function choiceWordJoinerSources({ exceptApprox = false } = {}) {
+  return CHOICE_JOINERS.filter((item) => item.place === 'word').map((item) => (
+    exceptApprox && item.notBefore ? `(?:${item.re})(?!${item.notBefore})` : item.re
+  ));
+}
+
 // Negation and alternatives are rejection signals, not allow-list words.
 // They are still filler for role detection, so "not" and "마" are not a second role.
 const NEGATION_OR_ALTERNATIVE_WORDS = new Set([
-  'not', 'no', 'never', "don't", 'dont', 'do', 'does', 'did', 'or',
-  '마', '말', '말고', '또는', '아니면', '혹은', '않', '하지'
+  'not', 'no', 'never', "don't", 'dont', 'do', 'does', 'did',
+  '마', '말', '말고', '않', '하지',
+  ...CHOICE_JOINERS.filter((item) => item.place === 'word').map((item) => item.text)
 ]);
 
 export function isNegationOrAlternativeWord(word) {
@@ -1106,7 +1164,8 @@ function clauseWords(clause) {
 function hasKeepCue(clause) {
   const raw = String(clause ?? '');
   const folded = raw.toLowerCase();
-  if (rx("\\b(?:keep|without|leave|alone|unchanged)\\b", "i").test(folded)) return true;
+  const source = englishSignalWordSource();
+  if (source && rx(source, 'i').test(folded)) return true;
   return KEEP_SIGNAL_TEXTS.some((cue) => raw.includes(cue));
 }
 
@@ -1497,10 +1556,8 @@ const NEGATION_SIGNALS = [
 
 const ALTERNATIVE_SIGNALS = [
   // "or so" approximates the ohms before it. It is not a second value.
-  String.raw`\bor\b(?!\s+so\b)`,
-  String.raw`또는`,
-  String.raw`아니면`,
-  String.raw`혹은`,
+  // The exception is the or row's notBefore column.
+  ...choiceWordJoinerSources({ exceptApprox: true }),
   String.raw`\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?|[kKmMrR](?:\s*(?:Ω|옴|ohms?))?)\s*/\s*\d+(?:\.\d+)?\s*(?:[kKmMrR](?:\s*(?:Ω|옴|ohms?))?|Ω|옴|ohms?)`
 ];
 

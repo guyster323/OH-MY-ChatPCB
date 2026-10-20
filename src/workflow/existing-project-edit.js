@@ -33,8 +33,11 @@ import {
   isAmbiguousI2cPreservation,
   isDontDeleteClause,
   isKoreanRequestStem,
+  CHOICE_JOINERS,
+  choiceWordJoinerSources,
   decimalBeforeKeepFragments,
   keepClauseSpans,
+  ledKeepVerbSkipTexts,
   isPermittedEdit,
   isPoliteIfFiller,
   isReplacedSourceValue,
@@ -50,25 +53,6 @@ import {
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
-// One choice-joiner list. Coordinators that are choices use these same rows,
-// so the clause split and the valued-keep check do not keep a second word list.
-// "and", "나", and "·" coordinate a clause and are not a choice. "하거나" contains
-// 고, but that 고 is not a new clause. An ending matches
-// (?:거나|든지|든가|던지|든)(?:요|도|나)?$ on one word. 뭐든, 언제든, 어디든, and
-// 누구든 are indefinite pronouns, so bare 든 excludes those stems. "or so" is an
-// approximation, not a choice.
-const CHOICE_JOINERS = Object.freeze([
-  Object.freeze({ id: 'or', lang: 'en', re: String.raw`\bor\b`, place: 'word' }),
-  Object.freeze({ id: 'ttoneun', lang: 'ko', re: '또는', place: 'word' }),
-  Object.freeze({ id: 'animyeon', lang: 'ko', re: '아니면', place: 'word' }),
-  Object.freeze({ id: 'hogeun', lang: 'ko', re: '혹은', place: 'word' }),
-  Object.freeze({ id: 'hageona', lang: 'ko', re: '하거나', place: 'word' }),
-  Object.freeze({ id: 'geona', lang: 'ko', re: '거나', place: 'ending' }),
-  Object.freeze({ id: 'deunji', lang: 'ko', re: '든지', place: 'ending' }),
-  Object.freeze({ id: 'deunga', lang: 'ko', re: '든가', place: 'ending' }),
-  Object.freeze({ id: 'deonji', lang: 'ko', re: '던지', place: 'ending' }),
-  Object.freeze({ id: 'deun', lang: 'ko', re: '(?<!뭐|언제|어디|누구)든', place: 'ending' })
-]);
 
 function choiceJoinerRow(id) {
   return CHOICE_JOINERS.find((item) => item.id === id);
@@ -206,11 +190,11 @@ export const DELETION_INTENT_VOCABULARY = Object.freeze({
   targetListJoins: Object.freeze([
     Object.freeze({ id: 'comma', re: ',' }),
     Object.freeze({ id: 'and', re: String.raw`\band\b`, afterComma: true }),
-    Object.freeze({ id: 'or', re: String.raw`\bor\b`, afterComma: true }),
+    Object.freeze({ ...choiceJoinerRow('or'), afterComma: true }),
     Object.freeze({ id: 'both', re: String.raw`\bboth\b` }),
     Object.freeze({ id: 'amp', re: '&' }),
     Object.freeze({ id: 'slash', re: '/' }),
-    Object.freeze({ id: 'ttoneun', re: '또는', afterComma: true }),
+    Object.freeze({ ...choiceJoinerRow('ttoneun'), afterComma: true }),
     Object.freeze({ id: 'geurigo', re: '그리고', afterComma: true }),
     Object.freeze({ id: 'mit', re: '및', afterComma: true }),
     Object.freeze({ id: 'hago', re: String.raw`하고(?![가-힣])` }),
@@ -1130,7 +1114,10 @@ function nonRemovalEdit(text) {
 
 const VALUE_ONLY_TAIL = /(?:\s*(?:으로|로|요|please))$/iu;
 const BARE_REF_TAIL = /(?:\s*(?:부터|먼저|first|please))+$/iu;
-const BARE_REF_GAP = /^(?:[\s,/&]+|\s*(?:and|or|와|과|랑|하고|및|그리고)\s*)+$/iu;
+const BARE_REF_GAP = compileRegExp(
+  `^(?:[\\s,/&]+|\\s*(?:and|${choiceJoinerRow('or').re}|와|과|랑|하고|및|그리고)\\s*)+$`,
+  'iu'
+);
 
 function wholeResistorToken(text) {
   RESISTOR_TOKEN.lastIndex = 0;
@@ -2223,13 +2210,18 @@ export function resistorEditCoverage(text, spec = null) {
   return assessRequestCoverage(textWithSeriesLedAsWord(text, spec));
 }
 
+// "as is" walks back through the verb, so "keep the LED as is" is one object.
+// The keep verbs come from KEEP_CUES (keep, hold, leave, without).
 const LED_KEEP_SKIP = new Set([
   'the', 'a', 'an', 'status', '상태', 'as', 'is', 'as-is',
   'and', 'but', '&', 'or',
   '그리고', '하고', '및', '이랑', '랑',
-  // "as is" walks back through the verb, so "keep the LED as is" is one object.
-  'keep', 'hold', 'leave', 'without'
+  ...ledKeepVerbSkipTexts()
 ]);
+
+export function ledKeepSkipWords() {
+  return LED_KEEP_SKIP;
+}
 
 function ledKeepTokens(piece) {
   return String(piece ?? '').split(/\s+/u).map((token) => {
@@ -3310,7 +3302,19 @@ const RESISTOR_TOKEN = compileRegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\
   String.raw`\d+(?:\.\d+)?`
 ].join('|')})`, 'gu');
 const RESISTOR_PACKAGE = /^(?:01005|0201|0402|0603|0805|1206|1210|2010|2512)$/;
-const RESISTOR_COORDINATOR = /^(?:and|or|하고|와|과|및|그리고)$/iu;
+const RESISTOR_COORDINATOR = compileRegExp(
+  `^(?:and|${choiceJoinerRow('or').re}|하고|와|과|및|그리고)$`,
+  'iu'
+);
+const CHOICE_VALUE_JOIN = choiceWordJoinerSources().join('|');
+const CHOICE_VALUE_BEFORE = compileRegExp(
+  `(?:Ω|옴|ohms?|\\d\\s*[kKrR])\\s*(?:/|${CHOICE_VALUE_JOIN})\\s*$`,
+  'iu'
+);
+const CHOICE_VALUE_AFTER = compileRegExp(
+  `^\\s*(?:/|${CHOICE_VALUE_JOIN})\\s*\\d`,
+  'iu'
+);
 const OHM_UNIT = /(?:Ω|옴|ohm)/iu;
 
 function scanResistorTokens(text) {
@@ -3578,8 +3582,8 @@ function unitlessSuffixCountsAsResistor(text, start, end) {
   if (SUFFIX_EDIT_BEFORE.test(before) || SUFFIX_EDIT_AFTER.test(after)) return true;
   // "680Ω or 1k", "680Ω/1k", and "680Ω 또는 1k" name both values.
   // A model, display, or pot after the token already returned false above.
-  if (/(?:Ω|옴|ohms?|\d\s*[kKrR])\s*(?:\/|또는|아니면|혹은|\bor\b)\s*$/iu.test(before)) return true;
-  if (/^\s*(?:\/|또는|아니면|혹은|\bor\b)\s*\d/iu.test(after)) return true;
+  if (CHOICE_VALUE_BEFORE.test(before)) return true;
+  if (CHOICE_VALUE_AFTER.test(after)) return true;
   // "680Ω and 1k", "1k vs 680Ω", "1k~680Ω", and "680Ω, 1k 둘 중" name that suffix too.
   return hasSiblingOhmUnit(text, start, end);
 }
