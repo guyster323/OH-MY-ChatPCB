@@ -19,6 +19,7 @@ import {
   resistorAmbiguousMessage,
   resistorUnitlessMessage,
   resistorValueAmbiguousMessage,
+  resistorValueInvalidMessage,
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
@@ -1893,6 +1894,83 @@ test('a from-value with a grouping separator (1.000, 1,000) is RESISTOR_VALUE_AM
     assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
     assert.equal(decision.edit, undefined, prompt);
     assert.equal(componentValue(bare, 'R3'), '1k', prompt);
+  }
+});
+
+test('a grouping-separator from-value on the R3 ref is RESISTOR_VALUE_AMBIGUOUS before the provider', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [
+    ['change R3 from 1.000 to 680', '1.000'],
+    ['change R3 from 1,000 to 680', '1,000'],
+    ['R3 1.000에서 680으로', '1.000'],
+    ['R3 1.000 -> 680', '1.000']
+  ];
+  for (const [prompt, fromRaw] of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    const detail = `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`;
+    assert.equal(decision.mode, 'refuse', detail);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', detail);
+    assert.equal(decision.edit, undefined, detail);
+    assert.equal(decision.message, resistorValueAmbiguousMessage('R3', [fromRaw, '680Ω']), detail);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, detail);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, detail);
+    assert.deepEqual(spec, before, detail);
+    assert.equal(componentValue(spec, 'R3'), '1k', detail);
+  }
+
+  const invalidMessage = resistorValueInvalidMessage();
+  for (const prompt of [
+    'change R3 from 1.000Ω to 680Ω',
+    'change R3 from 1,000Ω to 680Ω',
+    'change R3 from 1,000 ohms to 680 ohms',
+    'change R3 from 1.000 Ω to 680 Ω',
+    'R3 1,000Ω에서 680Ω으로'
+  ]) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    const detail = `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`;
+    assert.equal(decision.mode, 'refuse', detail);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', detail);
+    assert.equal(decision.message, invalidMessage, detail);
+    assert.equal(decision.edit, undefined, detail);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, detail);
+    assert.deepEqual(spec, before, detail);
+    assert.equal(componentValue(spec, 'R3'), '1k', detail);
+  }
+});
+
+test('property: a grouping-separator from-value on R3 or an LED resistor is RESISTOR_VALUE_AMBIGUOUS', () => {
+  const targets = ['R3', 'r3', 'the LED resistor', 'LED 저항'];
+  const values = ['1.000', '1,000', '2.200', '4,700'];
+  const forms = [
+    (target, value) => `change ${target} from ${value} to 680`,
+    (target, value) => `${target} ${value}에서 680으로`,
+    (target, value) => `${target} ${value} -> 680`
+  ];
+  const samples = [];
+  for (const target of targets) {
+    for (const form of forms) {
+      for (const value of values) samples.push({ target, value, prompt: form(target, value) });
+    }
+  }
+  assert.equal(samples.length, targets.length * forms.length * values.length);
+  for (const current of ['1k', '330Ω']) {
+    const spec = seriesSpec(current);
+    for (const sample of samples) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(sample.prompt, spec);
+      const ref = /^r\d+$/i.test(sample.target) ? sample.target.toUpperCase() : null;
+      const detail = `${current} ${sample.prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`;
+      assert.equal(decision.mode, 'refuse', detail);
+      assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', detail);
+      assert.equal(decision.edit, undefined, detail);
+      assert.equal(decision.message, resistorValueAmbiguousMessage(ref, [sample.value, '680Ω']), detail);
+      assert.equal(blocksBeforeProvider(sample.prompt, decision), true, detail);
+      assert.equal(appliesBeforeProvider(sample.prompt, decision), false, detail);
+      assert.deepEqual(spec, before, detail);
+      assert.equal(componentValue(spec, 'R3'), current, detail);
+    }
   }
 });
 
