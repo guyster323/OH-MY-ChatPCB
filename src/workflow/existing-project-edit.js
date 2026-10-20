@@ -767,8 +767,51 @@ function valuedKeepRefusal(text, spec) {
   return ambiguousValuedKeep();
 }
 
+// it/them/those/that and 그것/그거/이것. A keep cue may contain "it" ("the way it is");
+// that cue is blanked with the kept role before this test.
+const EDIT_ONLY_PRONOUN = /(?:\b(?:it|them|those|that)\b|그것|그거|이것)/iu;
+
+function keepSpanRanges(found) {
+  const ranges = [];
+  for (const object of found.objects) ranges.push([object.start, object.end]);
+  for (const cue of found.cues) ranges.push([cue.start, cue.end]);
+  return ranges;
+}
+
+// A kept pull-up, CC resistor, or other R ref is not the LED series part.
+function otherResistorRoleKept(text, spec) {
+  const found = keepClauseSpans(text);
+  if (found.objects.length === 0) return false;
+  const series = String(seriesResistorRef(spec) ?? '').toUpperCase();
+  for (const object of found.objects) {
+    const fragment = text.slice(object.start, object.end);
+    if (textHasKnownRole(fragment) || textHasUsbRole(fragment)) return true;
+    if (resistorReferenceTokens(fragment).some((ref) => ref !== series)) return true;
+  }
+  return false;
+}
+
+function explicitResistorEditTarget(text) {
+  return /저항|抵抗|\bresistors?\b|\bleds?\b|엘이디|엘예디|\bR\d+\b/iu.test(text);
+}
+
+// After a keep hides another resistor, "set them to 2.2k" has no noun left.
+// That pronoun does not name R3. An explicit LED resistor in the edit still does.
+function pronounOnlyEditAfterOtherKeep(text, spec) {
+  if (!otherResistorRoleKept(text, spec)) return false;
+  const remainder = blankCopy(text, keepSpanRanges(keepClauseSpans(text)));
+  if (!clauseCarriesResistorValue(remainder)) return false;
+  if (explicitResistorEditTarget(remainder)) return false;
+  if (textHasKnownRole(remainder) || textHasUsbRole(remainder)) return false;
+  if (resistorReferenceTokens(remainder).length > 0) return false;
+  return EDIT_ONLY_PRONOUN.test(remainder);
+}
+
 function finishResistor(text, spec, resistor) {
   if (!resistor) return null;
+  if (resistor.kind === 'resistor' && pronounOnlyEditAfterOtherKeep(text, spec)) {
+    return ambiguousValuedKeep();
+  }
   // A keep, don't-touch, or leave-alone object that is this edit's own target
   // is read here, before that object is stripped out of the sentence.
   if (resistor.kind === 'resistor' && keepNamesEditTarget(text, spec)) {

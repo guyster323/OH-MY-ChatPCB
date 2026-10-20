@@ -2264,3 +2264,157 @@ test('property: a valued keep of R3 or an LED-resistor synonym never changes R3'
   assert.equal(cases.length > 0, true);
   assert.deepEqual(failures.slice(0, 12), []);
 });
+
+test('a pronoun edit after a kept other resistor role is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const ambiguous = [
+    "don't touch the pull-ups, set them to 2.2k",
+    "don't touch the I2C pull-ups, change them to 10k",
+    "don't touch the CC resistor, set it to 680Ω",
+    'keep the pull-ups, set them to 2.2k',
+    'leave the pull-ups alone, set them to 2.2k',
+    'I2C 풀업은 건드리지 말고 그것을 2.2k로',
+    "don't touch the pull-ups, set that to 2.2k",
+    "don't touch the pull-ups, set those to 2.2k",
+    'I2C 풀업은 건드리지 말고 그거를 2.2k로',
+    'I2C 풀업은 건드리지 말고 이것을 2.2k로'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const applies = [
+    ["don't touch the pull-ups, set the LED resistor to 680Ω", 680, '680Ω'],
+    ['keep the pull-ups, set the LED resistor to 680Ω', 680, '680Ω']
+  ];
+  for (const [prompt, ohms, label] of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.kind, 'resistor', prompt);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+    assert.equal(decision.edit?.label, label, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), label, prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
+const OTHER_ROLE_KEEP_TARGETS = ['the pull-ups', 'the I2C pull-ups', 'the CC resistor', 'R4'];
+const PRONOUN_EDIT_VALUES = ['2.2k', '680Ω'];
+const PRONOUN_ONLY_EDITS = [
+  (value) => `set it to ${value}`,
+  (value) => `set them to ${value}`,
+  (value) => `set those to ${value}`,
+  (value) => `change it to ${value}`,
+  (value) => `그것을 ${value}로`
+];
+const LED_RESISTOR_EDITS = [
+  (value) => `set the LED resistor to ${value}`,
+  (value) => `set the LED resistor to ${value}`,
+  (value) => `set the LED resistor to ${value}`,
+  (value) => `change the LED resistor to ${value}`,
+  (value) => `the LED resistor를 ${value}로`
+];
+
+function otherRoleKeepClause(cue, role) {
+  if (cue.slot === 'before') return `${role} ${cue.text}`;
+  if (cue.slot === 'leave') return `leave ${role} ${cue.text}`;
+  return `${cue.text} ${role}`;
+}
+
+function placeKeepAndEdit(keep, edit, order) {
+  if (order === 'keep-first') return `${keep}, ${edit}`;
+  return `${edit}, ${keep}`;
+}
+
+function ohmsForToken(token) {
+  if (token === '2.2k') return { ohms: 2200, label: '2.2k' };
+  return { ohms: 680, label: '680Ω' };
+}
+
+test('property: a kept other role plus a pronoun edit is RESISTOR_AMBIGUOUS and an LED target still applies', { timeout: 30000 }, () => {
+  const spec = seriesSpec('1k');
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`pronoun-after-other-role-keep property seed ${seed}`);
+  const cues = KEEP_CUES.filter((cue) => cue.slot !== 'filler');
+  const orders = ['keep-first', 'edit-first'];
+  const ambiguous = [];
+  const applies = [];
+  for (const cue of cues) {
+    for (const role of OTHER_ROLE_KEEP_TARGETS) {
+      for (const value of PRONOUN_EDIT_VALUES) {
+        for (const order of orders) {
+          const keep = otherRoleKeepClause(cue, role);
+          for (const editOf of PRONOUN_ONLY_EDITS) {
+            ambiguous.push(placeKeepAndEdit(keep, editOf(value), order));
+          }
+          for (const editOf of LED_RESISTOR_EDITS) {
+            applies.push([placeKeepAndEdit(keep, editOf(value), order), value]);
+          }
+        }
+      }
+    }
+  }
+  shuffleItems(rng, ambiguous);
+  shuffleItems(rng, applies);
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.code !== 'RESISTOR_AMBIGUOUS' || decision.mode !== 'refuse' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== r3) failures.push(`${prompt} R3 ${componentValue(next, 'R3')}`);
+    }
+  }
+  for (const [prompt, value] of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    const want = ohmsForToken(value);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== want.ohms || decision.edit?.label !== want.label) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== want.label) failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R1') !== '5.1k' || componentValue(next, 'R4') !== '4.7k') {
+        failures.push(`${prompt} other ref`);
+      }
+    }
+  }
+  const width = cues.length * OTHER_ROLE_KEEP_TARGETS.length * PRONOUN_EDIT_VALUES.length * orders.length * PRONOUN_ONLY_EDITS.length;
+  assert.equal(ambiguous.length, width);
+  assert.equal(applies.length, width);
+  assert.equal(width > 0, true);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
