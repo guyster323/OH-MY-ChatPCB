@@ -250,8 +250,7 @@ function spanCarriesKeepValue(text, start, end) {
   for (let index = 0; index < words.length; index += 1) {
     const token = bareKeepToken(words[index]);
     const next = words[index + 1] ? bareKeepToken(words[index + 1]) : '';
-    const prev = index > 0 ? bareKeepToken(words[index - 1]) : '';
-    if (keepValueWidth(token, next) > 0 || isUnitlessKeepValue(token, prev)) return true;
+    if (keepValueWidth(token, next) > 0 || isUnitlessKeepValue(token)) return true;
   }
   return false;
 }
@@ -326,18 +325,10 @@ function keepParticleStem(token) {
   return keepTokenBare(token).replace(/(?:으로|로|은|는|이|가|을|를|도|만)$/u, '').trim();
 }
 
-function isKeepRefWord(token) {
-  return /^R\d+$/iu.test(keepParticleStem(token));
-}
-
-// A bare integer is not a value by itself. It is one beside an R ref, after
-// "at" / "로" / "으로", or when the integer already carries 으로 or 로.
-function isUnitlessKeepValue(token, prev) {
-  if (!/^\d+$/u.test(keepParticleStem(token))) return false;
-  if (/^\d+(?:으로|로)$/u.test(keepTokenBare(token))) return true;
-  const glue = keepTokenBare(prev);
-  if (glue.toLowerCase() === 'at' || glue === '로' || glue === '으로') return true;
-  return isKeepRefWord(prev);
+// Any bare integer in the keep is the kept number. The joiner may be a space,
+// ":", "=", "is", "값", "값은", or "at" ("R3: 1000", "R3 is 1000").
+function isUnitlessKeepValue(token) {
+  return /^\d+$/u.test(keepParticleStem(token));
 }
 
 // taken is right-to-left, so a spaced unit sits before its number in this array.
@@ -346,8 +337,7 @@ function takenValueIndexes(taken) {
   const valueAt = new Set();
   for (let index = 0; index < bare.length; index += 1) {
     if (isKeepValueWord(bare[index])) valueAt.add(index);
-    const left = index + 1 < bare.length ? bare[index + 1] : '';
-    if (isUnitlessKeepValue(bare[index], left)) valueAt.add(index);
+    if (isUnitlessKeepValue(bare[index])) valueAt.add(index);
     if (index + 1 < bare.length && (isKeepValueWord(`${bare[index]} ${bare[index + 1]}`) || isKeepValueWord(`${bare[index + 1]} ${bare[index]}`))) {
       valueAt.add(index);
       valueAt.add(index + 1);
@@ -357,7 +347,12 @@ function takenValueIndexes(taken) {
 }
 
 function keepObjectBefore(text, cueStart, skipDecimal = false) {
-  const origin = keepClauseOrigin(text, cueStart, skipDecimal);
+  let origin = keepClauseOrigin(text, cueStart, skipDecimal);
+  // "R3 is 1000, unchanged": the cue sits alone after the comma. The number
+  // and the name are in the previous segment.
+  if (!/\S/u.test(text.slice(origin, cueStart)) && origin > 0 && (text[origin - 1] === ',' || text[origin - 1] === '，')) {
+    origin = keepClauseOrigin(text, origin - 1, skipDecimal);
+  }
   const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
   const taken = [];
   let tookObject = false;
@@ -365,7 +360,7 @@ function keepObjectBefore(text, cueStart, skipDecimal = false) {
     const token = bareKeepToken(words[index][0]);
     const prev = index > 0 ? bareKeepToken(words[index - 1][0]) : '';
     const spaced = Boolean(prev) && !isKeepValueWord(token) && isKeepValueWord(`${prev} ${token}`);
-    const unitless = isUnitlessKeepValue(token, prev);
+    const unitless = isUnitlessKeepValue(token);
     const value = isKeepValueWord(token) || spaced || unitless;
     const nearest = taken.length > 0 ? bareKeepToken(taken[taken.length - 1][0]) : '';
     const atGlue = token.toLowerCase() === 'at' && (takenValueIndexes(taken).size > 0 || /^\d+$/u.test(keepParticleStem(nearest)));
@@ -458,6 +453,17 @@ function leaveComplementObject(text, verbEnd) {
   };
 }
 
+// Crossing a decimal ("2.2kΩ") is the numbered keep. It applies only when the
+// object is an R ref or an LED_RESISTOR_SYNONYMS phrase. A bare 저항 qualified
+// by another part ("커패시터 저항") is not that phrase, so the dot stays a boundary.
+function numberedDecimalKeepObject(text, cueStart) {
+  const object = keepObjectBefore(text, cueStart, true);
+  if (!object) return null;
+  const fragment = text.slice(object[0], object[1]);
+  if (/\bR\d+\b/iu.test(fragment) || textHasLedResistorSynonym(fragment)) return object;
+  return null;
+}
+
 // A before-cue whose object sits left of a decimal value ("R3 at 2.2kΩ as-is")
 // is invisible to keepClauseSpans, because that dot is still a boundary there.
 // The fragment is only for "does this name the edit target?". It is not stripped.
@@ -532,7 +538,10 @@ export function keepClauseSpans(text) {
       if (keepSpansOverlap(occupied, start, end)) continue;
       if (cue.slot === 'before') {
         if (koreanKeepCueNegated(raw.slice(end)) || negatedKeepVerbBefore(raw, start)) continue;
-        if (!take(keepObjectBefore(raw, start), cue.mask, [start, end])) continue;
+        // A decimal in 2.2kΩ is not a clause break when the object is R3, R4,
+        // or an LED_RESISTOR_SYNONYMS phrase. "커패시터 저항 4.7k" is not.
+        const object = keepObjectBefore(raw, start) || numberedDecimalKeepObject(raw, start);
+        if (!take(object, cue.mask, [start, end])) continue;
         continue;
       }
       if (cue.text === 'keep' && englishKeepVerbNegated(raw, start)) continue;

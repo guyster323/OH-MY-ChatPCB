@@ -2123,7 +2123,7 @@ const R35_PROBE_OUTCOME = new Map([
   ['set the LED resistor to 680Ω but keep R4 at 4.7k', 'merge'],
   ['set the LED resistor to 680Ω and keep R4 at 4.7k', 'merge'],
   ['change the LED resistor to 680Ω, keep R4 at 4.7kΩ', 'merge'],
-  ['LED 저항은 680Ω으로 바꾸고 R4는 4.7k로 유지', 'RESISTOR_REF_UNSUPPORTED'],
+  ['LED 저항은 680Ω으로 바꾸고 R4는 4.7k로 유지', 'merge'],
   ['keep the LED, set the LED resistor to 680Ω', 'merge'],
   ['LED는 그대로 두고 LED 저항만 680Ω으로', 'merge'],
   ['keep everything else, set the LED resistor to 680Ω', 'merge'],
@@ -2545,5 +2545,139 @@ test('property: a kept other role plus a pronoun edit is RESISTOR_AMBIGUOUS and 
   assert.equal(ambiguous.length, width);
   assert.equal(applies.length, width);
   assert.equal(width > 0, true);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
+
+const NUMBERED_KEEP_PROMPTS = [
+  'R3: 1000 그대로, LED 저항 680Ω',
+  'R3 = 1000 그대로, LED 저항 680Ω',
+  'R3 값 1000 그대로, LED 저항 680Ω',
+  'R3 값은 1000 그대로, LED 저항 680Ω',
+  'R3 is 1000, unchanged; LED resistor to 680Ω'
+];
+
+test('a numbered keep of R3 or an LED resistor is RESISTOR_AMBIGUOUS and R4 still applies', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  for (const prompt of NUMBERED_KEEP_PROMPTS) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const apply = 'set the LED resistor to 680Ω but keep R4 at 4.7k';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(apply, spec);
+  assert.equal(decision.mode, 'merge', `${apply} ${decision.code ?? ''} ${decision.message ?? ''}`);
+  assert.equal(decision.edit?.ohms, 680, apply);
+  assert.equal(decision.edit?.ref, 'R3', apply);
+  assert.equal(decision.edit?.label, '680Ω', apply);
+  assert.equal(appliesBeforeProvider(apply, decision), true, apply);
+  const next = applyExistingProjectEdit(spec, decision.edit);
+  assert.equal(componentValue(next, 'R3'), '680Ω', apply);
+  assert.equal(componentValue(next, 'R4'), '4.7k', apply);
+  assert.equal(componentValue(spec, 'R3'), '1k', apply);
+  assert.deepEqual(spec, before, apply);
+});
+
+const NUMBERED_KEEP_TARGETS = [
+  'R3',
+  'r3',
+  'the LED resistor',
+  'the current-limiting resistor',
+  'the series resistor',
+  'LED 저항',
+  '전류제한 저항'
+];
+const NUMBERED_KEEP_JOINERS = [' ', ': ', ' = ', ' is ', ' 값 ', ' 값은 ', ' at '];
+const NUMBERED_KEEP_NUMBERS = ['1000', '1k', '470', '2.2kΩ'];
+const NUMBERED_KEEP_EDITS = [
+  ['en', 'LED resistor to 680Ω'],
+  ['ko', 'LED 저항 680Ω']
+];
+const NUMBERED_KEEP_POSITIONS = ['before', 'after'];
+
+function numberedKeepClause(cue, target, joiner, number) {
+  const named = `${target}${joiner}${number}`;
+  if (cue.slot === 'before') return `${named} ${cue.text}`;
+  if (cue.slot === 'leave') return `leave ${named} ${cue.text}`;
+  return `${cue.text} ${named}`;
+}
+
+function placeNumberedKeep(keep, edit, position) {
+  if (position === 'before') return `${keep}, ${edit}`;
+  return `${edit}, ${keep}`;
+}
+
+test('property: a numbered keep cue names R3 or an LED resistor with a number and R4 still applies', { timeout: 120000 }, () => {
+  const spec = seriesSpec('1k');
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`numbered keep property seed ${seed}`);
+  const cues = KEEP_CUES.filter((cue) => cue.slot !== 'filler');
+  const ambiguous = [];
+  const applies = [];
+  for (const cue of cues) {
+    for (const joiner of NUMBERED_KEEP_JOINERS) {
+      for (const number of NUMBERED_KEEP_NUMBERS) {
+        for (const position of NUMBERED_KEEP_POSITIONS) {
+          for (const [, edit] of NUMBERED_KEEP_EDITS) {
+            for (const target of NUMBERED_KEEP_TARGETS) {
+              const keep = numberedKeepClause(cue, target, joiner, number);
+              ambiguous.push(placeNumberedKeep(keep, edit, position));
+            }
+            const kept = numberedKeepClause(cue, 'R4', joiner, number);
+            applies.push(placeNumberedKeep(kept, edit, position));
+          }
+        }
+      }
+    }
+  }
+  shuffleItems(rng, ambiguous);
+  shuffleItems(rng, applies);
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== r3) failures.push(`${prompt} R3 ${componentValue(next, 'R3')}`);
+    }
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  const ambiguousWidth = cues.length * NUMBERED_KEEP_TARGETS.length * NUMBERED_KEEP_JOINERS.length * NUMBERED_KEEP_NUMBERS.length * NUMBERED_KEEP_POSITIONS.length * NUMBERED_KEEP_EDITS.length;
+  const applyWidth = cues.length * NUMBERED_KEEP_JOINERS.length * NUMBERED_KEEP_NUMBERS.length * NUMBERED_KEEP_POSITIONS.length * NUMBERED_KEEP_EDITS.length;
+  assert.equal(ambiguous.length, ambiguousWidth);
+  assert.equal(applies.length, applyWidth);
+  assert.equal(ambiguousWidth > 0, true);
   assert.deepEqual(failures.slice(0, 12), []);
 });

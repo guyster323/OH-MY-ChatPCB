@@ -754,7 +754,16 @@ function valuedKeepRefusal(text, spec) {
   if (objects.every((object) => valuedKeepFragmentDefers(text.slice(object.start, object.end)))) return null;
   if (keepNamesEditTarget(text, spec)) return ambiguousValuedKeep();
   const dropping = objects.filter((object) => !valuedKeepFragmentDefers(text.slice(object.start, object.end)));
-  const ranges = dropping.map((object) => [object.start, object.end]);
+  // "keep R4 at 1k, LED resistor to 680Ω" keeps R4. The LED head after the
+  // comma stays the edit. A keep of "it" still hides that head, so R4 left
+  // outside the clause cannot borrow the ohms.
+  const ranges = dropping.map((object) => {
+    const identityEnd = keepIdentityEnd(text, object.start, object.end);
+    const identity = text.slice(object.start, identityEnd);
+    const otherPart = identityEnd < object.end
+      && (resistorReferenceTokens(identity).length > 0 || textHasKnownRole(identity));
+    return [object.start, otherPart ? identityEnd : object.end];
+  });
   for (const cue of found.cues) {
     if (dropping.some((object) => valuedKeepCueTouches(text, cue, object))) ranges.push([cue.start, cue.end]);
   }
