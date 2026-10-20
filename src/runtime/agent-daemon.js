@@ -112,13 +112,57 @@ function emitProviderEvent(ctx, event) {
   }
 }
 
-// Drops the test hook and the old classifier option names before a spread.
-function omitDaemonTestSeam(dispatchOptions = {}) {
-  const options = dispatchOptions && typeof dispatchOptions === 'object' ? { ...dispatchOptions } : {};
-  delete options.testOnly;
-  delete options.classifyExistingProjectRequest;
-  delete options.classifyRequest;
-  return options;
+// One copy, without the test classifier seam. Spreading the result cannot put it back.
+function stripTestOnlyKeys(options) {
+  const source = options && typeof options === 'object' ? options : {};
+  const copy = { ...source };
+  delete copy.testOnly;
+  delete copy.classifyExistingProjectRequest;
+  delete copy.classifyRequest;
+  return copy;
+}
+
+// Every key read off ctx. The classifier seam is not in this list.
+const DAEMON_CTX_KEYS = [
+  'allowGenerate',
+  'allowedWorkspaceRoot',
+  'chatgptAuthManager',
+  'checkProviderAvailabilityImpl',
+  'designSource',
+  'emit',
+  'forceProjectDir',
+  'getProviderDefinitionImpl',
+  'inspectProjectImpl',
+  'inspectResult',
+  'inspectionContext',
+  'kicadCliPath',
+  'ngspicePath',
+  'patchApprovalRegistry',
+  'pendingConversation',
+  'pendingConversationBytes',
+  'persistLiveConversation',
+  'progressRequestId',
+  'projectExists',
+  'projectMutexRegistry',
+  'providerControllers',
+  'provisionalPlans',
+  'reconciledProjects',
+  'retainProviderController',
+  'runCommandImpl',
+  'runProviderProcessImpl',
+  'snapshotFs',
+  'transactionJournal',
+  'validateBoardImpl',
+  'validateProjectImpl',
+  'verifyAppliedProjectImpl'
+];
+
+function daemonCtxFromOptions(options) {
+  const ctx = {};
+  for (const key of DAEMON_CTX_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(options, key)) ctx[key] = options[key];
+  }
+  return ctx;
 }
 
 export async function dispatchToolCall(call, dispatchOptions = {}) {
@@ -134,7 +178,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     && process.env.NODE_TEST_CONTEXT.length > 0
     ? testOnlyClassifyRequest
     : classifyExistingProjectRequest;
-  const seamFreeOptions = omitDaemonTestSeam(dispatchSource);
+  const seamFreeOptions = stripTestOnlyKeys(dispatchSource);
   const {
     checkProviderAvailabilityImpl = checkProviderAvailability,
     runProviderProcessImpl = runProviderProcess,
@@ -156,7 +200,7 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
   const validateProjectImpl = (options) => validateProjectImplementation({ ...options, kicadCliPath });
   const validateBoardImpl = (options) => validateBoardImplementation({ ...options, kicadCliPath });
   const ctx = {
-    ...seamFreeOptions,
+    ...daemonCtxFromOptions(seamFreeOptions),
     checkProviderAvailabilityImpl,
     runProviderProcessImpl,
     inspectProjectImpl,
@@ -173,9 +217,6 @@ export async function dispatchToolCall(call, dispatchOptions = {}) {
     runCommandImpl,
     verifyAppliedProjectImpl
   };
-  delete ctx.testOnly;
-  delete ctx.classifyExistingProjectRequest;
-  delete ctx.classifyRequest;
   if (dispatchSource[projectLockHeld] === true) ctx[projectLockHeld] = true;
 
   if (!call || typeof call !== 'object') {
@@ -1391,9 +1432,8 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     portAttempts: dispatchOptions.chatgptPortAttempts,
     timeoutMs: dispatchOptions.chatgptAuthTimeoutMs
   });
-  const daemonOptions = omitDaemonTestSeam(dispatchOptions);
-  const resolvedDispatchOptions = {
-    ...daemonOptions,
+  const resolvedDispatchOptions = stripTestOnlyKeys({
+    ...dispatchOptions,
     chatgptAuthManager,
     providerControllers,
     patchApprovalRegistry,
@@ -1401,10 +1441,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
     transactionJournal,
     reconciledProjects,
     allowedWorkspaceRoot: dispatchOptions.allowedWorkspaceRoot ?? process.env.CHATPCB_WORKSPACE_ROOT
-  };
-  delete resolvedDispatchOptions.testOnly;
-  delete resolvedDispatchOptions.classifyExistingProjectRequest;
-  delete resolvedDispatchOptions.classifyRequest;
+  });
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -1419,7 +1456,7 @@ export async function startDaemon({ host = '127.0.0.1', port = 41317, dispatchOp
 
       if (request.method === 'POST' && request.url === '/tool') {
         const body = await readJson(request);
-        const httpOptions = omitDaemonTestSeam(resolvedDispatchOptions);
+        const httpOptions = stripTestOnlyKeys(resolvedDispatchOptions);
         sendJson(response, 200, await dispatchToolCall(body, httpOptions));
         return;
       }
@@ -1830,15 +1867,11 @@ function scheduleSocketMessage(socket, payload, dispatchOptions, enqueue) {
 
 async function handleSocketEnvelope(socket, envelope, dispatchOptions) {
   if (envelope.type === 'tool.call') {
-    const socketOptions = omitDaemonTestSeam(dispatchOptions);
-    const callCtx = {
-      ...socketOptions,
+    const callCtx = stripTestOnlyKeys({
+      ...dispatchOptions,
       progressRequestId: envelope.payload.id,
       emit: (type, payload) => sendWebSocketJson(socket, createEnvelope(type, payload))
-    };
-    delete callCtx.testOnly;
-    delete callCtx.classifyExistingProjectRequest;
-    delete callCtx.classifyRequest;
+    });
     sendWebSocketJson(
       socket,
       createEnvelope('tool.result', {

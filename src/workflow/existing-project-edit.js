@@ -2007,107 +2007,14 @@ function hasLedSeriesRole(spec) {
   return Boolean(seriesResistorRef(spec));
 }
 
-// A kept part is not an edit target. The object is the few words before
-// 그대로/유지/남겨/unchanged, or after keep/without. A word that starts with a
-// digit is a value, so the walk stops there and the value stays an edit.
-const GUARD_BEFORE = /남겨|남기|유지|그대로|\bunchanged\b/iu;
-const GUARD_AFTER = /\b(?:keep|without)\b/iu;
-const GUARD_AFTER_STOP = /^(?:change|set|update|make|modify|to)$|(?:바꿔|변경|수정)/iu;
 const OHM_VALUE_IN_CLAUSE = /\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?\b|[rRkK]\b)|\d+(?:\.\d+)?\s*[kKmM]\d*\b|\d+\s*[rR]\d+/iu;
 
+// Kept objects are blanked only through keepClauseSpans, which reads KEEP_CUES.
 function maskGuardObjects(text) {
   const normalized = String(text ?? '').normalize('NFKC');
   const chars = normalized.split('');
-  for (const clause of splitClauses(normalized)) maskClauseGuards(chars, normalized, clause);
-  // "두고" splits on 고, so the whole keep phrase is masked on the raw text.
-  // "건드리지 마" is not one of these; only "말고" closes that phrase.
-  maskKoreanKeepClauses(chars, normalized);
-  maskDontTouchRefs(chars, normalized);
   maskKeepVocabulary(chars, normalized);
   return chars.join('');
-}
-
-// "don't touch R4" keeps that reference. "don't touch the pull-ups" keeps that
-// role. The LED edit in the other clause still applies. keepNamesEditTarget
-// already read the object, including a don't-touch of this resistor.
-function maskDontTouchRefs(chars, text) {
-  const re = compileRegExp(String.raw`\b(?:don't|dont|do not|never)\s+touch\b`, 'giu');
-  for (const match of text.matchAll(re)) {
-    const from = match.index + match[0].length;
-    const ref = /^\s*(?:(?:the|a|an)\s+)?(?:resistor\s+)?R\d+\b/iu.exec(text.slice(from));
-    if (!ref) continue;
-    blankRange(chars, from, from + ref[0].length);
-  }
-}
-
-const KOREAN_KEEP_CLAUSE = /(?<![가-힣])(?:그대로\s*두고|건드리지\s*말고|유지하고|놔\s*두고|빼고)/gu;
-
-function maskKoreanKeepClauses(chars, text) {
-  for (const match of text.matchAll(KOREAN_KEEP_CLAUSE)) {
-    const phraseStart = match.index;
-    const phraseEnd = phraseStart + match[0].length;
-    const before = text.slice(0, phraseStart);
-    let boundary = -1;
-    for (const mark of [',', '.', '?', '!', '\n', '。', '？', '！']) {
-      boundary = Math.max(boundary, before.lastIndexOf(mark));
-    }
-    blankWordsBefore(chars, text, boundary < 0 ? 0 : boundary + 1, phraseStart, 6);
-    blankRange(chars, phraseStart, phraseEnd);
-  }
-}
-
-function maskClauseGuards(chars, text, clause) {
-  const base = clause.start;
-  const negated = clause.negatedBySeparator === true;
-  for (const match of clause.text.matchAll(compileRegExp(GUARD_BEFORE.source, 'giu'))) {
-    const after = clause.text.slice(match.index + match[0].length);
-    // "그대로 두지 말고" and "유지하지 말고" cancel the keep. The role stays.
-    if (koreanKeepCueNegated(after, negated)) continue;
-    blankWordsBefore(chars, text, base, base + match.index);
-  }
-  for (const match of clause.text.matchAll(compileRegExp(GUARD_AFTER.source, 'giu'))) {
-    // "don't keep" is not a keep. "without" still hides the object after it.
-    if (/^keep$/iu.test(match[0]) && englishKeepIsNegated(clause.text, match.index)) continue;
-    const cueEnd = base + match.index + match[0].length;
-    blankWordsAfter(chars, text, cueEnd, base + clause.text.length);
-  }
-}
-
-// "두지 말고" splits on 말고, so the left clause ends at 두지/하지.
-// "두지 말" still inside the clause is the same negation.
-function koreanKeepCueNegated(after, negatedBySeparator) {
-  const body = String(after ?? '').trim();
-  if (/^(?:두지|하지)\s*(?:말|마|않)/u.test(body)) return true;
-  return negatedBySeparator === true && /^(?:두지|하지)$/u.test(body);
-}
-
-function englishKeepIsNegated(clauseText, matchIndex) {
-  const prefix = String(clauseText ?? '').slice(0, matchIndex).trimEnd();
-  return /(?:n't|\b(?:not|never|dont)\b)(?:\s+(?:please|just|you))?\s*$/iu.test(prefix);
-}
-
-function blankWordsBefore(chars, text, clauseStart, cueStart, limit = 2) {
-  const words = [...text.slice(clauseStart, cueStart).matchAll(/\S+/gu)];
-  const taken = [];
-  for (let index = words.length - 1; index >= 0 && taken.length < limit; index -= 1) {
-    if (/^\d/.test(words[index][0])) break;
-    taken.push(words[index]);
-  }
-  if (taken.length === 0) return;
-  blankRange(chars, clauseStart + taken[taken.length - 1].index, cueStart);
-}
-
-function blankWordsAfter(chars, text, cueEnd, clauseEnd) {
-  const words = [...text.slice(cueEnd, clauseEnd).matchAll(/\S+/gu)];
-  let end = cueEnd;
-  let count = 0;
-  for (const word of words) {
-    if (count >= 6) break;
-    if (/^\d/.test(word[0]) || GUARD_AFTER_STOP.test(word[0])) break;
-    end = cueEnd + word.index + word[0].length;
-    count += 1;
-  }
-  blankRange(chars, cueEnd, keepIdentityEnd(text, cueEnd, end));
 }
 
 function blankRange(chars, from, to) {
