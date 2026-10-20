@@ -2795,6 +2795,26 @@ test('a discourse or golden-sample aside still sets the LED resistor to 680Ω', 
   assert.equal(voltageBasis.edit, undefined);
 });
 
+// 어쨌든 / 어떻든 are aside filler only beside an LED-resistor synonym.
+// needsLed: false on either row turns that word into filler here and edits R3.
+test('contrast: 어쨌든 and 어떻든 without an LED synonym leave the target unclear', () => {
+  const spec = seriesSpec('1k');
+  const prompts = [
+    '어쨌든 680Ω으로',
+    '어쨌든 R3을 680Ω으로',
+    '어떻든 680Ω으로',
+    '어떻든 R3을 680Ω으로'
+  ];
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
 // Part (c) outcome for each r35 probe. A valued keep is dropped. One remaining
 // LED resistor and one value apply on R3. A keep with nothing left stays
 // ambiguous. The map is the sentence list and the expected outcome.
