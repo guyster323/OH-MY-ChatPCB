@@ -24,6 +24,7 @@ import {
   isDemonstrativeWord,
   isEditVerbWord,
   isFunctionWord,
+  isKeepListStop,
   isKnownRoleWord,
   isLedAllowWord,
   isLedResistorSynonymPiece,
@@ -34,6 +35,7 @@ import {
   isAmbiguousI2cPreservation,
   isDontDeleteClause,
   isKoreanRequestStem,
+  KEEP_CUES,
   CHOICE_JOINERS,
   choiceWordJoinerSources,
   decimalBeforeKeepFragments,
@@ -56,8 +58,10 @@ const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
 
-function choiceJoinerRow(id) {
-  return CHOICE_JOINERS.find((item) => item.id === id);
+export function choiceJoinerRow(id) {
+  const row = CHOICE_JOINERS.find((item) => item.id === id);
+  if (!row) throw new Error(`Unknown choice joiner id: ${id}`);
+  return row;
 }
 
 const CHOICE_JOINER_WORD = compileRegExp(
@@ -768,11 +772,62 @@ function choiceClauseBounds(wordStart, wordEnd, marks, textLength) {
   return [start, end];
 }
 
-const CHOICE_SIDE_STOP = /^(?:keep|hold|leave|set|change|update|modify|make|don't|don’t|dont|do|not|touch|and|but|또는|혹은|아니면|유지|그대로|건드리지|손대지|바꿔|변경|수정|두고|말고|놔두고|하지|두지)$/iu;
+// Keep cues and choice joiners are the side boundary. A second copy of those
+// words here would drift from KEEP_CUES and CHOICE_JOINERS.
+function addStop(stops, word) {
+  stops.add(word);
+  stops.add(word.toLowerCase());
+}
+
+function choiceSideVocabularyStops() {
+  const stops = new Set();
+  for (const cue of KEEP_CUES) {
+    if (cue.signal !== true || /[\s'’]/u.test(cue.text) || cue.text.includes('-')) continue;
+    addStop(stops, cue.text);
+  }
+  // "don't touch" / "don’t touch" / "dont touch" / "do not touch". "never touch"
+  // is a cue, and "never" is not a side stop.
+  for (const cue of KEEP_CUES) {
+    if (!cue.text.includes(' ') || !cue.text.includes('touch') || cue.text.startsWith('never ')) continue;
+    for (const part of cue.text.split(' ')) addStop(stops, part);
+  }
+  for (const item of CHOICE_JOINERS) {
+    if (item.place !== 'word') continue;
+    addStop(stops, item.text);
+  }
+  return stops;
+}
+
+const CHOICE_SIDE_VOCAB_STOPS = choiceSideVocabularyStops();
+
+// Edit verbs are the overlap of the edit-verb list and the keep-list stops.
+// "no", "never", "does", "did", and one-syllable 마/말/않 are negation words
+// and are not this boundary. and/but and the Korean edit stems are not rows
+// in either list.
+const CHOICE_SIDE_OTHER_STOP = /^(?:and|but|바꿔|변경|수정|두지)$/iu;
+
+function isChoiceSideNegation(token) {
+  if (!isNegationOrAlternativeWord(token)) return false;
+  const key = String(token).toLowerCase();
+  if (CHOICE_JOINERS.some((item) => item.place === 'word' && item.text.toLowerCase() === key)) return false;
+  if (key === 'no' || key === 'never' || key === 'does' || key === 'did') return false;
+  if (token === '마' || token === '말' || token === '않') return false;
+  return true;
+}
+
+export function isChoiceSideStop(token) {
+  const bare = String(token ?? '');
+  if (!bare) return false;
+  const key = bare.toLowerCase();
+  if (CHOICE_SIDE_VOCAB_STOPS.has(bare) || CHOICE_SIDE_VOCAB_STOPS.has(key)) return true;
+  if (isEditVerbWord(key) && isKeepListStop(key)) return true;
+  if (isChoiceSideNegation(bare)) return true;
+  return CHOICE_SIDE_OTHER_STOP.test(bare);
+}
 
 function choiceSideStem(token) {
   const bare = bareGlueWord(token);
-  if (!bare || CHOICE_SIDE_STOP.test(bare)) return bare;
+  if (!bare || isChoiceSideStop(bare)) return bare;
   return bare.replace(/(?:으로|로|은|는|이|가|을|를|도|만)$/u, '') || bare;
 }
 
@@ -786,7 +841,7 @@ function choiceSidePhrase(clause, side) {
     const stem = choiceSideStem(token[0]);
     if (!stem) continue;
     if (/^(?:the|a|an)$/iu.test(stem)) continue;
-    if (CHOICE_SIDE_STOP.test(stem)) break;
+    if (isChoiceSideStop(stem)) break;
     if (/\d/u.test(stem) && !/^R\d+$/iu.test(stem)) break;
     kept.push(stem);
     if (/^R\d+$/iu.test(stem) || textHasKnownRole(stem) || textHasLedResistorSynonym(stem)) break;

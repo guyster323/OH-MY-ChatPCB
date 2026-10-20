@@ -3,7 +3,9 @@ import test from 'node:test';
 
 import { dispatchToolCall } from '../src/runtime/agent-daemon.js';
 import {
+  choiceJoinerRow,
   classifyExistingProjectRequest,
+  isChoiceSideStop,
   ledKeepSkipWords
 } from '../src/workflow/existing-project-edit.js';
 import {
@@ -129,4 +131,57 @@ test('dispatchToolCall ctx drops unknown option keys', async () => {
   assert.equal(Object.hasOwn(seen, 'testOnly'), false);
   assert.equal(Object.hasOwn(seen, 'observeCtx'), false);
   assert.equal(seen.emit, emit);
+});
+
+// Same shape as the classifier seam outside node --test. Deleting
+// NODE_TEST_CONTEXT must keep testOnly.observeCtx from running.
+test('observeCtx is not called when NODE_TEST_CONTEXT is unset', async () => {
+  const previousContext = process.env.NODE_TEST_CONTEXT;
+  delete process.env.NODE_TEST_CONTEXT;
+  let calls = 0;
+  try {
+    const result = await dispatchToolCall(null, {
+      testOnly: {
+        observeCtx() {
+          calls += 1;
+        }
+      }
+    });
+    assert.equal(result.ok, false);
+    assert.equal(calls, 0);
+  } finally {
+    if (previousContext === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previousContext;
+  }
+});
+
+test('choiceJoinerRow throws on an unknown id', () => {
+  assert.throws(() => choiceJoinerRow('no-such-joiner'), /Unknown choice joiner id: no-such-joiner/);
+  assert.equal(choiceJoinerRow('deun').text, '든');
+  assert.equal(choiceJoinerRow('or').text, 'or');
+});
+
+// Single-token keep cues and word joiners are the side-phrase stops. A copy
+// of those words in the edit path would miss a row added to either list.
+test('choice side stops are read from KEEP_CUES and CHOICE_JOINERS', () => {
+  for (const cue of KEEP_CUES) {
+    if (cue.signal !== true) continue;
+    if (/[\s'’]/u.test(cue.text) || cue.text.includes('-')) continue;
+    assert.equal(isChoiceSideStop(cue.text), true, cue.text);
+  }
+  for (const item of CHOICE_JOINERS) {
+    if (item.place !== 'word') continue;
+    assert.equal(isChoiceSideStop(item.text), true, item.id);
+  }
+  for (const word of ['set', 'change', 'update', 'modify', 'make', "don't", 'don’t', 'dont', 'do', 'not', 'touch', 'and', 'but', '바꿔', '변경', '수정', '말고', '하지', '두지']) {
+    assert.equal(isChoiceSideStop(word), true, word);
+  }
+  const spec = seriesSpec();
+  const listed = classifyExistingProjectRequest('R4 또는 R5는 그대로 두고 LED 저항 680Ω으로', spec);
+  assert.equal(listed.mode, 'merge', listed.code ?? '');
+  assert.equal(listed.edit?.ref, 'R3');
+  assert.equal(listed.edit?.ohms, 680);
+  const kept = classifyExistingProjectRequest('set the LED resistor to 680Ω or keep R4', spec);
+  assert.equal(kept.code, 'RESISTOR_AMBIGUOUS', kept.mode);
+  assert.equal(kept.edit, undefined);
 });

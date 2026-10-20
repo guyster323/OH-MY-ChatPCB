@@ -2657,6 +2657,62 @@ test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', 
   assert.deepEqual(failures, []);
 });
 
+// The old deun lookbehind (?<!뭐|언제|어디|누구)든 treated these words as choice
+// endings. A -고 in 바꾸고 splits the value into another clause, so that
+// reading never reached the keep. These rows leave the value, the lexical 든,
+// and the keep in one clause: reverting the stem check refuses them.
+test('contrast: lexical 든 in the same clause as a keep still applies R3', () => {
+  const spec = seriesSpec('1k');
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  const lexical = ['어쨌든', '어쨨든', '어떻든', '얼마든', '골든'];
+  const applies = [];
+  for (const word of lexical) {
+    applies.push(`LED 저항 680Ω으로 ${word} R4는 그대로 둬`);
+    applies.push(`LED 저항을 680Ω으로 ${word} R4는 그대로 둬`);
+    applies.push(`LED 저항을 680Ω으로 바꾸고 ${word} R4는 그대로 둬`);
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  const provider = [
+    'LED 저항 680Ω으로 무엇이든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 무엇이든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 뭐든 R4는 그대로 둬'
+  ];
+  for (const prompt of provider) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code != null || decision.edit != null || blocksBeforeProvider(prompt, decision)) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? 'nocode'} block ${blocksBeforeProvider(prompt, decision)}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  const ambiguous = [
+    'LED 저항 680Ω으로 바꾸든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 하든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 두든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 쓰든 R4는 그대로 둬'
+  ];
+  for (const prompt of ambiguous) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 test('a discourse or golden-sample aside still sets the LED resistor to 680Ω', () => {
   const spec = seriesSpec('1k');
   const applies = [
