@@ -1282,13 +1282,55 @@ function isApproximationWord(word) {
   return word === '약' || word === '대략' || word === '대충' || word === '정도' || word === '쯤' || word === '가량' || word === '내외';
 }
 
-function recognizedWord(word, clause) {
+function isModifierGlue(word) {
+  return isFunctionWord(word) || isEditVerbWord(word) || isModalOrParticleWord(word) || isDemonstrativeWord(word);
+}
+
+// Synonym fragments name the LED resistor only when they sit in the modifier
+// phrase directly before the resistor noun. "current limit" there is the part.
+// The same words after the value are a different claim.
+function modifierPieceIndexes(clause) {
+  const words = clauseWords(clause);
+  const indexes = new Set();
+  for (let nounAt = 0; nounAt < words.length; nounAt += 1) {
+    if (!RESISTOR_NOUNS.has(lower(words[nounAt]))) continue;
+    for (let index = nounAt - 1; index >= 0; index -= 1) {
+      const word = words[index];
+      if (isModifierGlue(word)) continue;
+      if (!isLedResistorSynonymPiece(word) || RESISTOR_NOUNS.has(lower(word))) break;
+      indexes.add(index);
+    }
+  }
+  return indexes;
+}
+
+function clauseHasLooseSynonymFragment(clause) {
+  const words = clauseWords(clause);
+  const inside = modifierPieceIndexes(clause);
+  return words.some((word, index) => (
+    isLedResistorSynonymPiece(word)
+    && !RESISTOR_NOUNS.has(lower(word))
+    && !inside.has(index)
+  ));
+}
+
+// mA, A, V, mV, W, Hz, and the same units with a prefix. Ohms stay values.
+function isNonOhmMeasurement(word) {
+  const text = String(word ?? '').trim();
+  if (rx("^\\d+(?:\\.\\d+)?(?:[mµμunpkKMGT])?(?:hz|v|a|w)(?:dc|ac)?$", "i").test(text)) return true;
+  return rx("^\\d+/\\d+[wW]$").test(text);
+}
+
+function recognizedWord(word, clause, index = -1) {
   if (!word) return true;
   if (isNegationOrAlternativeWord(word)) return true;
   if (isPoliteIfFiller(word, clause)) return true;
+  // A non-ohm measurement beside a synonym fragment that is not the modifier
+  // is leftover. "at 3.3V" and "20mA" on the resistor phrase stay values.
+  if (isNonOhmMeasurement(word) && clauseHasLooseSynonymFragment(clause)) return false;
   if (rx("^\\d").test(word) || rx("[Ω옴%]").test(word) || rx("^(?:ohm|ohms|meg)$", "i").test(word)) return true;
   if (isLedAllowWord(word) || isFunctionWord(word) || isEditVerbWord(word)) return true;
-  if (isLedResistorSynonymPiece(word) && textHasLedResistorSynonym(clause)) return true;
+  if (index >= 0 && isLedResistorSynonymPiece(word) && modifierPieceIndexes(clause).has(index)) return true;
   if (isModalOrParticleWord(word) || isDemonstrativeWord(word)) return true;
   if (NOISE_WORDS.has(lower(word)) || NOISE_WORDS.has(word)) return true;
   if (rx("^R\\d+$", "i").test(word)) return true;
@@ -1319,7 +1361,7 @@ function leftoverWords(clause) {
   if (isDontDelete(clause) && dontDeleteNamesResistor(clause)) return [];
   if (isLengthClause(clause) || isForeignRoleClause(clause)) return [];
   const words = clauseWords(clause);
-  return words.filter((word) => !recognizedWord(word, clause) && !isKnownRoleWord(word) && !isUnboundMeasureNoun(word));
+  return words.filter((word, index) => !recognizedWord(word, clause, index) && !isKnownRoleWord(word) && !isUnboundMeasureNoun(word));
 }
 
 // A don't-delete left piece loses 마 when 말고 is the separator. "바꾸지" is an
@@ -1467,8 +1509,11 @@ function unknownRoleValue(clause) {
   if (isResistorKeepClause(clause) || isGenericKeep(clause)) return false;
   const bound = boundOhmTokens(clause);
   if (bound.length === 0) return false;
-  const words = clauseWords(clause).filter((word) => !rx("^\\d").test(word));
-  return words.some((word) => !recognizedWord(word, clause) && !isKnownRoleWord(word) && !isFunctionWord(word) && !isEditVerbWord(word));
+  const words = clauseWords(clause);
+  return words.some((word, index) => {
+    if (rx("^\\d").test(word)) return false;
+    return !recognizedWord(word, clause, index) && !isKnownRoleWord(word) && !isFunctionWord(word) && !isEditVerbWord(word);
+  });
 }
 
 // Whole-sentence allow list. covered is true only when nothing is left over.

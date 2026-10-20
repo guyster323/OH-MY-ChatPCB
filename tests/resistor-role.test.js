@@ -612,6 +612,46 @@ test('a current-limiting phrase with no LED word applies before the provider', (
   }
 });
 
+test('a synonym fragment outside the modifier, or a leftover non-ohm measurement, leaves R3 unchanged', () => {
+  const spec = seriesSpec('1k');
+  const unclear = resistorTargetUnclearMessage('680');
+  const refused = [
+    'set the LED resistor to 680Ω with current limit 10mA',
+    'set the LED resistor to 680Ω, current limit 10mA',
+    'set the LED resistor to 680Ω for a 10mA current limit',
+    'set the LED resistor to 680Ω limit 10mA',
+    'set the LED resistor to 680Ω and current-limit the LED at 10mA',
+    'set the LED resistor to 680Ω, current 10mA',
+    'set the LED resistor to 680Ω and status 3.3V',
+    'LED 저항 680Ω, 전류 제한 10mA'
+  ];
+  for (const prompt of refused) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.message, unclear, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.deepEqual(spec, before, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+  for (const prompt of ['set the current limit resistor to 680Ω', 'LED 전류 제한용 저항 680Ω']) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+});
+
 function noLedSpec() {
   return {
     mcu: { family: 'STM32' },
