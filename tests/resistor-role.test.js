@@ -21,7 +21,7 @@ import {
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
-import { assessRequestCoverage, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
+import { assessRequestCoverage, LED_RESISTOR_SYNONYMS, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -1189,6 +1189,82 @@ test('a keep of the LED itself is not a keep of its resistor', () => {
     assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
     assert.deepEqual(spec, before, prompt);
   }
+});
+
+const LED_SYNONYM_KEEP_POSITIONS = ['leading', 'trailing', 'next'];
+
+function ledResistorPhrase(synonym, lang) {
+  const text = String(synonym);
+  const hasNoun = /\bresistor\b/i.test(text) || text.includes('저항') || text.includes('抵抗');
+  if (hasNoun) return text;
+  return lang === 'en' ? `${text} resistor` : `${text} 저항`;
+}
+
+function ledSynonymKeep(synonym, lang) {
+  const phrase = ledResistorPhrase(synonym, lang);
+  return lang === 'en' ? `keep the ${phrase}` : `${phrase}은 그대로 두고`;
+}
+
+function ledSynonymEdit(lang) {
+  return lang === 'en' ? 'LED resistor 680Ω' : 'LED 저항 680Ω';
+}
+
+function placeLedSynonymKeep(keep, edit, position) {
+  if (position === 'leading') return `${keep}, ${edit}`;
+  if (position === 'trailing') return `${edit}, ${keep}`;
+  return `${edit}. ${keep}.`;
+}
+
+test('every LED-resistor synonym in a keep clause is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const required = [
+    'current-limiting',
+    'current limiting',
+    'current-limit',
+    'series',
+    'LED series',
+    'status LED resistor',
+    '직렬',
+    '전류제한',
+    '전류 제한',
+    '전류 제한용'
+  ];
+  for (const synonym of required) {
+    assert.equal(
+      LED_RESISTOR_SYNONYMS.some((item) => item.toLowerCase() === synonym.toLowerCase()),
+      true,
+      synonym
+    );
+  }
+  const failures = [];
+  for (const synonym of LED_RESISTOR_SYNONYMS) {
+    for (const lang of ['en', 'ko']) {
+      for (const position of LED_SYNONYM_KEEP_POSITIONS) {
+        const prompt = placeLedSynonymKeep(ledSynonymKeep(synonym, lang), ledSynonymEdit(lang), position);
+        const decision = classifyExistingProjectRequest(prompt, spec);
+        const where = `${synonym} ${lang} ${position} ${prompt}`;
+        if (decision.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${where} => ${decision.code ?? decision.mode} ${decision.edit?.ohms ?? ''}`);
+        else if (decision.message !== message) failures.push(`${where} message`);
+        else if (decision.edit !== undefined) failures.push(`${where} edit`);
+        else if (blocksBeforeProvider(prompt, decision) !== true) failures.push(`${where} blocks`);
+        else if (appliesBeforeProvider(prompt, decision) !== false) failures.push(`${where} applies`);
+      }
+    }
+  }
+  for (const prompt of [
+    'keep R4, LED resistor 680Ω',
+    'keep R4, set the LED resistor to 680Ω',
+    'R4는 그대로 두고 LED 저항 680Ω'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680) {
+      failures.push(`control ${prompt} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    } else if (appliesBeforeProvider(prompt, decision) !== true) failures.push(`control ${prompt} applies`);
+    else if (blocksBeforeProvider(prompt, decision) !== false) failures.push(`control ${prompt} blocks`);
+  }
+  assert.equal(LED_RESISTOR_SYNONYMS.length > 0, true);
+  assert.deepEqual(failures, []);
 });
 
 test('a keep clause that carries a value never applies that value to R3', () => {

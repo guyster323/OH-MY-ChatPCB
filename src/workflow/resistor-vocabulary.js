@@ -464,6 +464,101 @@ export function isShuntSenseWord(word) {
   return SHUNT_SENSE_WORDS.has(lower(word));
 }
 
+// One LED-resistor phrase list. Target classification and keep classification
+// both read this set. A second copy drops a hyphen or a Korean spacing.
+export const LED_RESISTOR_SYNONYMS = Object.freeze([
+  'current-limiting',
+  'current limiting',
+  'current-limit',
+  'series',
+  'LED series',
+  'status LED resistor',
+  '직렬',
+  '전류제한',
+  '전류 제한',
+  '전류 제한용',
+  '전류제한용',
+  'led',
+  'leds',
+  'status',
+  '엘이디',
+  '엘예디',
+  '상태',
+  '발광다이오드'
+]);
+
+function synonymFold(text) {
+  return lower(text).replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function synonymCompact(text) {
+  return lower(text).replace(/[-\s]+/g, '');
+}
+
+const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.map((synonym) => {
+  const folded = synonymFold(synonym);
+  const packed = synonymCompact(synonym);
+  const ascii = /^[a-z0-9 ]+$/.test(folded);
+  const body = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+  return {
+    folded,
+    packed,
+    ascii,
+    words: folded.split(' ').filter(Boolean),
+    re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null
+  };
+});
+
+function stripYong(word) {
+  const key = lower(word);
+  return key.length > 1 && key.endsWith('용') ? key.slice(0, -1) : key;
+}
+
+export function textHasLedResistorSynonym(text) {
+  const joined = synonymFold(text);
+  const compact = synonymCompact(text);
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
+    item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed))
+  ));
+}
+
+// A token of the shared set, including "limit" inside "current-limit" and "제한용".
+export function isLedResistorSynonymPiece(word) {
+  const key = lower(word);
+  const stripped = stripYong(key);
+  const folded = synonymFold(stripped);
+  const packed = synonymCompact(key);
+  const strippedPacked = synonymCompact(stripped);
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
+    item.words.includes(folded)
+    || item.folded === synonymFold(key)
+    || item.packed === packed
+    || item.packed === strippedPacked
+  ));
+}
+
+function modifierFitsSynonym(word, item) {
+  const bits = synonymFold(stripYong(word)).split(' ').filter(Boolean);
+  if (bits.length === 0) return false;
+  return bits.every((bit) => item.words.includes(bit) || isLedAllowWord(bit));
+}
+
+// Modifiers name the LED series resistor when they are one phrase from
+// LED_RESISTOR_SYNONYMS. "current sense" stays a shunt. Extra words that are
+// not part of that phrase and not LED allow-words refuse the phrase.
+export function matchesLedResistorModifiers(content) {
+  const words = Array.isArray(content) ? content.map((word) => lower(word)).filter(Boolean) : [];
+  if (words.length === 0) return false;
+  if (words.some((word) => isShuntSenseWord(word))) return false;
+  const joined = synonymFold(words.join(' '));
+  const compact = synonymCompact(words.join(''));
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
+    const hit = item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed));
+    if (!hit) return false;
+    return words.every((word) => modifierFitsSynonym(word, item));
+  });
+}
+
 export function specRoleNamesResistor(role) {
   return rx("resistor|pull-?up|pull-?down|pulldown|pullup", "i").test(String(role ?? ''));
 }
@@ -494,6 +589,7 @@ export function vocabularyAllowLists() {
     noiseWords: NOISE_WORDS,
     nonresObjects: NONRES_OBJECTS,
     keepCues: KEEP_CUES,
+    ledResistorSynonyms: LED_RESISTOR_SYNONYMS,
     adviceKo: ADVICE_KO,
     adviceEn: ADVICE_EN,
     permitPhrases: PERMIT_PHRASES,
@@ -1124,6 +1220,7 @@ function recognizedWord(word, clause) {
   if (isPoliteIfFiller(word, clause)) return true;
   if (rx("^\\d").test(word) || rx("[Ω옴%]").test(word) || rx("^(?:ohm|ohms|meg)$", "i").test(word)) return true;
   if (isLedAllowWord(word) || isFunctionWord(word) || isEditVerbWord(word)) return true;
+  if (isLedResistorSynonymPiece(word) && textHasLedResistorSynonym(clause)) return true;
   if (isModalOrParticleWord(word) || isDemonstrativeWord(word)) return true;
   if (NOISE_WORDS.has(lower(word)) || NOISE_WORDS.has(word)) return true;
   if (rx("^R\\d+$", "i").test(word)) return true;

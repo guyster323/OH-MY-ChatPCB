@@ -25,6 +25,8 @@ import {
   isFunctionWord,
   isKnownRoleWord,
   isLedAllowWord,
+  isLedResistorSynonymPiece,
+  matchesLedResistorModifiers,
   isModalOrParticleWord,
   isNegationOrAlternativeWord,
   isAmbiguousI2cPreservation,
@@ -35,7 +37,6 @@ import {
   isPoliteIfFiller,
   isReplacedSourceValue,
   tildeJoinsResistorRange,
-  isShuntSenseWord,
   isUnboundMeasureAfter,
   libIdNamesResistor,
   specRoleNamesResistor,
@@ -1958,7 +1959,9 @@ function keepNamesEditTarget(text, spec) {
   if (kept.size === 0) return false;
   // The cue word stays out of the edit remainder. "유지하고" must not sit on the LED noun.
   const edit = new Set();
-  const ranges = found.objects.map((object) => [object.start, object.end]);
+  // "keep the current-limiting resistor, LED resistor 680Ω" keeps only the
+  // first identity. The resistor after the comma stays visible as the edit.
+  const ranges = found.objects.map((object) => [object.start, keepIdentityEnd(text, object.start, object.end)]);
   for (const cue of found.cues) ranges.push([cue.start, cue.end]);
   const remainder = blankCopy(text, ranges);
   addKeptIdentity(edit, remainder, series, 'edit');
@@ -2299,7 +2302,7 @@ function modifiersBefore(words, text) {
     }
     if (!stemmed || isIgnorableWord(stemmed, text) || isDesignator(stemmed)) continue;
     picked.push(raw);
-    if (!isLedAllowWord(stemmed)) break;
+    if (!isLedPhraseWord(stemmed)) break;
   }
   return picked.reverse();
 }
@@ -2353,7 +2356,7 @@ function wordsAfterNoun(text, noun) {
       kept.push(word);
       break;
     }
-    if (!isLedAllowWord(stemmed)) break;
+    if (!isLedPhraseWord(stemmed)) break;
     kept.push(word);
     if (kept.length >= 4) break;
   }
@@ -2378,15 +2381,13 @@ function classifyModifiers(words, text) {
   return 'foreign';
 }
 
+function isLedPhraseWord(word) {
+  return isLedAllowWord(word) || isLedResistorSynonymPiece(word);
+}
+
 function isAllowedLedContext(content) {
-  // "current sense", "current-sense", and "current sensing" are shunt roles.
-  // They must not match the LED phrase "current limiting" / "current-limiting".
-  if (content.some((word) => isShuntSenseWord(word))) return false;
-  if (!content.every((word) => isLedAllowWord(word))) return false;
-  if (content.some((word) => /^(?:led|leds|엘이디|엘예디|status|상태|series|직렬)$/iu.test(word))) return true;
-  const joined = content.map((word) => word.toLowerCase().replace(/-/g, ' ')).join(' ');
-  const compact = content.join('').toLowerCase().replace(/-/g, '');
-  return joined.includes('current limiting') || compact.includes('전류제한') || compact.includes('발광다이오드');
+  // Target and keep both use LED_RESISTOR_SYNONYMS. "current sense" stays a shunt.
+  return matchesLedResistorModifiers(content);
 }
 
 function stemWord(word) {
