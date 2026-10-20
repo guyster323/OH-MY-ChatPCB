@@ -37,6 +37,7 @@ import {
   isKoreanRequestStem,
   KEEP_CUES,
   CHOICE_JOINERS,
+  choiceJoinerIsIdiom,
   choiceWordJoinerSources,
   decimalBeforeKeepFragments,
   keepClauseSpans,
@@ -705,13 +706,6 @@ function orSoApproximation(text, end) {
   return /^\s+so\b/iu.test(String(text ?? '').slice(end));
 }
 
-// "오든 말든" means "whether or not someone comes". It is not a resistor choice.
-function regardlessComingOrNot(text, start, end) {
-  const bare = bareGlueWord(text.slice(start, end));
-  if (bare === '오든' && /^\s*말든/u.test(text.slice(end))) return true;
-  return bare === '말든' && /오든\s*$/u.test(text.slice(0, start));
-}
-
 // A CHOICE_JOINERS word touches the keep. A valued keep joined by one stays in
 // the sentence. "or so" is an approximation, not that choice.
 // null tells the caller not to strip that keep.
@@ -906,9 +900,9 @@ function choiceJoinsAnyKeep(text, spec) {
     const end = start + word[0].length;
     if (!choiceJoinerWord(word[0], text.slice(end))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
-    // "오든 말든" is the idiom "regardless", not an alternative about the resistor.
-    // "바꾸든 말든" is still that alternative. A valued keep uses choiceKeepJoiner.
-    if (regardlessComingOrNot(text, start, end)) continue;
+    // idiomWith pairs are "regardless" unless the verb is an edit choice.
+    // A valued keep still goes through choiceKeepJoiner.
+    if (choiceJoinerIsIdiom(text, start, end)) continue;
     if (!rangesOverlap(ranges, start, end)
       && !ranges.some(([spanStart, spanEnd]) => (
         (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))

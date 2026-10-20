@@ -663,14 +663,17 @@ const VERB_STEM_BEFORE_DEUN = [
 // is not a new clause. An ending matches (?:거나|든지|든가|던지|든)(?:요|도|나)?$
 // on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
 // "or so" is an approximation, not a choice.
+// idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
+// a choice only when the verb is an edit verb, or 오다 follows an edit/do
+// connective. "하" alone is not an edit verb, so "하든 말든" stays the idiom.
 export const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
   Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
   Object.freeze({ id: 'animyeon', lang: 'ko', text: '아니면', re: '아니면', place: 'word' }),
   Object.freeze({ id: 'hogeun', lang: 'ko', text: '혹은', re: '혹은', place: 'word' }),
   Object.freeze({ id: 'hageona', lang: 'ko', text: '하거나', re: '하거나', place: 'word' }),
-  Object.freeze({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending' }),
-  Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending' }),
+  Object.freeze({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending', idiomWith: '말거나' }),
+  Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending', idiomWith: '말든지' }),
   Object.freeze({ id: 'deunga', lang: 'ko', text: '든가', re: '든가', place: 'ending' }),
   Object.freeze({ id: 'deonji', lang: 'ko', text: '던지', re: '던지', place: 'ending' }),
   Object.freeze({
@@ -678,9 +681,139 @@ export const CHOICE_JOINERS = Object.freeze([
     lang: 'ko',
     text: '든',
     re: `(?<=[${VERB_STEM_BEFORE_DEUN}])든|든(?=\\s*말든)`,
-    place: 'ending'
+    place: 'ending',
+    idiomWith: '말든'
   })
 ]);
+
+function idiomPairRows() {
+  return CHOICE_JOINERS
+    .filter((item) => item.idiomWith)
+    .slice()
+    .sort((left, right) => right.idiomWith.length - left.idiomWith.length || right.text.length - left.text.length);
+}
+
+function bareChoiceToken(token) {
+  return String(token ?? '').replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+}
+
+function stripChoicePolite(text) {
+  if (!/(?:요|도|나)$/u.test(text)) return text;
+  const cut = text.slice(0, -1);
+  const keeps = idiomPairRows().some((row) => (
+    cut === row.idiomWith || cut.endsWith(row.text) || cut.endsWith(row.idiomWith)
+  ));
+  return keeps ? cut : text;
+}
+
+function previousChoiceWord(text, index) {
+  const match = /(\S+)\s*$/u.exec(String(text ?? '').slice(0, index));
+  if (!match) return null;
+  return { text: match[1], start: match.index };
+}
+
+function nextChoiceWord(text, index) {
+  const match = /^\s*(\S+)/u.exec(String(text ?? '').slice(index));
+  return match ? match[1] : '';
+}
+
+function hangulParts(ch) {
+  const code = ch.codePointAt(0);
+  if (code < 0xAC00 || code > 0xD7A3) return null;
+  const n = code - 0xAC00;
+  return { onset: Math.floor(n / 588), vowel: Math.floor((n % 588) / 28), coda: n % 28 };
+}
+
+function hangulSyllable(onset, vowel, coda) {
+  return String.fromCodePoint(0xAC00 + ((onset * 21) + vowel) * 28 + coda);
+}
+
+// 아/어 connective back to the dictionary stem. 바꿔 → 바꾸, 해 → 하, 맞춰 → 맞추.
+// 바꾸고 stays empty: -고 is a clause link, and 오다 does not attach there.
+function araEoStem(word) {
+  const text = String(word ?? '');
+  if (!text) return null;
+  if (text === '해' || text === '하여') return '하';
+  if (text.endsWith('하여') && text.length > 2) return `${text.slice(0, -2)}하`;
+  if (text.endsWith('해') && text.length > 1) return `${text.slice(0, -1)}하`;
+  const last = text[text.length - 1];
+  const parts = hangulParts(last);
+  if (!parts || parts.coda !== 0) return null;
+  const head = text.slice(0, -1);
+  if (parts.vowel === 14) return head + hangulSyllable(parts.onset, 13, 0);
+  if (last === '아' || last === '어') return head || null;
+  return null;
+}
+
+// isEditVerbWord is the English set. Korean edit stems are the same list the
+// request stem already names, plus 맞추. "하" alone is not on it.
+function isChoiceEditVerb(stem) {
+  const text = String(stem ?? '');
+  if (!text || text.includes('부탁')) return false;
+  if (isEditVerbWord(text)) return true;
+  if (text === '맞추' || text === '맞춰') return true;
+  if (!isKoreanRequestStem(text)) return false;
+  if (/(?:고|며|지만|면|서)$/u.test(text)) return false;
+  return true;
+}
+
+function isEditOrDoConnective(word) {
+  const stem = araEoStem(bareChoiceToken(word));
+  if (!stem) return false;
+  if (stem === '하') return true;
+  if (stem.endsWith('하')) return isChoiceEditVerb(stem.slice(0, -1));
+  return isChoiceEditVerb(stem);
+}
+
+// 오다 after 바꿔/해/맞춰 is still the edit. 오든 after 바꾸고 is the idiom.
+function verbBeforePairIsChoice(text, verb, verbAt) {
+  if (isChoiceEditVerb(verb)) return true;
+  if (!verb.endsWith('오')) return false;
+  const head = verb.slice(0, -1);
+  if (head) return isEditOrDoConnective(head);
+  const prev = previousChoiceWord(text, verbAt);
+  return prev != null && isEditOrDoConnective(prev.text);
+}
+
+// The pair is the idiom "regardless" unless the verb is a real edit choice.
+// Both halves return true so a partner such as 말든 is not a second choice.
+export function choiceJoinerIsIdiom(text, start, end) {
+  const raw = String(text ?? '');
+  const slice = raw.slice(start, end);
+  const bare = bareChoiceToken(slice);
+  if (!bare) return false;
+  const lead = slice.indexOf(bare);
+  const bareStart = start + (lead < 0 ? 0 : lead);
+  const core = stripChoicePolite(bare);
+  const rows = idiomPairRows();
+  for (const row of rows) {
+    if (core !== row.idiomWith) continue;
+    const prev = previousChoiceWord(raw, start);
+    if (!prev) return false;
+    const prevBare = bareChoiceToken(prev.text);
+    const prevCore = stripChoicePolite(prevBare);
+    if (!prevCore.endsWith(row.text) || prevCore.length === row.text.length) return false;
+    const verb = prevCore.slice(0, -row.text.length);
+    const verbAt = prev.start + Math.max(0, prev.text.indexOf(prevBare)) + Math.max(0, prevBare.indexOf(verb));
+    return !verbBeforePairIsChoice(raw, verb, verbAt);
+  }
+  for (const row of rows) {
+    let host = core;
+    let sawPartner = false;
+    if (core.endsWith(row.idiomWith) && core.length > row.idiomWith.length) {
+      host = stripChoicePolite(core.slice(0, -row.idiomWith.length));
+      sawPartner = true;
+    } else {
+      const next = nextChoiceWord(raw, end);
+      if (next && stripChoicePolite(bareChoiceToken(next)) === row.idiomWith) sawPartner = true;
+    }
+    if (!sawPartner || !host.endsWith(row.text) || host.length === row.text.length) continue;
+    const verb = host.slice(0, -row.text.length);
+    const verbAt = bareStart + Math.max(0, bare.indexOf(verb));
+    return !verbBeforePairIsChoice(raw, verb, verbAt);
+  }
+  return false;
+}
 
 export function choiceWordJoinerSources({ exceptApprox = false } = {}) {
   return CHOICE_JOINERS.filter((item) => item.place === 'word').map((item) => (
