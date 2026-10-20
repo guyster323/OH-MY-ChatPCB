@@ -38,7 +38,7 @@ const REPLIES = [
   {
     kind: 'project-create',
     outcomeKind: 'project-create',
-    success: { displayName: 'Sensor board', slug: 'Sensor-board', projectDir: '/tmp/chatpcb-ui-project' }
+    success: { displayName: 'Sensor board', slug: 'Sensor-board', projectDir: 'fixtures/chatpcb-ui-project' }
   },
   {
     kind: 'project-request',

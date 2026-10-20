@@ -92,7 +92,7 @@ test('grok provider uses json schema output and a prompt-file placeholder', () =
 
 test('grok json schema enum is the mutating tool for that project context', () => {
   const definition = getProviderDefinition('grok');
-  const projectDir = '/tmp/chatpcb-project';
+  const projectDir = path.join(tmpdir(), 'chatpcb-project');
 
   const fresh = schemaFrom(buildProviderLaunchArgs(definition, {
     projectDir,
@@ -145,7 +145,7 @@ test('grok prompt for an existing project includes inspection context and forbid
   const prompt = buildProviderPrompt({
     provider: 'grok',
     userMessage: 'Add a status LED.',
-    projectDir: '/tmp/chatpcb-existing',
+    projectDir: path.join(tmpdir(), 'chatpcb-existing'),
     allowedTools: ['schematic.patch'],
     inspectionContext: {
       spec: {
@@ -268,7 +268,7 @@ test('provider timeout env overrides are validated and the per-provider value wi
 
 test('grok launch args pass --cwd before the model and prompt file', () => {
   const definition = getProviderDefinition('grok', { CHATPCB_GROK_MODEL: 'grok-2-latest' });
-  const projectDir = '/tmp/chatpcb-project';
+  const projectDir = path.join(tmpdir(), 'chatpcb-project');
   const args = buildProviderLaunchArgs(definition, projectDir);
 
   assert.deepEqual(args.slice(0, 6), [
@@ -526,8 +526,8 @@ async function writeExecutable(filePath) {
 test('invalid timeout env falls back for provider list and status instead of throwing', async () => {
   const grokEnv = {
     PATH: '',
-    HOME: '/tmp/chatpcb-no-home',
-    USERPROFILE: '/tmp/chatpcb-no-home',
+    HOME: path.join(tmpdir(), 'chatpcb-no-home'),
+    USERPROFILE: path.join(tmpdir(), 'chatpcb-no-home'),
     CHATPCB_GROK_TIMEOUT_MS: 'soon',
     CHATPCB_PROVIDER_TIMEOUT_MS: '180000'
   };
@@ -552,8 +552,8 @@ test('invalid timeout env falls back for provider list and status instead of thr
 
   const globalEnv = {
     PATH: '',
-    HOME: '/tmp/chatpcb-no-home',
-    USERPROFILE: '/tmp/chatpcb-no-home',
+    HOME: path.join(tmpdir(), 'chatpcb-no-home'),
+    USERPROFILE: path.join(tmpdir(), 'chatpcb-no-home'),
     CHATPCB_CODEX_TIMEOUT_MS: '90000',
     CHATPCB_PROVIDER_TIMEOUT_MS: '0'
   };
@@ -569,12 +569,12 @@ test('invalid timeout env falls back for provider list and status instead of thr
     provider: 'codex',
     env: {
       PATH: '',
-      HOME: '/tmp/chatpcb-no-home',
-      USERPROFILE: '/tmp/chatpcb-no-home',
+      HOME: path.join(tmpdir(), 'chatpcb-no-home'),
+      USERPROFILE: path.join(tmpdir(), 'chatpcb-no-home'),
       CHATPCB_PROVIDER_TIMEOUT_MS: '0'
     },
     platform: 'linux',
-    cwd: '/tmp'
+    cwd: tmpdir()
   });
   assert.equal(missing.available, false);
   assert.equal(missing.status, 'missing');

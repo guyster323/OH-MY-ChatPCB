@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { MAX_PENDING_SOCKET_MESSAGES, startDaemon } from '../src/runtime/agent-daemon.js';
 import { attachWebSocketFrameHandler, MAX_WEBSOCKET_MESSAGE_BYTES } from '../src/runtime/ws-frames.js';
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const wsPanelDir = path.join(tmpdir(), 'chatpcb-ws-panel');
 
 const unhandledRejections = [];
 process.on('unhandledRejection', (reason) => {
@@ -740,7 +743,7 @@ wsTest('a panel burst of provider.status, chatpcb.test.nonexistent-tool, and pro
     await sendCalls(client, [
       { id: 'status', name: 'provider.status', args: { provider: 'codex' } },
       { id: 'auth', name: 'chatpcb.test.nonexistent-tool', args: {} },
-      { id: 'inspect', name: 'project.inspect', args: { projectDir: '/tmp/chatpcb-ws-panel' } }
+      { id: 'inspect', name: 'project.inspect', args: { projectDir: wsPanelDir } }
     ]);
     await waitFor(() => toolResults(client).length >= 3);
     const results = toolResults(client);
@@ -750,7 +753,7 @@ wsTest('a panel burst of provider.status, chatpcb.test.nonexistent-tool, and pro
     assert.equal(results[1].ok, false);
     assert.equal(results[1].error.code, 'UNKNOWN_TOOL');
     assert.equal(results[2].ok, true);
-    assert.equal(results[2].result.projectDir, '/tmp/chatpcb-ws-panel');
+    assert.equal(results[2].result.projectDir, wsPanelDir);
   });
 });
 

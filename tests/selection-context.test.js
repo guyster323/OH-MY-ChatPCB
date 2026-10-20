@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { createFact, normalizeFinding } from '../src/analyzer/fact-contract.js';
@@ -65,7 +67,7 @@ test('normalizeSelectionContext trims fields, keeps a closed item set, and sorts
     reference: ' U1 ',
     position: { x: 10, y: 20 },
     beforeImage: 'secret-bytes',
-    candidatePath: '/tmp/chatpcb-native-proposal-xyz'
+    candidatePath: path.join(tmpdir(), 'chatpcb-native-proposal-xyz')
   };
   const selection = {
     editor: ' schematic ',

@@ -106,6 +106,21 @@ export default [
     }
   },
   {
+    files: ['tests/**'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: 'Literal[value=/^\\/(workspace|home|tmp)(\\/|$)/]',
+          message: 'Do not hardcode /workspace, /home, or /tmp paths in tests. Use a fixture path or os.tmpdir().'
+        },
+        {
+          selector: 'TemplateElement[value.raw=/^\\/(workspace|home|tmp)(\\/|$)/]',
+          message: 'Do not hardcode /workspace, /home, or /tmp paths in tests. Use a fixture path or os.tmpdir().'
+        }
+      ]
+    }
+  },
+  {
     files: ['apps/panel/**/*.js', 'scripts/verify-panel-ui.js', 'tests/panel-project-busy.test.js', 'tests/panel-ui-verifier.test.js', 'tests/chatgpt-panel-ui.test.js'],
     languageOptions: {
       globals: {

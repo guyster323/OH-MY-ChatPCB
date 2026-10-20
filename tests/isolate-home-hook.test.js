@@ -279,7 +279,7 @@ function isolateInjected(platform, env, present, suffix) {
 }
 
 test('resolveRealKicadConfigDir uses the platform default only when that directory exists', () => {
-  const home = '/home/dev';
+  const home = path.join(tmpdir(), 'dev');
   const xdg = '/xdg/config';
   const macHome = '/Users/dev';
   const appData = 'C:\\Users\\dev\\AppData\\Roaming';
@@ -365,7 +365,7 @@ test('isolateProcessHome pins the real KiCad config before redirecting home', ()
   const homeBefore = process.env.HOME;
   const kicadBefore = process.env.KICAD_CONFIG_HOME;
   const appDataBefore = process.env.APPDATA;
-  const home = '/home/dev';
+  const home = path.join(tmpdir(), 'dev');
   const xdg = '/xdg/config';
   const paths = kicadPaths(home, { xdg });
   const linux = { HOME: home, XDG_CONFIG_HOME: xdg };
@@ -454,7 +454,7 @@ test('isolateProcessHome points XDG_CACHE_HOME at the temporary home cache on li
   const homeBefore = process.env.HOME;
   const cacheBefore = process.env.XDG_CACHE_HOME;
   const configBefore = process.env.XDG_CONFIG_HOME;
-  const home = '/home/dev';
+  const home = path.join(tmpdir(), 'dev');
   const realCache = path.join(home, '.cache');
   const underTmp = (candidate) => candidate === tmpdir() || candidate.startsWith(`${tmpdir()}${path.sep}`);
 

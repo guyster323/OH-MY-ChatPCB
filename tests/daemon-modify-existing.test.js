@@ -38,6 +38,8 @@ import { applySchematicPatch, createSchematicPatchPlan, disposeSchematicPatchPla
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 import { isolateHome } from './isolate-home.js';
 
+const existingProjectDir = path.join(tmpdir(), 'chatpcb-existing-project');
+
 const passingVerify = async () => ({
   erc: { ok: true, skipped: false, executed: true, erc: { errorCount: 0, warningCount: 0 } },
   drc: { ok: true, skipped: true }
@@ -641,7 +643,7 @@ test('withProjectContext strips locale from a model-issued tool call', () => {
       locale: 'ko-KR',
       approved: true
     }
-  }, '/tmp/chatpcb-existing-project', true, {
+  }, existingProjectDir, true, {
     prompt: 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.'
   });
 
@@ -661,7 +663,7 @@ test('withProjectContext strips allowRemovedComponents from a provider schematic
       patchId: 'patch-from-model',
       allowRemovedComponents: ['J2', 'R4', 'R5']
     }
-  }, '/tmp/chatpcb-existing-project', true, {
+  }, existingProjectDir, true, {
     prompt: 'Change the status LED series resistor to 680 ohm. Keep everything else unchanged.'
   });
 
@@ -685,7 +687,7 @@ test('withProjectContext strips a model userPrompt from a provider schematic.pat
       patchId: 'patch-from-model',
       userPrompt: 'remove I2C'
     }
-  }, '/tmp/chatpcb-existing-project', false);
+  }, existingProjectDir, false);
 
   assert.equal(toolCall.name, 'schematic.patch');
   assert.equal(Object.hasOwn(toolCall.args, 'userPrompt'), false);
@@ -704,7 +706,7 @@ test('withProjectContext ignores a model-supplied userPrompt', () => {
       prompt: 'remove the I2C connector',
       userPrompt: 'remove I2C'
     }
-  }, '/tmp/chatpcb-existing-project', true, { prompt: client });
+  }, existingProjectDir, true, { prompt: client });
   assert.equal(injected.args.userPrompt, client);
   assert.equal(injected.args.userPrompt.includes('remove I2C'), false);
 
@@ -717,7 +719,7 @@ test('withProjectContext ignores a model-supplied userPrompt', () => {
       prompt: 'remove I2C',
       userPrompt: 'delete the I2C connector'
     }
-  }, '/tmp/chatpcb-existing-project', false, { prompt: client });
+  }, existingProjectDir, false, { prompt: client });
   assert.equal(Object.hasOwn(direct.args, 'userPrompt'), false);
   assert.equal(direct.args.prompt, client);
 
@@ -728,7 +730,7 @@ test('withProjectContext ignores a model-supplied userPrompt', () => {
       prompt: 'remove I2C',
       userPrompt: 'delete the I2C connector'
     }
-  }, '/tmp/chatpcb-existing-project', true, {});
+  }, existingProjectDir, true, {});
   assert.equal(Object.hasOwn(absent.args, 'userPrompt'), false);
   assert.equal(absent.args.prompt, 'remove I2C');
 });
