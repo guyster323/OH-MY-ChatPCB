@@ -246,8 +246,10 @@ function keepValueWidth(token, nextToken) {
 function spanCarriesKeepValue(text, start, end) {
   const words = String(text ?? '').slice(start, end).match(/\S+/gu) ?? [];
   for (let index = 0; index < words.length; index += 1) {
+    const token = bareKeepToken(words[index]);
     const next = words[index + 1] ? bareKeepToken(words[index + 1]) : '';
-    if (keepValueWidth(bareKeepToken(words[index]), next) > 0) return true;
+    const prev = index > 0 ? bareKeepToken(words[index - 1]) : '';
+    if (keepValueWidth(token, next) > 0 || isUnitlessKeepValue(token, prev)) return true;
   }
   return false;
 }
@@ -318,12 +320,32 @@ function negatedKeepVerbBefore(text, phraseStart) {
   return verbAt >= 0 && englishKeepVerbNegated(text, verbAt);
 }
 
+function keepParticleStem(token) {
+  return keepTokenBare(token).replace(/(?:으로|로|은|는|이|가|을|를|도|만)$/u, '').trim();
+}
+
+function isKeepRefWord(token) {
+  return /^R\d+$/iu.test(keepParticleStem(token));
+}
+
+// A bare integer is not a value by itself. It is one beside an R ref, after
+// "at" / "로" / "으로", or when the integer already carries 으로 or 로.
+function isUnitlessKeepValue(token, prev) {
+  if (!/^\d+$/u.test(keepParticleStem(token))) return false;
+  if (/^\d+(?:으로|로)$/u.test(keepTokenBare(token))) return true;
+  const glue = keepTokenBare(prev);
+  if (glue.toLowerCase() === 'at' || glue === '로' || glue === '으로') return true;
+  return isKeepRefWord(prev);
+}
+
 // taken is right-to-left, so a spaced unit sits before its number in this array.
 function takenValueIndexes(taken) {
   const bare = taken.map((word) => bareKeepToken(word[0]));
   const valueAt = new Set();
   for (let index = 0; index < bare.length; index += 1) {
     if (isKeepValueWord(bare[index])) valueAt.add(index);
+    const left = index + 1 < bare.length ? bare[index + 1] : '';
+    if (isUnitlessKeepValue(bare[index], left)) valueAt.add(index);
     if (index + 1 < bare.length && (isKeepValueWord(`${bare[index]} ${bare[index + 1]}`) || isKeepValueWord(`${bare[index + 1]} ${bare[index]}`))) {
       valueAt.add(index);
       valueAt.add(index + 1);
@@ -341,10 +363,14 @@ function keepObjectBefore(text, cueStart, skipDecimal = false) {
     const token = bareKeepToken(words[index][0]);
     const prev = index > 0 ? bareKeepToken(words[index - 1][0]) : '';
     const spaced = Boolean(prev) && !isKeepValueWord(token) && isKeepValueWord(`${prev} ${token}`);
-    const value = isKeepValueWord(token) || spaced;
+    const unitless = isUnitlessKeepValue(token, prev);
+    const value = isKeepValueWord(token) || spaced || unitless;
+    const nearest = taken.length > 0 ? bareKeepToken(taken[taken.length - 1][0]) : '';
+    const atGlue = token.toLowerCase() === 'at' && (takenValueIndexes(taken).size > 0 || /^\d+$/u.test(keepParticleStem(nearest)));
     // "R4는 680Ω으로 유지": the value sits between the ref and the cue.
     // "680Ω R4 unchanged": the value is left of the ref, so it stays an edit.
-    if (value || (token.toLowerCase() === 'at' && takenValueIndexes(taken).size > 0)) {
+    // "R3 1000 그대로" / "R3 at 1000 unchanged": the unitless integer is the keep value.
+    if (value || atGlue) {
       if (tookObject) break;
       taken.push(words[index]);
       if (spaced) {

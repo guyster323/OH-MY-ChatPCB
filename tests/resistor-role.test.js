@@ -1794,6 +1794,42 @@ test('a valued keep of R3 or an LED-resistor synonym is RESISTOR_AMBIGUOUS', () 
   }
 });
 
+test('a unitless integer after an R ref, at, or a Korean particle keeps R3 unchanged', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const prompts = [
+    'R3 1000 그대로, LED 저항 680Ω',
+    'R3는 1000으로 유지하고 LED 저항은 680Ω으로',
+    'R3 at 1000 unchanged, LED resistor to 680Ω'
+  ];
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const apply = 'set the LED resistor to 680Ω but keep R4 at 4.7k';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(apply, spec);
+  assert.equal(decision.mode, 'merge', `${apply} ${decision.code ?? ''} ${decision.message ?? ''}`);
+  assert.equal(decision.edit?.ohms, 680, apply);
+  assert.equal(decision.edit?.ref, 'R3', apply);
+  assert.equal(appliesBeforeProvider(apply, decision), true, apply);
+  const next = applyExistingProjectEdit(spec, decision.edit);
+  assert.equal(componentValue(next, 'R3'), '680Ω', apply);
+  assert.equal(componentValue(next, 'R4'), '4.7k', apply);
+  assert.equal(componentValue(spec, 'R3'), '1k', apply);
+  assert.deepEqual(spec, before, apply);
+});
+
 const SELF_KEEP_TARGETS = ['R3', 'r3', 'the LED resistor', 'the current-limiting resistor', 'LED 저항'];
 const SELF_KEEP_VALUES = ['1k', '470 ohms', '2.2kΩ'];
 const SELF_KEEP_EDITS = ['680Ω', '330 ohms'];
