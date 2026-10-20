@@ -29,6 +29,7 @@ import {
   isAmbiguousI2cPreservation,
   isDontDeleteClause,
   isKoreanRequestStem,
+  keepClauseSpans,
   isPermittedEdit,
   isPoliteIfFiller,
   isReplacedSourceValue,
@@ -1798,6 +1799,7 @@ function maskGuardObjects(text) {
   // "건드리지 마" is not one of these; only "말고" closes that phrase.
   maskKoreanKeepClauses(chars, normalized);
   maskDontTouchRefs(chars, normalized);
+  maskKeepVocabulary(chars, normalized);
   return chars.join('');
 }
 
@@ -1881,7 +1883,7 @@ function blankWordsAfter(chars, text, cueEnd, clauseEnd) {
     end = cueEnd + word.index + word[0].length;
     count += 1;
   }
-  blankRange(chars, cueEnd, end);
+  blankRange(chars, cueEnd, keepIdentityEnd(text, cueEnd, end));
 }
 
 function blankRange(chars, from, to) {
@@ -1889,23 +1891,37 @@ function blankRange(chars, from, to) {
   for (let index = Math.max(0, from); index < end; index += 1) chars[index] = ' ';
 }
 
-// Keep-list words. "and" joins items in one keep ("keep R4 and the LED resistor").
-// An edit verb or a value ends the list, same as the stripper's walk.
-const KEEP_LIST_STOP = /^(?:change|set|update|make|modify|to)$|(?:바꿔|변경|수정)/iu;
-const KEEP_LIST_COORD = /^(?:and|그리고|하고|및|이랑)$/iu;
-const LEAVE_ALONE = /\bleave\b/giu;
-const DONT_TOUCH_CUE = /\b(?:don't|dont|do not|never)\s+touch\b/giu;
+// Don't-touch blanks only R refs. leave / as-is / 그대로 blank the whole object.
+// A value-owning tail ("R4, LED 저항 680Ω") stays visible, so that noun is the edit.
+function maskKeepVocabulary(chars, text) {
+  const found = keepClauseSpans(text);
+  for (const cue of found.cues) blankRange(chars, cue.start, cue.end);
+  for (const object of found.objects) {
+    const end = keepIdentityEnd(text, object.start, object.end);
+    if (object.mask === 'ref') blankKeptRefs(chars, text, object.start, end);
+    else blankRange(chars, object.start, end);
+  }
+}
+
+function blankKeptRefs(chars, text, start, end) {
+  const slice = text.slice(start, end);
+  for (const match of slice.matchAll(/\bR\d+\b/giu)) {
+    blankRange(chars, start + match.index, start + match.index + match[0].length);
+  }
+}
 
 function keepNamesEditTarget(text, spec) {
-  const found = findKeepClauses(text);
+  const found = keepClauseSpans(text);
   if (found.objects.length === 0) return false;
   const series = seriesResistorRef(spec);
   const kept = new Set();
-  for (const [start, end] of found.objects) addKeptIdentity(kept, text.slice(start, end), series);
+  for (const object of found.objects) addKeptIdentity(kept, keepIdentityFragment(text, object), series);
   if (kept.size === 0) return false;
   // The cue word stays out of the edit remainder. "유지하고" must not sit on the LED noun.
   const edit = new Set();
-  const remainder = blankCopy(text, found.objects.concat(found.cues));
+  const ranges = found.objects.map((object) => [object.start, object.end]);
+  for (const cue of found.cues) ranges.push([cue.start, cue.end]);
+  const remainder = blankCopy(text, ranges);
   addKeptIdentity(edit, remainder, series);
   if (edit.size === 0 && bareSeriesRemainder(remainder, series)) edit.add(String(series).toUpperCase());
   for (const key of kept) {
@@ -1914,90 +1930,62 @@ function keepNamesEditTarget(text, spec) {
   return false;
 }
 
-function findKeepClauses(text) {
-  const objects = [];
-  const cues = [];
-  const add = (object, ...cueSpans) => {
-    if (!object) return;
-    objects.push(object);
-    for (const cue of cueSpans) if (cue) cues.push(cue);
-  };
-  KOREAN_KEEP_CLAUSE.lastIndex = 0;
-  for (const match of text.matchAll(KOREAN_KEEP_CLAUSE)) {
-    add(objectBefore(text, match.index, 6), [match.index, match.index + match[0].length]);
-  }
-  for (const match of text.matchAll(compileRegExp(GUARD_BEFORE.source, 'giu'))) {
-    const after = text.slice(match.index + match[0].length);
-    if (koreanKeepCueNegated(after, false)) continue;
-    add(objectBefore(text, match.index, 2), [match.index, match.index + match[0].length]);
-  }
-  for (const match of text.matchAll(compileRegExp(GUARD_AFTER.source, 'giu'))) {
-    if (/^keep$/iu.test(match[0]) && englishKeepIsNegated(text, match.index)) continue;
-    add(objectAfter(text, match.index + match[0].length), [match.index, match.index + match[0].length]);
-  }
-  DONT_TOUCH_CUE.lastIndex = 0;
-  for (const match of text.matchAll(DONT_TOUCH_CUE)) {
-    add(objectAfter(text, match.index + match[0].length), [match.index, match.index + match[0].length]);
-  }
-  LEAVE_ALONE.lastIndex = 0;
-  for (const match of text.matchAll(LEAVE_ALONE)) {
-    if (englishKeepIsNegated(text, match.index)) continue;
-    const alone = leaveAloneObject(text, match.index + match[0].length);
-    if (!alone) continue;
-    add(alone.object, [match.index, match.index + match[0].length], alone.cue);
-  }
-  return { objects, cues };
+// A comma stays in the list ("don't touch R4, LED"). The last item is the edit
+// when a value follows it directly ("I2C, LED resistor to 680Ω").
+function keepIdentityEnd(text, start, end) {
+  const full = text.slice(start, end);
+  const identity = keepIdentityFragment(text, { start, end });
+  if (identity !== full && full.startsWith(identity)) return start + identity.length;
+  return end;
 }
 
-function objectBefore(text, cueStart, limit) {
-  const before = text.slice(0, cueStart);
-  let boundary = -1;
-  for (const mark of [',', '.', '?', '!', '\n', '。', '？', '！', ';']) {
-    boundary = Math.max(boundary, before.lastIndexOf(mark));
+// "R4, LED" is a list. "4,7" is one value, so a comma between digits stays.
+function splitKeepList(fragment) {
+  const pieces = [];
+  let start = 0;
+  for (let index = 0; index < fragment.length; index += 1) {
+    const mark = fragment[index];
+    if (mark !== ',' && mark !== '，') continue;
+    const prev = fragment[index - 1] ?? '';
+    const next = fragment[index + 1] ?? '';
+    if (/\d/u.test(prev) && /\d/u.test(next)) continue;
+    pieces.push(fragment.slice(start, index));
+    start = index + 1;
   }
-  const origin = boundary < 0 ? 0 : boundary + 1;
-  const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
-  const taken = [];
-  for (let index = words.length - 1; index >= 0 && taken.length < limit; index -= 1) {
-    if (/^\d/.test(words[index][0])) break;
-    taken.push(words[index]);
-  }
-  if (taken.length === 0) return null;
-  return [origin + taken[taken.length - 1].index, cueStart];
+  pieces.push(fragment.slice(start));
+  return pieces;
 }
 
-function objectAfter(text, cueEnd) {
-  const words = [...text.slice(cueEnd).matchAll(/\S+/gu)];
-  let end = cueEnd;
-  let count = 0;
-  for (const word of words) {
-    if (count >= 6) break;
-    const cut = word[0].search(/[.;!?,。！？]/u);
-    const token = (cut > 0 ? word[0].slice(0, cut) : word[0]).replace(/^[("'`]+|[)"'`]+$/gu, '');
-    if (cut === 0 || /^\d/.test(token) || KEEP_LIST_STOP.test(token)) break;
-    end = cueEnd + word.index + (cut > 0 ? cut : word[0].length);
-    if (!KEEP_LIST_COORD.test(token)) count += 1;
-    if (cut > 0) break;
-  }
-  return end > cueEnd ? [cueEnd, end] : null;
+function keepIdentityFragment(text, object) {
+  const fragment = text.slice(object.start, object.end);
+  const pieces = splitKeepList(fragment);
+  if (pieces.length < 2 || !directValueFollows(text, object.end)) return fragment;
+  let end = pieces.length;
+  while (end > 1 && pieces[end - 1].trim() === '') end -= 1;
+  if (end < 2 || !namesResistorHead(pieces[end - 1])) return fragment;
+  return pieces.slice(0, end - 1).join(',');
 }
 
-function leaveAloneObject(text, from) {
-  const rest = text.slice(from);
-  const alone = /\balone\b/iu.exec(rest);
-  if (!alone) return null;
-  const between = rest.slice(0, alone.index);
-  if (/[.;!?,。！？\n]/.test(between) || between.trim() === '') return null;
-  const lead = between.match(/^\s*/u)[0].length;
-  return {
-    object: [from + lead, from + alone.index],
-    cue: [from + alone.index, from + alone.index + alone[0].length]
-  };
+function directValueFollows(text, index) {
+  const after = String(text ?? '').slice(index).replace(/^[\s,]+/u, '');
+  if (/^(?:set|change|update|make|modify|바꿔|변경|수정)/iu.test(after)) return false;
+  if (/^\d/u.test(after)) return true;
+  return /^(?:to\b|으로|로(?!부터|서|써))/iu.test(after) && /\d/u.test(after);
+}
+
+function namesResistorHead(segment) {
+  return /(?:저항|抵抗|\bresistors?\b|\bleds?\b|엘이디|엘예디)/iu.test(segment);
 }
 
 function addKeptIdentity(keys, fragment, series) {
   for (const ref of resistorReferenceTokens(fragment)) keys.add(ref.toUpperCase());
-  if (series && resistorNounKinds(fragment).includes('led')) keys.add(String(series).toUpperCase());
+  if (series && namesSeriesLed(fragment)) keys.add(String(series).toUpperCase());
+}
+
+// "the LED resistor" is a led noun. A bare LED in the keep list is the same part.
+function namesSeriesLed(fragment) {
+  if (resistorNounKinds(fragment).includes('led')) return true;
+  return /\bleds?\b|엘이디|엘예디/iu.test(fragment);
 }
 
 function bareSeriesRemainder(text, series) {
@@ -2672,6 +2660,38 @@ function resolvedRefConflicts(spec, text) {
   return false;
 }
 
+// "R3 빼고" keeps that resistor. The same 빼 on J2 or D1 is still a removal.
+// A bare bus is not a resistor, so that 빼 stays a deletion.
+function blockResistorKeepExcept(intents, text) {
+  const raw = String(text ?? '');
+  const spans = keepClauseSpans(raw);
+  for (const intent of intents) {
+    if (intent.verb !== '빼') continue;
+    const cue = spans.cues.find((item) => (
+      intent.sourceIndex >= item.start
+      && intent.sourceIndex < item.end
+      && raw.slice(item.start, item.end) === '빼고'
+    ));
+    if (!cue) continue;
+    const object = spans.objects.find((item) => item.end === cue.start);
+    if (!object || !isResistorKeepExcept(raw.slice(object.start, object.end))) continue;
+    blockIntent(intent);
+    intent.residue = false;
+  }
+}
+
+function isResistorKeepExcept(fragment) {
+  if (componentDesignators(fragment).some((ref) => !/^R\d+$/.test(ref))) return false;
+  const namesResistor = /저항|抵抗|\bresistor\b/iu.test(fragment);
+  const bareBus = compileRegExp(I2C_PART_PATTERN, 'iu').test(fragment)
+    && !namesResistor
+    && !textHasKnownRole(fragment);
+  if (bareBus) return false;
+  if (/\bR\d+\b/iu.test(fragment) || namesResistor) return true;
+  if (/\bleds?\b|엘이디|엘예디/iu.test(fragment)) return true;
+  return textHasKnownRole(fragment);
+}
+
 // Fail closed. A removal candidate exists only when one part is the clear
 // object of a removal verb and no negation, keep, question, correction, list,
 // or second candidate makes that reading unsafe. One existing reference is
@@ -2679,6 +2699,7 @@ function resolvedRefConflicts(spec, text) {
 function removalDecision(text, spec) {
   const normalized = stripQuotedMentions(normalizeDeletionText(text));
   const intents = classifyDeletionIntents(text);
+  blockResistorKeepExcept(intents, normalized);
   applySentenceBlocks(intents, normalized);
   applyPartScope(intents, normalized);
   applyTrailingCorrection(intents, normalized);

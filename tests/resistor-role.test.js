@@ -910,9 +910,13 @@ test('a Korean keep clause hides that role and still edits only the LED resistor
   assert.equal(componentValue(spec, 'R3'), '1k');
 
   const touch = classifyExistingProjectRequest('R3 680Ω, R4는 건드리지 마', spec);
-  assert.equal(touch.mode, 'refuse');
-  assert.equal(touch.code, 'RESISTOR_REF_AMBIGUOUS');
-  assert.equal(touch.edit, undefined);
+  assert.equal(touch.mode, 'merge');
+  assert.equal(touch.edit?.ohms, 680);
+  assert.equal(touch.edit?.label, '680Ω');
+  assert.equal(touch.edit?.ref, 'R3');
+  const touched = applyExistingProjectEdit(spec, touch.edit);
+  assert.equal(componentValue(touched, 'R3'), '680Ω');
+  assert.equal(componentValue(touched, 'R4'), '4.7k');
   assert.equal(componentValue(spec, 'R3'), '1k');
   assert.equal(componentValue(spec, 'R4'), '4.7k');
 

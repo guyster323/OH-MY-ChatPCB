@@ -77,7 +77,274 @@ const NONRES_OBJECTS = new Set([
   '케이블', '전선', '색', '보드', '커넥터', '헤더'
 ]);
 
-const KEEP_CUES = ['그대로', '유지', '남겨', '남기', '빼고', '두고', '건드리지', 'unchanged', 'keep', 'without', 'leave', 'alone'];
+// One keep vocabulary. The edit path imports this set for leave/as-is/don't-touch
+// and for the self-target check. signal cues are also filler; "be" is only the
+// complement of "leave", and don't-touch is not filler (it would swallow negation).
+// slot: before = object then phrase, after = phrase then object, leave = only
+// after "leave", leave-verb = the verb, filler = stem with no span of its own.
+export const KEEP_CUES = Object.freeze([
+  Object.freeze({ text: 'the way it is', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: 'as is', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: 'as-is', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: 'untouched', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: 'unchanged', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: 'alone', slot: 'leave', mask: 'all', signal: true }),
+  Object.freeze({ text: 'be', slot: 'leave', mask: 'all', signal: false }),
+  Object.freeze({ text: "don't touch", slot: 'after', mask: 'ref', signal: false }),
+  Object.freeze({ text: 'don’t touch', slot: 'after', mask: 'ref', signal: false }),
+  Object.freeze({ text: 'dont touch', slot: 'after', mask: 'ref', signal: false }),
+  Object.freeze({ text: 'do not touch', slot: 'after', mask: 'ref', signal: false }),
+  Object.freeze({ text: 'never touch', slot: 'after', mask: 'ref', signal: false }),
+  Object.freeze({ text: 'keep', slot: 'after', mask: 'all', signal: true }),
+  Object.freeze({ text: 'without', slot: 'after', mask: 'all', signal: true }),
+  Object.freeze({ text: 'leave', slot: 'leave-verb', mask: 'all', signal: true }),
+  Object.freeze({ text: '그대로 두고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '그대로', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '유지하고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '유지', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '놔두고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '놔 두고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '손대지 말고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '손대지 마', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '건드리지 말고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '건드리지 마', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '건드리지마', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '그냥 둬', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '그냥 두고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '남겨', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '남기', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '빼고', slot: 'before', mask: 'all', signal: true }),
+  Object.freeze({ text: '두고', slot: 'filler', mask: 'all', signal: true }),
+  Object.freeze({ text: '건드리지', slot: 'filler', mask: 'all', signal: true }),
+  Object.freeze({ text: '손대지', slot: 'filler', mask: 'all', signal: true }),
+  Object.freeze({ text: '놔두', slot: 'filler', mask: 'all', signal: true })
+]);
+
+const KEEP_FILLER_TEXTS = KEEP_CUES
+  .filter((cue) => cue.signal && !cue.text.includes(' ') && !cue.text.includes("'") && !cue.text.includes('’'))
+  .map((cue) => cue.text);
+const KEEP_SIGNAL_TEXTS = KEEP_CUES.filter((cue) => cue.signal).map((cue) => cue.text);
+
+function isAsciiWordChar(ch) {
+  if (!ch) return false;
+  const code = ch.charCodeAt(0);
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || ch === '_';
+}
+
+function keepSpansOverlap(spans, start, end) {
+  return spans.some((span) => start < span[1] && end > span[0]);
+}
+
+// Multi-word cues allow flexible whitespace. Korean allows none ("그대로두고").
+function matchCueAt(text, index, cueText) {
+  const parts = cueText.split(' ');
+  const lower = text.toLowerCase();
+  let cursor = index;
+  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+    const part = parts[partIndex];
+    const koreanPart = isHangulChar(part[0]);
+    if (partIndex > 0) {
+      let spaces = 0;
+      while (cursor < text.length && /\s/u.test(text[cursor])) {
+        cursor += 1;
+        spaces += 1;
+      }
+      if (!koreanPart && spaces === 0) return -1;
+    }
+    const needle = koreanPart ? part : part.toLowerCase();
+    const hay = koreanPart ? text : lower;
+    if (hay.slice(cursor, cursor + needle.length) !== needle) return -1;
+    if (partIndex === 0) {
+      const before = cursor === 0 ? '' : text[cursor - 1];
+      if (!koreanPart && isAsciiWordChar(before)) return -1;
+      if (koreanPart && isHangulChar(before)) return -1;
+    }
+    cursor += needle.length;
+    if (partIndex === parts.length - 1 && !koreanPart) {
+      const after = cursor >= text.length ? '' : text[cursor];
+      if (isAsciiWordChar(after)) return -1;
+    }
+  }
+  return cursor;
+}
+
+function findCueHits(text, cueText) {
+  const first = cueText.split(' ')[0];
+  const korean = isHangulChar(first[0]);
+  const hay = korean ? text : text.toLowerCase();
+  const needle = korean ? first : first.toLowerCase();
+  const hits = [];
+  let from = 0;
+  while (from < text.length) {
+    const at = hay.indexOf(needle, from);
+    if (at < 0) break;
+    const end = matchCueAt(text, at, cueText);
+    if (end > at) hits.push([at, end]);
+    from = at + Math.max(1, needle.length);
+  }
+  return hits;
+}
+
+const KEEP_CLAUSE_MARKS = [',', '.', '?', '!', ';', '\n', '。', '？', '！'];
+
+function keepClauseOrigin(text, index) {
+  let boundary = -1;
+  for (const mark of KEEP_CLAUSE_MARKS) boundary = Math.max(boundary, text.lastIndexOf(mark, index - 1));
+  return boundary < 0 ? 0 : boundary + 1;
+}
+
+function keepTokenBare(word) {
+  return String(word ?? '').replace(/^[("'` ,]+|[)"'` ,.;!?。！？]+$/gu, '');
+}
+
+const KEEP_LIST_STOP_EN = new Set(['change', 'set', 'update', 'make', 'modify', 'to']);
+
+export function isKeepListStop(token) {
+  const bare = keepTokenBare(token).toLowerCase();
+  if (!bare) return false;
+  if (KEEP_LIST_STOP_EN.has(bare)) return true;
+  return bare.includes('바꿔') || bare.includes('변경') || bare.includes('수정');
+}
+
+export function isKeepListCoord(token) {
+  const bare = keepTokenBare(token).toLowerCase();
+  return bare === 'and' || bare === 'but' || bare === '그리고' || bare === '하고' || bare === '및' || bare === '이랑';
+}
+
+function englishKeepVerbNegated(text, verbIndex) {
+  let prefix = text.slice(0, verbIndex).trimEnd().toLowerCase();
+  for (let guard = 0; guard < 4; guard += 1) {
+    const trailer = [' please', ' just', ' you'].find((item) => prefix.endsWith(item));
+    if (!trailer) break;
+    prefix = prefix.slice(0, -trailer.length).trimEnd();
+  }
+  if (prefix.endsWith("n't") || prefix.endsWith('n’t')) return true;
+  return ['not', 'never', 'dont', "don't", 'don’t'].some((word) => prefix === word || prefix.endsWith(` ${word}`));
+}
+
+function koreanKeepCueNegated(after) {
+  const body = String(after ?? '').trim();
+  if (!body.startsWith('두지') && !body.startsWith('하지')) return false;
+  const rest = body.slice(2).trimStart();
+  return rest.startsWith('말') || rest.startsWith('마') || rest.startsWith('않');
+}
+
+function negatedKeepVerbBefore(text, phraseStart) {
+  const origin = keepClauseOrigin(text, phraseStart);
+  const head = text.slice(origin, phraseStart);
+  const lower = head.toLowerCase();
+  let verbAt = -1;
+  for (const verb of ['leave', 'keep']) {
+    let from = 0;
+    while (from < lower.length) {
+      const at = lower.indexOf(verb, from);
+      if (at < 0) break;
+      const before = at === 0 ? '' : head[at - 1];
+      const after = head[at + verb.length] ?? '';
+      if (!isAsciiWordChar(before) && !isAsciiWordChar(after)) verbAt = origin + at;
+      from = at + verb.length;
+    }
+  }
+  return verbAt >= 0 && englishKeepVerbNegated(text, verbAt);
+}
+
+function keepObjectBefore(text, cueStart) {
+  const origin = keepClauseOrigin(text, cueStart);
+  const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
+  const taken = [];
+  for (let index = words.length - 1; index >= 0 && taken.length < 6; index -= 1) {
+    if (/^\d/u.test(words[index][0])) break;
+    taken.push(words[index]);
+  }
+  if (taken.length === 0) return null;
+  return [origin + taken[taken.length - 1].index, cueStart];
+}
+
+// A comma stays inside the keep list ("don't touch R4, LED"). A period or an
+// edit verb ends it. The value word ends it too, so the ohms stay an edit.
+function keepObjectAfter(text, cueEnd) {
+  const words = [...text.slice(cueEnd).matchAll(/\S+/gu)];
+  let end = cueEnd;
+  let count = 0;
+  for (const word of words) {
+    if (count >= 6) break;
+    const raw = word[0];
+    const stopPunct = raw.search(/[.;!?。！？]/u);
+    const token = keepTokenBare(stopPunct > 0 ? raw.slice(0, stopPunct) : raw);
+    if (stopPunct === 0 || /^\d/u.test(token) || isKeepListStop(token)) break;
+    end = cueEnd + word.index + (stopPunct > 0 ? stopPunct : raw.length);
+    if (token && !isKeepListCoord(token)) count += 1;
+    if (stopPunct > 0) break;
+  }
+  return end > cueEnd ? [cueEnd, end] : null;
+}
+
+function leaveComplementObject(text, verbEnd) {
+  const rest = text.slice(verbEnd);
+  const breakAt = rest.search(/[.;!?,。！？\n]/u);
+  const window = breakAt < 0 ? rest : rest.slice(0, breakAt);
+  const complements = KEEP_CUES
+    .filter((cue) => cue.slot === 'leave' || (cue.slot === 'before' && !isHangulChar(cue.text[0])))
+    .slice()
+    .sort((left, right) => right.text.length - left.text.length);
+  let best = null;
+  for (const cue of complements) {
+    for (const [at, end] of findCueHits(window, cue.text)) {
+      if (window.slice(0, at).trim() === '') continue;
+      if (!best || at < best.at || (at === best.at && end > best.end)) best = { at, end, cue };
+    }
+  }
+  if (!best) return null;
+  const lead = /^\s*/u.exec(window)[0].length;
+  if (best.at <= lead) return null;
+  return {
+    object: [verbEnd + lead, verbEnd + best.at],
+    cue: [verbEnd + best.at, verbEnd + best.end]
+  };
+}
+
+// Objects are the kept part. Cues are the phrase itself, blanked out of the
+// edit remainder so "유지하고" does not sit on the LED noun.
+export function keepClauseSpans(text) {
+  const raw = String(text ?? '');
+  const objects = [];
+  const cues = [];
+  const occupied = [];
+  const take = (object, mask, ...cueSpans) => {
+    if (!object) return false;
+    objects.push({ start: object[0], end: object[1], mask });
+    for (const span of cueSpans) {
+      if (!span) continue;
+      cues.push({ start: span[0], end: span[1] });
+      occupied.push(span);
+    }
+    return true;
+  };
+  for (const [start, end] of findCueHits(raw, 'leave')) {
+    if (englishKeepVerbNegated(raw, start)) continue;
+    const found = leaveComplementObject(raw, end);
+    if (!found) continue;
+    if (keepSpansOverlap(occupied, start, end) || keepSpansOverlap(occupied, found.cue[0], found.cue[1])) continue;
+    take(found.object, 'all', [start, end], found.cue);
+  }
+  const phrases = KEEP_CUES
+    .filter((cue) => cue.slot === 'before' || cue.slot === 'after')
+    .slice()
+    .sort((left, right) => right.text.length - left.text.length);
+  for (const cue of phrases) {
+    for (const [start, end] of findCueHits(raw, cue.text)) {
+      if (keepSpansOverlap(occupied, start, end)) continue;
+      if (cue.slot === 'before') {
+        if (koreanKeepCueNegated(raw.slice(end)) || negatedKeepVerbBefore(raw, start)) continue;
+        if (!take(keepObjectBefore(raw, start), cue.mask, [start, end])) continue;
+        continue;
+      }
+      if (cue.text === 'keep' && englishKeepVerbNegated(raw, start)) continue;
+      take(keepObjectAfter(raw, end), cue.mask, [start, end]);
+    }
+  }
+  return { objects, cues };
+}
 
 const ADVICE_KO = ['왜', '뭐', '어떻게', '궁금', '할까', '바꿔야'];
 const ADVICE_EN = new Set(['why', 'ask', 'know', 'what', 'how', 'wonder', 'which']);
@@ -488,7 +755,7 @@ const PARTICLE_SUFFIXES = ['이랑', '으로', '에서', '에게', '은', '는',
 
 function stripParticle(word) {
   let text = String(word ?? '');
-  if (!text || KEEP_CUES.some((cue) => text.includes(cue))) return text;
+  if (!text || KEEP_FILLER_TEXTS.some((cue) => text.includes(cue))) return text;
   // "또는" and "혹은" end in a particle character. They stay alternative signals.
   if (isNegationOrAlternativeWord(text)) return text;
   // "주세요" is a whole particle. Stripping 요 would leave the unknown "주세".
@@ -524,7 +791,7 @@ function hasKeepCue(clause) {
   const raw = String(clause ?? '');
   const folded = raw.toLowerCase();
   if (rx("\\b(?:keep|without|leave|alone|unchanged)\\b", "i").test(folded)) return true;
-  return KEEP_CUES.some((cue) => raw.includes(cue));
+  return KEEP_SIGNAL_TEXTS.some((cue) => raw.includes(cue));
 }
 
 function isNegatedKeep(clause) {
@@ -749,7 +1016,7 @@ function recognizedWord(word, clause) {
   if (rx("^괜찮", "u").test(word) || rx("^가능", "u").test(word)) return true;
   if (isApproximationWord(word)) return true;
   if (word === '될까' || word === '되나요' || word === '되나' || word === '돼' || word === '됨' || word === '됩니다') return true;
-  if (PARTICLE_WORDS.has(word) || KEEP_CUES.some((cue) => word.includes(cue) || lower(word) === cue)) return true;
+  if (PARTICLE_WORDS.has(word) || KEEP_SIGNAL_TEXTS.some((cue) => word.includes(cue) || lower(word) === cue)) return true;
   return false;
 }
 
@@ -786,7 +1053,10 @@ function isSplitDontDelete(clause) {
 function isDontTouchResistorClause(clause) {
   const raw = String(clause ?? '');
   const folded = raw.toLowerCase();
-  const english = rx("\\b(?:don't|dont|do not|does not|did not|never)\\s+touch\\b", "i").test(folded);
+  const english = rx("\\b(?:don't|dont|do not|does not|did not|never)\\s+touch\\b", "i").test(folded)
+    || KEEP_CUES.some((cue) => (
+      cue.slot === 'after' && cue.text.includes('touch') && folded.includes(cue.text.toLowerCase())
+    ));
   const korean = raw.includes('건드리지');
   if (!english && !korean) return false;
   if (rx("\\bR\\d+\\b", "i").test(raw)) return true;
