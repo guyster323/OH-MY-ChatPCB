@@ -167,7 +167,7 @@ async function openChatGPTWaiting(t, { locale, startResult, expiresInMs, reopenF
         }
         if (config.approvalFlow && call.name === 'project.create') {
           result = {
-            projectDir: '/tmp/chatpcb-ui-project',
+            projectDir: 'fixtures/chatpcb-ui-project',
             displayName: call.args?.projectName || 'Board',
             slug: 'Sensor-board'
           };
@@ -1843,7 +1843,7 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === true);
     const inspectsBeforeReload = await page.evaluate(() => window.__sent.filter((call) => call.name === 'project.inspect').length);
     await page.evaluate(() => {
-      window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+      window.postMessage({ type: 'project.reload', completed: true, projectPath: 'fixtures/chatpcb-ui-project' }, '*');
     });
     await page.waitForFunction((count) => (
       window.__sent.filter((call) => call.name === 'project.inspect').length > count
@@ -1854,7 +1854,7 @@ test('daemon apply replies fail closed and a closed gate dismisses the removal d
     await page.waitForFunction(() => document.querySelector('#apply-remove-components-confirm')?.hidden === false);
     await page.evaluate(() => { window.__inspectionDigest = 'ffffeeee1111'; });
     await page.evaluate(() => {
-      window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+      window.postMessage({ type: 'project.reload', completed: true, projectPath: 'fixtures/chatpcb-ui-project' }, '*');
     });
     await page.waitForFunction((stale) => (
       document.querySelector('#apply-remove-components-confirm')?.hidden === true
@@ -1913,7 +1913,7 @@ test('closed apply gate moves focus to the approval status instead of body', asy
         });
         await page.evaluate(() => { window.__inspectionDigest = 'ffffeeee1111'; });
         await page.evaluate(() => {
-          window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+          window.postMessage({ type: 'project.reload', completed: true, projectPath: 'fixtures/chatpcb-ui-project' }, '*');
         });
         await page.waitForFunction((stale) => (
           document.querySelector('#apply-remove-components-confirm')?.hidden === true
@@ -1968,7 +1968,7 @@ test('closing a removal dialog focuses the approval status once', async (t) => {
     });
     await page.evaluate(() => { window.__inspectionDigest = 'ffffeeee1111'; });
     await page.evaluate(() => {
-      window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+      window.postMessage({ type: 'project.reload', completed: true, projectPath: 'fixtures/chatpcb-ui-project' }, '*');
     });
     await page.waitForFunction((stale) => (
       document.querySelector('#patch-approval-status')?.textContent === stale
@@ -2008,7 +2008,7 @@ test('a delayed inspect keeps focus on the approval status', async (t) => {
           window.__inspectDelayMs = 500;
         });
         await page.evaluate(() => {
-          window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+          window.postMessage({ type: 'project.reload', completed: true, projectPath: 'fixtures/chatpcb-ui-project' }, '*');
         });
         await page.waitForFunction((stale) => (
           document.querySelector('#patch-approval-status')?.textContent === stale
@@ -2067,7 +2067,7 @@ test('a delayed inspect says it is checking instead of saying the preview cannot
         window.__inspectDelayMs = 500;
       });
       await page.evaluate(() => {
-        window.postMessage({ type: 'project.reload', completed: true, projectPath: '/tmp/chatpcb-ui-project' }, '*');
+        window.postMessage({ type: 'project.reload', completed: true, projectPath: 'fixtures/chatpcb-ui-project' }, '*');
       });
       await page.waitForFunction((checking) => (
         document.querySelector('#patch-approval-status')?.textContent === checking
@@ -2181,7 +2181,7 @@ test('a reply without validation and without applied does not reload or show suc
       via: 'request',
       result: {
         operation: 'generated',
-        files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' }
+        files: { project: 'fixtures/chatpcb-ui-project/board.kicad_pro' }
       }
     },
     {
@@ -2189,7 +2189,7 @@ test('a reply without validation and without applied does not reload or show suc
       via: 'apply',
       result: {
         operation: 'patched',
-        files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' }
+        files: { project: 'fixtures/chatpcb-ui-project/board.kicad_pro' }
       }
     },
     {
@@ -2200,7 +2200,7 @@ test('a reply without validation and without applied does not reload or show suc
         applied: false,
         requiresApproval: false,
         patchId: 'sha256:preview',
-        files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' },
+        files: { project: 'fixtures/chatpcb-ui-project/board.kicad_pro' },
         removedComponents: [{ value: '4.7k' }]
       }
     }
@@ -2256,14 +2256,14 @@ test('a reply without validation and without applied does not reload or show suc
         window.__patchApplyResult = {
           applied: true,
           operation: 'patched',
-          files: { project: '/tmp/chatpcb-ui-project/board.kicad_pro' }
+          files: { project: 'fixtures/chatpcb-ui-project/board.kicad_pro' }
         };
       });
       await page.locator('#approve-patch-button').click();
       await page.waitForFunction((text) => document.querySelector('#request-status')?.textContent === text, copy['patch.apply.applied']);
       const appliedReloads = await page.evaluate(() => window.__hostMessages.filter((message) => message?.type === 'project.reload'));
       assert.equal(appliedReloads.length, 1);
-      assert.equal(appliedReloads[0].projectPath, '/tmp/chatpcb-ui-project');
+      assert.equal(appliedReloads[0].projectPath, 'fixtures/chatpcb-ui-project');
       assert.deepEqual(pageErrors, []);
     } finally {
       await context.close();

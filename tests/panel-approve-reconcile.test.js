@@ -322,7 +322,7 @@ function removalResult(expiresAt) {
     applied: false,
     operation: 'generated',
     expiresAt,
-    files: { project: '/tmp/demo-board/board.kicad_pro' },
+    files: { project: 'fixtures/demo-board/board.kicad_pro' },
     removedComponents: [removedPart],
     reason: { code: 'EXISTING_COMPONENTS_REMOVED', removedComponents: [removedPart] },
     conversation: { messages: [] }
@@ -568,7 +568,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
       assert.equal(directShot.text, en['patch.apply.applied']);
       assert.equal(directShot.state, 'completed');
       assert.equal(directShot.reloads.length, 1, 'direct applied:true posts project.reload once');
-      assert.deepEqual(directShot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual(directShot.reloads, [{ type: 'project.reload', projectPath: 'fixtures/demo-board' }]);
       assert.deepEqual(direct.pageErrors, []);
     } finally {
       await direct.page.close();
@@ -644,7 +644,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
         && document.querySelector('#request-status')?.textContent === text
       ), en['patch.apply.applied'], { timeout: 3000 });
       const corrected = await completionSnapshot(missing.page);
-      assert.deepEqual(corrected.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual(corrected.reloads, [{ type: 'project.reload', projectPath: 'fixtures/demo-board' }]);
       assert.equal(corrected.text, directShot.text);
       assert.equal(corrected.state, directShot.state);
       await emitResult(missing.page, approve.id, appliedBody);
@@ -713,7 +713,7 @@ test('reconcile applied reloads once, a missing record stays unconfirmed, and re
         document.querySelector('#request-status')?.dataset.state === 'completed'
         && document.querySelector('#request-status')?.textContent === text
       ), en['patch.apply.applied'], { timeout: 3000 });
-      assert.deepEqual((await completionSnapshot(silentStatus.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual((await completionSnapshot(silentStatus.page)).reloads, [{ type: 'project.reload', projectPath: 'fixtures/demo-board' }]);
       const sent = await approveCallCount(silentStatus.page);
       await silentStatus.page.evaluate((preview) => window.__chatpcbTest.showPatch(preview), passedPreview);
       await silentStatus.page.locator('#approve-patch-button').dispatchEvent('click');
@@ -1036,7 +1036,7 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
         && document.querySelector('#request-status')?.textContent === text
         && document.activeElement?.id === 'request-result-heading'
       ), en['patch.apply.applied'], { timeout: 3000 });
-      assert.deepEqual((await completionSnapshot(asString.page)).reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual((await completionSnapshot(asString.page)).reloads, [{ type: 'project.reload', projectPath: 'fixtures/demo-board' }]);
       await blockReapply(asString.page);
       assert.deepEqual(asString.pageErrors, []);
     } finally {
@@ -1066,7 +1066,7 @@ test('a non-boolean applied flag reconciles and only a real false or rolled-back
       const shot = await completionSnapshot(missingField.page);
       assert.equal(shot.text, en['patch.apply.applied']);
       assert.equal(shot.reloads.length, 1, 'missing applied reconciles to one project.reload');
-      assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+      assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: 'fixtures/demo-board' }]);
       assert.equal(await activeElementId(missingField.page), 'request-result-heading');
       await blockReapply(missingField.page);
       assert.deepEqual(missingField.pageErrors, []);
@@ -1325,7 +1325,7 @@ test("late transaction status 'applied' after reconcile timeout upgrades to appl
     assert.equal(shot.text, en['patch.apply.applied']);
     assert.equal(shot.state, 'completed');
     assert.equal(shot.reloads.length, 1, 'late status applied posts project.reload once');
-    assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: '/tmp/demo-board' }]);
+    assert.deepEqual(shot.reloads, [{ type: 'project.reload', projectPath: 'fixtures/demo-board' }]);
     await emitResult(page, statusCall.id, appliedTransaction());
     await advance(page, 40);
     assert.equal((await completionSnapshot(page)).reloads.length, 1);
@@ -1517,7 +1517,7 @@ test('every request result focuses the result heading', async (t) => {
     applied: false,
     patchId: 'patch_preview',
     operation: 'generated',
-    files: { project: '/tmp/demo-board/board.kicad_pro' },
+    files: { project: 'fixtures/demo-board/board.kicad_pro' },
     validation: { ok: true, skipped: false, erc: { errorCount: 0, warningCount: 0 } },
     conversation: { messages: [] }
   };

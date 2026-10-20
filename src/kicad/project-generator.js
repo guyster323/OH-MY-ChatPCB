@@ -5,6 +5,7 @@ import path from 'node:path';
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
 import { resolveKicadCli } from './kicad-cli.js';
+import { classifyResistorValue } from './resistor-ohms.js';
 import {
   flatpakAppLibraryPaths,
   flatpakLibraryRoots,
@@ -196,67 +197,22 @@ function statusLedResistorValue(spec) {
   return '1k';
 }
 
-// Lone "m" is SPICE milli. "M" and "meg" are mega. RKM writes that letter in
-// place of the decimal point, so 4k7 is 4.7 kΩ and 1R5 is 1.5 Ω.
-const SPICE_RESISTOR_SCALE = {
-  t: 1e12,
-  g: 1e9,
-  k: 1e3,
-  r: 1,
-  u: 1e-6,
-  n: 1e-9,
-  p: 1e-12,
-  f: 1e-15
-};
-
-function spiceResistorScale(suffix) {
-  if (!suffix) return 1;
-  if (/^meg$/i.test(suffix)) return 1e6;
-  if (suffix === 'm') return 1e-3;
-  if (suffix === 'M') return 1e6;
-  if (suffix.length !== 1) return null;
-  return SPICE_RESISTOR_SCALE[suffix.toLowerCase()] ?? null;
-}
-
-function spiceResistorNumber(whole, fraction, multiplier) {
-  const scale = 10 ** fraction.length;
-  return (Number(whole) * scale + Number(fraction || 0)) * multiplier / scale;
-}
-
-function formatSpiceOhms(ohms) {
-  if (!Number.isFinite(ohms) || ohms < 0) return '1000';
-  const rounded = Math.round(ohms);
-  if (Math.abs(ohms - rounded) <= 1e-9 * Math.max(1, Math.abs(ohms))) return String(rounded);
-  return Number(ohms.toPrecision(12)).toFixed(12).replace(/0+$/, '').replace(/\.$/, '');
-}
-
+// Shared with existing-project edits: parseResistorOhms, then the lone-m
+// refusal and the 1Ω–10MΩ window. Anything refused returns null.
 export function spiceResistorOhms(value) {
-  const text = String(value ?? '')
-    .trim()
-    .normalize('NFKC')
-    .replace(/(?:\s*(?:Ω|옴|ohms?))$/iu, '')
-    .trim();
-  if (!text) return '1000';
+  return classifyResistorValue(value).ohmsText ?? null;
+}
 
-  const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
-  if (rkm) {
-    const multiplier = spiceResistorScale(rkm[2]);
-    return multiplier == null ? '1000' : formatSpiceOhms(spiceResistorNumber(rkm[1], rkm[3], multiplier));
+function requireSpiceResistorOhms(value) {
+  const ohms = spiceResistorOhms(value);
+  if (ohms == null) {
+    const error = new Error(
+      `Cannot parse status LED resistor ${JSON.stringify(String(value ?? ''))} for the SPICE netlist. Use a positive resistance from 1Ω to 10MΩ such as 330, 4k7, 4.7k, or 1M.`
+    );
+    error.code = 'SPICE_RESISTOR_INVALID';
+    throw error;
   }
-
-  const leadingR = /^[rR](\d+)$/.exec(text);
-  if (leadingR) return formatSpiceOhms(spiceResistorNumber('0', leadingR[1], 1));
-
-  const suffixed = /^(\d+(?:\.\d+)?)(?:\s*([A-Za-z]+))?$/.exec(text);
-  if (suffixed) {
-    const multiplier = spiceResistorScale(suffixed[2] ?? '');
-    if (multiplier != null) {
-      const [whole, fraction = ''] = suffixed[1].split('.');
-      return formatSpiceOhms(spiceResistorNumber(whole, fraction, multiplier));
-    }
-  }
-
-  return '1000';
+  return ohms;
 }
 
 export function buildMcuSchematicAst(spec) {
@@ -304,12 +260,14 @@ export function buildMcuSchematicAst(spec) {
       connectedPins: ['BOOT', 'GND'],
       pinNets: profileMode ? { 1: 'BOOT', 2: 'GND' } : undefined
     }),
-    component('D1', profileMode ? 'Device:LED' : 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric', {
-      value: profileMode ? 'STATUS_LED' : undefined,
-      pins: ['+3V3', 'GND'],
-      connectedPins: ['+3V3', 'GND'],
-      pinNets: profileMode ? { 1: 'GND', 2: '+3V3' } : undefined
-    })
+    ...(spec.omitStatusLed === true ? [] : [
+      component('D1', profileMode ? 'Device:LED' : 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric', {
+        value: profileMode ? 'STATUS_LED' : undefined,
+        pins: ['+3V3', 'GND'],
+        connectedPins: ['+3V3', 'GND'],
+        pinNets: profileMode ? { 1: 'GND', 2: '+3V3' } : undefined
+      })
+    ])
   ];
 
   if (spec.interfaces.some((iface) => iface.kind === 'i2c')) {
@@ -417,7 +375,7 @@ export function buildMcuSchematicAst(spec) {
     );
   }
 
-  if (spec.peripherals.some((peripheral) => peripheral.kind === 'status-led-resistor')) {
+  if (spec.omitStatusLed !== true && spec.peripherals.some((peripheral) => peripheral.kind === 'status-led-resistor')) {
     components.push(
       component('R3', profileMode ? 'Device:R' : 'ChatPCB:LED_RESISTOR', 'Status LED series resistor for a bounded indicator current.', 'Resistor_SMD:R_0603_1608Metric', {
         pins: ['+3V3', 'GND'],
@@ -1043,6 +1001,7 @@ export function renderSpiceFixture(spec) {
 
   const hasLed = spec.peripherals.some((peripheral) => peripheral.kind === 'status-led');
   const hasButton = spec.peripherals.some((peripheral) => peripheral.kind.includes('button'));
+  const ledOhms = hasLed ? requireSpiceResistorOhms(statusLedResistorValue(spec)) : null;
 
   return [
     `* OH-MY-ChatPCB SPICE fixture for ${spec.title}`,
@@ -1051,7 +1010,7 @@ export function renderSpiceFixture(spec) {
     'RREG vbus v3v3 1',
     'DREG v3v3 0 DCLAMP',
     '.model DCLAMP D(BV=3.3 IBV=1m)',
-    hasLed ? `RLED v3v3 led ${spiceResistorOhms(statusLedResistorValue(spec))}` : '* RLED omitted: no status LED requested',
+    hasLed ? `RLED v3v3 led ${ledOhms}` : '* RLED omitted: no status LED requested',
     hasLed ? 'DLED led 0 DRED' : '* DLED omitted: no status LED requested',
     hasLed ? '.model DRED D(Vfwd=1.9)' : '* LED model omitted',
     hasButton ? 'RBUTTON v3v3 button 10000' : '* RBUTTON omitted: no button requested',

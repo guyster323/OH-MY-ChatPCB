@@ -1,3 +1,4 @@
+import { normalizeMatchText } from './match-text.js';
 import { classifyQuantities, promptDescribesAcSupply } from './quantity-tokens.js';
 
 const FAMILY_PATTERNS = [
@@ -524,6 +525,20 @@ function formatSmallOhms(ohms) {
   return `${rounded}Ω`;
 }
 
+function discreteMilliResistorMessage() {
+  return {
+    en: 'Use M for megaohms, e.g. 4M7. No LED, resistor, or power symbol was generated.',
+    ko: '메가옴은 M을 써 주세요. 예: 4M7. LED, 저항, 전원 기호는 만들지 않았어요.'
+  };
+}
+
+function discreteInvalidResistorMessage() {
+  return {
+    en: 'The resistor value is not valid. State a value such as 680Ω or 4.7kΩ. No LED, resistor, or power symbol was generated.',
+    ko: '저항 값이 올바르지 않아요. 680Ω 또는 4.7kΩ 같은 값을 적어 주세요. LED, 저항, 전원 기호는 만들지 않았어요.'
+  };
+}
+
 function resistorTooSmallMessage(token) {
   const shown = formatSmallOhms(token.value);
   const raw = String(token.raw);
@@ -921,17 +936,31 @@ function refuseDiscreteLed({ code, texts, prompt, supplyVolts, supplyAssumed = f
 }
 
 export function parseDiscreteLedRequest(prompt) {
-  const text = String(prompt ?? '').normalize('NFKC');
+  // Length stays on NFKC, before whitespace collapse, so padding spaces still count.
+  const counted = String(prompt ?? '').normalize('NFKC');
+  const text = normalizeMatchText(counted);
   if (!isSimpleDiscreteLedPrompt(text)) return null;
-  if (text.length > MAX_DISCRETE_LED_PROMPT_CHARS) {
+  if (counted.length > MAX_DISCRETE_LED_PROMPT_CHARS) {
     return refuseDiscreteLed({
       code: 'discrete-led-prompt-too-long',
-      prompt: text,
+      prompt: counted,
       supplyVolts: null,
       texts: promptTooLongMessage()
     });
   }
   const scan = classifyQuantities(text);
+  // A resistor token the shared parser refuses is not a supply-voltage error,
+  // and it must not fall through to the calculated default.
+  if (scan.resistorFault) {
+    return refuseDiscreteLed({
+      code: 'discrete-led-invalid-resistor',
+      prompt: text,
+      supplyVolts: null,
+      texts: scan.resistorFault === 'milli'
+        ? discreteMilliResistorMessage()
+        : discreteInvalidResistorMessage()
+    });
+  }
   const implausible = scan.tokens.find((token) => token.role === 'vf' && token.implausible === true);
   if (implausible) {
     return refuseDiscreteLed({

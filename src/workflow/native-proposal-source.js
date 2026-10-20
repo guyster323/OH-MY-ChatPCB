@@ -11,7 +11,9 @@ import {
   classifyExistingProjectRequest,
   modifyRefusalMessage,
   removalFinding,
-  removedComponents
+  removalIntentUnclearMessage,
+  removedComponents,
+  resistorValueInvalidMessage
 } from './existing-project-edit.js';
 import { generateMcuPeripheralProject } from './generate-mcu-project.js';
 import { assertSafeProjectDir, readChatPcbManifest } from './project-workspace.js';
@@ -19,6 +21,9 @@ import { reviewCircuitReadiness } from './review-project.js';
 import { validateBoard } from './validate-board.js';
 import { validateProject } from './validate-project.js';
 import { classifyRecordedErc } from '../../apps/panel/erc-verdict.js';
+
+// The daemon passes the classifier it already resolved. String keys cannot set this.
+export const nativeProposalClassifier = Symbol('nativeProposalClassifier');
 
 const WHAT = 'Regenerate the supported ChatPCB project artifact set from the requested circuit specification.';
 const RISKS = [
@@ -39,6 +44,11 @@ function coded(code, message) {
 function promptFrom(request) {
   if (typeof request === 'string') return request;
   return request?.prompt;
+}
+
+function userPromptFrom(request) {
+  if (!request || typeof request !== 'object') return undefined;
+  return typeof request.userPrompt === 'string' ? request.userPrompt : undefined;
 }
 
 function decodeUtf8(bytes, relativePath) {
@@ -435,8 +445,12 @@ export async function createNativeProposal({
   validateCandidateImpl,
   generateProjectImpl = generateMcuPeripheralProject,
   conversationBytes,
-  source
+  source,
+  [nativeProposalClassifier]: nativeProposalClassifierFn
 } = {}) {
+  const resolvedClassifier = typeof nativeProposalClassifierFn === 'function'
+    ? nativeProposalClassifierFn
+    : classifyExistingProjectRequest;
   if (!projectDir) {
     throw new Error('projectDir is required.');
   }
@@ -455,9 +469,16 @@ export async function createNativeProposal({
     throwIfAborted(signal);
 
     const existingSpec = await readChatPcbManifest(candidateDir);
-    const decision = classifyExistingProjectRequest(prompt, existingSpec);
+    const decision = resolvedClassifier(prompt, existingSpec, userPromptFrom(request));
     let proposed;
     if (decision.mode === 'refuse') {
+      if (decision.code === 'REMOVAL_INTENT_UNCLEAR') {
+        throw coded('REMOVAL_INTENT_UNCLEAR', decision.message || removalIntentUnclearMessage());
+      }
+      if (decision.code === 'RESISTOR_VALUE_INVALID') {
+        throw coded('RESISTOR_VALUE_INVALID', decision.message || resistorValueInvalidMessage());
+      }
+      if (decision.code) throw coded(decision.code, decision.message);
       throw coded('PROVIDER_NO_PATCH', modifyRefusalMessage());
     } else if (decision.mode === 'merge') {
       proposed = await applyMergedProjectEdit({
@@ -466,7 +487,11 @@ export async function createNativeProposal({
         edit: decision.edit
       });
     } else {
-      proposed = await generateProjectImpl({ projectDir: candidateDir, prompt, projectName });
+      proposed = await generateProjectImpl({
+        projectDir: candidateDir,
+        prompt: decision.prompt ?? prompt,
+        projectName
+      });
     }
     throwIfAborted(signal);
     if (conversationBytes?.length) {

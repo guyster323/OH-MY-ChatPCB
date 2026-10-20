@@ -15,7 +15,7 @@ test('verify ui browser launch uses the injected executable, not google-chrome',
   const browser = { launched: true };
   const opened = await launchVerifyUiBrowser({
     env: {},
-    findChrome: async () => ({ path: '/tmp/chatpcb-fake-chrome', source: 'env' }),
+    findChrome: async () => ({ path: path.join(tmpdir(), 'chatpcb-fake-chrome'), source: 'env' }),
     launch: async (options) => {
       launches.push(options);
       return browser;
@@ -24,7 +24,7 @@ test('verify ui browser launch uses the injected executable, not google-chrome',
 
   assert.equal(opened, browser);
   assert.equal(launches.length, 1);
-  assert.equal(launches[0].executablePath, '/tmp/chatpcb-fake-chrome');
+  assert.equal(launches[0].executablePath, path.join(tmpdir(), 'chatpcb-fake-chrome'));
   assert.notEqual(launches[0].executablePath, '/usr/bin/google-chrome');
 
   const source = await readFile(new URL('../scripts/verify-panel-ui.js', import.meta.url), 'utf8');
@@ -37,7 +37,7 @@ test('verify ui browser launch uses the injected executable, not google-chrome',
     () => launchVerifyUiBrowser({
       env: {},
       headless: false,
-      findChrome: async () => ({ path: '/tmp/headless-shell', source: 'playwright-headless-shell' }),
+      findChrome: async () => ({ path: path.join(tmpdir(), 'headless-shell'), source: 'playwright-headless-shell' }),
       launch: async (options) => {
         headedLaunches.push(options);
         return browser;

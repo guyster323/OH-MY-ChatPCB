@@ -1,0 +1,6 @@
+(kicad_sch (version 20250114) (generator chatpcb)
+  (symbol (lib_id "ChatPCB:STATUS_LED") (at 100 100 0)
+    (property "Reference" "D1" (at 100 90 0))
+    (property "Value" "STATUS_LED" (at 100 110 0))
+  )
+)

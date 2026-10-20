@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -10,7 +11,8 @@ import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
 
 const panelRoot = path.resolve(import.meta.dirname, '../apps/panel');
 const panelLocale = JSON.parse(await readFile(path.join(panelRoot, 'locales/en.json'), 'utf8'));
-const projectDir = '/tmp/chatpcb-panel-secret-project-path';
+const projectDir = path.join(tmpdir(), 'chatpcb-panel-secret-project-path');
+const workspaceRoot = path.join(tmpdir(), 'chatpcb-panel-workspace');
 const englishBusy = 'Another operation is using this project. Try again in a moment.';
 const koreanBusy = '다른 작업이 이 프로젝트를 사용 중이에요. 잠시 후 다시 시도해 주세요.';
 
@@ -52,7 +54,7 @@ test('panel shows PROJECT_BUSY for request, apply, and patch and stays retryable
       }).observe(status, { attributes: true, childList: true, subtree: true, characterData: true });
     });
 
-    await page.getByLabel('Workspace root').fill('/tmp/chatpcb-panel-workspace');
+    await page.getByLabel('Workspace root').fill(workspaceRoot);
     await page.getByLabel('Project name').fill('Busy Board');
     await page.locator('#new-project-form').getByRole('button', { name: 'New project' }).click();
     await page.getByRole('status', { name: 'Active project' }).getByText('Busy Board').waitFor();

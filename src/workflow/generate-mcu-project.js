@@ -14,6 +14,8 @@ import {
   renderProjectSymbolTable,
   renderSpiceFixture
 } from '../kicad/project-generator.js';
+import { isLoneMilliResistorSuffix } from '../kicad/resistor-ohms.js';
+import { loneMilliCountsAsResistor, milliOwnedByForeignRole } from '../runtime/quantity-tokens.js';
 import { reviewCircuitReadiness } from './review-project.js';
 import { assertInspectionTree, assertUnlinkedAncestors } from './inspection-copy.js';
 import { assertSafeProjectDir } from './project-workspace.js';
@@ -29,20 +31,51 @@ export async function generateMcuPeripheralProject({
   }
 
   const guard = allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {};
-  // Reject escapes, dangling links, and untrusted symlink ancestors before mkdir.
+  // Reject escapes, dangling links, and untrusted symlink ancestors before any directory is created.
   assertSafeProjectDir(projectDir, guard);
   await assertUnlinkedAncestors(projectDir, guard);
-  await mkdir(projectDir, { recursive: true });
-  // Re-check the tree that now exists, including workspace confinement, before writing.
-  await assertInspectionTree(projectDir, guard);
   const conversation = await loadCircuitConversation(projectDir).catch(() => null);
   const drafted = applyDiscreteLedSpec(applyProductDraft(applyBoardProfile(normalizeCircuitSpec(prompt)), conversation));
   return writeGeneratedProject({
     projectDir,
-    spec: drafted,
+    spec: stampLoneMilliStatusResistor(drafted, prompt),
     projectName,
     allowedWorkspaceRoot
   });
+}
+
+// A lone m in a resistor phrase (4m7, "1m resistor") is not a value. Put it on
+// the status LED resistor so SPICE throws before writeGeneratedProject creates
+// the directory. A length or a time (1 m cable, every 5m) is left alone.
+// A shunt, sense, or other role milli is not the LED resistor either.
+// 10mA and 4M7 do not match.
+function loneMilliResistorToken(prompt) {
+  const text = String(prompt ?? '').normalize('NFKC');
+  const pattern = /(?<![\w.])(\d+m\d+|\d+(?:\.\d+)?\s*m)(?![\w])/g;
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[1].length;
+    if (!isLoneMilliResistorSuffix(match[1])) continue;
+    if (!loneMilliCountsAsResistor(text, start, end)) continue;
+    if (milliOwnedByForeignRole(text, start, end)) continue;
+    return match[1].replace(/\s+/g, '');
+  }
+  return null;
+}
+
+function stampLoneMilliStatusResistor(spec, prompt) {
+  const peripherals = Array.isArray(spec?.peripherals) ? spec.peripherals : null;
+  if (!peripherals?.some((item) => item?.kind === 'status-led')) return spec;
+  const token = loneMilliResistorToken(prompt);
+  if (!token) return spec;
+  let found = false;
+  const next = peripherals.map((item) => {
+    if (item?.kind !== 'status-led-resistor') return item;
+    found = true;
+    return { ...item, value: token };
+  });
+  if (!found) next.push({ kind: 'status-led-resistor', value: token });
+  return { ...spec, peripherals: next };
 }
 
 export async function writeGeneratedProject({
@@ -61,8 +94,6 @@ export async function writeGeneratedProject({
   const guard = allowedWorkspaceRoot ? { allowedWorkspaceRoot } : {};
   assertSafeProjectDir(projectDir, guard);
   await assertUnlinkedAncestors(projectDir, guard);
-  await mkdir(projectDir, { recursive: true });
-  await assertInspectionTree(projectDir, guard);
   const schematic = buildMcuSchematicAst(drafted);
   const spec = attachDiscretePartManifest(drafted, schematic);
   const baseName = sanitizeProjectName(projectName);
@@ -92,6 +123,12 @@ export async function writeGeneratedProject({
     files.board = path.join(projectDir, boardFileName);
   }
 
+  // Invalid resistor text throws here, before mkdir, so a failure leaves no project files.
+  const spiceText = renderSpiceFixture(spec);
+
+  await mkdir(projectDir, { recursive: true });
+  await assertInspectionTree(projectDir, guard);
+
   await writeFile(files.project, renderKiCadProject(baseName), 'utf8');
   await writeFile(files.schematic, renderKiCadSchematic({ baseName, spec, schematic }), 'utf8');
   if (files.board) {
@@ -108,7 +145,7 @@ export async function writeGeneratedProject({
   }
   await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(schematic.components.map((component) => component.libId)), 'utf8');
   await writeFile(files.symbolTable, renderProjectSymbolTable(), 'utf8');
-  await writeFile(files.spice, renderSpiceFixture(spec), 'utf8');
+  await writeFile(files.spice, spiceText, 'utf8');
   await writeFile(files.spec, `${JSON.stringify(projectMetadata, null, 2)}\n`, 'utf8');
 
   const review = reviewCircuitReadiness({ spec: projectMetadata });

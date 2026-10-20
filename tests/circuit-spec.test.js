@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { applyDiscreteLedSpec, normalizeCircuitSpec, parseDiscreteLedRequest } from '../src/runtime/circuit-spec.js';
+import { normalizeMatchText } from '../src/runtime/match-text.js';
 import { classifyQuantities, promptDescribesAcSupply, tokenizeQuantities } from '../src/runtime/quantity-tokens.js';
 import * as quantityTokens from '../src/runtime/quantity-tokens.js';
 import { reviewCircuitReadiness } from '../src/workflow/review-project.js';
@@ -715,13 +716,18 @@ test('fullwidth digits, glued counts, word pcs, and sub-ohm resistors', () => {
     assert.equal(parsed.supplyVolts, 5, prompt);
   }
 
+  for (const prompt of ['LED 5V 0R', 'LED 5V 0Ω', 'LED 5V 0 ohm', 'LED 5V 0', '엘이디 0Ω']) {
+    const parsed = parseDiscreteLedRequest(prompt);
+    assert.equal(parsed.refused, true, prompt);
+    assert.equal(parsed.resistanceOhms, null, prompt);
+    assert.equal(parsed.reviewBlockers[0].code, 'discrete-led-invalid-resistor', prompt);
+    assert.match(parsed.reviewBlockers[0].en, /not valid/);
+    assert.match(parsed.reviewBlockers[0].ko, /올바르지 않아요/);
+  }
+
   const tooSmall = [
-    ['LED 5V 0R', /0R/, /0Ω은/],
-    ['LED 5V 0Ω', /0Ω/, /0Ω은/],
-    ['LED 5V 0 ohm', /0 ohm/, /0Ω은/],
     ['LED 5V 0.5Ω', /0\.5Ω/, /0\.5Ω은/],
     ['LED 5V R47', /R47/, /0\.47Ω은/],
-    ['엘이디 0Ω', /0Ω/, /0Ω은/],
     ['엘이디 R47', /R47/, /0\.47Ω은/]
   ];
   for (const [prompt, english, korean] of tooSmall) {
@@ -1510,10 +1516,10 @@ test('identical blocker, note, and warning sentences appear once in the review',
 test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () => {
   const cases = [
     ['3.0-3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
-    ['3.0–3.4V', [{ value: 3.4, unit: 'V', raw: '3.0–3.4V' }]],
-    ['3.0—3.4V', [{ value: 3.4, unit: 'V', raw: '3.0—3.4V' }]],
+    ['3.0–3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
+    ['3.0—3.4V', [{ value: 3.4, unit: 'V', raw: '3.0-3.4V' }]],
     ['2.0～2.4V', [{ value: 2.4, unit: 'V', raw: '2.0~2.4V' }]],
-    ['2.0〜2.4V', [{ value: 2.4, unit: 'V', raw: '2.0〜2.4V' }]],
+    ['2.0〜2.4V', [{ value: 2.4, unit: 'V', raw: '2.0-2.4V' }]],
     ['2.0~2.4V', [{ value: 2.4, unit: 'V', raw: '2.0~2.4V' }]],
     ['2.0 to 2.4 V', [{ value: 2.4, unit: 'V', raw: '2.0 to 2.4 V' }]],
     ['vf3.2v', [{ value: 3.2, unit: 'V', raw: '3.2v' }]],
@@ -1589,9 +1595,6 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
     ['R1=330', [{ value: 330, unit: 'ohm', raw: 'R1=330' }]],
     ['R1 330', [{ value: 330, unit: 'ohm', raw: 'R1 330' }]],
     ['R47', [{ value: 0.47, unit: 'ohm', raw: 'R47' }]],
-    ['0R', [{ value: 0, unit: 'ohm', raw: '0R' }]],
-    ['0Ω', [{ value: 0, unit: 'ohm', raw: '0Ω' }]],
-    ['0 ohm', [{ value: 0, unit: 'ohm', raw: '0 ohm' }]],
     ['0.5Ω', [{ value: 0.5, unit: 'ohm', raw: '0.5Ω' }]],
     ['LEDx3', [{ value: 3, unit: 'count', raw: 'LEDx3' }]],
     ['LED×3', [{ value: 3, unit: 'count', raw: 'LED×3' }]],
@@ -1630,7 +1633,7 @@ test('quantity tokenizer tags voltages, ranges, RKM, current, and counts', () =>
       assert.equal(token.value, item.value, `${prompt} [${index}]`);
       assert.equal(token.unit, item.unit, `${prompt} [${index}] ${token.raw}`);
       assert.equal(token.raw, item.raw, prompt);
-      assert.equal(prompt.normalize('NFKC').slice(token.start, token.end), token.raw, prompt);
+      assert.equal(normalizeMatchText(prompt).slice(token.start, token.end), token.raw, prompt);
       assert.equal(typeof token.start, 'number', prompt);
       assert.ok(token.end > token.start, prompt);
     });
@@ -1865,10 +1868,10 @@ test('quantity classification is order-independent inside a small window', () =>
 test('a forward-voltage range is not a resistor and uses its maximum', () => {
   const cases = [
     ['LED Vf 3.0-3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
-    ['LED Vf 3.0–3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0–3.4V'],
-    ['LED Vf 3.0—3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0—3.4V'],
+    ['LED Vf 3.0–3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
+    ['LED Vf 3.0—3.4V at 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V'],
     ['LED Vf 2.0～2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0~2.4V'],
-    ['LED Vf 2.0〜2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0〜2.4V'],
+    ['LED Vf 2.0〜2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0-2.4V'],
     ['LED Vf 2.0~2.4V 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0~2.4V'],
     ['LED Vf 2.0 to 2.4 V at 5V', 5, '+5V', 2.4, false, 270, '270Ω', '2.0 to 2.4 V'],
     ['blue LED Vf 3.0-3.4V on 5V', 5, '+5V', 3.4, false, 160, '160Ω', '3.0-3.4V']
@@ -2145,6 +2148,11 @@ test('every discrete LED message is one language and Korean has no English words
     'LED 5V 20uA',
     'LED 0 pcs',
     'LED 0Ω',
+    'LED 5V R47',
+    '엘이디 R47',
+    'LED 5V 4m7',
+    '5V에 LED 2m2 저항',
+    'LED 5V -10 ohm',
     '엘이디 0Ω',
     'LED Vf 0',
     'LED',
@@ -2204,6 +2212,7 @@ test('every discrete LED message is one language and Korean has no English words
     'discrete-led-ambiguous-resistor',
     'discrete-led-invalid-count',
     'discrete-led-resistor-too-small',
+    'discrete-led-invalid-resistor',
     'discrete-led',
     'discrete-led-red',
     'discrete-led-green',
@@ -2465,7 +2474,7 @@ test('a voltage range with no Vf label asks which value is the supply', () => {
     assert.equal(parsed.resistanceOhms, null, prompt);
     assert.equal(parsed.reviewBlockers.length, 1, prompt);
     const blocker = parsed.reviewBlockers[0];
-    const shown = prompt.match(/\d[\d.\u2013\u2014-]*V/)[0];
+    const shown = prompt.match(/\d[\d.\u2013\u2014-]*V/)[0].replace(/\p{Pd}/gu, '-');
     assert.equal(blocker.code, 'discrete-led-ambiguous-range', `${prompt} ${blocker.code}`);
     assert.match(blocker.en, new RegExp(`^Which value is the supply and which is the LED Vf in ${escapeRegExp(shown)}\\?`), blocker.en);
     assert.match(blocker.en, /forward voltage \(Vf\)/i, blocker.en);
@@ -2542,10 +2551,18 @@ function strayKoreanAscii(text) {
     'V', 'mV', 'kV', 'A', 'mA', 'LED', 'RGB', 'WS2812', 'WS2811', 'SK6812', 'APA102',
     'PWM', 'ERC', 'E24', 'KiCad', 'GND', 'VCC'
   ]);
-  return (String(text).match(/[A-Za-z][A-Za-z0-9]*/g) ?? []).filter((word) => {
-    if (allowed.has(word)) return false;
-    return !(word.length === 1 && /[kKmMgGvVaArR]/.test(word));
-  });
+  const found = [];
+  const pattern = /[A-Za-z][A-Za-z0-9]*/g;
+  for (const match of String(text).matchAll(pattern)) {
+    const word = match[0];
+    if (allowed.has(word)) continue;
+    if (word.length === 1 && /[kKmMgGvVaArR]/.test(word)) continue;
+    // "4M7" is a resistor code. The letter run starts after a digit.
+    const before = match.index > 0 ? text[match.index - 1] : '';
+    if (/[0-9.]/.test(before) && /^[kKmMrR]\d*$/.test(word)) continue;
+    found.push(word);
+  }
+  return found;
 }
 
 test('normalizes USB data nets to KiCad-safe profile names', () => {

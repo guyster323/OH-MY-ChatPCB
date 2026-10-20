@@ -284,7 +284,7 @@ test('Soft panel meets the fold, contrast, and ChatGPT button criteria', async (
         );
         await page.evaluate(() => {
           window.__chatpcbTest.showPatch({
-            project: { displayName: 'demo-board', projectDir: '/tmp/demo-board' },
+            project: { displayName: 'demo-board', projectDir: 'fixtures/demo-board' },
             validation: {
               ok: false,
               erc: {

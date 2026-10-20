@@ -11,6 +11,9 @@ import { kicadCliChildEnv, resolveKicadCli, runCommand, runKicadCli } from '../s
 import { findInstalledSymbolLibraryDirectory } from '../src/kicad/project-generator.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 
+const copyCwd = path.join(os.tmpdir(), 'chatpcb-copy', 'project');
+const flatpakHome = path.join(os.tmpdir(), 'u');
+
 test('resolves an explicit KiCad CLI path first', () => {
   const found = resolveKicadCli({
     explicitPath: 'C:/KiCad/bin/kicad-cli.exe',
@@ -123,7 +126,7 @@ test('absolute PATH lookup works on POSIX without passing a bare command to spaw
 test('PATH lookup excludes the original project even when cwd is an inspection copy (posix)', () => {
   const found = resolveKicadCli({
     platform: 'linux',
-    cwd: '/tmp/chatpcb-copy/project',
+    cwd: copyCwd,
     env: { PATH: '/untrusted-project/bin:/trusted/bin' },
     excludeProjectDir: '/untrusted-project',
     exists: (candidate) => 
@@ -152,7 +155,7 @@ test('trusted explicitPath and KICAD_CLI_PATH still select inside an excluded pr
   const explicit = resolveKicadCli({
     explicitPath: '/untrusted-project/bin/kicad-cli',
     platform: 'linux',
-    cwd: '/tmp/chatpcb-copy/project',
+    cwd: copyCwd,
     env: { PATH: '/trusted/bin' },
     excludeProjectDir: '/untrusted-project',
     exists: (candidate) => candidate === '/untrusted-project/bin/kicad-cli' || candidate === '/trusted/bin/kicad-cli'
@@ -161,7 +164,7 @@ test('trusted explicitPath and KICAD_CLI_PATH still select inside an excluded pr
 
   const fromEnv = resolveKicadCli({
     platform: 'linux',
-    cwd: '/tmp/chatpcb-copy/project',
+    cwd: copyCwd,
     env: { KICAD_CLI_PATH: '/untrusted-project/bin/kicad-cli', PATH: '/trusted/bin' },
     excludeProjectDir: '/untrusted-project',
     exists: (candidate) => candidate === '/untrusted-project/bin/kicad-cli' || candidate === '/trusted/bin/kicad-cli'
@@ -435,14 +438,14 @@ test('flatpak path layouts, directory stripping, and KICAD_CLI_FLATPAK are table
     ['/var/lib/flatpak/exports/bin/kicad-cli', true, true],
     ['/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/bin/kicad-cli', true, true],
     ['/var/lib/flatpak/runtime/org.kicad.KiCad.Library.Symbols/x86_64/stable/active/files/bin/kicad-cli', true, true],
-    ['/home/u/.local/share/flatpak/exports/bin/org.kicad.KiCad', true, true],
-    ['/home/u/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/bin/kicad-cli', true, true],
-    ['/home/u/.local/share/flatpak/runtime/org.kicad.KiCad/x86_64/stable/active/files/bin/kicad-cli', true, true],
+    [path.join(flatpakHome, '.local', 'share', 'flatpak', 'exports', 'bin', 'org.kicad.KiCad'), true, true],
+    [path.join(flatpakHome, '.local', 'share', 'flatpak', 'app', 'org.kicad.KiCad', 'current', 'active', 'files', 'bin', 'kicad-cli'), true, true],
+    [path.join(flatpakHome, '.local', 'share', 'flatpak', 'runtime', 'org.kicad.KiCad', 'x86_64', 'stable', 'active', 'files', 'bin', 'kicad-cli'), true, true],
     ['/usr/bin/org.kicad.KiCad', true, false],
     ['/usr/local/bin/org.kicad.KiCad.exe', true, false],
     [String.raw`C:\Users\u\.local\share\flatpak\exports\bin\org.kicad.KiCad`, true, true],
     [String.raw`\var\lib\flatpak\app\org.kicad.KiCad\bin\kicad-cli`, true, true],
-    ['/home/u/flatpak/kicad/bin/kicad-cli', false, false],
+    [path.join(flatpakHome, 'flatpak', 'kicad', 'bin', 'kicad-cli'), false, false],
     ['/opt/flatpak-tools/bin/kicad-cli', false, false],
     ['/opt/flatpak-tools/kicad-cli', false, false],
     ['/opt/flatpak-kicad/bin/kicad-cli', false, false],
@@ -544,10 +547,10 @@ test('flatpak path layouts, directory stripping, and KICAD_CLI_FLATPAK are table
   }
   const withHome = flatpakAppLibraryPaths('footprints', {
     platform: 'linux',
-    env: { HOME: '/home/u', USERPROFILE: '/users/other' },
+    env: { HOME: flatpakHome, USERPROFILE: '/users/other' },
     mapPath: (candidate) => candidate
   });
-  assert.ok(withHome.includes('/home/u/.local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/footprints'));
+  assert.ok(withHome.includes(path.posix.join(flatpakHome, '.local', 'share', 'flatpak', 'app', 'org.kicad.KiCad', 'current', 'active', 'files', 'share', 'kicad', 'footprints')));
   assert.equal(withHome.some((candidate) => candidate.includes('/users/other')), false);
   const withProfile = flatpakLibraryRoots({
     platform: 'linux',
@@ -557,7 +560,7 @@ test('flatpak path layouts, directory stripping, and KICAD_CLI_FLATPAK are table
   assert.deepEqual(withProfile, ['/var/lib/flatpak', '/users/u/.local/share/flatpak']);
   assert.deepEqual(flatpakAppLibraryPaths('symbols', {
     platform: 'win32',
-    env: { HOME: '/home/u', USERPROFILE: 'C:/Users/u' },
+    env: { HOME: flatpakHome, USERPROFILE: 'C:/Users/u' },
     mapPath: (candidate) => candidate
   }), []);
 

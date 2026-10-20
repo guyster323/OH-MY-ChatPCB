@@ -21,7 +21,10 @@ export async function createNamedProject({ workspaceRoot, projectName } = {}) {
     await mkdir(projectDir, { recursive: false });
   } catch (error) {
     if (error?.code === 'EEXIST') {
-      throw typedError('PROJECT_EXISTS', `A project named "${displayName}" already exists.`);
+      throw typedError(
+        'PROJECT_EXISTS',
+        `A project named "${displayName}" already exists.\n이름이 "${displayName}"인 프로젝트가 이미 있습니다.`
+      );
     }
     throw error;
   }

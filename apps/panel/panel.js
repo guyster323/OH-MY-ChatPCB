@@ -2953,7 +2953,7 @@ if (new URLSearchParams(location.search).get('chatpcbTest') === '1' && window.__
         clearReconcileTimer(approveFlight);
         approveFlight = null;
       }
-      const project = state.project || { displayName: 'demo-board', projectDir: '/tmp/demo-board' };
+      const project = state.project || { displayName: 'demo-board', projectDir: 'fixtures/demo-board' };
       activeProject = project;
       activeProjectNameEl.textContent = project.displayName || '';
       activeProjectDirectoryEl.textContent = project.projectDir || '';

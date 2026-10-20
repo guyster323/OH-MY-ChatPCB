@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { launchPanelBrowser } from '../scripts/lib/launch-panel-browser.js';
@@ -8,7 +10,7 @@ test('launchPanelBrowser launches the executable findChrome returns', async () =
   const browser = { launched: true };
   const opened = await launchPanelBrowser({ skip() {} }, {
     env: {},
-    findChrome: async () => ({ path: '/tmp/chatpcb-fake-chrome', source: 'env' }),
+    findChrome: async () => ({ path: path.join(tmpdir(), 'chatpcb-fake-chrome'), source: 'env' }),
     launch: async (options) => {
       launches.push(options);
       return browser;
@@ -17,7 +19,7 @@ test('launchPanelBrowser launches the executable findChrome returns', async () =
 
   assert.equal(opened, browser);
   assert.equal(launches.length, 1);
-  assert.equal(launches[0].executablePath, '/tmp/chatpcb-fake-chrome');
+  assert.equal(launches[0].executablePath, path.join(tmpdir(), 'chatpcb-fake-chrome'));
   assert.notEqual(launches[0].executablePath, '/usr/bin/google-chrome');
   assert.equal(launches[0].headless, true);
 });

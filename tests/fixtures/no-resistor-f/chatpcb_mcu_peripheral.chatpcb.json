@@ -1,0 +1,35 @@
+{
+  "kind": "mcu-peripheral",
+  "title": "STM32 status LED without a series resistor",
+  "sourcePrompt": "STM32 board with USB-C 5V input, 3.3V regulator, I2C sensor connector, SWD header, reset button and status LED.",
+  "mcu": {
+    "family": "STM32",
+    "package": "STM32G0B1CBT6",
+    "role": "main-controller"
+  },
+  "power": {
+    "input": "USB-C",
+    "rails": [
+      { "name": "VBUS", "voltage": 5, "source": "input" },
+      { "name": "+3V3", "voltage": 3.3, "source": "regulator" }
+    ]
+  },
+  "interfaces": [
+    { "kind": "i2c", "pins": ["SCL", "SDA", "+3V3", "GND"] }
+  ],
+  "peripherals": [
+    { "kind": "reset-button", "debounce": "rc-optional" },
+    { "kind": "status-led", "currentLimit": "1k" },
+    { "kind": "sensor-connector", "pitch": "2.54mm" }
+  ],
+  "schematic": {
+    "components": [
+      { "ref": "J1", "libId": "ChatPCB:POWER_INPUT", "value": "POWER_INPUT" },
+      { "ref": "U1", "libId": "ChatPCB:REGULATOR_3V3", "value": "REGULATOR_3V3" },
+      { "ref": "U2", "libId": "ChatPCB:STM32G0B1CBT6", "value": "STM32G0B1CBT6" },
+      { "ref": "SW1", "libId": "ChatPCB:RESET_BUTTON", "value": "RESET_BUTTON" },
+      { "ref": "D1", "libId": "ChatPCB:STATUS_LED", "value": "STATUS_LED" },
+      { "ref": "J2", "libId": "ChatPCB:I2C_CONNECTOR", "value": "I2C_CONNECTOR" }
+    ]
+  }
+}

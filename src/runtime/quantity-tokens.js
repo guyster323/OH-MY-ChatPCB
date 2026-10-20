@@ -1,3 +1,11 @@
+import { isLoneMilliResistorSuffix, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { normalizeMatchText } from './match-text.js';
+import { clauseAround, textHasForeignMilliRole, textHasLengthObject } from '../workflow/resistor-vocabulary.js';
+
+function compileRegExp(source, flags) {
+  return new RegExp(source, flags);
+}
+
 // Quantities in an LED prompt. `value` is normalized: volts, ohms, milliamps,
 // or a count. `unit` is the notation that was recognized (mV, VAC, ohm, …).
 // A voltage range's value is its maximum.
@@ -15,7 +23,6 @@ const RANGE_SEPARATOR = '(?:-|~|–|—|～|〜|(?<![A-Za-z])[Tt][Oo](?![A-Za-z]
 // itself stays outside the token so the forward-voltage binder can see it.
 const VOLTAGE_START = '(?:(?<![\\w.])|(?<=\\b[Vv][Ff]))';
 
-const RESISTANCE_MULTIPLIER = { r: 1, k: 1000, m: 1_000_000 };
 const POT_BEFORE = /(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)\s*$/i;
 const POT_AFTER = /^[\s,.:;/-]*(?:Ω|옴|ohms?)?\s*(?:\bpots?\b|\bpotentiometers?\b|가변\s*저항)/i;
 const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
@@ -27,8 +34,8 @@ const ON_AT_BEFORE = /\b(?:on|at)\b(?:\s+(?:a|an|the))?\s*$/i;
 // An "R=" / "R1" label is collected separately. Each resistor candidate is
 // reported; more than one is refused by the discrete LED parser.
 const RESISTOR_CONTEXT_WORD = '(?:\\bohms?\\b|\\bresistors?\\b|저항(?:값|은|는|이|가|을|를|의)?|(?<![가-힣])옴)';
-const RESISTOR_CONTEXT_BEFORE = new RegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
-const RESISTOR_CONTEXT_AFTER = new RegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
+const RESISTOR_CONTEXT_BEFORE = compileRegExp(`${RESISTOR_CONTEXT_WORD}\\s*$`, 'i');
+const RESISTOR_CONTEXT_AFTER = compileRegExp(`^\\s*${RESISTOR_CONTEXT_WORD}`, 'i');
 
 const PRIORITY = {
   range: 0,
@@ -172,15 +179,34 @@ function trailingSupplyKind(prompt, end) {
   return null;
 }
 
-function resistanceMultiplier(letter) {
-  return RESISTANCE_MULTIPLIER[String(letter).toLowerCase()] ?? null;
+// Every resistor form goes through parseResistorOhms. A lone m is refused
+// there (4m7 and 4.7m are not values). Zero is null, so 0Ω is not a token.
+function resistorOhmsNumber(text) {
+  const parsed = parseResistorOhms(text);
+  if (parsed == null) return null;
+  const ohms = Number(parsed);
+  return Number.isFinite(ohms) ? ohms : null;
 }
 
-function rkmToOhms(whole, fraction, letter) {
-  const multiplier = resistanceMultiplier(letter);
-  if (!multiplier) return null;
-  const scale = 10 ** fraction.length;
-  return (Number(whole) * scale + Number(fraction)) * multiplier / scale;
+// "1kR" writes the ohm unit after the multiplier. The parser sees that R as a
+// second suffix, so it is stripped only when the whole token does not parse.
+function resistorOhmsFromSuffix(text) {
+  const direct = resistorOhmsNumber(text);
+  if (direct != null) return direct;
+  const stripped = String(text).replace(/\s*[rR]$/u, '');
+  if (stripped === String(text)) return null;
+  return resistorOhmsNumber(stripped);
+}
+
+function invalidResistorCandidate(priority, start, end, raw) {
+  return {
+    priority,
+    start,
+    end,
+    invalid: true,
+    reason: isLoneMilliResistorSuffix(raw) ? 'milli' : 'invalid',
+    token: null
+  };
 }
 
 function isPotentiometer(prompt, start, end) {
@@ -193,6 +219,80 @@ function bareHasResistorContext(prompt, start, end) {
   const before = prompt.slice(Math.max(0, start - 24), start);
   const after = prompt.slice(end, end + 24);
   return RESISTOR_CONTEXT_BEFORE.test(before) || RESISTOR_CONTEXT_AFTER.test(after);
+}
+
+// A lone m (1m, 4.7m) is a resistor only when the token itself is bound:
+// the whole prompt, an attached Ω/ohm/옴, the word resistor/저항/抵抗 against
+// the token, or the object of a resistor edit ("to 4.7m", "4.7m으로").
+// 4m7 and 2m2 stay resistor notations wherever they appear. "1 m cable" and
+// "every 5m" are length and time even when Ω or 저항 sits nearby.
+// "to 1m" / "1m로" is a resistor only when that edit's object is a resistor
+// or an R-ref in the same clause. A cable, wire, or length object is not.
+// A bound milli that names another role (shunt, sense, pull-up) is not the LED resistor.
+const MILLI_CUE_BEFORE = /(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\bohms?\b|Ω)\s*$/iu;
+const MILLI_CUE_AFTER = /^\s*(?:저항|抵抗|\bresistors?\b|(?<![가-힣])옴|\bohms?\b|Ω)/iu;
+const MILLI_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
+const MILLI_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써)|に)/u;
+const MILLI_RESISTOR_OBJECT = /저항|抵抗|\bresistor\b|\bR\d+\b/iu;
+
+// Comma, "and", and "그리고" close a clause. A comma between digits (1,000) does not.
+export function clauseAroundToken(prompt, start, end) {
+  return clauseAround(prompt, start, end);
+}
+
+function milliEditObjectIsResistor(text, start, end) {
+  const clause = clauseAroundToken(text, start, end);
+  if (textHasLengthObject(clause)) return false;
+  return MILLI_RESISTOR_OBJECT.test(clause);
+}
+
+export function loneMilliCountsAsResistor(prompt, start, end) {
+  const text = String(prompt ?? '');
+  const slice = text.slice(start, end);
+  const compact = slice.replace(/\s+/g, '').replace(/(?:Ω|옴|ohms?)$/iu, '');
+  if (/^\d+m\d+$/i.test(compact)) return true;
+  if (/(?:Ω|옴|ohms?)\s*$/iu.test(slice)) return true;
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  if (before.trim() === '' && after.trim() === '') return true;
+  if (MILLI_CUE_BEFORE.test(before) || MILLI_CUE_AFTER.test(after)) return true;
+  if (!(MILLI_EDIT_BEFORE.test(before) || MILLI_EDIT_AFTER.test(after))) return false;
+  return milliEditObjectIsResistor(text, start, end);
+}
+
+// The clause that holds the token names a resistor role other than the LED series resistor.
+export function milliOwnedByForeignRole(prompt, start, end) {
+  const text = String(prompt ?? '');
+  let from = 0;
+  const spans = [];
+  for (const mark of text.matchAll(/[,;.!?。！？]/gu)) {
+    spans.push([from, mark.index]);
+    from = mark.index + mark[0].length;
+  }
+  spans.push([from, text.length]);
+  for (const [spanStart, spanEnd] of spans) {
+    if (end <= spanStart || start >= spanEnd) continue;
+    if (textHasForeignMilliRole(text.slice(spanStart, spanEnd))) return true;
+  }
+  return false;
+}
+
+function milliResistorFault(prompt, start, end) {
+  return loneMilliCountsAsResistor(prompt, start, end) && !milliOwnedByForeignRole(prompt, start, end);
+}
+
+function pushLoneMilli(candidates, prompt, start, end, priority) {
+  if (milliResistorFault(prompt, start, end)) {
+    candidates.push(invalidResistorCandidate(priority, start, end, prompt.slice(start, end)));
+    return;
+  }
+  candidates.push({
+    priority,
+    start,
+    end,
+    invalid: false,
+    token: contextToken(prompt, start, end, 'length')
+  });
 }
 
 function pushMatch(candidates, match, priority, token, invalid = false) {
@@ -233,7 +333,7 @@ function voltageToken(prompt, start, end, volts, multiplier, unitText) {
 }
 
 function collectRanges(prompt, candidates) {
-  const pattern = new RegExp(
+  const pattern = compileRegExp(
     `(?<![\\w.])${VOLTAGE_NUMBER}(?:\\s*${VOLTAGE_UNIT})?\\s*${RANGE_SEPARATOR}\\s*${VOLTAGE_NUMBER}\\s*${VOLTAGE_MULT}\\s*(${VOLTAGE_UNIT})${VOLTAGE_AC_TAIL}(?![A-Za-z])`,
     'g'
   );
@@ -273,7 +373,7 @@ function collectGlued(prompt, candidates) {
 }
 
 function collectVoltages(prompt, candidates) {
-  const pattern = new RegExp(
+  const pattern = compileRegExp(
     `${VOLTAGE_START}${VOLTAGE_SIGN}${VOLTAGE_NUMBER}\\s*${VOLTAGE_MULT}\\s*(${VOLTAGE_UNIT})${VOLTAGE_AC_TAIL}(?![A-Za-z])`,
     'g'
   );
@@ -310,10 +410,16 @@ function isDesignatorAssignment(prompt, end) {
 function collectRkm(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+)([rRkKmM])(\d+)(?![\w])/g;
   for (const match of prompt.matchAll(pattern)) {
-    const ohms = rkmToOhms(match[1], match[3], match[2]);
-    if (!(ohms > 0)) continue;
     const start = match.index ?? 0;
     const end = start + match[0].length;
+    const ohms = resistorOhmsNumber(match[0]);
+    // 4m7 and 2m2 do not parse. Cover the span so the digits are not a bare value.
+    // A shunt or sense milli is not the LED resistor, so it is not a fault.
+    if (ohms == null) {
+      if (isLoneMilliResistorSuffix(match[0])) pushLoneMilli(candidates, prompt, start, end, PRIORITY.rkm);
+      else candidates.push(invalidResistorCandidate(PRIORITY.rkm, start, end, match[0]));
+      continue;
+    }
     candidates.push({
       priority: PRIORITY.rkm,
       start,
@@ -328,9 +434,8 @@ function collectRkm(prompt, candidates) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
     if (isDesignatorAssignment(prompt, end)) continue;
-    const fraction = match[1];
-    const ohms = Number(fraction) / (10 ** fraction.length);
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
+    const ohms = resistorOhmsNumber(match[0]);
+    if (ohms == null || ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.rkm,
       start,
@@ -341,14 +446,43 @@ function collectRkm(prompt, candidates) {
   }
 }
 
+// A leading sign stays inside the resistor span. Dropping it would read -10Ω as 10Ω.
+// ± before a percent is tolerance, so that span is left for collectTolerance.
+// Voltage, current, and counts start on the same sign and outrank this span.
+function collectSignedResistors(prompt, candidates) {
+  const pattern = compileRegExp(String.raw`(?<![\p{L}\p{N}_.+])[+\-\u2212\u2013\uFF0D\u00B1]\s*(?:${[
+    String.raw`\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)`,
+    String.raw`\d+[rRkKmM]\d+`,
+    String.raw`\d+(?:\.\d+)?\s*meg`,
+    String.raw`\d+(?:\.\d+)?\s*[rRkKmM]`,
+    String.raw`\d+(?:\.\d+)?(?!\s*%)`
+  ].join('|')})(?![A-Za-z])`, 'giu');
+  for (const match of prompt.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    candidates.push({
+      priority: PRIORITY.bare,
+      start,
+      end: start + match[0].length,
+      invalid: true,
+      reason: 'invalid',
+      token: null
+    });
+  }
+}
+
 function collectLabeledResistor(prompt, candidates) {
   // The designator stays inside the token so "R1" is not its own bare number.
   const pattern = /(?<![\w.])[Rr](\d+)?(?:\s*=\s*|\s+)(\d+(?:\.\d+)?)(?![\w.])/g;
   for (const match of prompt.matchAll(pattern)) {
-    const ohms = Number(match[2]);
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const start = match.index ?? 0;
     const end = start + match[0].length;
+    const ohms = resistorOhmsNumber(match[2]);
+    // "R1=1.000" is ambiguous. Cover the span so a bare number cannot read it as 1Ω.
+    if (ohms == null) {
+      candidates.push(invalidResistorCandidate(PRIORITY.rkm, start, end, match[2]));
+      continue;
+    }
+    if (ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.rkm,
       start,
@@ -363,13 +497,19 @@ function collectOhm(prompt, candidates) {
   // "vf330Ω" keeps the Vf label outside the token. The ohm value is a resistor.
   const pattern = /(?<![\w.])(?:[Vv][Ff](?=\d))?(\d+(?:\.\d+)?)\s*([rRkKmM])?\s*(?:옴|ohms?|Ω)/gi;
   for (const match of prompt.matchAll(pattern)) {
-    const multiplier = match[2] ? resistanceMultiplier(match[2]) : 1;
-    const ohms = Number(match[1]) * multiplier;
-    // 0Ω is kept so the draft can refuse it instead of ignoring the token.
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const matchStart = match.index ?? 0;
     const end = matchStart + match[0].length;
     const start = matchStart + match[0].indexOf(match[1]);
+    const ohms = resistorOhmsNumber(prompt.slice(start, end));
+    // 0Ω does not parse, so the span is unparseable instead of a 0Ω token.
+    // "1.000 ohm" does not parse. The span stays covered so a bare 1.000 is not 1Ω.
+    if (ohms == null) {
+      const raw = prompt.slice(start, end);
+      if (isLoneMilliResistorSuffix(raw)) pushLoneMilli(candidates, prompt, start, end, PRIORITY.ohm);
+      else candidates.push(invalidResistorCandidate(PRIORITY.ohm, start, end, raw));
+      continue;
+    }
+    if (ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.ohm,
       start,
@@ -380,14 +520,31 @@ function collectOhm(prompt, candidates) {
   }
 }
 
+// "4,7k" must not be read as 7k. A comma-grouped number plus a suffix or an
+// ohm unit covers the whole span, including the digits the suffix matcher
+// would otherwise start after the comma.
+function collectGroupedComma(prompt, candidates) {
+  const pattern = /(?<![\w.])\d{1,3}(?:,\d+)+(?:\.\d+)?(?:\s*(?:meg|[rRkKmM])(?:\s*(?:Ω|옴|ohms?))?|\s*(?:Ω|옴|ohms?))(?![A-Za-z])/giu;
+  for (const match of prompt.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    candidates.push(invalidResistorCandidate(PRIORITY.suffix, start, start + match[0].length, match[0]));
+  }
+}
+
 function collectSuffix(prompt, candidates) {
   const pattern = /(?<![\w.])(\d+(?:\.\d+)?)\s*([rRkKmM])(?:\s*[rR]\b|\b)(?![A-Za-z])/g;
   for (const match of prompt.matchAll(pattern)) {
-    const multiplier = resistanceMultiplier(match[2]);
-    const ohms = Number(match[1]) * multiplier;
-    if (!Number.isFinite(ohms) || ohms < 0) continue;
     const start = match.index ?? 0;
     const end = start + match[0].length;
+    const ohms = resistorOhmsFromSuffix(match[0]);
+    if (ohms == null) {
+      // A length or a time is not a milli fault. A bound milli ("1m resistor",
+      // "to 4.7m") still is, unless that clause names another resistor role.
+      if (isLoneMilliResistorSuffix(match[0])) pushLoneMilli(candidates, prompt, start, end, PRIORITY.suffix);
+      else candidates.push(invalidResistorCandidate(PRIORITY.suffix, start, end, match[0]));
+      continue;
+    }
+    if (ohms < 0) continue;
     candidates.push({
       priority: PRIORITY.suffix,
       start,
@@ -447,7 +604,7 @@ function collectCurrent(prompt, candidates) {
     '암페어',
     'a'
   ].join('|');
-  const pattern = new RegExp(`(?<![\\w.])([+\\-\\u2212]\\s*)?(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
+  const pattern = compileRegExp(`(?<![\\w.])([+\\-\\u2212]\\s*)?(\\d+(?:\\.\\d+)?)\\s*(${unit})${boundary}`, 'gi');
   for (const match of prompt.matchAll(pattern)) {
     const amount = Number(match[2]);
     if (!Number.isFinite(amount) || amount < 0) continue;
@@ -603,7 +760,7 @@ function collectEnglishWordCounts(prompt, candidates) {
   const words = Object.keys(COUNT_WORD).join('|');
   // "two and a half LEDs" is a fractional count, same as "2.5 LEDs". The
   // integer word matcher would otherwise keep "two" and drop the half.
-  const fractional = new RegExp(`\\b(${words})\\s+and\\s+(?:a|one)\\s+half\\s+leds?\\b`, 'i');
+  const fractional = compileRegExp(`\\b(${words})\\s+and\\s+(?:a|one)\\s+half\\s+leds?\\b`, 'i');
   const fraction = fractional.exec(prompt);
   if (fraction) {
     const value = COUNT_WORD[fraction[1].toLowerCase()] + 0.5;
@@ -611,7 +768,7 @@ function collectEnglishWordCounts(prompt, candidates) {
     pushWordCountToken(candidates, prompt, start, start + fraction[0].length, value);
     return true;
   }
-  const englishLed = new RegExp(`\\b(${words})\\b(?:\\s+\\w+){0,3}\\s+leds?\\b`, 'i');
+  const englishLed = compileRegExp(`\\b(${words})\\b(?:\\s+\\w+){0,3}\\s+leds?\\b`, 'i');
   const english = englishLed.exec(prompt);
   if (!english) return false;
   const value = COUNT_WORD[english[1].toLowerCase()];
@@ -631,8 +788,8 @@ function collectEnglishWordCounts(prompt, candidates) {
 function collectKoreanWordCounts(prompt, candidates) {
   const words = [...KOREAN_COUNT_WORDS].sort((left, right) => right[0].length - left[0].length);
   for (const [word, value] of words) {
-    const after = new RegExp(`(?:leds?|엘이디|발광)[^\\d]{0,12}(${word}\\s*개)`, 'i');
-    const before = new RegExp(`(${word}\\s*개)(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
+    const after = compileRegExp(`(?:leds?|엘이디|발광)[^\\d]{0,12}(${word}\\s*개)`, 'i');
+    const before = compileRegExp(`(${word}\\s*개)(?:의)?\\s*(?:leds?|엘이디|발광)`, 'i');
     const afterMatch = after.exec(prompt);
     const beforeMatch = before.exec(prompt);
     const match = afterMatch ?? beforeMatch;
@@ -659,7 +816,7 @@ function collectCounts(prompt, candidates) {
   const prefix = /(?<![\w.])[x\u00D7]\s*([+\-\u2212])?(\d+(?:[.,]\d+)?)(?![\w.])/gi;
   const gluedLed = /(?<![A-Za-z0-9])leds?[x\u00D7](\d+)(?![\w.])/gi;
   const words = Object.keys(COUNT_WORD).join('|');
-  const wordPcs = new RegExp(`(?<![A-Za-z])(${words})\\s+pcs(?![A-Za-z])`, 'gi');
+  const wordPcs = compileRegExp(`(?<![A-Za-z])(${words})\\s+pcs(?![A-Za-z])`, 'gi');
   for (const match of prompt.matchAll(led)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(fractionalLeds)) pushCount(candidates, prompt, match, match[1], match[2]);
   for (const match of prompt.matchAll(marker)) pushCount(candidates, prompt, match, match[1], match[2]);
@@ -781,6 +938,9 @@ function collectContext(prompt, candidates) {
   for (const pattern of pins) {
     for (const match of prompt.matchAll(pattern)) pushContext(candidates, prompt, match, 'pin');
   }
+  // Attached and spaced length units. A bare "m" stays on the milli path.
+  const lengths = /(?<![\w.])\d+(?:\.\d+)?\s*(?:cm|mm|km|ft|in)(?![A-Za-z])/gi;
+  for (const match of prompt.matchAll(lengths)) pushContext(candidates, prompt, match, 'length');
 }
 
 function collectPackages(prompt, candidates) {
@@ -820,12 +980,39 @@ function collectBare(prompt, candidates) {
     const end = start + match[0].length;
     const rawNumber = match[1];
     const ohms = Number(rawNumber);
-    if (!(ohms > 0)) continue;
+    // Bare 0 is unparseable. Dropping it would leave the calculated default.
+    if (!(ohms > 0)) {
+      if (ohms === 0) {
+        candidates.push({
+          priority: PRIORITY.bare,
+          start,
+          end,
+          invalid: true,
+          reason: 'invalid',
+          token: null
+        });
+      }
+      continue;
+    }
     if (LED_PACKAGE_SET.has(rawNumber)) continue;
     const asResistor = bareHasResistorContext(prompt, start, end) || isBareE24Resistor(rawNumber);
-    const token = asResistor
-      ? resistanceToken(prompt, start, end, ohms, 'bare')
-      : ambiguousNumberToken(prompt, start, end, ohms);
+    if (asResistor) {
+      const parsed = resistorOhmsNumber(rawNumber);
+      if (parsed == null) {
+        candidates.push({ priority: PRIORITY.bare, start, end, invalid: true, token: null });
+        continue;
+      }
+      if (!(parsed > 0)) continue;
+      candidates.push({
+        priority: PRIORITY.bare,
+        start,
+        end,
+        invalid: false,
+        token: resistanceToken(prompt, start, end, parsed, 'bare')
+      });
+      continue;
+    }
+    const token = ambiguousNumberToken(prompt, start, end, ohms);
     candidates.push({
       priority: PRIORITY.bare,
       start,
@@ -851,7 +1038,7 @@ function resolveOverlaps(candidates) {
 
 function hasUncoveredVoltage(prompt, spans) {
   return UNCOVERED_VOLTAGE.some((source) => {
-    for (const match of prompt.matchAll(new RegExp(source, 'gi'))) {
+    for (const match of prompt.matchAll(compileRegExp(source, 'gi'))) {
       const start = match.index ?? 0;
       const end = start + match[0].length;
       const covered = spans.some((span) => start >= span.start && end <= span.end);
@@ -862,7 +1049,7 @@ function hasUncoveredVoltage(prompt, spans) {
 }
 
 export function tokenizeQuantities(prompt) {
-  const text = String(prompt ?? '').normalize('NFKC');
+  const text = normalizeMatchText(prompt);
   const candidates = [];
   collectRanges(text, candidates);
   collectGlued(text, candidates);
@@ -870,6 +1057,7 @@ export function tokenizeQuantities(prompt) {
   collectRkm(text, candidates);
   collectLabeledResistor(text, candidates);
   collectOhm(text, candidates);
+  collectGroupedComma(text, candidates);
   collectSuffix(text, candidates);
   collectCurrent(text, candidates);
   collectTolerance(text, candidates);
@@ -877,25 +1065,30 @@ export function tokenizeQuantities(prompt) {
   collectPackages(text, candidates);
   collectContext(text, candidates);
   collectUnitlessForward(text, candidates);
+  collectSignedResistors(text, candidates);
   collectBare(text, candidates);
 
   const accepted = resolveOverlaps(candidates);
   const tokens = [];
   let unparseable = false;
+  let resistorFault = null;
   for (const item of accepted) {
-    if (item.invalid) unparseable = true;
-    else if (item.token) tokens.push(item.token);
+    if (item.invalid) {
+      unparseable = true;
+      if (item.reason === 'milli') resistorFault = 'milli';
+      else if (item.reason === 'invalid' && resistorFault !== 'milli') resistorFault = 'invalid';
+    } else if (item.token) tokens.push(item.token);
   }
   if (hasUncoveredVoltage(text, accepted)) unparseable = true;
   tokens.sort((left, right) => left.start - right.start);
-  return { tokens, unparseable };
+  return { tokens, unparseable, resistorFault };
 }
 
 function keywordHits(prompt, sources, role) {
   const found = [];
   for (const source of sources) {
     const flags = source.flags.includes('g') ? source.flags : `${source.flags}g`;
-    for (const match of prompt.matchAll(new RegExp(source.source, flags))) {
+    for (const match of prompt.matchAll(compileRegExp(source.source, flags))) {
       const start = match.index ?? 0;
       found.push({ role, start, end: start + match[0].length });
     }
@@ -930,8 +1123,8 @@ function bindKeyword(tokens, keyword) {
 }
 
 function explicitLabelGap(text) {
-  // En dash and em dash join a label to its value, as in "Vf—3.2V".
-  return /^[\s:=\u2013\u2014]*$/i.test(text) || /^[\s:=\u2013\u2014]*of[\s:=\u2013\u2014]*$/i.test(text);
+  // Match text folds every dash to ASCII '-', so "Vf—3.2V" arrives as "Vf-3.2V".
+  return /^[\s:=\u2013\u2014-]*$/i.test(text) || /^[\s:=\u2013\u2014-]*of[\s:=\u2013\u2014-]*$/i.test(text);
 }
 
 function resistanceFollowsLabel(prompt, tokens, label) {
@@ -987,7 +1180,7 @@ function roleForVoltage(prompt, token) {
 }
 
 export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
-  const text = String(prompt ?? '').normalize('NFKC');
+  const text = normalizeMatchText(prompt);
   const tokens = scan.tokens.map((token) => ({ ...token, hits: [] }));
   bindExplicitForwardVoltages(text, tokens);
   for (const keyword of keywordHits(text, SUPPLY_KEYWORDS, 'supply')) bindKeyword(tokens, keyword);
@@ -1007,7 +1200,7 @@ export function classifyQuantities(prompt, scan = tokenizeQuantities(prompt)) {
     else token.role = null;
     delete token.hits;
   }
-  return { tokens, unparseable: scan.unparseable };
+  return { tokens, unparseable: scan.unparseable, resistorFault: scan.resistorFault ?? null };
 }
 
 // AC refuses the draft only when it describes the supply. A DC/AC converter,

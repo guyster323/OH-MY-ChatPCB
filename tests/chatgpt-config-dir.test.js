@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { resolveChatGPTConfigDir } from '../src/runtime/auth/chatgpt-auth.js';
 import { applyIsolatedConfigEnv } from './isolate-home.js';
 
-const home = path.join('/home', 'tester');
-const xdg = path.join('/tmp', 'xdg-config');
+const home = path.join(tmpdir(), 'home', 'tester');
+const xdg = path.join(tmpdir(), 'xdg-config');
 const appData = path.join('C:/Users/tester/AppData/Roaming');
 const libraryDir = path.join(home, 'Library', 'Application Support', 'chatpcb');
 const linuxDefault = path.join(home, '.config', 'chatpcb');
@@ -103,10 +104,10 @@ test('resolveChatGPTConfigDir ignores a blank or relative XDG_CONFIG_HOME', () =
 });
 
 test('isolated config env puts the native directory inside the temp home without XDG on darwin and win32', () => {
-  const root = path.join('/tmp', 'chatpcb-isolated-home');
+  const root = path.join(tmpdir(), 'chatpcb-isolated-home');
   const keys = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'APPDATA', 'LOCALAPPDATA'];
   const saved = new Map(keys.map((key) => [key, process.env[key]]));
-  const userXdg = path.join('/tmp', 'user-xdg');
+  const userXdg = path.join(tmpdir(), 'user-xdg');
   try {
     process.env.XDG_CONFIG_HOME = userXdg;
     applyIsolatedConfigEnv(root, 'darwin');
