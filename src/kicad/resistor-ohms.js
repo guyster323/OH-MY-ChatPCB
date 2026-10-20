@@ -41,10 +41,23 @@ function formatResistorOhms(ohms) {
 }
 
 const OHM_UNIT_TAIL = /(?:\s*(?:Ω|옴|ohms?))$/iu;
+// Glued RKM (4k7, 2M2) and a number with an optional SI suffix (680, 2.2k, 1 meg).
+// One copy: the parser and isResistorValueWithUnit both read these.
+const RKM_GLUED = /^(\d+)([rRkKmM])(\d+)$/;
+const SUFFIXED_RESISTOR = /^(\d+(?:\.\d+)?)(?:\s*([A-Za-z]+))?$/;
 // "4k 7", "4k.7", "4k,7", "4k-7", "4k/7", "4k_7", "1R-5", "2M-2".
 // The separator splits the RKM fraction off the multiplier.
 // Lowercase m is milli, not this form. One digit glued on (4k7, 2M2) stays valid.
-const SPACED_RKM = new RegExp(String.raw`^\d+(?:\.\d+)?\s*[kKrRM]${RKM_FRACTION_SEPARATOR}\d+$`);
+// Built on first use. resistor-vocabulary imports this module, and this module
+// reads RKM_FRACTION_SEPARATOR from there, so the pattern cannot be built while
+// that binding is still initializing.
+let spacedRkmPattern = null;
+function spacedRkm() {
+  if (!spacedRkmPattern) {
+    spacedRkmPattern = new RegExp(String.raw`^\d+(?:\.\d+)?\s*[kKrRM]${RKM_FRACTION_SEPARATOR}\d+$`);
+  }
+  return spacedRkmPattern;
+}
 
 // One resistor-value parser. Unparseable text returns null. Callers must fail
 // closed instead of guessing a value. Zero is null here so a 0Ω token is not a
@@ -56,9 +69,9 @@ function parseResistorOhmsAllowingZero(value) {
     .replace(OHM_UNIT_TAIL, '')
     .trim();
   if (!text) return null;
-  if (SPACED_RKM.test(text)) return null;
+  if (spacedRkm().test(text)) return null;
 
-  const rkm = /^(\d+)([rRkKmM])(\d+)$/.exec(text);
+  const rkm = RKM_GLUED.exec(text);
   if (rkm) {
     // 4k7, 4K7, 1R5, 4r7, and 2M2 are RKM: exactly one digit after the letter.
     // Two or more digits (4k75, 4K60, 1R50, 2M20, 1k005) are not a value.
@@ -71,7 +84,7 @@ function parseResistorOhmsAllowingZero(value) {
   const leadingR = /^[rR](\d+)$/.exec(text);
   if (leadingR) return formatResistorOhms(resistorNumber('0', leadingR[1], 1));
 
-  const suffixed = /^(\d+(?:\.\d+)?)(?:\s*([A-Za-z]+))?$/.exec(text);
+  const suffixed = SUFFIXED_RESISTOR.exec(text);
   if (!suffixed) return null;
   const multiplier = resistorScale(suffixed[2] ?? '');
   if (multiplier == null) return null;
@@ -101,7 +114,30 @@ function bareResistorText(value) {
 
 // 4k 7, 4k.7, 1R-5, 2M-2, 4.7k 2. The whole token, after the ohm-unit tail is removed.
 export function isSpacedRkmValue(value) {
-  return SPACED_RKM.test(bareResistorText(value));
+  return spacedRkm().test(bareResistorText(value));
+}
+
+// A bare number is not a value. A number plus a unit is, attached or spaced:
+// 680Ω, 680 ohms, 680 Ω, 1 meg, 2.2k, 10kΩ, 2M2. The unit test is OHM_UNIT_TAIL
+// plus the parser's glued-RKM and suffixed forms. No second unit pattern.
+function suffixMarksKeepUnit(suffix) {
+  if (!suffix) return false;
+  if (suffix === 'm') return true;
+  const scale = resistorScale(suffix);
+  if (suffix.length !== 1) return scale === 1e6;
+  return scale === 1 || scale === 1e3 || scale === 1e6;
+}
+
+export function isResistorValueWithUnit(value) {
+  const text = String(value ?? '').trim().normalize('NFKC');
+  if (!/^\d/u.test(text)) return false;
+  const stripped = text.replace(OHM_UNIT_TAIL, '').trim();
+  const hadOhmUnit = stripped !== text;
+  if (RKM_GLUED.test(stripped)) return true;
+  const suffixed = SUFFIXED_RESISTOR.exec(stripped);
+  if (!suffixed) return false;
+  if (suffixed[2]) return suffixMarksKeepUnit(suffixed[2]);
+  return hadOhmUnit;
 }
 
 // 4m7, 4 m7, 1m, 2m2, and 4.7m. Uppercase M and meg/MEG/Meg are not this suffix.

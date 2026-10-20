@@ -1275,7 +1275,16 @@ test('a keep clause that carries a value never applies that value to R3', () => 
     'keep R4 at 680Ω please',
     'leave the pull-up at 2.2k',
     'R4는 680Ω으로 유지',
-    'hold R4 at 10k'
+    'hold R4 at 10k',
+    'keep R4 at 680 ohms',
+    'keep R4 at 680 Ω',
+    'keep R4 at 680 ohm',
+    'keep R4 at 680Ω.',
+    'keep R4 at 1 meg',
+    "don't touch R4 at 680 ohms",
+    'R4는 680 옴으로 유지',
+    'hold R4 at 680 ohms',
+    'leave R4 at 680 ohms'
   ];
   for (const prompt of prompts) {
     const before = structuredClone(spec);

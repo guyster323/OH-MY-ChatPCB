@@ -1,6 +1,7 @@
 // One fail-closed vocabulary for resistor edits. Unit, role, edit-verb,
 // question, permission, approximation, filler, and length words live here.
 // A request is covered only when every content word is on this list.
+import { isResistorValueWithUnit } from '../kicad/resistor-ohms.js';
 import { normalizeMatchText } from '../runtime/match-text.js';
 
 function rx(source, flags) {
@@ -198,19 +199,37 @@ function keepTokenBare(word) {
   return String(word ?? '').replace(/^[("'` ,]+|[)"'` ,.;!?。！？]+$/gu, '');
 }
 
+function bareKeepToken(raw) {
+  const text = String(raw ?? '');
+  const stop = keepStopIndex(text);
+  return keepTokenBare(stop > 0 ? text.slice(0, stop) : text);
+}
+
 // A value word inside the keep clause belongs to that clause. A bare number
 // (a count, a year, a package) is not a value here. "at" is only the glue.
+// A number and the unit after it are one value, attached or spaced.
 function isKeepValueWord(token) {
   const stem = keepTokenBare(token)
     .replace(/(?:으로|로|은|는|이|가|을|를|도|만)$/u, '')
-    .replace(/\s+/gu, '');
+    .trim();
   if (!/^\d/u.test(stem)) return false;
-  return /^(?:\d+(?:\.\d+)?(?:Ω|옴|ohms?|meg|[kKmMrR](?:Ω|옴)?)|\d+[rRkKmM]\d+)$/iu.test(stem);
+  return isResistorValueWithUnit(stem);
+}
+
+// 1 when token is already a value. 2 when the next word is its unit.
+function keepValueWidth(token, nextToken) {
+  if (isKeepValueWord(token)) return 1;
+  if (nextToken && isKeepValueWord(`${token} ${nextToken}`)) return 2;
+  return 0;
 }
 
 function spanCarriesKeepValue(text, start, end) {
   const words = String(text ?? '').slice(start, end).match(/\S+/gu) ?? [];
-  return words.some((word) => isKeepValueWord(word));
+  for (let index = 0; index < words.length; index += 1) {
+    const next = words[index + 1] ? bareKeepToken(words[index + 1]) : '';
+    if (keepValueWidth(bareKeepToken(words[index]), next) > 0) return true;
+  }
+  return false;
 }
 
 // A decimal point inside 2.2k is not the end of the clause.
@@ -279,26 +298,47 @@ function negatedKeepVerbBefore(text, phraseStart) {
   return verbAt >= 0 && englishKeepVerbNegated(text, verbAt);
 }
 
+// taken is right-to-left, so a spaced unit sits before its number in this array.
+function takenValueIndexes(taken) {
+  const bare = taken.map((word) => bareKeepToken(word[0]));
+  const valueAt = new Set();
+  for (let index = 0; index < bare.length; index += 1) {
+    if (isKeepValueWord(bare[index])) valueAt.add(index);
+    if (index + 1 < bare.length && (isKeepValueWord(`${bare[index]} ${bare[index + 1]}`) || isKeepValueWord(`${bare[index + 1]} ${bare[index]}`))) {
+      valueAt.add(index);
+      valueAt.add(index + 1);
+    }
+  }
+  return valueAt;
+}
+
 function keepObjectBefore(text, cueStart) {
   const origin = keepClauseOrigin(text, cueStart);
   const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
   const taken = [];
   let tookObject = false;
   for (let index = words.length - 1; index >= 0 && taken.length < 8; index -= 1) {
-    const token = keepTokenBare(words[index][0]);
-    const value = isKeepValueWord(token);
+    const token = bareKeepToken(words[index][0]);
+    const prev = index > 0 ? bareKeepToken(words[index - 1][0]) : '';
+    const spaced = Boolean(prev) && !isKeepValueWord(token) && isKeepValueWord(`${prev} ${token}`);
+    const value = isKeepValueWord(token) || spaced;
     // "R4는 680Ω으로 유지": the value sits between the ref and the cue.
     // "680Ω R4 unchanged": the value is left of the ref, so it stays an edit.
-    if (value || (token.toLowerCase() === 'at' && taken.some((word) => isKeepValueWord(word[0])))) {
+    if (value || (token.toLowerCase() === 'at' && takenValueIndexes(taken).size > 0)) {
       if (tookObject) break;
       taken.push(words[index]);
+      if (spaced) {
+        taken.push(words[index - 1]);
+        index -= 1;
+      }
       continue;
     }
     if (/^\d/u.test(token) || isKeepListStop(token)) break;
     taken.push(words[index]);
     tookObject = true;
   }
-  if (!taken.some((word) => !isKeepValueWord(word[0]) && keepTokenBare(word[0]).toLowerCase() !== 'at')) return null;
+  const valueAt = takenValueIndexes(taken);
+  if (!taken.some((word, at) => !valueAt.has(at) && bareKeepToken(word[0]).toLowerCase() !== 'at')) return null;
   return [origin + taken[taken.length - 1].index, cueStart];
 }
 
@@ -311,21 +351,35 @@ function keepObjectAfter(text, cueEnd) {
   let count = 0;
   let afterComma = false;
   let commaThenHead = false;
-  for (const word of words) {
+  for (let index = 0; index < words.length; index += 1) {
     if (count >= 6) break;
+    const word = words[index];
     const raw = word[0];
     const stopPunct = keepStopIndex(raw);
-    const token = keepTokenBare(stopPunct > 0 ? raw.slice(0, stopPunct) : raw);
+    const token = bareKeepToken(raw);
     if (stopPunct === 0 || isKeepListStop(token)) break;
+    const next = stopPunct > 0 ? null : words[index + 1];
+    const width = keepValueWidth(token, next ? bareKeepToken(next[0]) : '');
     // "R4, LED 저항 680Ω" keeps R4. The ohms belong to the LED head.
-    if (isKeepValueWord(token)) {
+    // "keep R4 at 680 ohms" / "hold R4 at 680 ohms" / "leave R4 at 680 ohms":
+    // the number and the unit are one value, so both stay inside the keep.
+    if (width > 0) {
       if (commaThenHead) break;
     } else if (/^\d/u.test(token)) {
       break;
     }
-    if (!isKeepValueWord(token) && afterComma && keepNamesResistorHead(token)) commaThenHead = true;
+    if (width === 0 && afterComma && keepNamesResistorHead(token)) commaThenHead = true;
+    if (width === 2) {
+      const nextRaw = next[0];
+      const nextPunct = keepStopIndex(nextRaw);
+      end = cueEnd + next.index + (nextPunct > 0 ? nextPunct : nextRaw.length);
+      if (nextRaw.includes(',') || nextRaw.includes('，')) afterComma = true;
+      index += 1;
+      if (nextPunct > 0) break;
+      continue;
+    }
     end = cueEnd + word.index + (stopPunct > 0 ? stopPunct : raw.length);
-    if (token && !isKeepListCoord(token) && !isKeepValueWord(token)) count += 1;
+    if (token && !isKeepListCoord(token) && width === 0) count += 1;
     if (stopPunct > 0) break;
     if (raw.includes(',') || raw.includes('，')) afterComma = true;
   }
