@@ -121,7 +121,6 @@ test('resistor notation uses the same values the SPICE parser accepts', () => {
     ['LED resistor 1R5', 1.5, '1.5Ω'],
     ['LED resistor 680 ohm', 680, '680Ω'],
     ['LED 저항 680옴', 680, '680Ω'],
-    ['change the LED resistor from 680 to 1k', 1000, '1k'],
     ['LED 저항 123옴에서 1k옴으로', 1000, '1k']
   ];
 
@@ -133,6 +132,13 @@ test('resistor notation uses the same values the SPICE parser accepts', () => {
     assert.equal(decision.edit?.label, label, prompt);
     assert.equal((decision.edit?.targets ?? []).includes('i2c'), false, prompt);
   }
+
+  // Saved R3 is 123Ω. A unitless from-value is the stated current value.
+  const from680 = classifyExistingProjectRequest('change the LED resistor from 680 to 1k', SPEC);
+  assert.equal(from680.mode, 'refuse');
+  assert.equal(from680.code, 'RESISTOR_VALUE_AMBIGUOUS');
+  assert.equal(from680.edit, undefined);
+  assert.equal(from680.message, resistorValueAmbiguousMessage(null, ['680Ω', '1k']));
 });
 
 test('an invalid user resistor value is not filled from the rewrite example', () => {
@@ -402,14 +408,20 @@ test('explicit transition forms pick the destination value', () => {
     ['change the LED resistor from 123Ω to 680Ω', 680, '680Ω'],
     ['R3 123 ohm -> 680 ohm', 680, '680Ω'],
     ['LED 저항 123옴에서 680옴으로', 680, '680Ω'],
-    ['LED 저항 123Ω에서 680Ω로', 680, '680Ω'],
-    ['change the LED resistor from 680 to 1k', 1000, '1k']
+    ['LED 저항 123Ω에서 680Ω로', 680, '680Ω']
   ]) {
     const decision = classifyExistingProjectRequest(prompt, SPEC);
     assert.equal(decision.mode, 'merge', prompt);
     assert.equal(decision.edit?.ohms, ohms, prompt);
     assert.equal(decision.edit?.label, label, prompt);
   }
+
+  // Saved R3 is 123Ω, so the unitless from-value 680 does not match.
+  const mismatched = classifyExistingProjectRequest('change the LED resistor from 680 to 1k', SPEC);
+  assert.equal(mismatched.mode, 'refuse');
+  assert.equal(mismatched.code, 'RESISTOR_VALUE_AMBIGUOUS');
+  assert.equal(mismatched.edit, undefined);
+  assert.equal(mismatched.message, resistorValueAmbiguousMessage(null, ['680Ω', '1k']));
 });
 
 test('values outside 1Ω to 10MΩ are refused with the allowed range', () => {

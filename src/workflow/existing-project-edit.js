@@ -1931,14 +1931,14 @@ function keepNamesEditTarget(text, spec) {
   if (found.objects.length === 0) return false;
   const series = seriesResistorRef(spec);
   const kept = new Set();
-  for (const object of found.objects) addKeptIdentity(kept, keepIdentityFragment(text, object), series);
+  for (const object of found.objects) addKeptIdentity(kept, keepIdentityFragment(text, object), series, 'keep');
   if (kept.size === 0) return false;
   // The cue word stays out of the edit remainder. "유지하고" must not sit on the LED noun.
   const edit = new Set();
   const ranges = found.objects.map((object) => [object.start, object.end]);
   for (const cue of found.cues) ranges.push([cue.start, cue.end]);
   const remainder = blankCopy(text, ranges);
-  addKeptIdentity(edit, remainder, series);
+  addKeptIdentity(edit, remainder, series, 'edit');
   if (edit.size === 0 && bareSeriesRemainder(remainder, series)) edit.add(String(series).toUpperCase());
   for (const key of kept) {
     if (edit.has(key)) return true;
@@ -1993,14 +1993,18 @@ function namesResistorHead(segment) {
   return /(?:저항|抵抗|\bresistors?\b|\bleds?\b|엘이디|엘예디)/iu.test(segment);
 }
 
-function addKeptIdentity(keys, fragment, series) {
+function addKeptIdentity(keys, fragment, series, side) {
   for (const ref of resistorReferenceTokens(fragment)) keys.add(ref.toUpperCase());
-  if (series && namesSeriesLed(fragment)) keys.add(String(series).toUpperCase());
+  if (series && namesSeriesLed(fragment, side)) keys.add(String(series).toUpperCase());
 }
 
-// "the LED resistor" is a led noun. A bare LED in the keep list is the same part.
-function namesSeriesLed(fragment) {
+// A keep object is this resistor only with a resistor noun ("resistor" / "저항",
+// including "LED resistor" and "LED 저항") or an R ref (added above).
+// A bare LED or status LED is the diode, so that keep does not block the edit.
+// The edit remainder still treats a bare LED as the series resistor.
+function namesSeriesLed(fragment, side = 'edit') {
   if (resistorNounKinds(fragment).includes('led')) return true;
+  if (side === 'keep') return false;
   return /\bleds?\b|엘이디|엘예디/iu.test(fragment);
 }
 
@@ -2437,11 +2441,13 @@ function isForeignResistorRole(text) {
 }
 
 // Two unit values joined by from/to, 에서, or an arrow. The first is the stated
-// current value. It has to be the saved series value.
+// current value. It has to be the saved series value. A unitless number tight
+// against from, an arrow, or 에서 is that current value too.
 function transitionValuePair(text) {
   const tokens = scanResistorTokens(text);
   markNonResistorQuantities(tokens, text);
   promoteCoordinatedBareValues(tokens, text);
+  promoteUnitlessTransitionSource(tokens, text);
   dropLeadingDesignators(tokens);
   const amounts = classifyResistorAttempts(tokens).valid;
   if (amounts.length < 2) return null;
@@ -2453,6 +2459,19 @@ function transitionValuePair(text) {
   const fromTo = /\bfrom\b/i.test(head) && /\bto\b/i.test(between);
   if (!arrow && !fromTo) return null;
   return { source, destination };
+}
+
+// "from 220", "220 ->", and "220에서" name the current ohms without a unit.
+function promoteUnitlessTransitionSource(tokens, text) {
+  for (const token of tokens) {
+    if (!isBareUnitlessToken(token) || !isCleanUnitless(token.raw.trim())) continue;
+    const before = text.slice(0, token.index);
+    const after = text.slice(token.end);
+    const afterFrom = /\bfrom\s*$/iu.test(before);
+    const beforeMarker = /^\s*(?:from\b|->|→|에서)/iu.test(after);
+    if (!afterFrom && !beforeMarker) continue;
+    token.attempt = true;
+  }
 }
 
 function statedFromMismatch(text, spec) {

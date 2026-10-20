@@ -2919,6 +2919,16 @@ const KEEP_OTHER_ROWS = [
 function keepTargetPrompt(rng, self) {
   const lang = rng() < 0.5 ? 'en' : 'ko';
   if (!self) {
+    if (rng() < 0.35) {
+      const prompt = lang === 'en'
+        ? pickItem(rng, [
+          'keep the LED, set the LED resistor to 680Ω',
+          'keep the status LED, set the LED resistor to 680Ω',
+          'keep the LED as is, set the LED resistor to 680Ω'
+        ])
+        : 'LED는 그대로 두고 LED 저항만 680Ω으로';
+      return { prompt, apply: true };
+    }
     const ref = rng() < 0.5 ? 'R4' : 'R1';
     const prompt = lang === 'en'
       ? pickItem(rng, [
@@ -2931,6 +2941,7 @@ function keepTargetPrompt(rng, self) {
       ]);
     return { prompt, apply: true };
   }
+  // Ambiguous only for an R ref or a resistor noun. A bare LED / status LED is the diode.
   const role = lang === 'en'
     ? pickItem(rng, ['R3', 'the LED resistor', 'the current-limiting resistor', 'the status LED resistor'])
     : pickItem(rng, ['R3', 'LED 저항', '전류 제한 저항', '상태 LED 저항']);
@@ -3083,14 +3094,15 @@ const KEEP_PHRASE_ROWS = [
   'leave R3 the way it is and set the LED resistor to 680Ω',
   'R3 as is, LED resistor to 680Ω',
   'set the LED resistor to 680Ω and leave R3 as is',
-  'LED 저항 680Ω으로 바꿔줘. R3는 건드리지 마.',
-  "don't touch R4, LED, set to 680Ω"
+  'LED 저항 680Ω으로 바꿔줘. R3는 건드리지 마.'
 ];
 
+// K1c reversed: "LED" in "don't touch R4, LED" is the diode, not R3.
 const KEEP_PHRASE_CONTROLS = [
   ['leave R1 as is and set the LED resistor to 680Ω', 680, '680Ω', '680'],
   ['leave R4 as is, LED resistor 680Ω', 680, '680Ω', '680'],
-  ['keep R4, set the LED resistor to 4.7k', 4700, '4.7k', '4700']
+  ['keep R4, set the LED resistor to 4.7k', 4700, '4.7k', '4700'],
+  ["don't touch R4, LED, set to 680Ω", 680, '680Ω', '680']
 ];
 
 test('every keep phrase naming the edit target (\'as is\', \'as-is\', \'untouched\', \'the way it is\', \'be\', ko 그대로/손대지 말고) is RESISTOR_AMBIGUOUS', async () => {
