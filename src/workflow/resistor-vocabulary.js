@@ -597,6 +597,56 @@ const PERMIT_PHRASES = [
 // "if" is not a function word. These phrases are the only place it is filler.
 const POLITE_IF_PHRASES = ['if possible', 'if you can', 'if you could'];
 
+// Comparison and discourse asides. They are not a resistor name. A word is
+// filler only when every copy of it sits inside one of these phrases, so a
+// real "기준 저항" or "골든 저항" in the same sentence stays a modifier.
+// 어쨌든 / 어떻든 count only beside an LED-resistor synonym. 언제든 and 뭐든
+// are not in this list. Bare 든 is still the choice ending, not these phrases.
+const ASIDE_PHRASES = Object.freeze([
+  Object.freeze({ source: String.raw`(?<![가-힣])어쨌든(?![가-힣])`, needsLed: true }),
+  Object.freeze({ source: String.raw`(?<![가-힣])어떻든(?![가-힣])`, needsLed: true }),
+  Object.freeze({ source: String.raw`(?<![가-힣])(?:골든\s+)?샘플처럼(?![가-힣])`, needsLed: false }),
+  Object.freeze({ source: String.raw`(?<![가-힣])(?:골든\s+)?샘플과\s+같게(?![가-힣])`, needsLed: false }),
+  Object.freeze({ source: String.raw`(?<![가-힣])골든\s+보드\s+기준으로(?![가-힣])`, needsLed: false })
+]);
+
+function asideTokenStem(token) {
+  const cleaned = String(token ?? '').replace(rx("^[(\"'`[•·±<>→⇒~∼〜=]+|[)\\]\"'`,.:;?？!！<>→⇒~∼〜=]+$", "gu"), '');
+  return stripParticle(cleaned);
+}
+
+function asideSpans(text) {
+  const raw = String(text ?? '');
+  const led = textHasLedResistorSynonym(raw);
+  const spans = [];
+  for (const phrase of ASIDE_PHRASES) {
+    if (phrase.needsLed && !led) continue;
+    for (const match of raw.matchAll(rx(phrase.source, 'gu'))) {
+      const start = match.index ?? 0;
+      spans.push([start, start + match[0].length]);
+    }
+  }
+  return spans;
+}
+
+export function isAsideFiller(word, text) {
+  const key = String(word ?? '');
+  if (!key) return false;
+  const raw = String(text ?? '');
+  const spans = asideSpans(raw);
+  if (spans.length === 0) return false;
+  let saw = false;
+  for (const match of raw.matchAll(rx("\\S+", "gu"))) {
+    if (asideTokenStem(match[0]) !== key) continue;
+    saw = true;
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const inside = spans.some(([from, to]) => start < to && end > from);
+    if (!inside) return false;
+  }
+  return saw;
+}
+
 // Predicate-final syllables -거나 already sits on (하 in 하거나, 꾸 in 바꾸거나,
 // 두 in 두거나). Bare 든 is that same ending only after one of these, or when
 // 말든 follows. Lexical 든 (어쨌든, 얼마든, 골든, 무엇이든, 뭐든) is not a stem.
@@ -808,7 +858,8 @@ export function vocabularyAllowLists() {
     permitPhrases: PERMIT_PHRASES,
     counterWords: COUNTER_WORDS,
     counterLeadWords: COUNTER_LEAD_WORDS,
-    politeIfPhrases: POLITE_IF_PHRASES
+    politeIfPhrases: POLITE_IF_PHRASES,
+    asidePhrases: ASIDE_PHRASES.map((phrase) => phrase.source)
   };
 }
 
@@ -1491,6 +1542,7 @@ function recognizedWord(word, clause, index = -1) {
   if (!word) return true;
   if (isNegationOrAlternativeWord(word)) return true;
   if (isPoliteIfFiller(word, clause)) return true;
+  if (isAsideFiller(word, clause)) return true;
   // A non-ohm measurement beside a synonym fragment that is not the modifier
   // is leftover. "at 3.3V" and "20mA" on the resistor phrase stay values.
   if (isNonOhmMeasurement(word) && clauseHasLooseSynonymFragment(clause)) return false;

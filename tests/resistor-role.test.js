@@ -2657,6 +2657,88 @@ test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', 
   assert.deepEqual(failures, []);
 });
 
+test('a discourse or golden-sample aside still sets the LED resistor to 680Ω', () => {
+  const spec = seriesSpec('1k');
+  const applies = [
+    '어쨌든 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항은 어쨌든 680Ω으로',
+    '어떻든 LED 저항 680Ω으로 바꿔줘',
+    '골든 샘플처럼 LED 저항 680Ω으로',
+    '골든 보드 기준으로 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항 680Ω으로, 골든 샘플과 같게',
+    '샘플처럼 LED 저항 680Ω으로'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision, spec), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const ledBoard = seriesLedBoard();
+  for (const prompt of [
+    'LED 저항 680Ω으로 바꾸든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든 말든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 하든 R4는 4.7k 그대로',
+    'LED 저항 680Ω으로 바꾸거나요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든지요 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나도 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든가나 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나요, R4는 4.7k로 유지',
+    'keep the LED circuit, set the LED resistor to 680Ω',
+    'keep the LED, set it to 680Ω'
+  ]) {
+    assertAmbiguousKeep(ledBoard, prompt);
+  }
+
+  const unclear = resistorTargetUnclearMessage('680');
+  for (const prompt of [
+    'set the LED resistor to 680Ω with current limit 10mA',
+    'set the LED resistor to 680Ω, current limit 10mA',
+    'set the LED resistor to 680Ω for a 10mA current limit',
+    'LED 저항 680Ω, 전류 제한 10mA'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.message, unclear, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  }
+
+  const unsupported = resistorRefUnsupportedMessage('R3');
+  for (const prompt of ['R4 저항 680Ω으로', '파란 저항 10k', '큰 저항 10k로', '기준 저항 680Ω으로', '골든 저항 680Ω으로']) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
+    assert.equal(decision.message, unsupported, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+  const missing = classifyExistingProjectRequest('R7 저항 680Ω으로', spec);
+  assert.equal(missing.mode, 'refuse');
+  assert.equal(missing.code, 'RESISTOR_REF_NOT_FOUND');
+  assert.equal(missing.edit, undefined);
+  const whenever = classifyExistingProjectRequest('언제든 LED 저항 680Ω으로 바꿔줘', spec);
+  assert.equal(whenever.code, 'RESISTOR_REF_UNSUPPORTED');
+  const whatever = classifyExistingProjectRequest('뭐든 LED 저항 680Ω으로', spec);
+  assert.equal(whatever.mode, 'refuse');
+  assert.equal(whatever.code, undefined);
+  assert.equal(blocksBeforeProvider('뭐든 LED 저항 680Ω으로', whatever), false);
+  const voltageBasis = classifyExistingProjectRequest('LED 저항 3.3V 기준으로', spec);
+  assert.notEqual(voltageBasis.mode, 'merge');
+  assert.equal(voltageBasis.edit, undefined);
+});
+
 // Part (c) outcome for each r35 probe. A valued keep is dropped. One remaining
 // LED resistor and one value apply on R3. A keep with nothing left stays
 // ambiguous. The map is the sentence list and the expected outcome.

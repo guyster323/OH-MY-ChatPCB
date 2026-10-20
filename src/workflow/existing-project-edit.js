@@ -18,6 +18,7 @@ import {
   hasMalformedRkm,
   RKM_FRACTION_SEPARATOR,
   isAdviceQuestion,
+  isAsideFiller,
   isCounterFollow,
   isCounterLead,
   isDemonstrativeWord,
@@ -2853,6 +2854,7 @@ function stemWord(word) {
 }
 
 function isIgnorableWord(word, text) {
+  if (isAsideFiller(word, text)) return true;
   if (isFunctionWord(word) || isEditVerbWord(word) || isModalOrParticleWord(word)) return true;
   if (isNegationOrAlternativeWord(word)) return true;
   if (isPoliteIfFiller(word, text)) return true;
