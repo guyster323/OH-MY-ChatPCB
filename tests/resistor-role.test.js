@@ -1573,6 +1573,8 @@ test('every LED-resistor synonym in a keep clause is RESISTOR_AMBIGUOUS', () => 
   }
   const failures = [];
   for (const synonym of LED_RESISTOR_SYNONYMS) {
+    // "{led}" is the board's status LED ref. The alias property test fills it in.
+    if (synonym.includes('{led}')) continue;
     for (const lang of ['en', 'ko']) {
       for (const position of LED_SYNONYM_KEEP_POSITIONS) {
         const prompt = placeLedSynonymKeep(ledSynonymKeep(synonym, lang), ledSynonymEdit(lang), position);
@@ -3401,4 +3403,115 @@ test('property: a numbered keep cue names R3 or an LED resistor with a number an
   assert.equal(applies.length, applyWidth);
   assert.equal(ambiguousWidth > 0, true);
   assert.deepEqual(failures.slice(0, 12), []);
+});
+
+// The status LED's own D ref. D1 on seriesLedBoard; another diode is not this part.
+function statusLedRef(spec) {
+  const rows = [
+    ...(spec?.schematic?.components ?? []),
+    ...(spec?.boardProfile?.productionParts ?? [])
+  ];
+  for (const row of rows) {
+    const ref = String(row?.ref ?? '');
+    if (!/^D\d+$/iu.test(ref)) continue;
+    const role = String(row?.role ?? '');
+    const libId = String(row?.libId ?? '');
+    const value = String(row?.value ?? '');
+    if (role === 'status-led' || libId === 'ChatPCB:STATUS_LED' || value === 'STATUS_LED') return ref.toUpperCase();
+  }
+  return null;
+}
+
+function boardWithStatusLedRef(ref) {
+  const spec = seriesLedBoard('1k');
+  for (const row of [...spec.schematic.components, ...spec.boardProfile.productionParts]) {
+    if (String(row.ref).toUpperCase() === 'D1') row.ref = ref;
+  }
+  return spec;
+}
+
+// Phrases that name the LED series resistor. The D ref comes from the spec.
+function ledResistorAliasPhrases(ledRef) {
+  return [
+    'the current limiter',
+    `${ledRef}'s resistor`,
+    `the ${ledRef} resistor`,
+    'the indicator resistor',
+    'the series one',
+    `${ledRef} 저항`
+  ];
+}
+
+function aliasKeepSentences(phrase) {
+  return [
+    `keep ${phrase} and set R3 to 680Ω`,
+    `keep ${phrase}, set the LED resistor to 680Ω`,
+    `keep R4 or ${phrase} and set the LED resistor to 680Ω`,
+    `R4 또는 ${phrase}은 그대로 두고 R3 680Ω으로`
+  ];
+}
+
+test('property: an LED-resistor alias keep is RESISTOR_AMBIGUOUS and a direct edit applies R3', () => {
+  const boards = [seriesLedBoard('1k'), boardWithStatusLedRef('D7')];
+  const failures = [];
+  for (const spec of boards) {
+    const ledRef = statusLedRef(spec);
+    const phrases = ledResistorAliasPhrases(ledRef);
+    const ambiguous = phrases.flatMap((phrase) => aliasKeepSentences(phrase));
+    const applies = [
+      'keep R4 or R5 and set the LED resistor to 680Ω',
+      'keep the LED, set the LED resistor to 680Ω',
+      `keep ${ledRef}, set the LED resistor to 680Ω`,
+      `keep ${ledRef} and change the LED resistor to 680Ω`,
+      'set the current limiter to 680Ω',
+      `${ledRef} 저항 680Ω으로`,
+      'set the indicator resistor to 680Ω',
+      'set the series one to 680Ω'
+    ];
+    const r3 = componentValue(spec, 'R3');
+    for (const prompt of ambiguous) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+        failures.push(`${ledRef} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    }
+    for (const prompt of applies) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+        failures.push(`${ledRef} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+        if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      }
+    }
+    const otherRef = ledRef === 'D1' ? 'D7' : 'D1';
+    const otherEdit = `${otherRef} 저항 680Ω으로`;
+    const otherDecision = classifyExistingProjectRequest(otherEdit, spec);
+    if (otherDecision.mode === 'merge' && otherDecision.edit?.ref === 'R3') {
+      failures.push(`${otherEdit} on ${ledRef} applied R3`);
+    }
+    // "current limit" / "current-limit" are modifiers. They are not the
+    // "current limiter" alias, so a keep or an edit of them stays unclear
+    // unless a resistor noun is present.
+    for (const prompt of [
+      'set the current limit to 680Ω',
+      'set the current-limit to 680Ω',
+      'keep the current-limit and set R3 to 680Ω',
+      'set the indicator to 680Ω'
+    ]) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_TARGET_UNCLEAR') {
+        failures.push(`${ledRef} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}`);
+      }
+    }
+    assert.equal(phrases.length, 6);
+    assert.equal(ambiguous.length, phrases.length * 4);
+  }
+  assert.deepEqual(failures.slice(0, 16), []);
 });

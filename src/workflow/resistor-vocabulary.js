@@ -729,11 +729,17 @@ export function isShuntSenseWord(word) {
 
 // One LED-resistor phrase list. Target classification and keep classification
 // both read this set. A second copy drops a hyphen or a Korean spacing.
+// "current limiter", "indicator resistor", and "the series one" name that part
+// on their own. "{led}" rows are the same set with the status LED ref filled in.
 export const LED_RESISTOR_SYNONYMS = Object.freeze([
   'current-limiting',
   'current limiting',
   'current-limit',
+  'current limiter',
+  'indicator resistor',
   'series',
+  'series one',
+  'the series one',
   'LED series',
   'status LED resistor',
   '직렬',
@@ -747,7 +753,11 @@ export const LED_RESISTOR_SYNONYMS = Object.freeze([
   '엘이디',
   '엘예디',
   '상태',
-  '발광다이오드'
+  '발광다이오드',
+  "{led}'s resistor",
+  'the {led} resistor',
+  '{led} resistor',
+  '{led} 저항'
 ]);
 
 function synonymFold(text) {
@@ -758,11 +768,16 @@ function synonymCompact(text) {
   return lower(text).replace(/[-\s]+/g, '');
 }
 
-const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.map((synonym) => {
+function escapeSynonymBody(folded) {
+  return folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+}
+
+// "{led}" waits for the status LED ref. The other rows are ready to match.
+const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.filter((synonym) => !synonym.includes('{led}')).map((synonym) => {
   const folded = synonymFold(synonym);
   const packed = synonymCompact(synonym);
   const ascii = /^[a-z0-9 ]+$/.test(folded);
-  const body = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+  const body = escapeSynonymBody(folded);
   return {
     folded,
     packed,
@@ -772,17 +787,92 @@ const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.map((synonym) => {
   };
 });
 
+const LED_REF_SYNONYM_TEMPLATES = LED_RESISTOR_SYNONYMS.filter((synonym) => synonym.includes('{led}'));
+
+function ledRefToken(ledRef) {
+  const ref = String(ledRef ?? '').trim();
+  if (!/^[A-Za-z]{1,3}\d+$/u.test(ref)) return null;
+  return ref;
+}
+
+function ledRefSynonymMatchers(ledRef) {
+  const ref = ledRefToken(ledRef);
+  if (!ref) return [];
+  return LED_REF_SYNONYM_TEMPLATES.map((synonym) => {
+    const folded = synonymFold(synonym.replaceAll('{led}', ref));
+    const packed = synonymCompact(folded);
+    const body = escapeSynonymBody(folded);
+    return {
+      folded,
+      packed,
+      ascii: true,
+      words: folded.split(' ').filter(Boolean),
+      re: new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`, 'iu')
+    };
+  });
+}
+
+// A modifier phrase ("current limiting", "current limit", "series") still needs
+// the resistor noun. A bare name is the part by itself: "current limiter",
+// "the series one". "limit" stays the modifier inside "current-limit".
+function synonymIsBareName(folded) {
+  const words = folded.split(' ').filter(Boolean);
+  if (words.length < 2) return false;
+  if (words.some((word) => RESISTOR_NOUNS.has(word))) return false;
+  const hasOutside = words.some((word) => !LED_WORDS.has(word) && !FUNCTION_WORDS.has(word) && word !== 'limit');
+  const hasFunctionWithLed = words.some((word) => FUNCTION_WORDS.has(word)) && words.some((word) => LED_WORDS.has(word));
+  return hasOutside || hasFunctionWithLed;
+}
+
+function matcherHits(item, joined, compact) {
+  return item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed));
+}
+
 function stripYong(word) {
   const key = lower(word);
   return key.length > 1 && key.endsWith('용') ? key.slice(0, -1) : key;
 }
 
-export function textHasLedResistorSynonym(text) {
+function synonymMatchers(ledRef) {
+  const extra = ledRefSynonymMatchers(ledRef);
+  return extra.length === 0 ? LED_RESISTOR_SYNONYM_MATCHERS : LED_RESISTOR_SYNONYM_MATCHERS.concat(extra);
+}
+
+export function textHasLedResistorSynonym(text, ledRef = null) {
+  const joined = synonymFold(text);
+  const compact = synonymCompact(text);
+  return synonymMatchers(ledRef).some((item) => matcherHits(item, joined, compact));
+}
+
+// "current limiter" and "the series one" name the series resistor with no
+// resistor noun. "current limit" and "series" stay modifiers.
+export function textHasBareLedResistorName(text) {
   const joined = synonymFold(text);
   const compact = synonymCompact(text);
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
-    item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed))
+    synonymIsBareName(item.folded) && matcherHits(item, joined, compact)
   ));
+}
+
+function ledRefReplacement(template) {
+  return template.includes('저항') ? 'LED 저항' : 'the LED resistor';
+}
+
+// The {led} rows of LED_RESISTOR_SYNONYMS, written as the canonical LED phrase
+// so target and keep classification read one set.
+export function expandLedRefResistorAliases(text, ledRef) {
+  const ref = ledRefToken(ledRef);
+  const raw = String(text ?? '');
+  if (!ref) return raw;
+  const templates = LED_REF_SYNONYM_TEMPLATES.slice().sort((left, right) => right.length - left.length);
+  let next = raw;
+  for (const template of templates) {
+    const source = template.replaceAll('{led}', ref);
+    let body = escapeSynonymBody(source).replace(/'/g, "['’]");
+    if (template.includes('저항')) body = body.replace('\\s+', '\\s*');
+    next = next.replace(new RegExp(`(?<![A-Za-z0-9])${body}(?![A-Za-z0-9])`, 'giu'), ledRefReplacement(template));
+  }
+  return next;
 }
 
 // A token of the shared set, including "limit" inside "current-limit" and "제한용".
@@ -809,6 +899,10 @@ function modifierFitsSynonym(word, item) {
 // Modifiers name the LED series resistor when they are one phrase from
 // LED_RESISTOR_SYNONYMS. "current sense" stays a shunt. Extra words that are
 // not part of that phrase and not LED allow-words refuse the phrase.
+function synonymHeadWords(item) {
+  return item.words.filter((word) => !RESISTOR_NOUNS.has(word) && !FUNCTION_WORDS.has(word));
+}
+
 export function matchesLedResistorModifiers(content) {
   const words = Array.isArray(content) ? content.map((word) => lower(word)).filter(Boolean) : [];
   if (words.length === 0) return false;
@@ -816,8 +910,13 @@ export function matchesLedResistorModifiers(content) {
   const joined = synonymFold(words.join(' '));
   const compact = synonymCompact(words.join(''));
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
-    const hit = item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed));
-    if (!hit) return false;
+    const hit = matcherHits(item, joined, compact);
+    if (hit && words.every((word) => modifierFitsSynonym(word, item))) return true;
+    // "indicator resistor" is the phrase. The noun is separate, so the head
+    // "indicator" is the modifier in front of 저항/resistor.
+    const heads = synonymHeadWords(item);
+    if (heads.length === 0 || heads.length !== words.length) return false;
+    if (!heads.every((word, index) => word === synonymFold(words[index]))) return false;
     return words.every((word) => modifierFitsSynonym(word, item));
   });
 }
@@ -1538,6 +1637,21 @@ function isNonOhmMeasurement(word) {
   return rx("^\\d+/\\d+[wW]$").test(text);
 }
 
+// A bare name ("current limiter", "the series one") is the part, so its words
+// are covered with no resistor noun. A modifier ("current limit", "current-limit")
+// is covered only directly before the resistor noun.
+function wordSitsInMatchedSynonym(word, clause) {
+  const key = synonymFold(word);
+  if (!key) return false;
+  const joined = synonymFold(clause);
+  const compact = synonymCompact(clause);
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
+    synonymIsBareName(item.folded)
+    && (item.words.includes(key) || item.folded === key)
+    && matcherHits(item, joined, compact)
+  ));
+}
+
 function recognizedWord(word, clause, index = -1) {
   if (!word) return true;
   if (isNegationOrAlternativeWord(word)) return true;
@@ -1548,6 +1662,7 @@ function recognizedWord(word, clause, index = -1) {
   if (isNonOhmMeasurement(word) && clauseHasLooseSynonymFragment(clause)) return false;
   if (rx("^\\d").test(word) || rx("[Ω옴%]").test(word) || rx("^(?:ohm|ohms|meg)$", "i").test(word)) return true;
   if (isLedAllowWord(word) || isFunctionWord(word) || isEditVerbWord(word)) return true;
+  if (wordSitsInMatchedSynonym(word, clause)) return true;
   if (index >= 0 && isLedResistorSynonymPiece(word) && modifierPieceIndexes(clause).has(index)) return true;
   if (isModalOrParticleWord(word) || isDemonstrativeWord(word)) return true;
   if (NOISE_WORDS.has(lower(word)) || NOISE_WORDS.has(word)) return true;

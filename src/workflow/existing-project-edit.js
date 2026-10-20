@@ -48,6 +48,8 @@ import {
   isUnboundMeasureAfter,
   libIdNamesResistor,
   specRoleNamesResistor,
+  expandLedRefResistorAliases,
+  textHasBareLedResistorName,
   textHasKnownRole,
   textHasLedResistorSynonym,
   textHasLengthObject,
@@ -500,9 +502,10 @@ function clientLanguage(locale) {
 // full board description, so a new project or a full regeneration keeps its preview.
 export function classifyExistingProjectRequest(prompt, existingSpec, userPrompt) {
   if (!existingSpec || typeof existingSpec !== 'object') return { mode: 'regenerate' };
-  const editText = normalizeMatchText(prompt);
+  const ledRef = ledResistorAliasRef(existingSpec);
+  const editText = expandLedRefResistorAliases(normalizeMatchText(prompt), ledRef);
   const hasUser = typeof userPrompt === 'string' && userPrompt.trim().length > 0;
-  const intentText = hasUser ? normalizeMatchText(userPrompt) : editText;
+  const intentText = hasUser ? expandLedRefResistorAliases(normalizeMatchText(userPrompt), ledRef) : editText;
   const separateIntent = hasUser && intentText.trim() !== editText.trim();
   if (!separateIntent) return classifyPrompt(editText, existingSpec);
 
@@ -2309,6 +2312,15 @@ function seriesLedDesignator(spec) {
   return null;
 }
 
+// The generator draws the status LED as D1. A spec that saved the series
+// resistor but not that diode still uses D1 for "{led}'s resistor" / "{led} 저항".
+function ledResistorAliasRef(spec) {
+  const found = seriesLedDesignator(spec);
+  if (found) return found;
+  if (!seriesResistorRef(spec)) return null;
+  return 'D1';
+}
+
 function textWithSeriesLedAsWord(text, spec) {
   const ledRef = seriesLedDesignator(spec);
   const raw = String(text ?? '');
@@ -2335,7 +2347,8 @@ function textWithSeriesLedAsWord(text, spec) {
 }
 
 export function resistorEditCoverage(text, spec = null) {
-  return assessRequestCoverage(textWithSeriesLedAsWord(text, spec));
+  const expanded = expandLedRefResistorAliases(text, ledResistorAliasRef(spec));
+  return assessRequestCoverage(textWithSeriesLedAsWord(expanded, spec));
 }
 
 // "as is" walks back through the verb, so "keep the LED as is" is one object.
@@ -2435,6 +2448,7 @@ function ledResistorEditSpans(text) {
   const spans = [];
   const alternatives = [];
   for (const synonym of LED_RESISTOR_SYNONYMS) {
+    if (synonym.includes('{led}')) continue;
     const folded = String(synonym).toLowerCase();
     const body = ledResistorSynonymBody(synonym);
     if (!body) continue;
@@ -2536,6 +2550,8 @@ function addKeptIdentity(keys, fragment, series, side) {
 // The edit remainder still treats a bare LED as the series resistor.
 function namesSeriesLed(fragment, side = 'edit') {
   if (resistorNounKinds(fragment).includes('led')) return true;
+  // "current limiter" and "the series one" are the series resistor with no noun.
+  if (side === 'keep' && textHasBareLedResistorName(fragment)) return true;
   if (side === 'keep') return false;
   return /\bleds?\b|엘이디|엘예디/iu.test(fragment);
 }
