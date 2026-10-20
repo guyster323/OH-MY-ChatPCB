@@ -1739,3 +1739,103 @@ test('property: a keep-only cue, ref, and value never changes R3', () => {
   assert.equal(cases.length > 0, true);
   assert.deepEqual(failures.slice(0, 12), []);
 });
+
+const SELF_VALUED_KEEP_PROMPTS = [
+  'set the LED resistor to 680Ω but keep R3 at 1k',
+  'keep R3 at 1k, set the LED resistor to 680Ω',
+  'set the LED resistor to 680Ω but keep the LED resistor at 1k',
+  'keep the LED resistor at 1k, set the LED resistor to 680Ω',
+  'keep the current-limiting resistor at 1k, LED resistor 680Ω',
+  'set the LED resistor to 680Ω but keep the series resistor at 1k',
+  'R3는 1k로 유지하고 LED 저항은 680Ω으로',
+  'LED 저항은 680Ω으로 바꾸고 LED 저항은 1k로 유지',
+  'keep the status LED resistor at 1k and set the LED resistor to 680Ω'
+];
+
+test('a valued keep of R3 or an LED-resistor synonym is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  for (const prompt of SELF_VALUED_KEEP_PROMPTS) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
+const SELF_KEEP_TARGETS = ['R3', 'r3', 'the LED resistor', 'the current-limiting resistor', 'LED 저항'];
+const SELF_KEEP_VALUES = ['1k', '470 ohms', '2.2kΩ'];
+const SELF_KEEP_EDITS = ['680Ω', '330 ohms'];
+
+function selfValuedKeepClause(cue, target, value, lang) {
+  if (lang === 'ko') {
+    if (cue.slot === 'before') return `${target}는 ${value}로 ${cue.text}`;
+    if (cue.slot === 'leave') return `leave ${target}는 ${value}로 ${cue.text}`;
+    return `${cue.text} ${target}는 ${value}로`;
+  }
+  if (cue.slot === 'before') return `${target} at ${value} ${cue.text}`;
+  if (cue.slot === 'leave') return `leave ${target} at ${value} ${cue.text}`;
+  return `${cue.text} ${target} at ${value}`;
+}
+
+function selfValuedKeepEdit(value, lang) {
+  return lang === 'ko' ? `LED 저항은 ${value}으로` : `set the LED resistor to ${value}`;
+}
+
+function placeSelfValuedKeep(keep, edit, order, lang) {
+  if (order === 'first') return lang === 'ko' ? `${keep} ${edit}` : `${keep}, ${edit}`;
+  return lang === 'ko' ? `${edit} 바꾸고 ${keep}` : `${edit} but ${keep}`;
+}
+
+test('property: a valued keep of R3 or an LED-resistor synonym never changes R3', () => {
+  const spec = seriesSpec('1k');
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`self valued-keep property seed ${seed}`);
+  const cues = KEEP_CUES.filter((cue) => cue.slot !== 'filler');
+  const cases = [];
+  for (const cue of cues) {
+    for (const target of SELF_KEEP_TARGETS) {
+      for (const value of SELF_KEEP_VALUES) {
+        for (const editValue of SELF_KEEP_EDITS) {
+          for (const order of ['first', 'last']) {
+            for (const lang of ['en', 'ko']) {
+              const keep = selfValuedKeepClause(cue, target, value, lang);
+              const edit = selfValuedKeepEdit(editValue, lang);
+              cases.push(placeSelfValuedKeep(keep, edit, order, lang));
+            }
+          }
+        }
+      }
+    }
+  }
+  shuffleItems(rng, cases);
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of cases) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode === 'merge' && decision.edit?.ref === 'R3') {
+      failures.push(`${prompt} => merge ${decision.edit.ohms}`);
+    }
+    if (componentValue(spec, 'R3') !== r3) failures.push(`${prompt} mutated`);
+    if (JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} spec`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== r3) failures.push(`${prompt} R3 ${componentValue(next, 'R3')}`);
+    }
+  }
+  assert.equal(
+    cases.length,
+    cues.length * SELF_KEEP_TARGETS.length * SELF_KEEP_VALUES.length * SELF_KEEP_EDITS.length * 2 * 2
+  );
+  assert.equal(cases.length > 0, true);
+  assert.deepEqual(failures.slice(0, 12), []);
+});

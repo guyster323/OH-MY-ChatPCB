@@ -32,6 +32,7 @@ import {
   isAmbiguousI2cPreservation,
   isDontDeleteClause,
   isKoreanRequestStem,
+  decimalBeforeKeepFragments,
   keepClauseSpans,
   isPermittedEdit,
   isPoliteIfFiller,
@@ -505,7 +506,7 @@ function classifySeparateIntent(editText, intentText, spec) {
   if (isMixedRemovalAndEdit(removal, fromUser)) return mixedRemovalAndEdit();
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
-  const valuedKeep = valuedKeepRefusal(intentText);
+  const valuedKeep = valuedKeepRefusal(intentText, spec);
   if (valuedKeep?.mode) return valuedKeep;
   const keptBody = valuedKeep?.remainder ?? intentText;
   const keptUser = keptBody === intentText ? fromUser : nonRemovalEdit(keptBody);
@@ -536,7 +537,7 @@ function classifyEditText(text, spec) {
   // Bind a value inside a keep clause before that clause is stripped. The ohms
   // name the kept part, so they must not land on R3. A valued keep is dropped
   // and the remainder is classified when one LED resistor and one value stay.
-  const valuedKeep = valuedKeepRefusal(text);
+  const valuedKeep = valuedKeepRefusal(text, spec);
   if (valuedKeep?.mode) return valuedKeep;
   const keptBody = valuedKeep?.remainder ?? text;
   const keptResistor = keptBody === text ? resistor : nonRemovalEdit(keptBody);
@@ -672,6 +673,21 @@ function distinctRemainderOhms(text) {
   return new Set(parsed.valid.map((amount) => amount.ohmsText)).size;
 }
 
+// "R3 at 2.2kΩ as-is" hides R3 behind the decimal. The span list still treats
+// that dot as a boundary, so a keep of another ref is not stripped. A keep of
+// the series ref, or of an LED-resistor synonym, is ambiguous instead.
+function decimalKeepNamesEditTarget(text, spec) {
+  const series = seriesResistorRef(spec);
+  if (!series) return false;
+  const seriesKey = String(series).toUpperCase();
+  for (const fragment of decimalBeforeKeepFragments(text)) {
+    const kept = new Set();
+    addKeptIdentity(kept, fragment, series, 'keep');
+    if (kept.has(seriesKey)) return true;
+  }
+  return false;
+}
+
 function ambiguousValuedKeep() {
   return {
     mode: 'refuse',
@@ -683,13 +699,19 @@ function ambiguousValuedKeep() {
 // A valued keep names some other part. Drop that span and its ohms. One LED
 // resistor and one value left is that edit. Nothing left stays ambiguous.
 // Anything else refuses the same way as the whole-request keep.
-function valuedKeepRefusal(text) {
+// A keep of R3, or of an LED-resistor synonym, is read on the raw text.
+// Stripping that clause first would leave a clean edit and change R3.
+function valuedKeepRefusal(text, spec) {
+  // A decimal value hides a before-cue from the span list. Refuse that keep
+  // when it names this edit before the empty-span return.
+  if (decimalKeepNamesEditTarget(text, spec)) return ambiguousValuedKeep();
   const found = keepClauseSpans(text);
   const objects = found.objects.filter((object) => object.valued === true);
   if (objects.length === 0) return null;
   // A capacitor or cable keep keeps its own refusal. A resistor keep that
   // carries the ohms must not lend that value to R3.
   if (objects.every((object) => valuedKeepFragmentDefers(text.slice(object.start, object.end)))) return null;
+  if (keepNamesEditTarget(text, spec)) return ambiguousValuedKeep();
   const dropping = objects.filter((object) => !valuedKeepFragmentDefers(text.slice(object.start, object.end)));
   const ranges = dropping.map((object) => [object.start, object.end]);
   for (const cue of found.cues) {

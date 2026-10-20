@@ -189,9 +189,29 @@ function findCueHits(text, cueText) {
 
 const KEEP_CLAUSE_MARKS = [',', '.', '?', '!', ';', '\n', '。', '？', '！'];
 
-function keepClauseOrigin(text, index) {
+// "2.2kΩ" is one value. Callers that pass skipDecimal still see the words
+// before that dot. The default keeps the dot as a boundary.
+function isDecimalPoint(text, index) {
+  return text[index] === '.'
+    && /\d/u.test(text[index - 1] ?? '')
+    && /\d/u.test(text[index + 1] ?? '');
+}
+
+function keepClauseOrigin(text, index, skipDecimal = false) {
   let boundary = -1;
-  for (const mark of KEEP_CLAUSE_MARKS) boundary = Math.max(boundary, text.lastIndexOf(mark, index - 1));
+  for (const mark of KEEP_CLAUSE_MARKS) {
+    let from = index - 1;
+    while (from >= 0) {
+      const at = text.lastIndexOf(mark, from);
+      if (at < 0) break;
+      if (skipDecimal && mark === '.' && isDecimalPoint(text, at)) {
+        from = at - 1;
+        continue;
+      }
+      boundary = Math.max(boundary, at);
+      break;
+    }
+  }
   return boundary < 0 ? 0 : boundary + 1;
 }
 
@@ -312,8 +332,8 @@ function takenValueIndexes(taken) {
   return valueAt;
 }
 
-function keepObjectBefore(text, cueStart) {
-  const origin = keepClauseOrigin(text, cueStart);
+function keepObjectBefore(text, cueStart, skipDecimal = false) {
+  const origin = keepClauseOrigin(text, cueStart, skipDecimal);
   const words = [...text.slice(origin, cueStart).matchAll(/\S+/gu)];
   const taken = [];
   let tookObject = false;
@@ -408,6 +428,34 @@ function leaveComplementObject(text, verbEnd) {
     object: [verbEnd + lead, verbEnd + best.at],
     cue: [verbEnd + best.at, verbEnd + best.end]
   };
+}
+
+// A before-cue whose object sits left of a decimal value ("R3 at 2.2kΩ as-is")
+// is invisible to keepClauseSpans, because that dot is still a boundary there.
+// The fragment is only for "does this name the edit target?". It is not stripped.
+export function decimalBeforeKeepFragments(text) {
+  const raw = String(text ?? '');
+  const fragments = [];
+  const occupied = [];
+  const phrases = KEEP_CUES
+    .filter((cue) => cue.slot === 'before')
+    .slice()
+    .sort((left, right) => right.text.length - left.text.length);
+  for (const cue of phrases) {
+    for (const [start, end] of findCueHits(raw, cue.text)) {
+      if (keepSpansOverlap(occupied, start, end)) continue;
+      if (koreanKeepCueNegated(raw.slice(end)) || negatedKeepVerbBefore(raw, start)) continue;
+      if (keepObjectBefore(raw, start)) {
+        occupied.push([start, end]);
+        continue;
+      }
+      const object = keepObjectBefore(raw, start, true);
+      if (!object) continue;
+      occupied.push([start, end]);
+      fragments.push(raw.slice(object[0], object[1]));
+    }
+  }
+  return fragments;
 }
 
 // Objects are the kept part. Cues are the phrase itself, blanked out of the
