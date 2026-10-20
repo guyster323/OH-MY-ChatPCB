@@ -2217,6 +2217,149 @@ test('a valued keep joined by or, 또는, or 아니면 is RESISTOR_AMBIGUOUS', (
   }
 });
 
+test('a verb-ending or 혹은 choice keep is RESISTOR_AMBIGUOUS and a but or 고 keep applies R3', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const ambiguous = [
+    'LED 저항 680Ω으로 바꾸거나 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든지 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든가 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸던지 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 혹은 R4는 4.7k로 유지',
+    'LED는 그대로 두고 저항 680Ω'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const applies = [
+    'set the LED resistor to 680Ω but keep R4 at 4.7k',
+    'LED 저항 680Ω으로 바꾸고 R4는 4.7k로 유지'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
+const CHOICE_KEEP_JOINERS = [
+  { kind: 'en', text: 'or' },
+  { kind: 'ko-word', text: '또는' },
+  { kind: 'ko-word', text: '아니면' },
+  { kind: 'ko-word', text: '혹은' },
+  { kind: 'ko-end', text: '거나' },
+  { kind: 'ko-end', text: '든지' },
+  { kind: 'ko-end', text: '든가' },
+  { kind: 'ko-end', text: '던지' }
+];
+
+const CONTROL_KEEP_JOINERS = [
+  { kind: 'en', text: 'but' },
+  { kind: 'en', text: 'and' },
+  { kind: 'ko-end', text: '고' },
+  { kind: 'ko-word', text: '하고' }
+];
+
+const VALUED_KEEP_CLAUSES = [
+  { en: 'R4 at 4.7k', ko: 'R4는 4.7k로 유지' },
+  { en: 'R1 at 5.1k', ko: 'R1은 5.1k로 유지' },
+  { en: 'the pull-ups at 10k', ko: '풀업은 10k로 유지' }
+];
+
+function valuedKeepJoinerSentence(joiner, keep, order) {
+  if (joiner.kind === 'en') {
+    const kept = `keep ${keep.en}`;
+    const edit = 'set the LED resistor to 680Ω';
+    return order === 'edit-first' ? `${edit} ${joiner.text} ${kept}` : `${kept} ${joiner.text} ${edit}`;
+  }
+  if (joiner.kind === 'ko-word') {
+    const edit = 'LED 저항 680Ω으로';
+    return order === 'edit-first' ? `${edit} ${joiner.text} ${keep.ko}` : `${keep.ko} ${joiner.text} ${edit}`;
+  }
+  const edit = `LED 저항 680Ω으로 바꾸${joiner.text}`;
+  const kept = keep.ko.replace(/유지$/u, `유지하${joiner.text}`);
+  return order === 'edit-first' ? `${edit} ${keep.ko}` : `${kept} LED 저항 680Ω으로`;
+}
+
+test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a control joiner applies R3', () => {
+  const spec = seriesSpec('1k');
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  const orders = ['edit-first', 'keep-first'];
+  const ambiguous = [];
+  const applies = [];
+  for (const joiner of CHOICE_KEEP_JOINERS) {
+    for (const keep of VALUED_KEEP_CLAUSES) {
+      for (const order of orders) ambiguous.push(valuedKeepJoinerSentence(joiner, keep, order));
+    }
+  }
+  for (const joiner of CONTROL_KEEP_JOINERS) {
+    for (const keep of VALUED_KEEP_CLAUSES) {
+      for (const order of orders) applies.push(valuedKeepJoinerSentence(joiner, keep, order));
+    }
+  }
+  shuffleItems(rng, ambiguous);
+  shuffleItems(rng, applies);
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== r3) failures.push(`${prompt} R3 ${componentValue(next, 'R3')}`);
+    }
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  assert.equal(ambiguous.length, CHOICE_KEEP_JOINERS.length * VALUED_KEEP_CLAUSES.length * orders.length);
+  assert.equal(applies.length, CONTROL_KEEP_JOINERS.length * VALUED_KEEP_CLAUSES.length * orders.length);
+  if (failures.length > 0) console.log(`choice joiner property seed ${seed}`);
+  assert.deepEqual(failures.slice(0, 12), [], `choice joiner property seed ${seed}`);
+});
+
 // Part (c) outcome for each r35 probe. A valued keep is dropped. One remaining
 // LED resistor and one value apply on R3. A keep with nothing left stays
 // ambiguous. The map is the sentence list and the expected outcome.

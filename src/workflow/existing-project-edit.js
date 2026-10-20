@@ -50,15 +50,43 @@ import {
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
-// Coordinators are built before the table so the clause split can see them.
-// "하거나" contains 고, but that 고 is not a new clause.
+// One choice-joiner list. Coordinators that are choices use these same rows,
+// so the clause split and the valued-keep check do not keep a second word list.
+// "and", "나", and "·" coordinate a clause and are not a choice. "하거나" contains
+// 고, but that 고 is not a new clause. An ending matches (?:거나|든지|든가|던지)$
+// on one word. "or so" is an approximation, not a choice.
+const CHOICE_JOINERS = Object.freeze([
+  Object.freeze({ id: 'or', lang: 'en', re: String.raw`\bor\b`, place: 'word' }),
+  Object.freeze({ id: 'ttoneun', lang: 'ko', re: '또는', place: 'word' }),
+  Object.freeze({ id: 'animyeon', lang: 'ko', re: '아니면', place: 'word' }),
+  Object.freeze({ id: 'hogeun', lang: 'ko', re: '혹은', place: 'word' }),
+  Object.freeze({ id: 'hageona', lang: 'ko', re: '하거나', place: 'word' }),
+  Object.freeze({ id: 'geona', lang: 'ko', re: '거나', place: 'ending' }),
+  Object.freeze({ id: 'deunji', lang: 'ko', re: '든지', place: 'ending' }),
+  Object.freeze({ id: 'deunga', lang: 'ko', re: '든가', place: 'ending' }),
+  Object.freeze({ id: 'deonji', lang: 'ko', re: '던지', place: 'ending' })
+]);
+
+function choiceJoinerRow(id) {
+  return CHOICE_JOINERS.find((item) => item.id === id);
+}
+
+const CHOICE_JOINER_WORD = compileRegExp(
+  `^(?:${CHOICE_JOINERS.filter((item) => item.place === 'word').map((item) => item.re).join('|')})$`,
+  'iu'
+);
+const CHOICE_JOINER_ENDING = compileRegExp(
+  `(?:${CHOICE_JOINERS.filter((item) => item.place === 'ending').map((item) => item.re).join('|')})$`,
+  'iu'
+);
+
 const DELETION_COORDINATORS = Object.freeze([
-  Object.freeze({ id: 'or', lang: 'en', re: String.raw`\bor\b` }),
+  choiceJoinerRow('or'),
   Object.freeze({ id: 'and', lang: 'en', re: String.raw`\band\b` }),
-  Object.freeze({ id: 'hageona', lang: 'ko', re: '하거나' }),
-  Object.freeze({ id: 'geona', lang: 'ko', re: '거나' }),
+  choiceJoinerRow('hageona'),
+  choiceJoinerRow('geona'),
   Object.freeze({ id: 'na', lang: 'ko', re: '나' }),
-  Object.freeze({ id: 'ttoneun', lang: 'ko', re: '또는' }),
+  choiceJoinerRow('ttoneun'),
   Object.freeze({ id: 'dot', lang: 'ko', re: '·' })
 ]);
 
@@ -652,7 +680,8 @@ function bareGlueWord(token) {
 }
 
 function choiceJoinerWord(token) {
-  return /^(?:or|또는|아니면)$/iu.test(bareGlueWord(token));
+  const bare = bareGlueWord(token);
+  return CHOICE_JOINER_WORD.test(bare) || CHOICE_JOINER_ENDING.test(bare);
 }
 
 // A decimal in 4.7k hides a before-cue from the span list. The fragment still
@@ -669,8 +698,8 @@ function orSoApproximation(text, end) {
   return /^\s+so\b/iu.test(String(text ?? '').slice(end));
 }
 
-// "or", "또는", and "아니면" are a choice. A valued keep joined by one of them
-// stays in the sentence. "or so" is an approximation, not that choice.
+// A CHOICE_JOINERS word touches the keep. A valued keep joined by one stays in
+// the sentence. "or so" is an approximation, not that choice.
 // null tells the caller not to strip that keep.
 function choiceKeepJoiner(text, ranges) {
   for (const word of text.matchAll(/\S+/gu)) {
