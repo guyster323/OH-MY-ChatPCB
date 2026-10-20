@@ -647,10 +647,16 @@ export function isRejectedUppercaseRkm(text) {
   return match[3].length !== 1;
 }
 
-// A bare digit after the multiplier ("4k 7", "1R 5", "2M 2") is the same refusal.
+// One separator between an RKM multiplier (k/K, R/r, uppercase M) and a digit.
+// Space may repeat. Also ".", ",", "-", en dash, em dash, "/", "_", and "·".
+// "4k 7", "4k.7", "4k,7", "4k-7", "4k/7", "4k_7", "1R-5", "2M-2".
+// "4k7" has no separator. "4k 5%" is a tolerance. "1k-2k" keeps the second multiplier.
+export const RKM_FRACTION_SEPARATOR = String.raw`[.,\u2013\u2014/_\u00B7\s\-]+`;
+
+// A bare digit after the multiplier ("4k 7", "4k.7", "1R-5", "2M-2") is the same refusal.
 // "4k 5%" is not: the percent token is not a bare digit.
 export function hasMalformedRkm(text) {
-  return rx("(?:^|[^\\d.])(?:\\d+[kKrR]\\d{2,}|\\d+M\\d{2,}|\\d+(?:\\.\\d+)?\\s*[kKrRM]\\s+\\d+(?![\\d%]))(?!\\d)").test(String(text ?? ''));
+  return rx(`(?:^|[^\\d.])(?:\\d+[kKrR]\\d{2,}|\\d+M\\d{2,}|\\d+(?:\\.\\d+)?\\s*[kKrRM]${RKM_FRACTION_SEPARATOR}\\d+(?![\\d%kKrRM]))(?!\\d)`).test(String(text ?? ''));
 }
 
 function pushBreak(breaks, start, end) {

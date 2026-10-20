@@ -16,6 +16,7 @@ import {
   approximateBefore,
   assessRequestCoverage,
   hasMalformedRkm,
+  RKM_FRACTION_SEPARATOR,
   isAdviceQuestion,
   isCounterFollow,
   isCounterLead,
@@ -2764,7 +2765,7 @@ const RESISTOR_TOKEN = compileRegExp(String.raw`(?<![A-Za-z\u1100-\u11FF\u3130-\
   String.raw`\d+(?:\.\d+)?\s*(?:meg|[kKmMrR])?\s*(?:Ω|옴|ohms?)(?![A-Za-z])`,
   String.raw`\d+[rRkKmM]\d+[A-Za-z]+`,
   String.raw`\d+[rRkKmM]\d+`,
-  String.raw`\d+(?:\.\d+)?\s*[kKrRM]\s+\d+(?![\d%])`,
+  String.raw`\d+(?:\.\d+)?\s*[kKrRM]${RKM_FRACTION_SEPARATOR}\d+(?![\d%kKrRM])`,
   String.raw`\d+(?:\.\d+)?\s*meg(?![A-Za-z])`,
   String.raw`\d+(?:\.\d+)?\s*[rRkKmMuUnNpPfFgGtT](?![A-Za-z])`,
   String.raw`\d+(?:\.\d+)?[A-Za-z]{2,}`,
@@ -3009,6 +3010,15 @@ const SUFFIX_CUE_AFTER = /^\s*(?:(?:leds?|엘이디|엘예디|발광(?:\s*다이
 const SUFFIX_EDIT_BEFORE = /(?:->|→|=|\bto\b)\s*$/iu;
 const SUFFIX_EDIT_AFTER = /^\s*(?:으로|로(?!부터|서|써))/u;
 
+// "680Ω-1k" is a range. A leading dash on 1k is not a signed value when an ohm
+// value sits on the other side and the tail itself carries a multiplier or unit.
+function dashJoinsResistorValues(text, raw, index) {
+  if (!/^[-−–—－]/.test(raw)) return false;
+  const body = raw.replace(/^[-−–—－]\s*/, '');
+  if (!/(?:Ω|옴|ohms?|[kKrRM])/iu.test(body)) return false;
+  return /(?:Ω|옴|ohms?|\d\s*[kKrRM])\s*$/iu.test(String(text ?? '').slice(0, index));
+}
+
 function isUnitlessKRSuffix(raw) {
   const text = String(raw ?? '').trim();
   if (/(?:Ω|옴|ohms?)/iu.test(text)) return false;
@@ -3089,9 +3099,15 @@ function markNonResistorQuantities(tokens, text) {
       token.attempt = false;
       continue;
     }
+    // "680Ω-1k" names two values. The dash after an ohm value is the range, not a sign on 1k.
+    if (dashJoinsResistorValues(text, raw, token.index)) {
+      token.quantity = true;
+      token.attempt = false;
+      continue;
+    }
     // Unitless k/K/R (4k, 4K, 4k7, 2R2) is a value only when it is bound to the
     // resistor target. "rev 4k", "4K display", and "10k pot" are not.
-    // "4k 7" / "1R 5" / "2M 2" follow that same binding. A bound one is malformed.
+    // "4k 7" / "4k.7" / "1R-5" / "2M-2" follow that same binding. A bound one is malformed.
     if ((isUnitlessKRSuffix(raw) || isSpacedRkmValue(raw)) && !unitlessSuffixCountsAsResistor(text, token.index, token.end)) {
       token.quantity = true;
       token.attempt = false;

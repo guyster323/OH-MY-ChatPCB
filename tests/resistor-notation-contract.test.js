@@ -101,6 +101,59 @@ test('lowercase m is refused and uppercase M is mega', () => {
   assertEdit('change R3 to 1M', 1e6);
 });
 
+test("a multiplier letter followed by a separator and a digit ('4k.7', '4k,7', '4k-7', '4k–7', '4k/7', '4k_7', '4k·7', '1R-5', '2M-2') is RESISTOR_VALUE_INVALID", () => {
+  const prompts = [
+    'set the LED resistor to 4k.7',
+    'set the LED resistor to 4k,7',
+    'set the LED resistor to 4k-7',
+    'set the LED resistor to 4k–7',
+    'set the LED resistor to 4k—7',
+    'set the LED resistor to 4k/7',
+    'set the LED resistor to 4k_7',
+    'set the LED resistor to 4k·7',
+    'set the LED resistor to 1R-5',
+    'set the LED resistor to 2M-2',
+    'change the LED resistor to 4k.7',
+    'LED 저항 4k.7로 바꿔줘',
+    'change the LED resistor to 4k-7',
+    'LED 저항 4k-7로 바꿔줘',
+    'change the LED resistor to 4K_7',
+    'LED 저항 1R.5로 바꿔줘',
+    'change the LED resistor to 1R.5',
+    'LED 저항 2M-2로 바꿔줘',
+    'LED resistor 4k.7',
+    'LED resistor 1R-5',
+    'LED resistor 2M-2'
+  ];
+  for (const prompt of prompts) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_INVALID', `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  }
+
+  for (const [prompt, ohms] of [
+    ['change the LED resistor to 4.7k', 4700],
+    ['LED resistor 4k7', 4700],
+    ['change the LED resistor to 1.5kΩ', 1500],
+    ['LED 저항 2.2k로 바꿔줘', 2200],
+    ['set the LED resistor to 4k 5%', 4000]
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit?.ohms, ohms, prompt);
+  }
+
+  for (const prompt of ['LED resistor 680Ω–1k', 'LED resistor 470~680Ω']) {
+    const decision = classifyExistingProjectRequest(prompt, SPEC);
+    assert.equal(decision.mode, 'refuse', prompt);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  }
+});
+
 test('thousands separators are not resistor values', () => {
   for (const input of ['1,000', '1.000', '1,000 ohm', '1.000 ohm', '1.000.000', '1,000,000', '1 000', '4,7k', '2.200', '2.200 ohm']) {
     assertParsed(input, null);

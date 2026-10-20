@@ -1,6 +1,6 @@
 // LED series resistors outside this window are refused by the edit path and by
 // SPICE validation. parseResistorOhms stays a pure parser; callers apply this.
-import { isRejectedUppercaseRkm } from '../workflow/resistor-vocabulary.js';
+import { isRejectedUppercaseRkm, RKM_FRACTION_SEPARATOR } from '../workflow/resistor-vocabulary.js';
 
 export const LED_SERIES_RESISTOR_RANGE = Object.freeze({ min: 1, max: 10e6 });
 
@@ -41,9 +41,10 @@ function formatResistorOhms(ohms) {
 }
 
 const OHM_UNIT_TAIL = /(?:\s*(?:Ω|옴|ohms?))$/iu;
-// "4k 7", "1R 5", "2M 2". The space splits the RKM fraction off the multiplier.
+// "4k 7", "4k.7", "4k,7", "4k-7", "4k/7", "4k_7", "1R-5", "2M-2".
+// The separator splits the RKM fraction off the multiplier.
 // Lowercase m is milli, not this form. One digit glued on (4k7, 2M2) stays valid.
-const SPACED_RKM = /^\d+(?:\.\d+)?\s*[kKrRM]\s+\d+$/;
+const SPACED_RKM = new RegExp(String.raw`^\d+(?:\.\d+)?\s*[kKrRM]${RKM_FRACTION_SEPARATOR}\d+$`);
 
 // One resistor-value parser. Unparseable text returns null. Callers must fail
 // closed instead of guessing a value. Zero is null here so a 0Ω token is not a
@@ -98,7 +99,7 @@ function bareResistorText(value) {
     .trim();
 }
 
-// 4k 7, 1R 5, 2M 2, 4.7k 2. The whole token, after the ohm-unit tail is removed.
+// 4k 7, 4k.7, 1R-5, 2M-2, 4.7k 2. The whole token, after the ohm-unit tail is removed.
 export function isSpacedRkmValue(value) {
   return SPACED_RKM.test(bareResistorText(value));
 }
