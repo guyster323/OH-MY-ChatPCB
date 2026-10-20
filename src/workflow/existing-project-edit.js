@@ -506,8 +506,10 @@ function classifySeparateIntent(editText, intentText, spec) {
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
   const valuedKeep = valuedKeepRefusal(intentText);
-  if (valuedKeep) return valuedKeep;
-  const finishedUser = finishResistor(intentText, spec, fromUser);
+  if (valuedKeep?.mode) return valuedKeep;
+  const keptBody = valuedKeep?.remainder ?? intentText;
+  const keptUser = keptBody === intentText ? fromUser : nonRemovalEdit(keptBody);
+  const finishedUser = finishResistor(keptBody, spec, keptUser);
   if (finishedUser) return finishedUser;
   if (removal.kind === 'unclear') return unclearRemoval();
   if (isFullDesignPrompt(intentText)) return { mode: 'regenerate', prompt: intentText };
@@ -532,12 +534,15 @@ function classifyEditText(text, spec) {
   const decided = refusalForRemoval(removal);
   if (decided) return decided;
   // Bind a value inside a keep clause before that clause is stripped. The ohms
-  // name the kept part, so they must not land on R3.
+  // name the kept part, so they must not land on R3. A valued keep is dropped
+  // and the remainder is classified when one LED resistor and one value stay.
   const valuedKeep = valuedKeepRefusal(text);
-  if (valuedKeep) return valuedKeep;
-  const finished = finishResistor(text, spec, resistor);
+  if (valuedKeep?.mode) return valuedKeep;
+  const keptBody = valuedKeep?.remainder ?? text;
+  const keptResistor = keptBody === text ? resistor : nonRemovalEdit(keptBody);
+  const finished = finishResistor(keptBody, spec, keptResistor);
   if (finished) return finished;
-  const caught = coverageCatch(text, spec);
+  const caught = coverageCatch(keptBody, spec);
   if (caught) return caught;
   if (removal.kind === 'unclear') return unclearRemoval();
   return { mode: 'refuse' };
@@ -630,17 +635,72 @@ function valuedKeepFragmentDefers(fragment) {
   return /커패시터|콘덴서|캐패시터|capacitor|\bcaps?\b|케이블|cable|connector|커넥터/iu.test(fragment);
 }
 
-function valuedKeepRefusal(text) {
-  const objects = keepClauseSpans(text).objects.filter((object) => object.valued === true);
-  if (objects.length === 0) return null;
-  // A capacitor or cable keep keeps its own refusal. A resistor keep that
-  // carries the ohms must not lend that value to R3.
-  if (objects.every((object) => valuedKeepFragmentDefers(text.slice(object.start, object.end)))) return null;
+function valuedKeepCueTouches(text, cue, object) {
+  if (cue.start < object.end && cue.end > object.start) return true;
+  if (cue.end <= object.start && /^\s*$/u.test(text.slice(cue.end, object.start))) return true;
+  return object.end <= cue.start && /^\s*$/u.test(text.slice(object.end, cue.start));
+}
+
+// "but" is not a clause break. It is only the glue beside a valued keep.
+function valuedKeepGlueRanges(text, ranges) {
+  const extra = [];
+  for (const word of text.matchAll(/\S+/gu)) {
+    const start = word.index;
+    const end = start + word[0].length;
+    if (ranges.some(([spanStart, spanEnd]) => start < spanEnd && end > spanStart)) continue;
+    const bare = word[0].replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+    if (!/^(?:but|and|or|그리고|하고|및|이랑)$/iu.test(bare)) continue;
+    const touches = ranges.some(([spanStart, spanEnd]) => (
+      (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
+      || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
+    ));
+    if (touches) extra.push([start, end]);
+  }
+  return extra;
+}
+
+function ledResistorTargetCount(text) {
+  return resistorNounKinds(text).filter((kind) => kind === 'led').length;
+}
+
+function distinctRemainderOhms(text) {
+  const tokens = scanResistorTokens(text);
+  markNonResistorQuantities(tokens, text);
+  promoteCoordinatedBareValues(tokens, text);
+  dropLeadingDesignators(tokens);
+  const parsed = classifyResistorAttempts(tokens);
+  return new Set(parsed.valid.map((amount) => amount.ohmsText)).size;
+}
+
+function ambiguousValuedKeep() {
   return {
     mode: 'refuse',
     code: 'RESISTOR_AMBIGUOUS',
     message: resistorAmbiguousMessage()
   };
+}
+
+// A valued keep names some other part. Drop that span and its ohms. One LED
+// resistor and one value left is that edit. Nothing left stays ambiguous.
+// Anything else refuses the same way as the whole-request keep.
+function valuedKeepRefusal(text) {
+  const found = keepClauseSpans(text);
+  const objects = found.objects.filter((object) => object.valued === true);
+  if (objects.length === 0) return null;
+  // A capacitor or cable keep keeps its own refusal. A resistor keep that
+  // carries the ohms must not lend that value to R3.
+  if (objects.every((object) => valuedKeepFragmentDefers(text.slice(object.start, object.end)))) return null;
+  const dropping = objects.filter((object) => !valuedKeepFragmentDefers(text.slice(object.start, object.end)));
+  const ranges = dropping.map((object) => [object.start, object.end]);
+  for (const cue of found.cues) {
+    if (dropping.some((object) => valuedKeepCueTouches(text, cue, object))) ranges.push([cue.start, cue.end]);
+  }
+  const remainder = blankCopy(text, [...ranges, ...valuedKeepGlueRanges(text, ranges)]);
+  const targets = ledResistorTargetCount(remainder);
+  const values = distinctRemainderOhms(remainder);
+  if (targets === 0 && values === 0) return ambiguousValuedKeep();
+  if (targets === 1 && values === 1) return { remainder };
+  return ambiguousValuedKeep();
 }
 
 function finishResistor(text, spec, resistor) {

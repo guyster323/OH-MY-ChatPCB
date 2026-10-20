@@ -1133,8 +1133,22 @@ function sameOhmTokens(tokens) {
 // "from 330Ω to 680Ω" and "330옴에서 680옴으로" name the destination once.
 // A second value with no transition marker stays a second value.
 // "4k7 and 4.7k" is one value written twice.
+// A valued keep owns its ohms. That token is not a second edit value, so
+// "set the LED resistor to 680Ω but keep R4 at 4.7k" still has one bound value.
+function valuedResistorKeepRanges(text) {
+  const raw = String(text ?? '');
+  return keepClauseSpans(raw).objects
+    .filter((object) => object.valued === true)
+    .filter((object) => !/커패시터|콘덴서|캐패시터|capacitor|\bcaps?\b|케이블|cable|connector|커넥터/iu.test(raw.slice(object.start, object.end)))
+    .map((object) => [object.start, object.end]);
+}
+
 function logicalBoundTokens(text) {
-  const tokens = boundOhmTokens(text).filter((token) => !isReplacedSourceValue(text, token.index));
+  const hidden = valuedResistorKeepRanges(text);
+  const tokens = boundOhmTokens(text).filter((token) => (
+    !isReplacedSourceValue(text, token.index)
+    && !hidden.some(([start, end]) => token.index >= start && token.index < end)
+  ));
   if (tokens.length <= 1) return tokens;
   if (rx("(?:\\bfrom\\b|\\bto\\b|에서|->|→)", "iu").test(text)) return [tokens[tokens.length - 1]];
   const spans = parentheticalCurrentSpans(text);

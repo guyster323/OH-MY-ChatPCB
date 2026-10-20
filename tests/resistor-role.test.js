@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { randomInt } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -21,7 +23,7 @@ import {
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
-import { assessRequestCoverage, LED_RESISTOR_SYNONYMS, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
+import { assessRequestCoverage, KEEP_CUES, LED_RESISTOR_SYNONYMS, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -1495,4 +1497,218 @@ test('transitions and resistor keep clauses still apply, and questions stay with
     assert.equal(decision.edit, undefined, prompt);
     assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
   }
+});
+
+test('a valued keep of another part still applies the LED resistor', () => {
+  const spec = seriesSpec('1k');
+  const merges = [
+    'set the LED resistor to 680Ω but keep R4 at 4.7k',
+    'keep R4 at 680Ω, set the LED resistor to 680Ω'
+  ];
+  for (const prompt of merges) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const prompt = 'keep R4 at 680Ω';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'refuse', prompt);
+  assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+  assert.equal(decision.message, resistorAmbiguousMessage(), prompt);
+  assert.equal(decision.edit, undefined, prompt);
+  assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+  assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+  assert.deepEqual(spec, before, prompt);
+});
+
+// Part (c) outcome for each r35 probe. A valued keep is dropped. One remaining
+// LED resistor and one value apply on R3. A keep with nothing left stays
+// ambiguous. The review file is the sentence list; these are the outcomes.
+const R35_PROBE_OUTCOME = new Map([
+  ['keep R4 at 680Ω, set the LED resistor to 680Ω', 'merge'],
+  ['keep R4 at 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680 ohms', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680 Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680 ohm', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 4.7kohm', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 4.7 kΩ', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 4.7k ohms', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680Ω.', 'RESISTOR_AMBIGUOUS'],
+  ['keep the pull-up at 2.2 k', 'RESISTOR_AMBIGUOUS'],
+  ['keep the pull-up at 2.2k', 'RESISTOR_AMBIGUOUS'],
+  ['keep the I2C pullup at 4700 ohms', 'RESISTOR_AMBIGUOUS'],
+  ['R4는 680Ω으로 유지', 'RESISTOR_AMBIGUOUS'],
+  ['R4는 680 옴으로 유지', 'RESISTOR_AMBIGUOUS'],
+  ['R4는 680옴으로 유지해줘', 'RESISTOR_AMBIGUOUS'],
+  ['R4 680 Ω 그대로 두고', 'RESISTOR_AMBIGUOUS'],
+  ['hold R4 at 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['hold R4 at 680 ohms', 'RESISTOR_AMBIGUOUS'],
+  ['leave the pull-up at 2.2k', 'RESISTOR_AMBIGUOUS'],
+  ['leave the pull-up at 2.2 kΩ', 'RESISTOR_AMBIGUOUS'],
+  ['leave R4 at 680 ohms', 'RESISTOR_AMBIGUOUS'],
+  ["don't touch R4 at 680 ohms", 'RESISTOR_AMBIGUOUS'],
+  ['set the LED resistor to 680Ω but keep R4 at 4.7k', 'merge'],
+  ['set the LED resistor to 680Ω and keep R4 at 4.7k', 'merge'],
+  ['change the LED resistor to 680Ω, keep R4 at 4.7kΩ', 'merge'],
+  ['LED 저항은 680Ω으로 바꾸고 R4는 4.7k로 유지', 'RESISTOR_REF_UNSUPPORTED'],
+  ['keep the LED, set the LED resistor to 680Ω', 'merge'],
+  ['LED는 그대로 두고 LED 저항만 680Ω으로', 'merge'],
+  ['keep everything else, set the LED resistor to 680Ω', 'merge'],
+  ['set the LED resistor to 680Ω, keep the rest', 'merge'],
+  ['hold on, set the LED resistor to 680Ω', 'merge'],
+  ['set the LED resistor to 680Ω and hold', 'merge'],
+  ['hold the LED resistor at 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep the LED resistor at 1k', 'RESISTOR_AMBIGUOUS'],
+  ['keep 3 LEDs, set the LED resistor to 680Ω', 'merge'],
+  ['keep the 100nF capacitor, set the LED resistor to 680Ω', 'RESISTOR_TARGET_UNCLEAR'],
+  ['keep C1 at 100nF, set the LED resistor to 680Ω', 'RESISTOR_TARGET_UNCLEAR'],
+  ['keep the 10k pull-up, set the LED resistor to 680Ω', 'merge'],
+  ['keep the 4k7 pullups and set the LED resistor to 680Ω', 'merge'],
+  ['keep R4, LED resistor 680Ω', 'merge'],
+  ['R4, keep it at 4.7k, LED resistor 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 4.7k; LED resistor to 680Ω', 'merge'],
+  ['keep R4 at 4.7k. LED resistor to 680Ω', 'merge'],
+  ['set LED resistor to 680Ω. keep R4 at 4.7k', 'merge'],
+  ['keep R4 as 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 = 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 @ 680Ω', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 (680Ω)', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680Ω please', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680Ω!', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 0.68k', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 1M', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 1 meg', 'RESISTOR_AMBIGUOUS'],
+  ['keep R4 at 680Ω and R1 at 5.1k', 'RESISTOR_AMBIGUOUS']
+]);
+
+test('every r35 probe sentence has its valued-keep outcome', () => {
+  const probes = readFileSync('/workspace/commit-review/r35-probes.tsv', 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => line.split('\t').slice(1).join('\t'));
+  const reviewed = new Set(
+    readFileSync('/workspace/commit-review/r35-before-after.tsv', 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => line.split('\t')[0])
+  );
+  const spec = seriesSpec('1k');
+  const ambiguous = resistorAmbiguousMessage();
+  assert.equal(probes.length, R35_PROBE_OUTCOME.size);
+  for (const prompt of probes) {
+    assert.equal(reviewed.has(prompt), true, prompt);
+    const want = R35_PROBE_OUTCOME.get(prompt);
+    assert.equal(typeof want, 'string', prompt);
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (want === 'merge') {
+      assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''}`);
+      assert.equal(decision.edit?.ohms, 680, prompt);
+      assert.equal(decision.edit?.label, '680Ω', prompt);
+      assert.equal(decision.edit?.ref, 'R3', prompt);
+      assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+      assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+      assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    } else {
+      assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+      assert.equal(decision.code, want, prompt);
+      assert.equal(decision.edit, undefined, prompt);
+      assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+      if (want === 'RESISTOR_AMBIGUOUS') {
+        assert.equal(decision.message, ambiguous, prompt);
+        assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+      }
+    }
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+});
+
+function mulberry32(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let mixed = state;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function propertySeed() {
+  const raw = process.env.CHATPCB_PROP_SEED;
+  if (raw != null && String(raw).trim() !== '' && Number.isFinite(Number(raw))) return Number(raw) >>> 0;
+  return randomInt(0, 0x100000000);
+}
+
+function shuffleItems(rng, list) {
+  for (let index = list.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(rng() * (index + 1));
+    const held = list[index];
+    list[index] = list[swap];
+    list[swap] = held;
+  }
+  return list;
+}
+
+function keepOnlySentence(cue, ref, value) {
+  if (cue.slot === 'before') return `${ref} at ${value} ${cue.text}`;
+  if (cue.slot === 'leave') return `leave ${ref} at ${value} ${cue.text}`;
+  return `${cue.text} ${ref} at ${value}`;
+}
+
+test('property: a keep-only cue, ref, and value never changes R3', () => {
+  const spec = seriesSpec('1k');
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`keep-only value property seed ${seed}`);
+  const cues = KEEP_CUES.filter((cue) => cue.slot !== 'filler');
+  const refs = ['R1', 'R4', 'the pull-up'];
+  const values = ['680 ohms', '680 Ω', '4.7 kΩ', '1 meg', '680옴'];
+  const cases = [];
+  for (const cue of cues) {
+    for (const ref of refs) {
+      for (const value of values) {
+        cases.push(keepOnlySentence(cue, ref, value));
+      }
+    }
+  }
+  shuffleItems(rng, cases);
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of cases) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode === 'merge' && decision.edit?.ref === 'R3') {
+      failures.push(`${prompt} => merge ${decision.edit.ohms}`);
+    }
+    if (componentValue(spec, 'R3') !== r3) failures.push(`${prompt} mutated`);
+    if (JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} spec`);
+    if (decision.mode === 'merge' && decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== r3) failures.push(`${prompt} R3 ${componentValue(next, 'R3')}`);
+    }
+  }
+  assert.equal(cases.length, cues.length * refs.length * values.length);
+  assert.equal(cases.length > 0, true);
+  assert.deepEqual(failures.slice(0, 12), []);
 });
