@@ -955,15 +955,23 @@ function pushBreak(breaks, start, end) {
   if (end > start) breaks.push([start, end]);
 }
 
+const KEEP_LIST_CLAUSE_SEPS = new Set([' and ', ' & ', '하고', '이랑', '이고']);
+
+function separatorInsideKeepList(objects, start, end) {
+  return objects.some((object) => start >= object.start && end < object.end);
+}
+
 function allowClausePieces(text) {
   const breaks = [];
+  const keepObjects = keepClauseSpans(text).objects;
   const lowerText = text.toLowerCase();
   for (const sep of [' and then ', ' and ', ' & ', ' then ']) {
     let from = 0;
     while (from < lowerText.length) {
       const at = lowerText.indexOf(sep, from);
       if (at < 0) break;
-      pushBreak(breaks, at, at + sep.length);
+      const insideList = KEEP_LIST_CLAUSE_SEPS.has(sep) && separatorInsideKeepList(keepObjects, at, at + sep.length);
+      if (!insideList) pushBreak(breaks, at, at + sep.length);
       from = at + sep.length;
     }
   }
@@ -972,7 +980,8 @@ function allowClausePieces(text) {
     while (from < text.length) {
       const at = text.indexOf(sep, from);
       if (at < 0) break;
-      pushBreak(breaks, at, at + sep.length);
+      const insideList = KEEP_LIST_CLAUSE_SEPS.has(sep) && separatorInsideKeepList(keepObjects, at, at + sep.length);
+      if (!insideList) pushBreak(breaks, at, at + sep.length);
       from = at + sep.length;
     }
   }

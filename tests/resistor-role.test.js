@@ -1600,6 +1600,135 @@ test('every LED-resistor synonym in a keep clause is RESISTOR_AMBIGUOUS', () => 
   assert.deepEqual(failures, []);
 });
 
+test('an LED keep plus a series-resistor synonym applies R3 and a resistor on the keep stays ambiguous', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    'keep the LED, set the current-limiting resistor to 680Ω',
+    'keep the LED, set the series resistor to 680Ω',
+    'keep the status LED, set the series resistor to 680Ω',
+    'LED는 그대로, 전류제한 저항은 680Ω',
+    'keep the LED and R4, set the LED resistor to 680Ω',
+    'keep R4 and the LED, set the LED resistor to 680Ω'
+  ]) {
+    assertLedKeepApplies(spec, prompt);
+  }
+  for (const prompt of [
+    'keep the LED and its resistor, set the LED resistor to 680Ω',
+    'keep the LED & resistor, set the LED resistor to 680Ω'
+  ]) {
+    assertAmbiguousKeep(spec, prompt);
+  }
+});
+
+const LED_KEEP_HEADS = ['the LED', 'the status LED', 'D1', 'LED는 그대로'];
+const LED_KEEP_PARTNERS = ['R4', 'the pull-ups'];
+const LED_KEEP_ORDERS = ['led-first', 'other-first'];
+const LED_EDIT_SYNONYMS = ['LED resistor', 'current-limiting resistor', 'series resistor', '전류제한 저항', 'LED 저항'];
+const LED_EDIT_VALUES = ['680Ω', '330 ohms'];
+const LED_KEEP_NOUNS = [
+  'keep the LED and its resistor',
+  'keep the LED & resistor',
+  "keep the LED's resistor",
+  'keep the status LED and its resistor',
+  'keep the status LED & resistor',
+  "keep D1's resistor",
+  'LED랑 저항은 그대로'
+];
+
+function ledKeepEditClause(synonym, value) {
+  return `set the ${synonym} to ${value}`;
+}
+
+function ledKeepApplyHead(keep, partner, order) {
+  if (!partner) {
+    if (keep === 'LED는 그대로') return keep;
+    return `keep ${keep}`;
+  }
+  if (keep === 'LED는 그대로') {
+    const other = partner === 'the pull-ups' ? '풀업' : partner;
+    const coord = partner === 'the pull-ups' ? '하고' : '랑';
+    if (order === 'other-first') return `${other}${coord} LED는 그대로`;
+    return `LED${coord} ${other}는 그대로`;
+  }
+  if (order === 'other-first') return `keep ${partner} and ${keep}`;
+  return `keep ${keep} and ${partner}`;
+}
+
+function ledKeepOhms(value) {
+  if (value === '330 ohms') return { ohms: 330, label: '330Ω' };
+  return { ohms: 680, label: '680Ω' };
+}
+
+test('property: an LED keep, optional other part, and LED-resistor synonym applies R3', () => {
+  const spec = seriesLedBoard();
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`led-keep synonym property seed ${seed}`);
+  const applies = [];
+  for (const keep of LED_KEEP_HEADS) {
+    const heads = [{ keep, partner: null, order: 'led-first' }];
+    for (const partner of LED_KEEP_PARTNERS) {
+      for (const order of LED_KEEP_ORDERS) heads.push({ keep, partner, order });
+    }
+    for (const head of heads) {
+      for (const synonym of LED_EDIT_SYNONYMS) {
+        for (const value of LED_EDIT_VALUES) {
+          const prompt = `${ledKeepApplyHead(head.keep, head.partner, head.order)}, ${ledKeepEditClause(synonym, value)}`;
+          applies.push({ prompt, value, keep: head.keep, partner: head.partner ?? '', order: head.order, synonym });
+        }
+      }
+    }
+  }
+  const ambiguous = [];
+  for (const keep of LED_KEEP_NOUNS) {
+    for (const synonym of LED_EDIT_SYNONYMS) {
+      for (const value of LED_EDIT_VALUES) {
+        ambiguous.push({
+          prompt: `${keep}, ${ledKeepEditClause(synonym, value)}`,
+          keep,
+          synonym,
+          value
+        });
+      }
+    }
+  }
+  shuffleItems(rng, applies);
+  shuffleItems(rng, ambiguous);
+  const failures = [];
+  for (const sample of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(sample.prompt, spec);
+    const want = ledKeepOhms(sample.value);
+    const where = `${sample.keep} ${sample.partner} ${sample.order} ${sample.synonym} ${sample.value} ${sample.prompt}`;
+    if (decision.mode !== 'merge' || decision.code != null || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== want.ohms || decision.edit?.label !== want.label) {
+      failures.push(`${where} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    } else if (appliesBeforeProvider(sample.prompt, decision, spec) !== true) failures.push(`${where} applies`);
+    else if (blocksBeforeProvider(sample.prompt, decision) !== false) failures.push(`${where} blocks`);
+    else {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== want.label || componentValue(next, 'R4') !== '4.7k') {
+        failures.push(`${where} next R3 ${componentValue(next, 'R3')}`);
+      }
+    }
+    if (JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${where} mutated`);
+  }
+  for (const sample of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(sample.prompt, spec);
+    const where = `${sample.keep} ${sample.synonym} ${sample.value} ${sample.prompt}`;
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${where} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    } else if (decision.message !== resistorAmbiguousMessage()) failures.push(`${where} message`);
+    else if (blocksBeforeProvider(sample.prompt, decision) !== true) failures.push(`${where} blocks`);
+    else if (appliesBeforeProvider(sample.prompt, decision, spec) !== false) failures.push(`${where} applies`);
+    if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${where} mutated`);
+  }
+  const applyCount = LED_KEEP_HEADS.length * (1 + LED_KEEP_PARTNERS.length * LED_KEEP_ORDERS.length) * LED_EDIT_SYNONYMS.length * LED_EDIT_VALUES.length;
+  assert.equal(applies.length, applyCount);
+  assert.equal(ambiguous.length, LED_KEEP_NOUNS.length * LED_EDIT_SYNONYMS.length * LED_EDIT_VALUES.length);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
+
 test('a keep clause that carries a value never applies that value to R3', () => {
   const spec = seriesSpec('1k');
   const message = resistorAmbiguousMessage();

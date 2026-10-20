@@ -26,6 +26,7 @@ import {
   isKnownRoleWord,
   isLedAllowWord,
   isLedResistorSynonymPiece,
+  LED_RESISTOR_SYNONYMS,
   matchesLedResistorModifiers,
   isModalOrParticleWord,
   isNegationOrAlternativeWord,
@@ -2243,12 +2244,15 @@ function ledKeepCountsAsSeries(text) {
   let bareAt = null;
   for (const object of found.objects) {
     const end = keepIdentityEnd(text, object.start, object.end);
-    const pieces = splitKeepList(text.slice(object.start, end));
-    let cursor = object.start;
+    const fragment = text.slice(object.start, end);
+    const pieces = splitKeepList(fragment);
+    let searchFrom = 0;
     for (const piece of pieces) {
+      const rel = fragment.indexOf(piece, searchFrom);
+      const at = rel < 0 ? searchFrom : rel;
+      const pieceAt = object.start + at;
+      searchFrom = at + piece.length;
       const trimmed = piece.trim();
-      const pieceAt = cursor;
-      cursor += piece.length + 1;
       if (!trimmed || isSeparateOtherKeep(trimmed)) continue;
       if (isBareLedPiece(trimmed)) {
         sawBare = true;
@@ -2269,14 +2273,31 @@ function ledKeepCountsAsSeries(text) {
   return /(?:저항|抵抗|\bresistors?\b|\bresistance\b|'s\b|’s\b|\bits\b|\bit\b)/iu.test(residue);
 }
 
+function ledResistorSynonymBody(synonym) {
+  const folded = String(synonym).toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+  return folded.split(' ').filter(Boolean).map((part) => escapeRegExp(part)).join('[-\\s]+');
+}
+
+// Blank the edit phrase so its resistor noun is not leftover after an LED keep.
+// The phrase is any LED_RESISTOR_SYNONYMS entry ("current-limiting", "series",
+// "전류제한", "전류 제한") plus the resistor noun, unless the entry already names it.
 function ledResistorEditSpans(text) {
   const spans = [];
-  const patterns = [
-    /\b(?:the\s+)?(?:status\s+)?led\s+resistors?\b[^\n]{0,30}?\d+(?:\.\d+)?/giu,
-    /\bled\s*저항[^\n]{0,16}?\d+(?:\.\d+)?/giu
-  ];
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) spans.push([match.index, match.index + match[0].length]);
+  const alternatives = [];
+  for (const synonym of LED_RESISTOR_SYNONYMS) {
+    const folded = String(synonym).toLowerCase();
+    const body = ledResistorSynonymBody(synonym);
+    if (!body) continue;
+    const namesResistor = /resistor|저항|抵抗/.test(folded);
+    const tail = namesResistor ? '' : '(?:\\s+resistors?|\\s*저항|\\s*抵抗)';
+    const ascii = /^[a-z0-9 -]+$/.test(folded.replace(/-/g, ' '));
+    alternatives.push(ascii ? `(?<![a-z0-9])(?:the\\s+)?${body}${tail}` : `${body}${tail}`);
+  }
+  if (alternatives.length === 0) return spans;
+  const pattern = compileRegExp(alternatives.join('|'), 'giu');
+  for (const match of String(text).matchAll(pattern)) {
+    if (match[0].length === 0) continue;
+    spans.push([match.index, match.index + match[0].length]);
   }
   return spans;
 }
@@ -2300,31 +2321,46 @@ function keepIdentityEnd(text, start, end) {
   return end;
 }
 
-// "R4, LED" is a list. "4,7" is one value, so a comma between digits stays.
-function splitKeepList(fragment) {
+// "R4, LED" and "the LED and R4" are lists. "4,7" is one value, so a comma
+// between digits stays. "and", "및", "랑" / "이랑", and "하고" split the same list.
+const KEEP_LIST_MARK = /\band\b|(?:이랑|랑|하고|및)(?![가-힣])|[,，]/giu;
+
+// `cut` is the separator before this piece. Dropping the tail slices there, so
+// "and" / "하고" stay in the prefix. Rejoining with "," is a prefix only when
+// every separator was a comma, and then "keep D1 and its resistor, LED 저항"
+// hides the edit noun inside the keep.
+function splitKeepListSpans(fragment) {
   const pieces = [];
+  const source = String(fragment ?? '');
   let start = 0;
-  for (let index = 0; index < fragment.length; index += 1) {
-    const mark = fragment[index];
-    if (mark !== ',' && mark !== '，') continue;
-    const prev = fragment[index - 1] ?? '';
-    const next = fragment[index + 1] ?? '';
-    if (/\d/u.test(prev) && /\d/u.test(next)) continue;
-    pieces.push(fragment.slice(start, index));
-    start = index + 1;
+  let cut = 0;
+  for (const match of source.matchAll(KEEP_LIST_MARK)) {
+    const mark = match[0];
+    if (mark === ',' || mark === '，') {
+      const prev = source[match.index - 1] ?? '';
+      const next = source[match.index + 1] ?? '';
+      if (/\d/u.test(prev) && /\d/u.test(next)) continue;
+    }
+    pieces.push({ text: source.slice(start, match.index), start, cut });
+    cut = match.index;
+    start = match.index + mark.length;
   }
-  pieces.push(fragment.slice(start));
+  pieces.push({ text: source.slice(start), start, cut });
   return pieces;
+}
+
+function splitKeepList(fragment) {
+  return splitKeepListSpans(fragment).map((piece) => piece.text);
 }
 
 function keepIdentityFragment(text, object) {
   const fragment = text.slice(object.start, object.end);
-  const pieces = splitKeepList(fragment);
+  const pieces = splitKeepListSpans(fragment);
   if (pieces.length < 2 || !directValueFollows(text, object.end)) return fragment;
   let end = pieces.length;
-  while (end > 1 && pieces[end - 1].trim() === '') end -= 1;
-  if (end < 2 || !namesResistorHead(pieces[end - 1])) return fragment;
-  return pieces.slice(0, end - 1).join(',');
+  while (end > 1 && pieces[end - 1].text.trim() === '') end -= 1;
+  if (end < 2 || !namesResistorHead(pieces[end - 1].text)) return fragment;
+  return fragment.slice(0, pieces[end - 1].cut);
 }
 
 function directValueFollows(text, index) {
@@ -2938,8 +2974,19 @@ function editTargetDesignators(text) {
     return refs;
   }
   const targets = refs.filter((ref) => visible.has(ref));
+  // Every designator sits in a keep ("keep D1 and R4"). None of them is the edit.
+  if (targets.length === 0 && refs.every((ref) => hiddenDesignatorIsKept(normalized, ref))) return [];
   if (targets.length === 0) return refs;
   return targets;
+}
+
+function hiddenDesignatorIsKept(text, ref) {
+  const found = keepClauseSpans(text);
+  const re = new RegExp(`\\b${ref}\\b`, 'iu');
+  return found.objects.some((object) => {
+    const end = keepIdentityEnd(text, object.start, object.end);
+    return re.test(text.slice(object.start, end));
+  });
 }
 
 function ambiguousResistorRefs(refs) {

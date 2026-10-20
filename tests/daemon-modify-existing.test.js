@@ -3110,7 +3110,7 @@ test('property: a keep clause naming the target ref or its role is RESISTOR_AMBI
         }
       }
     }
-    assert.deepEqual(failures, []);
+    assert.deepEqual(failures, [], `keep-target property seed ${seed}`);
   } finally {
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
