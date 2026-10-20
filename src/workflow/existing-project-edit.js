@@ -617,8 +617,8 @@ function coverageCatch(text, spec) {
   if (isQuestionShaped(text) && !isPermittedEdit(text)) return null;
   // A removal sentence with no resistor value stays on the deletion path.
   // "지워줘" and "제거" are removal verbs. They are not a valueless role edit.
-  if (!assessRequestCoverage(text).hasBoundValue && findVerbs(text).length > 0) return null;
-  const coverage = assessRequestCoverage(text);
+  if (!resistorEditCoverage(text, spec).hasBoundValue && findVerbs(text).length > 0) return null;
+  const coverage = resistorEditCoverage(text, spec);
   if (coverage.approximate) return null;
   if (coverage.foreignRole && coverage.resistorMention && !coverage.hasBoundValue) {
     return coverageRefusal(text, spec, coverage, 'RESISTOR_REF_UNSUPPORTED');
@@ -774,7 +774,7 @@ function finishResistor(text, spec, resistor) {
       message: resistorAmbiguousMessage()
     };
   }
-  const coverage = assessRequestCoverage(text);
+  const coverage = resistorEditCoverage(text, spec);
   // A value belongs to the role in its own clause. Any non-LED role that has a
   // value refuses the whole request, so that ohms value cannot land on R3.
   // A negated keep ("두지 말고", "don't keep") stays visible and still counts.
@@ -947,9 +947,9 @@ export function blocksBeforeProvider(text, decision) {
 }
 
 // A covered allow-list edit is applied locally. Anything left over does not merge.
-export function appliesBeforeProvider(text, decision) {
+export function appliesBeforeProvider(text, decision, spec = null) {
   if (decision?.mode !== 'merge' || decision.edit?.kind !== 'resistor') return false;
-  return assessRequestCoverage(text).covered;
+  return resistorEditCoverage(text, spec).covered;
 }
 
 function nonRemovalEdit(text) {
@@ -2071,25 +2071,177 @@ function blankKeptRefs(chars, text, start, end) {
 }
 
 function keepNamesEditTarget(text, spec) {
-  const found = keepClauseSpans(text);
+  // "keep D1" is the status LED when D1 is that diode. The keep span is the only
+  // place that designator is read as the word LED.
+  const raw = textWithSeriesLedAsWord(text, spec);
+  const found = keepClauseSpans(raw);
   if (found.objects.length === 0) return false;
   const series = seriesResistorRef(spec);
   const kept = new Set();
-  for (const object of found.objects) addKeptIdentity(kept, keepIdentityFragment(text, object), series, 'keep');
+  for (const object of found.objects) addKeptIdentity(kept, keepIdentityFragment(raw, object), series, 'keep');
+  // A bare LED keep is the diode. A resistor noun, possessive, pronoun, or a
+  // wider object ("LED circuit", "LEDs") keeps the series resistor instead.
+  const ledBlocked = Boolean(series) && ledKeepCountsAsSeries(raw);
+  if (ledBlocked) kept.add(String(series).toUpperCase());
   if (kept.size === 0) return false;
   // The cue word stays out of the edit remainder. "유지하고" must not sit on the LED noun.
   const edit = new Set();
   // "keep the current-limiting resistor, LED resistor 680Ω" keeps only the
   // first identity. The resistor after the comma stays visible as the edit.
-  const ranges = found.objects.map((object) => [object.start, keepIdentityEnd(text, object.start, object.end)]);
+  const ranges = found.objects.map((object) => [object.start, keepIdentityEnd(raw, object.start, object.end)]);
   for (const cue of found.cues) ranges.push([cue.start, cue.end]);
-  const remainder = blankCopy(text, ranges);
+  const remainder = blankCopy(raw, ranges);
   addKeptIdentity(edit, remainder, series, 'edit');
   if (edit.size === 0 && bareSeriesRemainder(remainder, series)) edit.add(String(series).toUpperCase());
+  if (ledBlocked && seriesEditRemainder(remainder, series)) edit.add(String(series).toUpperCase());
   for (const key of kept) {
     if (edit.has(key)) return true;
   }
   return false;
+}
+
+// The status LED's own D ref. Another diode (D2, a TVS) is not this part.
+function seriesLedDesignator(spec) {
+  const rows = [];
+  if (Array.isArray(spec?.schematic?.components)) rows.push(...spec.schematic.components);
+  if (Array.isArray(spec?.boardProfile?.productionParts)) rows.push(...spec.boardProfile.productionParts);
+  for (const row of rows) {
+    const ref = String(row?.ref ?? '');
+    if (!/^D\d+$/i.test(ref)) continue;
+    const libId = String(row?.libId ?? '');
+    const value = String(row?.value ?? '');
+    const role = String(row?.role || componentRole(spec, ref) || '');
+    if (role === 'status-led' || libId === 'ChatPCB:STATUS_LED' || value === 'STATUS_LED') return ref.toUpperCase();
+  }
+  return null;
+}
+
+function textWithSeriesLedAsWord(text, spec) {
+  const ledRef = seriesLedDesignator(spec);
+  const raw = String(text ?? '');
+  if (!ledRef) return raw;
+  const found = keepClauseSpans(raw);
+  if (found.objects.length === 0) return raw;
+  const hits = [];
+  const re = new RegExp(`\\b${ledRef}\\b`, 'giu');
+  for (const object of found.objects) {
+    const slice = raw.slice(object.start, object.end);
+    for (const match of slice.matchAll(re)) {
+      hits.push([object.start + match.index, object.start + match.index + match[0].length]);
+    }
+  }
+  hits.sort((left, right) => left[0] - right[0]);
+  let result = '';
+  let cursor = 0;
+  for (const [start, end] of hits) {
+    if (start < cursor) continue;
+    result += raw.slice(cursor, start) + 'LED';
+    cursor = end;
+  }
+  return result + raw.slice(cursor);
+}
+
+export function resistorEditCoverage(text, spec = null) {
+  return assessRequestCoverage(textWithSeriesLedAsWord(text, spec));
+}
+
+const LED_KEEP_SKIP = new Set([
+  'the', 'a', 'an', 'status', '상태', 'as', 'is', 'as-is',
+  'and', 'but', '&', 'or',
+  '그리고', '하고', '및', '이랑', '랑',
+  // "as is" walks back through the verb, so "keep the LED as is" is one object.
+  'keep', 'hold', 'leave', 'without'
+]);
+
+function ledKeepTokens(piece) {
+  return String(piece ?? '').split(/\s+/u).map((token) => {
+    let word = token.replace(/^[("'`[\]]+|[)"'`[\],.;:!?]+$/gu, '');
+    word = word.replace(/(?:으로|로|은|는|이|가|을|를|도|만|의)$/u, '');
+    return word;
+  }).filter((word) => word && !LED_KEEP_SKIP.has(word.toLowerCase()));
+}
+
+function isBareLedPiece(piece) {
+  const tokens = ledKeepTokens(piece);
+  if (tokens.length === 0) return false;
+  return tokens.every((token) => /^(?:led|엘이디|엘예디)$/iu.test(token));
+}
+
+function pieceMentionsLed(piece) {
+  return /\bleds?\b|엘이디|엘예디/iu.test(piece);
+}
+
+function pieceHasResistorNoun(piece) {
+  return /(?:저항|抵抗|\bresistors?\b|\bresistance\b)/iu.test(piece);
+}
+
+function pieceHasPossessive(piece) {
+  return /(?:'s\b|’s\b|\bits\b)/iu.test(piece);
+}
+
+function isSeparateOtherKeep(piece) {
+  if (pieceMentionsLed(piece) || pieceHasResistorNoun(piece) || pieceHasPossessive(piece)) return false;
+  if (/\bR\d+\b/iu.test(piece)) return true;
+  return textHasKnownRole(piece);
+}
+
+// An LED keep is the diode only when the kept object is a bare LED / status LED
+// and no clause from that keep through the edit names a resistor, a possessive, or "it".
+// A keep of some other resistor ("I2C pull-up resistors") is not an LED keep.
+// A resistor noun before the LED keep is that other edit ("I2C 저항 2.2k로. LED는 그대로").
+function ledKeepCountsAsSeries(text) {
+  const found = keepClauseSpans(text);
+  let sawBare = false;
+  let sawNoun = false;
+  let bareAt = null;
+  for (const object of found.objects) {
+    const end = keepIdentityEnd(text, object.start, object.end);
+    const pieces = splitKeepList(text.slice(object.start, end));
+    let cursor = object.start;
+    for (const piece of pieces) {
+      const trimmed = piece.trim();
+      const pieceAt = cursor;
+      cursor += piece.length + 1;
+      if (!trimmed || isSeparateOtherKeep(trimmed)) continue;
+      if (isBareLedPiece(trimmed)) {
+        sawBare = true;
+        if (bareAt === null || pieceAt < bareAt) bareAt = pieceAt;
+        continue;
+      }
+      // "LED circuit", "LEDs", "LED's resistor", "LED and its resistor".
+      if (pieceMentionsLed(trimmed)) return true;
+      if (pieceHasResistorNoun(trimmed) || pieceHasPossessive(trimmed)) sawNoun = true;
+    }
+  }
+  if (!sawBare) return false;
+  if (sawNoun) return true;
+  const spans = found.objects.map((object) => [object.start, object.end]);
+  for (const cue of found.cues) spans.push([cue.start, cue.end]);
+  spans.push(...ledResistorEditSpans(text));
+  const residue = blankCopy(text, spans).slice(bareAt);
+  return /(?:저항|抵抗|\bresistors?\b|\bresistance\b|'s\b|’s\b|\bits\b|\bit\b)/iu.test(residue);
+}
+
+function ledResistorEditSpans(text) {
+  const spans = [];
+  const patterns = [
+    /\b(?:the\s+)?(?:status\s+)?led\s+resistors?\b[^\n]{0,30}?\d+(?:\.\d+)?/giu,
+    /\bled\s*저항[^\n]{0,16}?\d+(?:\.\d+)?/giu
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) spans.push([match.index, match.index + match[0].length]);
+  }
+  return spans;
+}
+
+function seriesEditRemainder(text, series) {
+  if (bareSeriesRemainder(text, series)) return true;
+  if (!clauseCarriesResistorValue(text)) return false;
+  // "풀업 저항 10k" is the other resistor. A bare "저항" or "it" is this one.
+  if (textHasKnownRole(text) || textHasUsbRole(text)) return false;
+  if (resistorNounKinds(text).includes('foreign')) return false;
+  if (resistorNounKinds(text).includes('led')) return true;
+  return /(?:저항|抵抗|\bresistors?\b|\bresistance\b|\bit\b)/iu.test(text);
 }
 
 // A comma stays in the list ("don't touch R4, LED"). The last item is the edit
@@ -2147,6 +2299,7 @@ function addKeptIdentity(keys, fragment, series, side) {
 // A keep object is this resistor only with a resistor noun ("resistor" / "저항",
 // including "LED resistor" and "LED 저항") or an R ref (added above).
 // A bare LED or status LED is the diode, so that keep does not block the edit.
+// "LED circuit", "LEDs", "its resistor", and a later "The resistor too" do.
 // The edit remainder still treats a bare LED as the series resistor.
 function namesSeriesLed(fragment, side = 'edit') {
   if (resistorNounKinds(fragment).includes('led')) return true;

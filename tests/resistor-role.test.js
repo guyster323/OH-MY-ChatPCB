@@ -1232,6 +1232,223 @@ test('a keep of the LED itself is not a keep of its resistor', () => {
   }
 });
 
+// The R board: series resistor R3, status LED D1, and another diode D2.
+function seriesLedBoard(value = '1k') {
+  const spec = seriesSpec(value);
+  spec.schematic.components.push(
+    { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED', role: 'status-led' },
+    { ref: 'D2', libId: 'ChatPCB:USB_ESD', value: 'PRTR5V0U2X' }
+  );
+  spec.boardProfile.productionParts.push(
+    { ref: 'D1', role: 'status-led', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' },
+    { ref: 'D2', role: 'usb-esd', libId: 'ChatPCB:USB_ESD', value: 'PRTR5V0U2X' }
+  );
+  return spec;
+}
+
+function assertAmbiguousKeep(spec, prompt) {
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''} ${decision.edit?.ohms ?? ''}`);
+  assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+  assert.equal(decision.message, resistorAmbiguousMessage(), prompt);
+  assert.equal(decision.edit, undefined, prompt);
+  assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+  assert.equal(appliesBeforeProvider(prompt, decision, spec), false, prompt);
+  assert.deepEqual(spec, before, prompt);
+  assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+}
+
+function assertLedKeepApplies(spec, prompt) {
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+  assert.equal(decision.code, undefined, prompt);
+  assert.equal(decision.edit?.ohms, 680, prompt);
+  assert.equal(decision.edit?.label, '680Ω', prompt);
+  assert.equal(decision.edit?.ref, 'R3', prompt);
+  assert.equal(appliesBeforeProvider(prompt, decision, spec), true, prompt);
+  assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+  const next = applyExistingProjectEdit(spec, decision.edit);
+  assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+  assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+  assert.deepEqual(spec, before, prompt);
+}
+
+test('an LED keep followed by its resistor is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    'keep the LED and its resistor, set the LED resistor to 680Ω',
+    "keep the LED's resistor, set 680Ω",
+    'keep the LED. The resistor too. Set the LED resistor to 680Ω',
+    'LED는 그대로, 저항도 그대로. LED 저항 680Ω',
+    'keep the LED resistance, set the LED resistor to 680Ω',
+    'keep D1 and its resistor, set the LED resistor to 680Ω'
+  ]) {
+    assertAmbiguousKeep(spec, prompt);
+  }
+  for (const prompt of [
+    'keep the LED & resistor, set the LED resistor to 680Ω',
+    'LED랑 저항 그대로. LED 저항 680Ω',
+    'LED 및 저항 유지, LED 저항 680Ω',
+    'keep the LED (R3), set the LED resistor to 680Ω'
+  ]) {
+    assertAmbiguousKeep(spec, prompt);
+  }
+  for (const prompt of [
+    'keep the LED & resistor',
+    'LED랑 저항 그대로',
+    'LED 및 저항 유지',
+    'keep the LED (R3)'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.notEqual(decision.mode, 'merge', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+});
+
+test("keep the LED circuit/stuff or 'set it' after an LED keep is RESISTOR_AMBIGUOUS", () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    'keep the LED circuit, set the LED resistor to 680Ω',
+    'keep the LED stuff, set the LED resistor to 680Ω',
+    'keep the LEDs, set the LED resistor to 680Ω',
+    'keep the LED, set it to 680Ω',
+    'LED는 그대로 두고 저항 680Ω'
+  ]) {
+    assertAmbiguousKeep(spec, prompt);
+  }
+  for (const prompt of [
+    'LED는 그대로 두고 LED 저항만 680Ω으로',
+    'keep the LED, set the LED resistor to 680Ω',
+    'keep the status LED, set the LED resistor to 680Ω',
+    'keep the LED as is, set the LED resistor to 680Ω',
+    "don't touch R4, LED, set to 680Ω"
+  ]) {
+    assertLedKeepApplies(spec, prompt);
+  }
+});
+
+test('a keep of the series LED D ref applies R3 and another diode does not', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    'keep D1, LED resistor 680Ω',
+    'keep D1 and change the LED resistor to 680Ω',
+    'keep the LED D1, LED resistor 680Ω',
+    'D1은 유지하고 LED 저항 680Ω으로'
+  ]) {
+    assertLedKeepApplies(spec, prompt);
+  }
+  const other = classifyExistingProjectRequest('keep D2, LED resistor 680Ω', spec);
+  assert.equal(other.mode, 'refuse', other.code ?? '');
+  assert.equal(other.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(other.edit, undefined);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'D2'), 'PRTR5V0U2X');
+});
+
+const LED_KEEP_SPELLINGS = ['LED', 'D1', 'the LED D1'];
+const LED_KEEP_SUFFIXES = ['and its resistor', "'s resistor", 'The resistor too.', '저항도 그대로', 'resistance'];
+const LED_KEEP_SPLITS = ['same', 'comma', 'period'];
+
+function ledKeepHead(spelling) {
+  if (spelling === 'D1') return 'keep D1';
+  if (spelling === 'the LED D1') return 'keep the LED D1';
+  return 'keep the LED';
+}
+
+function ledKeepKoHead(spelling) {
+  if (spelling === 'D1') return 'D1은 그대로';
+  if (spelling === 'the LED D1') return 'LED D1은 그대로';
+  return 'LED는 그대로';
+}
+
+function ledKeepAmbiguousPrompt(spelling, suffix, split) {
+  const edit = 'set the LED resistor to 680Ω';
+  const head = ledKeepHead(spelling);
+  if (suffix === 'and its resistor') {
+    if (split === 'period') return `${head}. And its resistor. ${edit}`;
+    if (split === 'comma') return `${head}, and its resistor, ${edit}`;
+    return `${head} and its resistor, ${edit}`;
+  }
+  if (suffix === "'s resistor") {
+    const owned = spelling === 'D1'
+      ? "keep D1's resistor"
+      : spelling === 'the LED D1'
+        ? "keep the LED D1's resistor"
+        : "keep the LED's resistor";
+    if (split === 'period') return `${owned}. ${edit}`;
+    if (split === 'comma') return `${owned}, ${edit}`;
+    return `${owned}, set 680Ω`;
+  }
+  if (suffix === 'The resistor too.') {
+    if (split === 'comma') return `${head}, the resistor too, ${edit}`;
+    if (split === 'same') return `${head} the resistor too, ${edit}`;
+    return `${head}. The resistor too. ${edit}`;
+  }
+  if (suffix === '저항도 그대로') {
+    const ko = ledKeepKoHead(spelling);
+    const koEdit = 'LED 저항 680Ω';
+    if (split === 'period') return `${ko}. 저항도 그대로. ${koEdit}`;
+    if (split === 'comma') return `${ko}, 저항도 그대로. ${koEdit}`;
+    return `${ko} 저항도 그대로. ${koEdit}`;
+  }
+  const resistance = spelling === 'D1'
+    ? 'keep D1 resistance'
+    : spelling === 'the LED D1'
+      ? 'keep the LED D1 resistance'
+      : 'keep the LED resistance';
+  if (split === 'period') return `${resistance}. ${edit}`;
+  if (split === 'comma') return `${resistance}, ${edit}`;
+  return `${resistance}, ${edit}`;
+}
+
+function ledKeepApplyPrompt(spelling) {
+  if (spelling === 'D1') return 'keep D1, LED resistor 680Ω';
+  if (spelling === 'the LED D1') return 'keep the LED D1, LED resistor 680Ω';
+  return 'keep the LED, set the LED resistor to 680Ω';
+}
+
+test('property: an LED keep times a resistor suffix times a sentence split is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  const seed = propertySeed();
+  const rng = mulberry32(seed);
+  console.log(`led-keep property seed ${seed}`);
+  const cases = [];
+  for (const spelling of LED_KEEP_SPELLINGS) {
+    for (const suffix of LED_KEEP_SUFFIXES) {
+      for (const split of LED_KEEP_SPLITS) {
+        cases.push({
+          prompt: ledKeepAmbiguousPrompt(spelling, suffix, split),
+          apply: false,
+          spelling,
+          suffix,
+          split
+        });
+      }
+    }
+    cases.push({ prompt: ledKeepApplyPrompt(spelling), apply: true, spelling, suffix: 'bare', split: 'edit' });
+  }
+  shuffleItems(rng, cases);
+  const failures = [];
+  for (const sample of cases) {
+    const decision = classifyExistingProjectRequest(sample.prompt, spec);
+    const where = `${sample.spelling} ${sample.suffix} ${sample.split} ${sample.prompt}`;
+    if (sample.apply) {
+      if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680) {
+        failures.push(`${where} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+      } else if (appliesBeforeProvider(sample.prompt, decision, spec) !== true) failures.push(`${where} applies`);
+      continue;
+    }
+    if (decision.code !== 'RESISTOR_AMBIGUOUS') failures.push(`${where} => ${decision.code ?? decision.mode} ${decision.edit?.ohms ?? ''}`);
+    else if (decision.edit !== undefined) failures.push(`${where} edit`);
+    else if (blocksBeforeProvider(sample.prompt, decision) !== true) failures.push(`${where} blocks`);
+    else if (appliesBeforeProvider(sample.prompt, decision, spec) !== false) failures.push(`${where} applies`);
+  }
+  assert.equal(cases.length, LED_KEEP_SPELLINGS.length * LED_KEEP_SUFFIXES.length * LED_KEEP_SPLITS.length + LED_KEEP_SPELLINGS.length);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
+
 const LED_SYNONYM_KEEP_POSITIONS = ['leading', 'trailing', 'next'];
 
 function ledResistorPhrase(synonym, lang) {

@@ -21,8 +21,7 @@ import { simulateProject } from '../workflow/simulate-project.js';
 import { inspectProject } from '../workflow/inspect-project.js';
 import { validateProject } from '../workflow/validate-project.js';
 import { validateBoard } from '../workflow/validate-board.js';
-import { assessRequestCoverage } from '../workflow/resistor-vocabulary.js';
-import { blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale, resistorTargetUnclearMessage } from '../workflow/existing-project-edit.js';
+import { blocksBeforeProvider, classifyExistingProjectRequest, messageForLocale, resistorEditCoverage, resistorTargetUnclearMessage } from '../workflow/existing-project-edit.js';
 import { assertSafeProjectDir, createNamedProject, readChatPcbManifest } from '../workflow/project-workspace.js';
 import { normalizeCircuitSpec } from './circuit-spec.js';
 import { continueCircuitConversation, conversationWantsGenerate, loadCircuitConversation, saveCircuitConversation, serializeCircuitConversation } from './request-conversation.js';
@@ -661,8 +660,8 @@ async function invokeProvider(call, ctx) {
 
 // A covered resistor merge applies locally. An uncovered one asks which
 // resistor, even when an earlier classifier returned merge.
-export function localResistorGate(decision, prompt) {
-  const coverage = assessRequestCoverage(prompt);
+export function localResistorGate(decision, prompt, spec = null) {
+  const coverage = resistorEditCoverage(prompt, spec);
   if (decision.mode === 'merge' && decision.edit?.kind === 'resistor' && !coverage.covered) {
     return {
       action: 'refuse',
@@ -795,7 +794,7 @@ async function requestProject(call, ctx, resolvedClassifier = classifyExistingPr
           }
           // The same allow list gates a local apply. A covered resistor edit
           // never calls the provider. A merge that is not covered asks which resistor.
-          const gate = localResistorGate(decision, prompt);
+          const gate = localResistorGate(decision, prompt, existingSpec);
           if (gate.action === 'refuse') {
             const refused = new Error(gate.message);
             refused.code = gate.code;

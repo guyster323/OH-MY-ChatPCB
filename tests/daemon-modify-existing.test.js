@@ -2926,9 +2926,15 @@ function keepTargetPrompt(rng, self) {
         ? pickItem(rng, [
           'keep the LED, set the LED resistor to 680Ω',
           'keep the status LED, set the LED resistor to 680Ω',
-          'keep the LED as is, set the LED resistor to 680Ω'
+          'keep the LED as is, set the LED resistor to 680Ω',
+          'keep D1, LED resistor 680Ω',
+          'keep D1 and change the LED resistor to 680Ω',
+          'keep the LED D1, LED resistor 680Ω'
         ])
-        : 'LED는 그대로 두고 LED 저항만 680Ω으로';
+        : pickItem(rng, [
+          'LED는 그대로 두고 LED 저항만 680Ω으로',
+          'D1은 유지하고 LED 저항 680Ω으로'
+        ]);
       return { prompt, apply: true };
     }
     const ref = rng() < 0.5 ? 'R4' : 'R1';
@@ -2943,7 +2949,31 @@ function keepTargetPrompt(rng, self) {
       ]);
     return { prompt, apply: true };
   }
-  // Ambiguous only for an R ref or a resistor noun. A bare LED / status LED is the diode.
+  // A bare LED, status LED, or the series LED's own D ref still applies above.
+  // These shapes keep a resistor noun, a possessive, or a pronoun, so they are ambiguous.
+  if (rng() < 0.5) {
+    const spelling = lang === 'en'
+      ? pickItem(rng, ['the LED', 'D1', 'the LED D1'])
+      : pickItem(rng, ['LED', 'D1']);
+    const edit = lang === 'en' ? 'set the LED resistor to 680Ω' : 'LED 저항 680Ω';
+    const prompt = lang === 'en'
+      ? pickItem(rng, [
+        `keep ${spelling} and its resistor, ${edit}`,
+        `keep ${spelling}'s resistor, set 680Ω`,
+        `keep ${spelling}. The resistor too. ${edit}`,
+        `keep ${spelling} resistance, ${edit}`,
+        `keep ${spelling}, set it to 680Ω`,
+        'keep the LED circuit, set the LED resistor to 680Ω',
+        'keep the LED stuff, set the LED resistor to 680Ω',
+        'keep the LEDs, set the LED resistor to 680Ω'
+      ])
+      : pickItem(rng, [
+        `${spelling}는 그대로, 저항도 그대로. ${edit}`,
+        `${spelling}는 그대로 두고 저항 680Ω`,
+        `keep ${spelling} and its resistor, ${edit}`
+      ]);
+    return { prompt, apply: false };
+  }
   const role = lang === 'en'
     ? pickItem(rng, ['R3', 'the LED resistor', 'the current-limiting resistor', 'the status LED resistor'])
     : pickItem(rng, ['R3', 'LED 저항', '전류 제한 저항', '상태 LED 저항']);
@@ -3085,6 +3115,57 @@ test('property: a keep clause naming the target ref or its role is RESISTOR_AMBI
     services.patchApprovalRegistry.disposeAll();
     await rm(projectDir, { force: true, recursive: true });
     await rm(services.stateRoot, { force: true, recursive: true });
+  }
+});
+
+test('a keep of the series LED D ref on the generated STM32 board applies R3', async () => {
+  const previousLibs = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+  const { projectDir, generated } = await generatedStm32Project();
+  try {
+    await seedSeriesResistor(projectDir, generated, '1k');
+    const spec = await readChatPcbManifest(projectDir);
+    const d1 = spec.schematic.components.find((part) => part.ref === 'D1');
+    assert.equal(d1?.libId, 'ChatPCB:STATUS_LED');
+    const apply = [
+      'keep D1, LED resistor 680Ω',
+      'keep D1 and change the LED resistor to 680Ω',
+      'keep the LED D1, LED resistor 680Ω',
+      'D1은 유지하고 LED 저항 680Ω으로',
+      'keep the LED, set the LED resistor to 680Ω'
+    ];
+    for (const prompt of apply) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+      assert.equal(decision.edit?.ref, 'R3', prompt);
+      assert.equal(decision.edit?.ohms, 680, prompt);
+      assert.equal(decision.edit?.label, '680Ω', prompt);
+      assert.equal(appliesBeforeProvider(prompt, decision, spec), true, prompt);
+      assert.deepEqual(localResistorGate(decision, prompt, spec), { action: 'local' }, prompt);
+    }
+    const ambiguous = [
+      'keep D1 and its resistor, set the LED resistor to 680Ω',
+      "keep D1's resistor, set 680Ω",
+      'keep the LED circuit, set the LED resistor to 680Ω',
+      'keep the LED, set it to 680Ω'
+    ];
+    for (const prompt of ambiguous) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', `${prompt} ${decision.code ?? decision.mode}`);
+      assert.equal(decision.edit, undefined, prompt);
+      assert.equal(localResistorGate(decision, prompt, spec).action, 'continue', prompt);
+    }
+    const withOtherDiode = structuredClone(spec);
+    if (!withOtherDiode.schematic.components.some((part) => part.ref === 'D2')) {
+      withOtherDiode.schematic.components.push({ ref: 'D2', libId: 'ChatPCB:USB_ESD', value: 'USBLC6' });
+    }
+    const other = classifyExistingProjectRequest('keep D2, LED resistor 680Ω', withOtherDiode);
+    assert.equal(other.mode, 'refuse', other.code ?? '');
+    assert.equal(other.code, 'RESISTOR_TARGET_UNCLEAR');
+    assert.notEqual(other.code, undefined);
+    assert.equal(localResistorGate(other, 'keep D2, LED resistor 680Ω', withOtherDiode).action, 'continue');
+  } finally {
+    restoreKicadLibraryEnv(previousLibs);
+    await rm(projectDir, { force: true, recursive: true });
   }
 });
 
