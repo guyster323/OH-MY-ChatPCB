@@ -3674,6 +3674,19 @@ test('property: an LED-resistor alias keep is RESISTOR_AMBIGUOUS and a direct ed
   assert.deepEqual(failures.slice(0, 16), []);
 });
 
+// UAT 121 joins the alias keep with a comma and no "and set". 120/122 use "and set".
+// "전류 제한기" is the modifier "전류 제한", not the bare "current limiter" name,
+// so the Korean list still edits R3. A ref list with no alias does too.
+test('a comma-joined LED-resistor alias keep is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    'keep R4 or the current limiter, LED resistor 680Ω',
+    'keep the current limiter, LED resistor 680Ω'
+  ]) assertAmbiguousKeep(spec, prompt);
+  assertLedKeepApplies(spec, 'R4 또는 전류 제한기는 그대로 두고, LED 저항 680Ω');
+  assertLedKeepApplies(spec, 'keep R4 or R5, LED resistor 680Ω');
+});
+
 // "the" and "one" are articles and a pronoun in the synonym table. A current
 // or voltage on the LED resistor phrase is still the edit, with or without "the".
 test('property: a measured LED resistor phrase merges R3 with or without the article', () => {
@@ -3791,6 +3804,7 @@ test('D1 aliases the LED resistor only when the spec has no D-designator part', 
     // No D-designator at all: D1 is still the status-LED substitute.
     ['base', 'D1 저항 680Ω으로', 'R3'],
     ['base', "set D1's resistor to 680Ω", 'R3'],
+    ['base', "keep D1's resistor and set R3 to 680Ω", 'RESISTOR_AMBIGUOUS'],
     ['base', 'D1저항 680Ω', 'R3'],
     ['base', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
     ['base', 'set the current limiter to 680Ω', 'R3'],
@@ -3798,6 +3812,7 @@ test('D1 aliases the LED resistor only when the spec has no D-designator part', 
     // D1 is the status LED.
     ['d1led', 'D1 저항 680Ω으로', 'R3'],
     ['d1led', "set D1's resistor to 680Ω", 'R3'],
+    ['d1led', 'set D1 resistor to 680Ω', 'R3'],
     ['d1led', 'D1저항 680Ω', 'R3'],
     ['d1led', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
     ['d1led', 'set the current limiter to 680Ω', 'R3'],

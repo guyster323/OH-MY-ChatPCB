@@ -6,6 +6,7 @@ function compileRegExp(source, flags) {
 }
 
 import { classifyResistorValue, isLoneMilliResistorSuffix, isSpacedRkmValue, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { STATUS_LED_DESIGNATOR } from '../runtime/board-profiles.js';
 import { normalizeMatchText } from '../runtime/match-text.js';
 import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
@@ -2305,7 +2306,13 @@ function keepNamesEditTarget(text, spec) {
   const remainder = blankCopy(raw, ranges);
   addKeptIdentity(edit, remainder, series, 'edit');
   if (edit.size === 0 && bareSeriesRemainder(remainder, series)) edit.add(String(series).toUpperCase());
-  if (ledBlocked && seriesEditRemainder(remainder, series)) edit.add(String(series).toUpperCase());
+  // "keep R4 or the current limiter, LED resistor 680Ω" keeps the bare alias,
+  // but the list's word cap takes "LED" and leaves "resistor 680Ω". That
+  // remainder is still this part, so the keep overlaps the edit.
+  const aliasKept = Boolean(series) && found.objects.some((object) => (
+    textHasBareLedResistorName(keepIdentityFragment(raw, object))
+  ));
+  if ((ledBlocked || aliasKept) && seriesEditRemainder(remainder, series)) edit.add(String(series).toUpperCase());
   for (const key of kept) {
     if (edit.has(key)) return true;
   }
@@ -2335,15 +2342,15 @@ function specHasDDesignator(spec) {
   return rows.some((row) => /^D\d+$/i.test(String(row?.ref ?? '')));
 }
 
-// The generator draws the status LED as D1. A spec that saved the series
-// resistor but not that diode still uses D1 for "{led}'s resistor" / "{led} 저항".
+// The generator's status-LED designator. A spec that saved the series resistor
+// but not that diode still uses it for "{led}'s resistor" / "{led} 저항".
 // A saved D part that is not the status LED is not that substitute.
 function ledResistorAliasRef(spec) {
   const found = seriesLedDesignator(spec);
   if (found) return found;
   if (!seriesResistorRef(spec)) return null;
   if (specHasDDesignator(spec)) return null;
-  return 'D1';
+  return STATUS_LED_DESIGNATOR;
 }
 
 function textWithSeriesLedAsWord(text, spec) {

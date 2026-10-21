@@ -83,6 +83,10 @@ const BMS_RELEASE_GATES = [
   }
 ];
 
+// The status LED ref drawn by this parts table and by project-generator.
+// "{led}'s resistor" falls back to it only when the spec has no D part.
+export const STATUS_LED_DESIGNATOR = 'D1';
+
 const COMMON_PRODUCTION_PARTS = [
   part('J1', 'power-input-header', 'Connector_Generic:Conn_01x02', 'POWER_INPUT', 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical'),
   part('U1', '3v3-buck-regulator', 'Regulator_Switching:TPS62177DQC', 'TPS62177DQC', 'Package_SON:WSON-10-1EP_2x3mm_P0.5mm_EP0.84x2.4mm_ThermalVias', {
@@ -91,7 +95,7 @@ const COMMON_PRODUCTION_PARTS = [
   }),
   part('SW1', 'reset-button', 'Switch:SW_Push', 'RESET_BUTTON', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
   part('SW2', 'boot-button', 'Switch:SW_Push', 'BOOT_BUTTON', 'Button_Switch_SMD:Panasonic_EVQPUJ_EVQPUA'),
-  part('D1', 'status-led', 'Device:LED', 'STATUS_LED', 'LED_SMD:LED_0603_1608Metric'),
+  part(STATUS_LED_DESIGNATOR, 'status-led', 'Device:LED', 'STATUS_LED', 'LED_SMD:LED_0603_1608Metric'),
   part('J2', 'i2c-sensor-header', 'Connector_Generic:Conn_01x04', 'I2C_CONNECTOR', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical'),
   part('J3', 'uart-debug-header', 'Connector_Generic:Conn_01x04', 'UART_HEADER', 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical'),
   part('J4', 'usb-c-connector', 'Connector:USB_C_Receptacle_USB2.0_16P', 'USB_C_CONNECTOR', 'Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12', {
@@ -420,7 +424,7 @@ function calculationEvidence() {
     {
       id: 'status-led-current',
       status: 'pass',
-      subjectRefs: ['D1', 'R3'],
+      subjectRefs: [STATUS_LED_DESIGNATOR, 'R3'],
       assumptions: ['3.3V rail', '2.0V nominal LED forward voltage', '1k series resistor'],
       equation: '(3.3V - 2.0V) / 1000 ohm',
       result: '1.3mA nominal status LED current.',
