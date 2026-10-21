@@ -23,7 +23,7 @@ import {
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
-import { assessRequestCoverage, KEEP_CUES, LED_RESISTOR_SYNONYMS, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
+import { assessRequestCoverage, CHOICE_JOINERS, KEEP_CUES, LED_RESISTOR_SYNONYMS, ledResistorSynonymIsNoun, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -1562,7 +1562,12 @@ test('every LED-resistor synonym in a keep clause is RESISTOR_AMBIGUOUS', () => 
     '직렬',
     '전류제한',
     '전류 제한',
-    '전류 제한용'
+    '전류 제한용',
+    'current limiters',
+    '전류 제한기',
+    '전류제한기',
+    '표시등 저항',
+    '리미터'
   ];
   for (const synonym of required) {
     assert.equal(
@@ -1573,6 +1578,8 @@ test('every LED-resistor synonym in a keep clause is RESISTOR_AMBIGUOUS', () => 
   }
   const failures = [];
   for (const synonym of LED_RESISTOR_SYNONYMS) {
+    // "{led}" is the board's status LED ref. The alias property test fills it in.
+    if (synonym.includes('{led}')) continue;
     for (const lang of ['en', 'ko']) {
       for (const position of LED_SYNONYM_KEEP_POSITIONS) {
         const prompt = placeLedSynonymKeep(ledSynonymKeep(synonym, lang), ledSynonymEdit(lang), position);
@@ -2605,6 +2612,332 @@ test('property: or/또는/혹은 between keep-list targets applies R3 and a real
   assert.deepEqual(failures.slice(0, 16), []);
 });
 
+// and / -고 / 말고 bound a keep list. They do not wall the ohms off from a
+// later choice joiner, so "and rebuild or leave R4" stays a choice. A comma
+// still ends that value. R4 or R5 on the joiner is a list and applies R3.
+const VERB_BEFORE_CHOICE = [
+  { id: 'and rebuild' },
+  { id: '빌드하고' },
+  { id: '-고 BOM도 고치' }
+];
+
+const VERB_CHOICE_JOINERS = [
+  { id: 'or', text: 'or', place: 'word' },
+  { id: '거나', text: '거나', place: 'ending' },
+  { id: '든지', text: '든지', place: 'ending' },
+  { id: '아니면', text: '아니면', place: 'word' }
+];
+
+const UNVALUED_CHOICE_KEEPS = [
+  'leave R4 alone',
+  'R4는 그대로 둬',
+  'R4는 건드리지 마'
+];
+
+function verbBeforeChoiceSentence(middle, joiner, keep) {
+  const ending = joiner.place === 'ending';
+  if (middle.id === 'and rebuild') {
+    const verb = ending ? `rebuild${joiner.text}` : `rebuild ${joiner.text}`;
+    return `set the LED resistor to 680Ω and ${verb} ${keep}`;
+  }
+  if (middle.id === '빌드하고') {
+    const verb = ending ? `빌드하${joiner.text}` : `빌드하고 ${joiner.text}`;
+    return `LED 저항을 680Ω으로 바꾸고 ${verb} ${keep}`;
+  }
+  const verb = ending ? `고치${joiner.text}` : `고치고 ${joiner.text}`;
+  return `LED 저항을 680Ω으로 바꾸고 BOM도 ${verb} ${keep}`;
+}
+
+test('property: a verb between the ohms and an unvalued choice keep is RESISTOR_AMBIGUOUS and a keep list applies R3', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [];
+  for (const middle of VERB_BEFORE_CHOICE) {
+    for (const joiner of VERB_CHOICE_JOINERS) {
+      for (const keep of UNVALUED_CHOICE_KEEPS) ambiguous.push(verbBeforeChoiceSentence(middle, joiner, keep));
+    }
+  }
+  ambiguous.push('LED 저항을 680Ω으로 바꾸고 빌드하거나 아니면 R4는 4.7k로 유지');
+  const applies = [
+    'keep R4 or R5 and set the LED resistor to 680Ω',
+    'R4 또는 R5는 그대로 두고 LED 저항 680Ω으로',
+    'set the LED resistor to 680Ω and keep R4 or R5',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R4는 그대로 둬'
+  ];
+  const comma = 'set the LED resistor to 680Ω and rebuild, or leave R4 alone';
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  const commaBefore = structuredClone(spec);
+  const commaDecision = classifyExistingProjectRequest(comma, spec);
+  if (commaDecision.code !== 'RESISTOR_TARGET_UNCLEAR' || commaDecision.edit != null) {
+    failures.push(`${comma} => ${commaDecision.mode} ${commaDecision.code ?? ''} ${commaDecision.edit?.ref ?? ''}`);
+  }
+  if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(commaBefore)) {
+    failures.push(`${comma} mutated`);
+  }
+  assert.equal(ambiguous.length, VERB_BEFORE_CHOICE.length * VERB_CHOICE_JOINERS.length * UNVALUED_CHOICE_KEEPS.length + 1);
+  assert.deepEqual(failures.slice(0, 12), []);
+});
+
+// X든/X든지/X거나 + 말든/말든지/말거나 is the idiom unless the verb is an edit
+// verb, or 오다 follows an edit/do connective. A pair sitting on the resistor
+// value is a choice for any verb; the next test pins that. Bare 하든 without
+// 말든 stays a choice.
+test('든-말든 is an idiom unless the verb is an edit verb or 오다 follows an edit connective', () => {
+  const spec = seriesSpec('1k');
+  const applies = [
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든지 말든지 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 하든지 말든지 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 가든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오거나 말거나 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 누가 오든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오던 말던 R4는 그대로 둬'
+  ];
+  const ambiguous = [
+    'LED 저항 680Ω으로 바꿔 오든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 바꿔 오든 말든 R1은 그대로 둬',
+    'LED 저항 680Ω으로 해 오든 말든 R4는 그대로',
+    'LED 저항을 680Ω으로 해 오든 말든 R1은 그대로 둬',
+    'LED 저항 680Ω으로 맞춰 오든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 맞춰 오든 말든 R1은 그대로 둬',
+    'LED 저항 680Ω으로 바꿔 오든 말든 R4는 4.7k로 유지',
+    'LED 저항을 680Ω으로 바꾸든 말든 R1은 그대로 둬',
+    'LED 저항 680Ω으로 바꾸든 말든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸든지 말든지 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸거나 말거나 R4는 그대로 둬',
+    'LED 저항 680Ω으로 변경하든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 수정하든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 설정하든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 하든 R4는 4.7k 그대로',
+    'LED 저항 680Ω으로 하든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 오든말든 R4는 4.7k로 유지',
+    'LED 저항을 680Ω으로 바꾸고 누가 오든 말든 R4는 4.7k로 유지'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(next, 'R1') !== '5.1k') failures.push(`${prompt} R1 ${componentValue(next, 'R1')}`);
+    }
+  }
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  for (const [id, partner] of [['deun', '말든'], ['deunji', '말든지'], ['geona', '말거나']]) {
+    const row = CHOICE_JOINERS.find((item) => item.id === id);
+    if (row?.idiomWith !== partner) failures.push(`${id} idiomWith ${row?.idiomWith ?? 'missing'}`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+// 든/든지/거나 + 말든/말든지/말거나 right after value+(으)로, or earlier in the
+// same clause as a target and a value, is a choice for any verb. A keep on
+// either side is RESISTOR_AMBIGUOUS. After a clause break the pair stays the
+// idiom and still applies R3. With no keep the sentence stays TARGET_UNCLEAR.
+test('든-말든 after a resistor value is a choice and a keep on either side is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [
+    'LED 저항을 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든지 말든지 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하거나 말거나 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 해든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R4는 건드리지 마',
+    'LED 저항을 680Ω으로 하든 말든 풀업은 그대로',
+    'LED 저항을 680Ω으로 하든말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든요 말든요 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 변경하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 해 가든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 오든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 가든 말든 R4는 그대로 둬',
+    'R3를 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R4는 4.7k 그대로',
+    'LED 저항을 680Ω으로 하든 말든 R4는 4.7k로 유지',
+    'R4는 그대로 두고 LED 저항을 680Ω으로 하든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 하든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 바꾸든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 변경하든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 해 오든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 바꿔 오든 말든',
+    'LED 저항을 680Ω으로 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 하든지 말든지 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 해든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 하거나 말거나 R1은 그대로 둠',
+    'LED 저항 680Ω 하든 말든 R1은 그대로 둠',
+    'LED 저항 680Ω으로 하든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R1은 건드리지 마',
+    'LED 저항을 680Ω으로 하든말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 하든요 말든요 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 변경하든 말든 R1은 그대로 둬',
+    'R3를 680Ω으로 하든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R1은 4.7k 그대로',
+    'LED 저항을 680Ω으로 하든 말든 R1은 4.7k로 유지',
+    'LED 저항을 680Ω으로 해 가든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 오든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 가든 말든 R1은 그대로 둠'
+  ];
+  const applies = [
+    'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 오든말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 가든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오거나 말거나 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 누가 오든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R4는 그대로 둬'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(next, 'R1') !== '5.1k') failures.push(`${prompt} R1 ${componentValue(next, 'R1')}`);
+    }
+  }
+  const unclear = 'LED 저항을 680Ω으로 하든 말든 해줘';
+  const unclearDecision = classifyExistingProjectRequest(unclear, spec);
+  if (unclearDecision.code !== 'RESISTOR_TARGET_UNCLEAR' || unclearDecision.edit != null) {
+    failures.push(`${unclear} => ${unclearDecision.mode} ${unclearDecision.code ?? ''} ${unclearDecision.edit?.ref ?? ''}`);
+  }
+  const afterValue = 'R4는 그대로 두고 오든 말든 LED 저항 680Ω';
+  const afterValueDecision = classifyExistingProjectRequest(afterValue, spec);
+  if (afterValueDecision.code !== 'RESISTOR_REF_UNSUPPORTED' || afterValueDecision.edit != null) {
+    failures.push(`${afterValue} => ${afterValueDecision.mode} ${afterValueDecision.code ?? ''} ${afterValueDecision.edit?.ref ?? ''}`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+// 바꾸고's -고 puts 680Ω in the previous clause, so the value-position rule
+// does not see it. 바꾸 and 변경 are edit verbs, so the pair is still a choice
+// and the R1 keep is RESISTOR_AMBIGUOUS. A non-edit verb after the same break
+// stays the idiom and applies R3.
+test('바꾸든 or 변경하든 after 바꾸고 plus an R1 keep is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const prompts = [
+    'LED 저항을 680Ω으로 바꾸고 바꾸든 말든 R1은 그대로 둘',
+    'LED 저항을 680Ω으로 바꾸고 변경하든 말든 R1은 그대로 둘'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+// The target sits before 든/든지/거나 + 말든/말든지/말거나 and the value sits
+// after that pair, in the same clause. That is the same choice as a value
+// earlier in the clause, so a keep is RESISTOR_AMBIGUOUS. A standalone idiom
+// after -고 still applies R3: its value is in the previous clause. No keep
+// leaves the sentence on its current decision.
+test('a value after 든-말든 in the same target clause is RESISTOR_AMBIGUOUS with a keep', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [
+    'LED 저항은 바꾸든 말든 680Ω으로 하고 R1은 그대로 둘',
+    'LED 저항은 하든 말든 680Ω으로 하고 R1은 그대로 둘'
+  ];
+  const applies = [
+    'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 가든 말든 R1은 그대로 둠'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(next, 'R1') !== '5.1k') failures.push(`${prompt} R1 ${componentValue(next, 'R1')}`);
+    }
+  }
+  const noKeep = 'LED 저항은 바꾸든 말든 680Ω으로 해줘';
+  const noKeepBefore = structuredClone(spec);
+  const noKeepDecision = classifyExistingProjectRequest(noKeep, spec);
+  if (noKeepDecision.code !== 'RESISTOR_TARGET_UNCLEAR' || noKeepDecision.edit != null) {
+    failures.push(`${noKeep} => ${noKeepDecision.mode} ${noKeepDecision.code ?? ''} ${noKeepDecision.edit?.ref ?? ''}`);
+  }
+  if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(noKeepBefore)) failures.push(`${noKeep} mutated`);
+  assert.deepEqual(failures, []);
+});
+
 test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', () => {
   const spec = seriesSpec('1k');
   const failures = [];
@@ -3401,4 +3734,606 @@ test('property: a numbered keep cue names R3 or an LED resistor with a number an
   assert.equal(applies.length, applyWidth);
   assert.equal(ambiguousWidth > 0, true);
   assert.deepEqual(failures.slice(0, 12), []);
+});
+
+// The status LED's own D ref. D1 on seriesLedBoard; another diode is not this part.
+function statusLedRef(spec) {
+  const rows = [
+    ...(spec?.schematic?.components ?? []),
+    ...(spec?.boardProfile?.productionParts ?? [])
+  ];
+  for (const row of rows) {
+    const ref = String(row?.ref ?? '');
+    if (!/^D\d+$/iu.test(ref)) continue;
+    const role = String(row?.role ?? '');
+    const libId = String(row?.libId ?? '');
+    const value = String(row?.value ?? '');
+    if (role === 'status-led' || libId === 'ChatPCB:STATUS_LED' || value === 'STATUS_LED') return ref.toUpperCase();
+  }
+  return null;
+}
+
+function boardWithStatusLedRef(ref) {
+  const spec = seriesLedBoard('1k');
+  for (const row of [...spec.schematic.components, ...spec.boardProfile.productionParts]) {
+    if (String(row.ref).toUpperCase() === 'D1') row.ref = ref;
+  }
+  return spec;
+}
+
+// Phrases that name the LED series resistor. The D ref comes from the spec.
+function ledResistorAliasPhrases(ledRef) {
+  return [
+    'the current limiter',
+    `${ledRef}'s resistor`,
+    `the ${ledRef} resistor`,
+    'the indicator resistor',
+    'the series one',
+    `${ledRef} 저항`
+  ];
+}
+
+function aliasKeepSentences(phrase) {
+  return [
+    `keep ${phrase} and set R3 to 680Ω`,
+    `keep ${phrase}, set the LED resistor to 680Ω`,
+    `keep R4 or ${phrase} and set the LED resistor to 680Ω`,
+    `R4 또는 ${phrase}은 그대로 두고 R3 680Ω으로`
+  ];
+}
+
+test('property: an LED-resistor alias keep is RESISTOR_AMBIGUOUS and a direct edit applies R3', () => {
+  const boards = [seriesLedBoard('1k'), boardWithStatusLedRef('D7')];
+  const failures = [];
+  for (const spec of boards) {
+    const ledRef = statusLedRef(spec);
+    const phrases = ledResistorAliasPhrases(ledRef);
+    const ambiguous = phrases.flatMap((phrase) => aliasKeepSentences(phrase));
+    const applies = [
+      'keep R4 or R5 and set the LED resistor to 680Ω',
+      'keep the LED, set the LED resistor to 680Ω',
+      `keep ${ledRef}, set the LED resistor to 680Ω`,
+      `keep ${ledRef} and change the LED resistor to 680Ω`,
+      'set the current limiter to 680Ω',
+      `${ledRef} 저항 680Ω으로`,
+      'set the indicator resistor to 680Ω',
+      'set the series one to 680Ω'
+    ];
+    const r3 = componentValue(spec, 'R3');
+    for (const prompt of ambiguous) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+        failures.push(`${ledRef} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    }
+    for (const prompt of applies) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+        failures.push(`${ledRef} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+        if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      }
+    }
+    const otherRef = ledRef === 'D1' ? 'D7' : 'D1';
+    const otherEdit = `${otherRef} 저항 680Ω으로`;
+    const otherDecision = classifyExistingProjectRequest(otherEdit, spec);
+    if (otherDecision.mode === 'merge' && otherDecision.edit?.ref === 'R3') {
+      failures.push(`${otherEdit} on ${ledRef} applied R3`);
+    }
+    // "current limit" / "current-limit" are modifiers. They are not the
+    // "current limiter" alias, so a keep or an edit of them stays unclear
+    // unless a resistor noun is present.
+    for (const prompt of [
+      'set the current limit to 680Ω',
+      'set the current-limit to 680Ω',
+      'keep the current-limit and set R3 to 680Ω',
+      'set the indicator to 680Ω'
+    ]) {
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_TARGET_UNCLEAR') {
+        failures.push(`${ledRef} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}`);
+      }
+    }
+    assert.equal(phrases.length, 6);
+    assert.equal(ambiguous.length, phrases.length * 4);
+  }
+  assert.deepEqual(failures.slice(0, 16), []);
+});
+
+// UAT 121 joins the alias keep with a comma and no "and set". 120/122 use "and set".
+// "전류 제한기" names the same part as "current limiter", so that keep contradicts the edit.
+// A ref list with no alias still edits R3.
+test('a comma-joined LED-resistor alias keep is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    'keep R4 or the current limiter, LED resistor 680Ω',
+    'keep the current limiter, LED resistor 680Ω',
+    'R4 또는 전류 제한기는 그대로 두고, LED 저항 680Ω'
+  ]) assertAmbiguousKeep(spec, prompt);
+  assertLedKeepApplies(spec, 'keep R4 or R5, LED resistor 680Ω');
+});
+
+// "전류 제한" / "전류 제한 저항" stay modifiers. "전류 제한기" is the part.
+// Bare "리미터" must not match inside "밀리미터" or "프리미터".
+test('Korean current-limiter names are RESISTOR_AMBIGUOUS on keep and apply R3 on edit', () => {
+  const spec = seriesLedBoard();
+  for (const synonym of ['current limiters', '전류 제한기', '전류제한기', '표시등 저항', '리미터']) {
+    assert.equal(LED_RESISTOR_SYNONYMS.includes(synonym), true, synonym);
+  }
+  for (const prompt of [
+    'R4 또는 전류 제한기는 그대로 두고, LED 저항 680Ω',
+    'R4 또는 전류 제한기는 그대로 두고 LED 저항 680Ω',
+    '전류 제한기는 그대로 두고, LED 저항 680Ω',
+    '전류 제한기는 그대로 두고 LED 저항 680Ω',
+    '전류 제한기는 그대로 두고 LED 저항을 680Ω으로',
+    'R4 또는 전류제한기는 그대로 두고, LED 저항 680Ω',
+    '전류제한기는 그대로 두고 LED 저항 680Ω',
+    '전류 제한기는 건드리지 말고 R3 680Ω',
+    'R4 또는 전류 제한기는 건드리지 말고 R3 680Ω으로',
+    'keep the current limiters and set R3 to 680Ω',
+    'keep the current limiters, set the LED resistor to 680Ω'
+  ]) assertAmbiguousKeep(spec, prompt);
+  for (const prompt of [
+    '전류 제한기를 680Ω으로',
+    '전류제한기 680Ω으로 바꿔줘',
+    '표시등 저항 680Ω으로',
+    '리미터 680Ω으로',
+    'set the current limiters to 680Ω'
+  ]) assertLedKeepApplies(spec, prompt);
+  assertAmbiguousKeep(spec, '전류 제한 저항은 그대로 두고 LED 저항 680Ω');
+  for (const prompt of [
+    '전류 제한 저항 680Ω',
+    'LED 전류 제한용 저항 680Ω',
+    '전류 제한 680Ω으로',
+    '전류 제한을 680Ω으로',
+    '전류제한 680Ω으로',
+    '전류 제한용 680Ω으로',
+    '리미터 저항 680Ω으로'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+  for (const prompt of ['전류제한용 680Ω으로', 'set the current limit to 680Ω', '프리미터 680Ω으로', '전압 리미터 680Ω으로']) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+  const milliResistor = classifyExistingProjectRequest('밀리미터 저항 680Ω으로', spec);
+  assert.equal(milliResistor.mode, 'refuse', milliResistor.code ?? '');
+  assert.equal(milliResistor.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(milliResistor.edit, undefined);
+  for (const prompt of [
+    '밀리미터는 그대로 두고 LED 저항 680Ω',
+    '프리미터는 그대로 두고 LED 저항 680Ω'
+  ]) assertLedKeepApplies(spec, prompt);
+});
+
+// A Korean LED alias is the part only at a word boundary. Hangul glued on
+// ("과전류 제한기"), a noun continuation ("전류 제한 기능"), or a
+// preceding qualifier ("전압 리미터", "USB 전류 제한기") is a different part.
+// The LED 저항 edit still applies. A real "전류 제한기" keep stays ambiguous.
+test('a qualified or extended Korean LED alias keep still applies the LED resistor edit', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    '전류 제한 기능은 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '과전류 제한기는 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    'USB 전류 제한기는 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '전압 리미터는 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '과전류 제한 기능은 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '5밀리미터 간격은 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '프리미터 레이어는 그대로 두고 LED 저항을 680Ω으로 바꿔'
+  ]) assertLedKeepApplies(spec, prompt);
+  for (const prompt of [
+    '과전류 제한기를 680Ω으로 바꿔',
+    '과전류제한기를 680Ω으로 바꿔',
+    '전압 리미터를 680Ω으로 바꿔'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+  const usbLimiter = classifyExistingProjectRequest('USB 리미터를 680Ω으로 바꿔', spec);
+  assert.equal(usbLimiter.mode, 'refuse', usbLimiter.code ?? '');
+  assert.equal(usbLimiter.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(usbLimiter.edit, undefined);
+  const compactFunction = classifyExistingProjectRequest('전류제한기능은 유지하고 LED 저항을 680Ω으로 바꿔', spec);
+  assert.equal(compactFunction.mode, 'refuse', compactFunction.code ?? '');
+  assert.equal(compactFunction.code, 'RESISTOR_TARGET_UNCLEAR', '전류제한기능은 유지하고 LED 저항을 680Ω으로 바꿔');
+  assert.equal(compactFunction.edit, undefined);
+});
+
+// Particles and postpositions do not lengthen the alias into another noun.
+// A designator, adverb, or separator in front does not qualify a different part.
+test('Korean alias particles, separators, and adverbs stay RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    '전류 제한기하고 R4는 그대로 두고, LED 저항 680Ω',
+    '전류 제한기나 R4는 그대로 두고, LED 저항 680Ω',
+    '전류 제한기까지 그대로 두고, LED 저항 680Ω',
+    '전류 제한기에는 손대지 말고, LED 저항 680Ω',
+    'R4(전류 제한기)는 그대로 두고, LED 저항 680Ω',
+    'R4·전류 제한기는 그대로 두고, LED 저항 680Ω',
+    '지금 전류 제한기는 그대로 두고, LED 저항 680Ω',
+    'R4나 리미터는 그대로 두고, LED 저항 680Ω',
+    'R4/전류 제한기는 그대로 두고, LED 저항 680Ω'
+  ]) assertAmbiguousKeep(spec, prompt);
+});
+
+// Each Korean noun alias plus a particle is still that alias. The particle is
+// glued on, and the keep cue stays "그대로 두고". A modifier row is not that
+// part unless 저항 follows it.
+const KOREAN_ALIAS_PARTICLES = Object.freeze([
+  '는', '은', '을', '를', '도', '만', '하고', '나', '이나', '까지', '부터', '에는', '에도', '처럼'
+]);
+
+function koreanLedResistorAliases() {
+  return LED_RESISTOR_SYNONYMS.filter((alias) => /[가-힣]/u.test(alias) && !alias.includes('{led}'));
+}
+
+test('Korean noun alias particle keeps are RESISTOR_AMBIGUOUS and a modifier names that part only with 저항', () => {
+  const spec = seriesLedBoard();
+  const failures = [];
+  const aliases = koreanLedResistorAliases();
+  const nouns = aliases.filter((alias) => ledResistorSynonymIsNoun(alias));
+  for (const alias of nouns) {
+    for (const particle of KOREAN_ALIAS_PARTICLES) {
+      const prompt = `${alias}${particle} 그대로 두고, LED 저항 680Ω`;
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+        failures.push(`noun ${prompt} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+      }
+    }
+  }
+  assert.equal(aliases.length > nouns.length, true);
+  assert.equal(nouns.length > 0, true);
+  assert.equal(ledResistorSynonymIsNoun('직렬'), false);
+  assert.equal(ledResistorSynonymIsNoun('LED 직렬'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류 제한'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류제한'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류 제한용'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류제한용'), false);
+  assert.equal(ledResistorSynonymIsNoun('엘이디'), false);
+  assert.equal(ledResistorSynonymIsNoun('엘예디'), false);
+  assert.equal(ledResistorSynonymIsNoun('상태'), false);
+  assert.equal(ledResistorSynonymIsNoun('발광다이오드'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류 제한기'), true);
+  assert.equal(ledResistorSynonymIsNoun('전류제한기'), true);
+  assert.equal(ledResistorSynonymIsNoun('리미터'), true);
+  assert.equal(ledResistorSynonymIsNoun('표시등 저항'), true);
+  assert.equal(ledResistorSynonymIsNoun('상태 LED 저항'), true);
+  assert.equal(failures.length, 0, failures.slice(0, 24).join('\n'));
+  // A modifier plus some other noun keeps that object. The LED resistor edit applies.
+  for (const prompt of [
+    '직렬 연결은 그대로 두고, LED 저항 680Ω',
+    '직렬 다이오드는 그대로 두고, LED 저항 680Ω',
+    '전류 제한 설정은 그대로 두고, LED 저항 680Ω',
+    '전류 제한 퓨즈는 그대로 두고, LED 저항 680Ω',
+    '전류 제한 값은 그대로 두고, LED 저항 680Ω',
+    '전류 제한기판은 그대로 두고, LED 저항 680Ω'
+  ]) assertLedKeepApplies(spec, prompt);
+  assertLedKeepApplies(spec, '전류 제한기 기능은 그대로 두고 LED 저항을 680Ω으로 바꿔');
+  assertAmbiguousKeep(spec, '직렬 저항은 그대로 두고, LED 저항 680Ω');
+  assertAmbiguousKeep(spec, '전류 제한 저항은 그대로 두고, LED 저항 680Ω');
+  const seriesCap = classifyExistingProjectRequest('직렬 커패시터는 그대로 두고, LED 저항 680Ω', spec);
+  assert.equal(seriesCap.mode, 'refuse', seriesCap.code ?? '');
+  assert.equal(seriesCap.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(seriesCap.edit, undefined);
+});
+
+// The resistor noun may sit later in the same noun phrase, after the modifier
+// and before the 은/는/을/를 that ends the keep. Another noun in that slot
+// still names a different object, so the LED resistor edit applies.
+test('a resistor noun later in the modifier phrase is RESISTOR_AMBIGUOUS and another noun still applies R3', () => {
+  const spec = seriesLedBoard();
+  const rows = [
+    ['직렬로 연결된 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 연결된 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 연결 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['전류 제한하는 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 쪽 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['전류 제한 쪽 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬로 달린 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 R은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 연결은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'merge'],
+    ['전류 제한 설정은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'merge'],
+    ['직렬 다이오드는 그대로 두고, LED 저항 680Ω', 'merge'],
+    ['전류 제한 퓨즈는 그대로 두고, LED 저항 680Ω', 'merge'],
+    ['전류 제한 값은 그대로 두고, LED 저항 680Ω', 'merge'],
+    ['전류 제한기판은 그대로 두고, LED 저항 680Ω', 'merge']
+  ];
+  for (const [prompt, kind] of rows) {
+    if (kind === 'ambiguous') assertAmbiguousKeep(spec, prompt);
+    else assertLedKeepApplies(spec, prompt);
+  }
+});
+
+// English alias -> Korean row in LED_RESISTOR_SYNONYMS. A new English row
+// fails until this map names it and that Korean alias is in the table.
+// "the" and "one" are glue, so the series-one rows pair with 직렬. There is
+// no separate Korean bare-name row for that idiom.
+const LED_RESISTOR_ENGLISH_TO_KOREAN = Object.freeze({
+  'current-limiting': '전류제한',
+  'current limiting': '전류 제한',
+  'current-limit': '전류 제한',
+  'current limiter': '전류 제한기',
+  'current limiters': '전류 제한기',
+  'indicator resistor': '표시등 저항',
+  'series': '직렬',
+  'series one': '직렬',
+  'the series one': '직렬',
+  'LED series': 'LED 직렬',
+  'status LED resistor': '상태 LED 저항',
+  'led': '엘이디',
+  'leds': '엘이디',
+  'status': '상태',
+  "{led}'s resistor": '{led} 저항',
+  'the {led} resistor': '{led} 저항',
+  '{led} resistor': '{led} 저항'
+});
+
+function isEnglishLedResistorAlias(alias) {
+  return /[A-Za-z]/.test(alias) && !/[가-힣]/.test(alias);
+}
+
+test('every English LED-resistor alias has a Korean counterpart row', () => {
+  const table = new Set(LED_RESISTOR_SYNONYMS);
+  const english = LED_RESISTOR_SYNONYMS.filter((alias) => isEnglishLedResistorAlias(alias));
+  const missingMap = [];
+  const missingKorean = [];
+  for (const alias of english) {
+    if (!Object.hasOwn(LED_RESISTOR_ENGLISH_TO_KOREAN, alias)) {
+      missingMap.push(alias);
+      continue;
+    }
+    const korean = LED_RESISTOR_ENGLISH_TO_KOREAN[alias];
+    if (isEnglishLedResistorAlias(korean) || !table.has(korean)) missingKorean.push(`${alias} -> ${korean}`);
+  }
+  const stale = Object.keys(LED_RESISTOR_ENGLISH_TO_KOREAN).filter((alias) => (
+    !table.has(alias) || !isEnglishLedResistorAlias(alias)
+  ));
+  assert.equal(LED_RESISTOR_ENGLISH_TO_KOREAN['current limiter'], '전류 제한기');
+  assert.equal(LED_RESISTOR_ENGLISH_TO_KOREAN['current limiters'], '전류 제한기');
+  assert.equal(LED_RESISTOR_ENGLISH_TO_KOREAN['indicator resistor'], '표시등 저항');
+  assert.deepEqual(missingMap, []);
+  assert.deepEqual(missingKorean, []);
+  assert.deepEqual(stale, []);
+  assert.equal(english.length, Object.keys(LED_RESISTOR_ENGLISH_TO_KOREAN).length);
+});
+
+// 'LED 직렬' and '상태 LED 저항' are the Korean rows for 'LED series' and
+// 'status LED resistor'. A keep of either contradicts an LED-resistor edit.
+test('Korean LED-series and status-LED-resistor rows are RESISTOR_AMBIGUOUS on keep and apply R3 on edit', () => {
+  const spec = seriesLedBoard();
+  for (const synonym of ['LED 직렬', '상태 LED 저항']) {
+    assert.equal(LED_RESISTOR_SYNONYMS.includes(synonym), true, synonym);
+  }
+  for (const prompt of [
+    'LED 직렬 저항은 그대로 두고 LED 저항 680Ω',
+    'LED 직렬 저항은 그대로 두고, LED 저항 680Ω',
+    'R4 또는 LED 직렬 저항은 그대로 두고 LED 저항 680Ω',
+    '상태 LED 저항은 그대로 두고 LED 저항 680Ω',
+    '상태 LED 저항은 그대로 두고, LED 저항 680Ω',
+    'R4 또는 상태 LED 저항은 그대로 두고 LED 저항 680Ω',
+    '상태 LED 저항은 그대로 두고, LED 저항을 680Ω으로'
+  ]) assertAmbiguousKeep(spec, prompt);
+  for (const prompt of [
+    'LED 직렬 저항 680Ω',
+    'LED 직렬 저항을 680Ω으로',
+    'LED 직렬 680Ω으로',
+    '상태 LED 저항 680Ω으로',
+    '상태 LED 저항을 680Ω으로'
+  ]) assertLedKeepApplies(spec, prompt);
+});
+
+// "the" and "one" are articles and a pronoun in the synonym table. A current
+// or voltage on the LED resistor phrase is still the edit, with or without "the".
+test('property: a measured LED resistor phrase merges R3 with or without the article', () => {
+  const articles = ['the', ''];
+  const phrases = ['LED resistor', 'status LED resistor', 'current limiting resistor'];
+  const tails = ['for 20mA', 'at 3.3V', '(20mA)'];
+  const spec = seriesLedBoard('1k');
+  const prompts = [];
+  for (const article of articles) {
+    for (const phrase of phrases) {
+      for (const tail of tails) {
+        const head = article === '' ? phrase : `${article} ${phrase}`;
+        prompts.push(`set ${head} to 680Ω ${tail}`);
+      }
+    }
+  }
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+    }
+  }
+  const keep = classifyExistingProjectRequest('keep the series one and set R3 to 680Ω', spec);
+  if (keep.mode !== 'refuse' || keep.code !== 'RESISTOR_AMBIGUOUS' || keep.edit != null) {
+    failures.push(`keep the series one and set R3 to 680Ω => ${keep.mode} ${keep.code ?? ''} ${keep.edit?.ref ?? ''}`);
+  }
+  const series = classifyExistingProjectRequest('set the series one to 680Ω', spec);
+  if (series.mode !== 'merge' || series.edit?.ref !== 'R3' || series.edit?.ohms !== 680 || series.edit?.label !== '680Ω') {
+    failures.push(`set the series one to 680Ω => ${series.mode} ${series.code ?? ''} ${series.edit?.ref ?? ''} ${series.edit?.ohms ?? ''}`);
+  }
+  assert.equal(prompts.length, articles.length * phrases.length * tails.length);
+  assert.deepEqual(failures, []);
+});
+
+// Specs match probe40.mjs. D1 stands in for the status LED only when the spec
+// has no D-designator part. A Schottky or power LED already on D1 is not that part.
+function probeBoard(kind) {
+  const comps = [
+    { ref: 'R1', libId: 'Device:R', value: '5.1k' },
+    { ref: 'R3', libId: 'ChatPCB:LED_RESISTOR', value: '1k' },
+    { ref: 'R4', libId: 'ChatPCB:I2C_PULLUP', value: '4.7k' }
+  ];
+  const parts = [
+    { ref: 'R1', role: 'usb-c-cc1-pulldown', value: '5.1k' },
+    { ref: 'R3', role: 'status-led-resistor', value: '1k' },
+    { ref: 'R4', role: 'i2c-scl-pullup', value: '4.7k' }
+  ];
+  const per = [{ kind: 'status-led' }, { kind: 'status-led-resistor', value: '1k' }];
+  if (kind === 'noled') {
+    return {
+      mcu: { family: 'STM32' },
+      schematic: { components: [comps[0], comps[2]] },
+      peripherals: [{ kind: 'status-led' }],
+      boardProfile: { productionParts: [parts[0], parts[2]] }
+    };
+  }
+  if (kind === 'd1led') {
+    comps.push({ ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' });
+    parts.push({ ref: 'D1', role: 'status-led' });
+  }
+  if (kind === 'd2status') {
+    comps.push(
+      { ref: 'D1', libId: 'Device:LED', value: 'PWR_LED' },
+      { ref: 'D2', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' },
+      { ref: 'R5', libId: 'Device:R', value: '2.2k' }
+    );
+    parts.push(
+      { ref: 'D1', role: 'power-led' },
+      { ref: 'D2', role: 'status-led' },
+      { ref: 'R5', role: 'power-led-resistor', value: '2.2k' }
+    );
+  }
+  if (kind === 'd1schottky') {
+    comps.push({ ref: 'D1', libId: 'Device:D_Schottky', value: 'SS14' });
+    parts.push({ ref: 'D1', role: 'reverse-polarity-diode' });
+  }
+  if (kind === 'multiled') {
+    comps.push(
+      { ref: 'D1', libId: 'ChatPCB:STATUS_LED', value: 'STATUS_LED' },
+      { ref: 'D2', libId: 'Device:LED', value: 'PWR_LED' },
+      { ref: 'R5', libId: 'Device:R', value: '2.2k' }
+    );
+    parts.push(
+      { ref: 'D1', role: 'status-led' },
+      { ref: 'D2', role: 'power-led' },
+      { ref: 'R5', role: 'power-led-resistor', value: '2.2k' }
+    );
+  }
+  return {
+    mcu: { family: 'STM32' },
+    schematic: { components: comps },
+    peripherals: per,
+    boardProfile: { productionParts: parts }
+  };
+}
+
+test('D1 aliases the LED resistor only when the spec has no D-designator part', () => {
+  const d1Edits = [
+    'D1 저항 680Ω으로',
+    "set D1's resistor to 680Ω",
+    'D1저항 680Ω'
+  ];
+  const rows = [
+    // No D-designator at all: D1 is still the status-LED substitute.
+    ['base', 'D1 저항 680Ω으로', 'R3'],
+    ['base', "set D1's resistor to 680Ω", 'R3'],
+    ['base', "keep D1's resistor and set R3 to 680Ω", 'RESISTOR_AMBIGUOUS'],
+    ['base', 'D1저항 680Ω', 'R3'],
+    ['base', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['base', 'set the current limiter to 680Ω', 'R3'],
+    ['base', 'set the indicator resistor to 680Ω', 'R3'],
+    // D1 is the status LED.
+    ['d1led', 'D1 저항 680Ω으로', 'R3'],
+    ['d1led', "set D1's resistor to 680Ω", 'R3'],
+    ['d1led', 'set D1 resistor to 680Ω', 'R3'],
+    ['d1led', 'D1저항 680Ω', 'R3'],
+    ['d1led', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['d1led', 'set the current limiter to 680Ω', 'R3'],
+    ['d1led', 'set the indicator resistor to 680Ω', 'R3'],
+    // D2 is the status LED. D1 is a power LED, so it is not the alias.
+    ['d2status', 'D1 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d2status', "set D1's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['d2status', 'D1저항 680Ω', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d2status', 'D2 저항 680Ω으로', 'R3'],
+    ['d2status', "set D2's resistor to 680Ω", 'R3'],
+    ['d2status', 'set the current limiter to 680Ω', 'R3'],
+    ['d2status', 'set the indicator resistor to 680Ω', 'R3'],
+    // D1 is a Schottky diode. Naming it must not edit R3.
+    ['d1schottky', 'D1 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d1schottky', "set D1's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['d1schottky', 'D1저항 680Ω', 'RESISTOR_REF_UNSUPPORTED'],
+    ['d1schottky', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['d1schottky', 'set the current limiter to 680Ω', 'R3'],
+    ['d1schottky', 'set the indicator resistor to 680Ω', 'R3'],
+    // D1 is the status LED. D2 is a power LED.
+    ['multiled', 'D1 저항 680Ω으로', 'R3'],
+    ['multiled', "set D1's resistor to 680Ω", 'R3'],
+    ['multiled', 'D1저항 680Ω', 'R3'],
+    ['multiled', 'D2 저항 680Ω으로', 'RESISTOR_REF_UNSUPPORTED'],
+    ['multiled', "set D2's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['multiled', 'set the current limiter to 680Ω', 'R3'],
+    ['multiled', 'set the indicator resistor to 680Ω', 'R3'],
+    // No LED parts and no series resistor. The alias must not add one.
+    ['noled', 'D1 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['noled', "set D1's resistor to 680Ω", 'RESISTOR_REF_UNSUPPORTED'],
+    ['noled', 'D1저항 680Ω', 'RESISTOR_REF_NOT_FOUND'],
+    ['noled', 'D2 저항 680Ω으로', 'RESISTOR_REF_NOT_FOUND'],
+    ['noled', 'set the current limiter to 680Ω', 'RESISTOR_TARGET_UNCLEAR'],
+    ['noled', 'set the indicator resistor to 680Ω', 'RESISTOR_TARGET_UNCLEAR']
+  ];
+  const failures = [];
+  for (const [kind, prompt, expectCode] of rows) {
+    const spec = probeBoard(kind);
+    const before = structuredClone(spec);
+    const r3 = componentValue(spec, 'R3');
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    const got = decision.mode === 'merge' ? decision.edit?.ref : decision.code;
+    if (got !== expectCode || (expectCode === 'R3' && (decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω'))) {
+      failures.push(`${kind} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${kind} ${prompt} mutated`);
+    if (componentValue(spec, 'R3') !== r3) failures.push(`${kind} ${prompt} R3 changed before apply`);
+    if (decision.mode === 'refuse') {
+      if (decision.edit != null) failures.push(`${kind} ${prompt} edit set`);
+      if (!blocksBeforeProvider(prompt, decision)) failures.push(`${kind} ${prompt} reached provider`);
+    }
+    if (decision.mode === 'merge' && decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${kind} ${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${kind} ${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(spec, 'R5') !== undefined && componentValue(next, 'R5') !== '2.2k') {
+        failures.push(`${kind} ${prompt} R5 ${componentValue(next, 'R5')}`);
+      }
+    }
+    if (kind === 'd1schottky' && d1Edits.includes(prompt)) {
+      if (decision.code !== 'RESISTOR_REF_UNSUPPORTED' || componentValue(spec, 'R3') !== '1k') {
+        failures.push(`${kind} ${prompt} must stay RESISTOR_REF_UNSUPPORTED with R3 unchanged`);
+      }
+      if (componentValue(spec, 'D1') !== 'SS14') failures.push(`${kind} ${prompt} D1 changed`);
+    }
+    if (kind === 'noled' && componentValue(spec, 'R3') !== undefined) {
+      failures.push(`${kind} ${prompt} added R3`);
+    }
+  }
+  assert.deepEqual(failures, []);
 });

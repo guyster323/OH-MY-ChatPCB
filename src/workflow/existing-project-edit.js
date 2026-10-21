@@ -6,6 +6,7 @@ function compileRegExp(source, flags) {
 }
 
 import { classifyResistorValue, isLoneMilliResistorSuffix, isSpacedRkmValue, parseResistorOhms } from '../kicad/resistor-ohms.js';
+import { STATUS_LED_DESIGNATOR } from '../runtime/board-profiles.js';
 import { normalizeMatchText } from '../runtime/match-text.js';
 import { loneMilliCountsAsResistor } from '../runtime/quantity-tokens.js';
 import { writeGeneratedProject } from './generate-mcu-project.js';
@@ -37,7 +38,10 @@ import {
   isKoreanRequestStem,
   KEEP_CUES,
   CHOICE_JOINERS,
+  choiceJoinerIsIdiom,
+  choiceJoinerBindsValue,
   choiceWordJoinerSources,
+  goMalgoClauseSpans,
   decimalBeforeKeepFragments,
   keepClauseSpans,
   ledKeepVerbSkipTexts,
@@ -48,7 +52,10 @@ import {
   isUnboundMeasureAfter,
   libIdNamesResistor,
   specRoleNamesResistor,
+  expandLedRefResistorAliases,
+  textHasBareLedResistorName,
   textHasKnownRole,
+  textHasKoreanLedResistorAlias,
   textHasLedResistorSynonym,
   textHasLengthObject,
   textHasUsbRole
@@ -500,9 +507,10 @@ function clientLanguage(locale) {
 // full board description, so a new project or a full regeneration keeps its preview.
 export function classifyExistingProjectRequest(prompt, existingSpec, userPrompt) {
   if (!existingSpec || typeof existingSpec !== 'object') return { mode: 'regenerate' };
-  const editText = normalizeMatchText(prompt);
+  const ledRef = ledResistorAliasRef(existingSpec);
+  const editText = expandLedRefResistorAliases(normalizeMatchText(prompt), ledRef);
   const hasUser = typeof userPrompt === 'string' && userPrompt.trim().length > 0;
-  const intentText = hasUser ? normalizeMatchText(userPrompt) : editText;
+  const intentText = hasUser ? expandLedRefResistorAliases(normalizeMatchText(userPrompt), ledRef) : editText;
   const separateIntent = hasUser && intentText.trim() !== editText.trim();
   if (!separateIntent) return classifyPrompt(editText, existingSpec);
 
@@ -747,17 +755,23 @@ function isChoiceClauseBreak(text, index) {
   return ch === '.' && !(/\d/u.test(text[index - 1] ?? '') && /\d/u.test(text[index + 1] ?? ''));
 }
 
-// and, -고, and 말고 close a clause for this check. 하거나's 고 does not.
-function choiceClauseMarks(text) {
+// Punctuation ends the clause the value search reads. and, -고, and 말고 do
+// not: "680Ω and rebuild or leave R4" still carries 680Ω on the left of "or".
+function choiceValueMarks(text) {
   const marks = [];
   for (let index = 0; index < text.length; index += 1) {
     if (isChoiceClauseBreak(text, index)) marks.push([index, index + 1]);
   }
+  return marks;
+}
+
+// and, -고, and 말고 close a clause for the keep-list check only. The Korean
+// breaks are goMalgoClauseSpans. 하거나's 고 does not. The list nouns sit
+// against the joiner; the edit value may not.
+function choiceClauseMarks(text) {
+  const marks = choiceValueMarks(text);
   for (const match of text.matchAll(/\band\b/giu)) marks.push([match.index, match.index + match[0].length]);
-  for (const match of text.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
-    marks.push([match.index, match.index + match[0].length]);
-  }
-  for (const match of text.matchAll(/말고/gu)) marks.push([match.index, match.index + match[0].length]);
+  for (const span of goMalgoClauseSpans(text)) marks.push(span);
   marks.sort((left, right) => left[0] - right[0] || right[1] - left[1]);
   return marks;
 }
@@ -867,10 +881,12 @@ function rangesOverlap(ranges, start, end) {
 }
 
 // A choice word between an edit value and a keep, valued or not, asks which
-// alternative to apply. "R1 or the pull-ups" coordinates the keep list; the
-// edit value sits in another clause (and, -고, 말고, or punctuation), so that
-// "or" is not the choice. Two keep-list nouns on the joiner's sides are a list
-// too, unless one of them is the series ref or an LED-resistor synonym.
+// alternative to apply. "R1 or the pull-ups" coordinates the keep list; and,
+// -고, and 말고 put that list in its own clause, so that "or" is not the
+// choice. The ohm value is not cut by those words. It reaches back to
+// punctuation, so "680Ω and rebuild or leave R4" is still the choice. Two
+// keep-list nouns on the joiner's sides are a list too, unless one of them is
+// the series ref or an LED-resistor synonym.
 function choiceJoinsAnyKeep(text, spec) {
   const found = keepClauseSpans(text);
   const ranges = [];
@@ -879,25 +895,34 @@ function choiceJoinsAnyKeep(text, spec) {
   for (const span of asIsChoiceSpans(text)) ranges.push(span);
   if (ranges.length === 0) return false;
   const marks = choiceClauseMarks(text);
+  const valueMarks = choiceValueMarks(text);
   const series = seriesResistorRef(spec);
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
     if (!choiceJoinerWord(word[0], text.slice(end))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
-    if (!rangesOverlap(ranges, start, end)
-      && !ranges.some(([spanStart, spanEnd]) => (
+    // idiomWith pairs are "regardless" unless the verb is an edit choice or
+    // the pair sits on the resistor value. A valued keep still goes through
+    // choiceKeepJoiner. A value-bound pair also meets a keep in an earlier
+    // clause ("그대로 두고 … 680Ω으로 하든 말든").
+    if (choiceJoinerIsIdiom(text, start, end)) continue;
+    const bindsValue = choiceJoinerBindsValue(text, start, end);
+    const touchesKeep = rangesOverlap(ranges, start, end)
+      || ranges.some(([spanStart, spanEnd]) => (
         (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
         || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
-      ))) continue;
+      ));
+    if (!touchesKeep && !bindsValue) continue;
     const [left, right] = choiceClauseBounds(start, end, marks, text.length);
+    const [valueLeft] = choiceClauseBounds(start, end, valueMarks, text.length);
     const leftText = text.slice(left, start);
     const rightText = text.slice(end, right);
     const leftKeep = rangesOverlap(ranges, left, start);
     const rightKeep = rangesOverlap(ranges, end, right);
-    const leftValue = clauseCarriesResistorValue(leftText);
+    const leftValue = clauseCarriesResistorValue(text.slice(valueLeft, start));
     const rightValue = clauseCarriesResistorValue(rightText);
-    if (!(leftValue && rightKeep) && !(rightValue && leftKeep)) continue;
+    if (!(leftValue && rightKeep) && !(rightValue && leftKeep) && !bindsValue) continue;
     const leftPhrase = choiceSidePhrase(leftText, 'left');
     const rightPhrase = choiceSidePhrase(rightText, 'right');
     if (choiceSideIsListTarget(leftPhrase, series) && choiceSideIsListTarget(rightPhrase, series)) continue;
@@ -2286,7 +2311,13 @@ function keepNamesEditTarget(text, spec) {
   const remainder = blankCopy(raw, ranges);
   addKeptIdentity(edit, remainder, series, 'edit');
   if (edit.size === 0 && bareSeriesRemainder(remainder, series)) edit.add(String(series).toUpperCase());
-  if (ledBlocked && seriesEditRemainder(remainder, series)) edit.add(String(series).toUpperCase());
+  // "keep R4 or the current limiter, LED resistor 680Ω" keeps the bare alias,
+  // but the list's word cap takes "LED" and leaves "resistor 680Ω". That
+  // remainder is still this part, so the keep overlaps the edit.
+  const aliasKept = Boolean(series) && found.objects.some((object) => (
+    textHasBareLedResistorName(keepIdentityFragment(raw, object))
+  ));
+  if ((ledBlocked || aliasKept) && seriesEditRemainder(remainder, series)) edit.add(String(series).toUpperCase());
   for (const key of kept) {
     if (edit.has(key)) return true;
   }
@@ -2307,6 +2338,24 @@ function seriesLedDesignator(spec) {
     if (role === 'status-led' || libId === 'ChatPCB:STATUS_LED' || value === 'STATUS_LED') return ref.toUpperCase();
   }
   return null;
+}
+
+function specHasDDesignator(spec) {
+  const rows = [];
+  if (Array.isArray(spec?.schematic?.components)) rows.push(...spec.schematic.components);
+  if (Array.isArray(spec?.boardProfile?.productionParts)) rows.push(...spec.boardProfile.productionParts);
+  return rows.some((row) => /^D\d+$/i.test(String(row?.ref ?? '')));
+}
+
+// The generator's status-LED designator. A spec that saved the series resistor
+// but not that diode still uses it for "{led}'s resistor" / "{led} 저항".
+// A saved D part that is not the status LED is not that substitute.
+function ledResistorAliasRef(spec) {
+  const found = seriesLedDesignator(spec);
+  if (found) return found;
+  if (!seriesResistorRef(spec)) return null;
+  if (specHasDDesignator(spec)) return null;
+  return STATUS_LED_DESIGNATOR;
 }
 
 function textWithSeriesLedAsWord(text, spec) {
@@ -2335,7 +2384,8 @@ function textWithSeriesLedAsWord(text, spec) {
 }
 
 export function resistorEditCoverage(text, spec = null) {
-  return assessRequestCoverage(textWithSeriesLedAsWord(text, spec));
+  const expanded = expandLedRefResistorAliases(text, ledResistorAliasRef(spec));
+  return assessRequestCoverage(textWithSeriesLedAsWord(expanded, spec));
 }
 
 // "as is" walks back through the verb, so "keep the LED as is" is one object.
@@ -2435,13 +2485,16 @@ function ledResistorEditSpans(text) {
   const spans = [];
   const alternatives = [];
   for (const synonym of LED_RESISTOR_SYNONYMS) {
+    if (synonym.includes('{led}')) continue;
     const folded = String(synonym).toLowerCase();
     const body = ledResistorSynonymBody(synonym);
     if (!body) continue;
     const namesResistor = /resistor|저항|抵抗/.test(folded);
     const tail = namesResistor ? '' : '(?:\\s+resistors?|\\s*저항|\\s*抵抗)';
     const ascii = /^[a-z0-9 -]+$/.test(folded.replace(/-/g, ' '));
-    alternatives.push(ascii ? `(?<![a-z0-9])(?:the\\s+)?${body}${tail}` : `${body}${tail}`);
+    // "리미터" is inside "밀리미터". The character before it has to be a boundary.
+    const hangulHead = folded === '리미터' ? '(?<![가-힣])' : '';
+    alternatives.push(ascii ? `(?<![a-z0-9])(?:the\\s+)?${body}${tail}` : `${hangulHead}${body}${tail}`);
   }
   if (alternatives.length === 0) return spans;
   const pattern = compileRegExp(alternatives.join('|'), 'giu');
@@ -2536,6 +2589,11 @@ function addKeptIdentity(keys, fragment, series, side) {
 // The edit remainder still treats a bare LED as the series resistor.
 function namesSeriesLed(fragment, side = 'edit') {
   if (resistorNounKinds(fragment).includes('led')) return true;
+  // "current limiter" and "the series one" are the series resistor with no noun.
+  // A Korean noun alias is the same part. A modifier ("직렬", "전류 제한") is
+  // that part when 저항, 저항기, or R sits in the same noun phrase, before the
+  // topic or object particle. English "current limit" stays a modifier.
+  if (side === 'keep' && (textHasBareLedResistorName(fragment) || textHasKoreanLedResistorAlias(fragment))) return true;
   if (side === 'keep') return false;
   return /\bleds?\b|엘이디|엘예디/iu.test(fragment);
 }

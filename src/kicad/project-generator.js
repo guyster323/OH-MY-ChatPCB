@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { STATUS_LED_DESIGNATOR } from '../runtime/board-profiles.js';
 import { boardPadGeometry } from './pad-geometry.js';
 import { findGridRoute } from './board-route-planner.js';
 import { resolveKicadCli } from './kicad-cli.js';
@@ -261,7 +262,7 @@ export function buildMcuSchematicAst(spec) {
       pinNets: profileMode ? { 1: 'BOOT', 2: 'GND' } : undefined
     }),
     ...(spec.omitStatusLed === true ? [] : [
-      component('D1', profileMode ? 'Device:LED' : 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric', {
+      component(STATUS_LED_DESIGNATOR, profileMode ? 'Device:LED' : 'ChatPCB:STATUS_LED', 'Status LED with current limiting represented in the SPICE fixture.', 'LED_SMD:LED_0603_1608Metric', {
         value: profileMode ? 'STATUS_LED' : undefined,
         pins: ['+3V3', 'GND'],
         connectedPins: ['+3V3', 'GND'],

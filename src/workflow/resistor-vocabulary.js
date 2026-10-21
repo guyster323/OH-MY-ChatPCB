@@ -663,14 +663,20 @@ const VERB_STEM_BEFORE_DEUN = [
 // is not a new clause. An ending matches (?:거나|든지|든가|던지|든)(?:요|도|나)?$
 // on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
 // "or so" is an approximation, not a choice.
+// idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
+// a choice when the verb is an edit verb, when 오다 follows an edit/do
+// connective, or when the pair sits on a resistor value in this clause
+// (value+(으)로, or a target earlier in the clause and a value on either
+// side of the pair). "바꾸고 하든 말든" stays the idiom: -고 is another
+// clause, so a value only in the previous clause does not count.
 export const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
   Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
   Object.freeze({ id: 'animyeon', lang: 'ko', text: '아니면', re: '아니면', place: 'word' }),
   Object.freeze({ id: 'hogeun', lang: 'ko', text: '혹은', re: '혹은', place: 'word' }),
   Object.freeze({ id: 'hageona', lang: 'ko', text: '하거나', re: '하거나', place: 'word' }),
-  Object.freeze({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending' }),
-  Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending' }),
+  Object.freeze({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending', idiomWith: '말거나' }),
+  Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending', idiomWith: '말든지' }),
   Object.freeze({ id: 'deunga', lang: 'ko', text: '든가', re: '든가', place: 'ending' }),
   Object.freeze({ id: 'deonji', lang: 'ko', text: '던지', re: '던지', place: 'ending' }),
   Object.freeze({
@@ -678,9 +684,247 @@ export const CHOICE_JOINERS = Object.freeze([
     lang: 'ko',
     text: '든',
     re: `(?<=[${VERB_STEM_BEFORE_DEUN}])든|든(?=\\s*말든)`,
-    place: 'ending'
+    place: 'ending',
+    idiomWith: '말든'
   })
 ]);
+
+function idiomPairRows() {
+  return CHOICE_JOINERS
+    .filter((item) => item.idiomWith)
+    .slice()
+    .sort((left, right) => right.idiomWith.length - left.idiomWith.length || right.text.length - left.text.length);
+}
+
+function bareChoiceToken(token) {
+  return String(token ?? '').replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+}
+
+function stripChoicePolite(text) {
+  if (!/(?:요|도|나)$/u.test(text)) return text;
+  const cut = text.slice(0, -1);
+  const keeps = idiomPairRows().some((row) => (
+    cut === row.idiomWith || cut.endsWith(row.text) || cut.endsWith(row.idiomWith)
+  ));
+  return keeps ? cut : text;
+}
+
+function previousChoiceWord(text, index) {
+  const match = /(\S+)\s*$/u.exec(String(text ?? '').slice(0, index));
+  if (!match) return null;
+  return { text: match[1], start: match.index };
+}
+
+function nextChoiceWord(text, index) {
+  const match = /^\s*(\S+)/u.exec(String(text ?? '').slice(index));
+  return match ? match[1] : '';
+}
+
+function hangulParts(ch) {
+  const code = ch.codePointAt(0);
+  if (code < 0xAC00 || code > 0xD7A3) return null;
+  const n = code - 0xAC00;
+  return { onset: Math.floor(n / 588), vowel: Math.floor((n % 588) / 28), coda: n % 28 };
+}
+
+function hangulSyllable(onset, vowel, coda) {
+  return String.fromCodePoint(0xAC00 + ((onset * 21) + vowel) * 28 + coda);
+}
+
+// 아/어 connective back to the dictionary stem. 바꿔 → 바꾸, 해 → 하, 맞춰 → 맞추.
+// 바꾸고 stays empty: -고 is a clause link, and 오다 does not attach there.
+function araEoStem(word) {
+  const text = String(word ?? '');
+  if (!text) return null;
+  if (text === '해' || text === '하여') return '하';
+  if (text.endsWith('하여') && text.length > 2) return `${text.slice(0, -2)}하`;
+  if (text.endsWith('해') && text.length > 1) return `${text.slice(0, -1)}하`;
+  const last = text[text.length - 1];
+  const parts = hangulParts(last);
+  if (!parts || parts.coda !== 0) return null;
+  const head = text.slice(0, -1);
+  if (parts.vowel === 14) return head + hangulSyllable(parts.onset, 13, 0);
+  if (last === '아' || last === '어') return head || null;
+  return null;
+}
+
+// isEditVerbWord is the English set. Korean edit stems are the same list the
+// request stem already names, plus 맞추. "하" alone is not on it.
+function isChoiceEditVerb(stem) {
+  const text = String(stem ?? '');
+  if (!text || text.includes('부탁')) return false;
+  if (isEditVerbWord(text)) return true;
+  if (text === '맞추' || text === '맞춰') return true;
+  if (!isKoreanRequestStem(text)) return false;
+  if (/(?:고|며|지만|면|서)$/u.test(text)) return false;
+  return true;
+}
+
+function isEditOrDoConnective(word) {
+  const stem = araEoStem(bareChoiceToken(word));
+  if (!stem) return false;
+  if (stem === '하') return true;
+  if (stem.endsWith('하')) return isChoiceEditVerb(stem.slice(0, -1));
+  return isChoiceEditVerb(stem);
+}
+
+// 오다 after 바꿔/해/맞춰 is still the edit. 오든 after 바꾸고 is the idiom.
+function verbBeforePairIsChoice(text, verb, verbAt) {
+  if (isChoiceEditVerb(verb)) return true;
+  if (!verb.endsWith('오')) return false;
+  const head = verb.slice(0, -1);
+  if (head) return isEditOrDoConnective(head);
+  const prev = previousChoiceWord(text, verbAt);
+  return prev != null && isEditOrDoConnective(prev.text);
+}
+
+// One -고 / 말고 clause boundary. 하거나's 고 is not a break, and 고 나서 is
+// one connective. existing-project-edit.js imports this so the keep-list
+// check cannot grow a second copy.
+export const GO_MALGO_CLAUSE_BOUNDARIES = Object.freeze([
+  Object.freeze({ id: 'go', re: String.raw`(?<=[가-힣])고(?!\s*나서)(?!거나)` }),
+  Object.freeze({ id: 'malgo', re: String.raw`말고` })
+]);
+
+export function goMalgoClauseSpans(text) {
+  const raw = String(text ?? '');
+  const spans = [];
+  for (const row of GO_MALGO_CLAUSE_BOUNDARIES) {
+    for (const match of raw.matchAll(rx(row.re, 'gu'))) {
+      const at = match.index ?? 0;
+      spans.push([at, at + match[0].length]);
+    }
+  }
+  return spans;
+}
+
+// Punctuation, and, and the shared -고 / 말고 breaks. 하거나's 고 is not a
+// break. The edit path uses the same breaks so the pair and the ohms share
+// a clause.
+function idiomClauseBreaks(text) {
+  const raw = String(text ?? '');
+  const breaks = [];
+  const add = (at, length) => {
+    breaks.push([at, at + length]);
+  };
+  for (let at = 0; at < raw.length; at += 1) {
+    const ch = raw[at];
+    const punctuation = ch === ',' || ch === '，' || ch === ';' || ch === '\n'
+      || ch === '。' || ch === '？' || ch === '！' || ch === '?' || ch === '!';
+    const dot = ch === '.' && !(/\d/u.test(raw[at - 1] ?? '') && /\d/u.test(raw[at + 1] ?? ''));
+    if (punctuation || dot) add(at, 1);
+  }
+  for (const match of raw.matchAll(/\band\b/giu)) add(match.index ?? 0, match[0].length);
+  for (const [from, to] of goMalgoClauseSpans(raw)) add(from, to - from);
+  return breaks;
+}
+
+function idiomClauseBounds(text, index) {
+  const raw = String(text ?? '');
+  let start = 0;
+  let end = raw.length;
+  for (const [from, to] of idiomClauseBreaks(raw)) {
+    if (to <= index && to > start) start = to;
+    if (from >= index && from < end) end = from;
+  }
+  return [start, end];
+}
+
+function idiomClauseHasTarget(fragment) {
+  if (textHasLedResistorSynonym(fragment)) return true;
+  if (/\bR\d+\b/iu.test(fragment)) return true;
+  return /(?:저항|抵抗|\bresistors?\b)/iu.test(fragment);
+}
+
+const IDIOM_OHM_BODY = String.raw`\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?\b|[rRkK](?![A-Za-z]))|\d+(?:\.\d+)?\s*[kKmM]\d*(?![A-Za-z])|\d+\s*[rR]\d+(?![A-Za-z])`;
+
+function idiomGapIsConnective(gap) {
+  const words = String(gap ?? '').split(/\s+/u).filter(Boolean);
+  return words.every((word) => isEditOrDoConnective(bareChoiceToken(word)));
+}
+
+// value+(으)로 may keep an edit/do connective between itself and the verb
+// ("680Ω으로 해 가든"). A target earlier in the same clause counts with a
+// value on either side of the pair ("LED 저항 680Ω 하든", "LED 저항은 하든
+// 말든 680Ω으로"). A value only in the previous -고 clause does not.
+function idiomPairSitsOnValue(text, verbAt) {
+  const raw = String(text ?? '');
+  const [clauseFrom, clauseTo] = idiomClauseBounds(raw, verbAt);
+  const before = raw.slice(clauseFrom, verbAt);
+  const particle = new RegExp(String.raw`(?:${IDIOM_OHM_BODY})(?:\s*(?:Ω|옴))?\s*(?:으로|로)`, 'giu');
+  let last = null;
+  for (const match of before.matchAll(particle)) last = match;
+  if (last && idiomGapIsConnective(before.slice(last.index + last[0].length))) return true;
+  if (!idiomClauseHasTarget(before)) return false;
+  if (new RegExp(IDIOM_OHM_BODY, 'iu').test(before)) return true;
+  return new RegExp(IDIOM_OHM_BODY, 'iu').test(raw.slice(verbAt, clauseTo));
+}
+
+// null when this span is not one half of an X든 + 말든 pair. The caller treats
+// that the same as a real choice, which is what a bare 든 ending already is.
+function pairedIdiomVerb(text, start, end) {
+  const raw = String(text ?? '');
+  const slice = raw.slice(start, end);
+  const bare = bareChoiceToken(slice);
+  if (!bare) return null;
+  const lead = slice.indexOf(bare);
+  const bareStart = start + (lead < 0 ? 0 : lead);
+  const core = stripChoicePolite(bare);
+  const rows = idiomPairRows();
+  for (const row of rows) {
+    if (core !== row.idiomWith) continue;
+    const prev = previousChoiceWord(raw, start);
+    if (!prev) return null;
+    const prevBare = bareChoiceToken(prev.text);
+    const prevCore = stripChoicePolite(prevBare);
+    if (!prevCore.endsWith(row.text) || prevCore.length === row.text.length) return null;
+    const verb = prevCore.slice(0, -row.text.length);
+    const verbAt = prev.start + Math.max(0, prev.text.indexOf(prevBare)) + Math.max(0, prevBare.indexOf(verb));
+    return { verb, verbAt };
+  }
+  for (const row of rows) {
+    let host = core;
+    let sawPartner = false;
+    if (core.endsWith(row.idiomWith) && core.length > row.idiomWith.length) {
+      host = stripChoicePolite(core.slice(0, -row.idiomWith.length));
+      sawPartner = true;
+    } else {
+      const next = nextChoiceWord(raw, end);
+      if (next && stripChoicePolite(bareChoiceToken(next)) === row.idiomWith) sawPartner = true;
+    }
+    if (!sawPartner || !host.endsWith(row.text) || host.length === row.text.length) continue;
+    const verb = host.slice(0, -row.text.length);
+    const verbAt = bareStart + Math.max(0, bare.indexOf(verb));
+    return { verb, verbAt };
+  }
+  return null;
+}
+
+// 'edit' is the 8bd7c6b choice. 'value' is the same pair sitting on the ohms,
+// for any verb. 'idiom' applies. 'no' is not a pair.
+function idiomPairClass(text, start, end) {
+  const pair = pairedIdiomVerb(text, start, end);
+  if (!pair) return 'no';
+  if (verbBeforePairIsChoice(text, pair.verb, pair.verbAt)) return 'edit';
+  if (idiomPairSitsOnValue(text, pair.verbAt)) return 'value';
+  return 'idiom';
+}
+
+// The pair is the idiom "regardless" unless it is a real edit choice or it
+// sits on the resistor value. Both halves return true so a partner such as
+// 말든 is not a second choice.
+export function choiceJoinerIsIdiom(text, start, end) {
+  return idiomPairClass(text, start, end) === 'idiom';
+}
+
+// The pair sits on the ohms, so a keep in an earlier clause still joins it.
+// An edit verb does too ("680Ω으로 바꾸든 말든", "바꿔 오든 말든"). A pair
+// after -고 is not on the ohms and keeps the old geometry.
+export function choiceJoinerBindsValue(text, start, end) {
+  const pair = pairedIdiomVerb(text, start, end);
+  if (!pair || idiomPairClass(text, start, end) === 'idiom') return false;
+  return idiomPairSitsOnValue(text, pair.verbAt);
+}
 
 export function choiceWordJoinerSources({ exceptApprox = false } = {}) {
   return CHOICE_JOINERS.filter((item) => item.place === 'word').map((item) => (
@@ -729,25 +973,42 @@ export function isShuntSenseWord(word) {
 
 // One LED-resistor phrase list. Target classification and keep classification
 // both read this set. A second copy drops a hyphen or a Korean spacing.
+// "current limiter", "indicator resistor", and "the series one" name that part
+// on their own. "{led}" rows are the same set with the status LED ref filled in.
 export const LED_RESISTOR_SYNONYMS = Object.freeze([
   'current-limiting',
   'current limiting',
   'current-limit',
+  'current limiter',
+  'current limiters',
+  'indicator resistor',
   'series',
+  'series one',
+  'the series one',
   'LED series',
   'status LED resistor',
   '직렬',
+  'LED 직렬',
   '전류제한',
   '전류 제한',
   '전류 제한용',
   '전류제한용',
+  '전류 제한기',
+  '전류제한기',
+  '표시등 저항',
+  '리미터',
   'led',
   'leds',
   'status',
   '엘이디',
   '엘예디',
   '상태',
-  '발광다이오드'
+  '상태 LED 저항',
+  '발광다이오드',
+  "{led}'s resistor",
+  'the {led} resistor',
+  '{led} resistor',
+  '{led} 저항'
 ]);
 
 function synonymFold(text) {
@@ -758,35 +1019,331 @@ function synonymCompact(text) {
   return lower(text).replace(/[-\s]+/g, '');
 }
 
-const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.map((synonym) => {
+function escapeSynonymBody(folded) {
+  return folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+}
+
+// Optional space between Hangul syllables, so "발광다이오드" also matches
+// "발광 다이오드". A space still cannot split a particle off a longer word:
+// the tail check rejects "전류 제한 기" inside "전류 제한 기능".
+function flexKoreanAlias(folded) {
+  const chars = [...folded];
+  let out = '';
+  for (let index = 0; index < chars.length; index += 1) {
+    const ch = chars[index];
+    if (/\s/u.test(ch)) {
+      out += '\\s*';
+      continue;
+    }
+    if (index > 0 && isHangulChar(chars[index - 1]) && isHangulChar(ch)) out += '\\s*';
+    out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return out;
+}
+
+// "{led}" waits for the status LED ref. The other rows are ready to match.
+const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.filter((synonym) => !synonym.includes('{led}')).map((synonym) => {
   const folded = synonymFold(synonym);
   const packed = synonymCompact(synonym);
   const ascii = /^[a-z0-9 ]+$/.test(folded);
-  const body = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+  const body = escapeSynonymBody(folded);
   return {
     folded,
     packed,
     ascii,
     words: folded.split(' ').filter(Boolean),
-    re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null
+    // Spaces inside a Korean alias are optional ("전류 제한기" / "전류제한기",
+    // "발광다이오드" / "발광 다이오드"). They are not a free pass through the
+    // next word ("제한 기능").
+    koreanRe: ascii ? null : new RegExp(flexKoreanAlias(folded), 'gu'),
+    re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null,
+    // Noun rows name the part. Modifier rows need 저항/저항기 after them.
+    noun: synonymRowIsNoun(folded)
   };
 });
+
+const LED_REF_SYNONYM_TEMPLATES = LED_RESISTOR_SYNONYMS.filter((synonym) => synonym.includes('{led}'));
+
+function ledRefToken(ledRef) {
+  const ref = String(ledRef ?? '').trim();
+  if (!/^[A-Za-z]{1,3}\d+$/u.test(ref)) return null;
+  return ref;
+}
+
+function ledRefSynonymMatchers(ledRef) {
+  const ref = ledRefToken(ledRef);
+  if (!ref) return [];
+  return LED_REF_SYNONYM_TEMPLATES.map((synonym) => {
+    const folded = synonymFold(synonym.replaceAll('{led}', ref));
+    const packed = synonymCompact(folded);
+    const body = escapeSynonymBody(folded);
+    return {
+      folded,
+      packed,
+      ascii: true,
+      words: folded.split(' ').filter(Boolean),
+      re: new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`, 'iu')
+    };
+  });
+}
+
+// A modifier phrase ("current limiting", "current limit", "series") still needs
+// the resistor noun. A bare name is the part by itself: "current limiter",
+// "current limiters", "the series one", "전류 제한기". "limit" stays the
+// modifier inside "current-limit". A one-word part name ("전류제한기", "리미터")
+// is bare too. LED words and "전류제한용" stay modifiers.
+function synonymIsBareName(folded) {
+  const words = folded.split(' ').filter(Boolean);
+  if (words.some((word) => RESISTOR_NOUNS.has(word))) return false;
+  if (words.length < 2) {
+    const only = words[0] ?? '';
+    if (!only || LED_WORDS.has(only) || FUNCTION_WORDS.has(only) || only === 'limit') return false;
+    if (only.endsWith('용')) return false;
+    return true;
+  }
+  const hasOutside = words.some((word) => !LED_WORDS.has(word) && !FUNCTION_WORDS.has(word) && word !== 'limit');
+  const hasFunctionWithLed = words.some((word) => FUNCTION_WORDS.has(word)) && words.some((word) => LED_WORDS.has(word));
+  return hasOutside || hasFunctionWithLed;
+}
+
+// Derived from the synonym row, not a second list of Korean spellings.
+// A resistor noun already in the row ("표시등 저항", "상태 LED 저항") is the
+// part. So is a bare name ("전류 제한기", "리미터"). A 용 row stays a modifier
+// ("전류 제한용"), matching the one-word rule above.
+function synonymRowIsNoun(folded) {
+  const words = folded.split(' ').filter(Boolean);
+  if (words.some((word) => RESISTOR_NOUNS.has(word) || word === '저항기')) return true;
+  if (words.some((word) => word.endsWith('용'))) return false;
+  return synonymIsBareName(folded);
+}
+
+export function ledResistorSynonymIsNoun(synonym) {
+  return synonymRowIsNoun(synonymFold(synonym));
+}
+
+// PARTICLE_SUFFIXES plus the subject particles 이/가. Longest first, so
+// "으로" wins over "로" and "이랑" wins over "이".
+let aliasTailParticles = null;
+function koreanAliasTailParticles() {
+  if (!aliasTailParticles) {
+    aliasTailParticles = [...new Set([...PARTICLE_SUFFIXES, '이', '가'])].sort((left, right) => right.length - left.length);
+  }
+  return aliasTailParticles;
+}
+
+// A Korean alias is one word. Hangul glued on the left is a different word
+// ("과전류제한기", "밀리미터"). The tail lengthens the word only when the next
+// Hangul is a noun continuation ("전류 제한기능", "전류 제한 기능": the noun
+// 기능, or the leftover syllable 능 once 기 was read from 기능; "전류 제한기판"
+// is 기판 the same way, leftover 판). Particles and postpositions are not that
+// continuation, so they are not an allowlist: 하고, 나, 에는, 처럼, and the
+// rest pass because they do not start a new noun. A closed particle list is
+// what made 에는 and 까지 fail. It cannot name every stacked ending, and it
+// rejects real postpositions that were never added.
+const ALIAS_NOUN_CONTINUATIONS = ['기능', '기판', '능', '판'];
+
+// Time and discourse adverbs sit in front of the part. They are not qualifiers
+// the way 전압 and USB are. "현재" is also a particle word.
+const ALIAS_LEAD_ADVERBS = new Set(['지금', '현재', '원래']);
+
+function isAliasLeadSeparator(ch) {
+  return /[()（）[\]{}<>「」『』·•・/\\|&~～:：;；=+，,]/u.test(ch ?? '');
+}
+
+function koreanAliasTailOk(text, end) {
+  let index = end;
+  while (index < text.length && /\s/u.test(text[index])) index += 1;
+  const rest = text.slice(index);
+  if (!rest || !isHangulChar(rest[0])) return true;
+  return !ALIAS_NOUN_CONTINUATIONS.some((noun) => rest.startsWith(noun));
+}
+
+function aliasPredecessor(word) {
+  const raw = String(word ?? '').replace(/^[("'`,.:;!?[\]{}]+|[)"'`,.:;!?[\]{}]+$/gu, '');
+  if (!raw) return true;
+  const key = lower(raw);
+  if (ALIAS_LEAD_ADVERBS.has(raw) || ALIAS_LEAD_ADVERBS.has(key)) return true;
+  if (isLedAllowWord(raw) || isLedAllowWord(key)) return true;
+  if (isFunctionWord(raw) || isModalOrParticleWord(raw) || isDemonstrativeWord(raw)) return true;
+  if (isNegationOrAlternativeWord(raw) || isEditVerbWord(raw) || isKoreanRequestStem(raw)) return true;
+  if (/^[A-Za-z]{1,3}\d+$/u.test(raw)) return true;
+  return false;
+}
+
+// The word that touches the alias. ( · / and the same family are separators,
+// so "R4(전류 제한기)" and "R4/전류 제한기" still see R4. A ref plus Hangul is
+// that ref with an ending ("R4나") unless the Hangul is itself a qualifier
+// ("전압") or a role ("풀업").
+function aliasLeadWord(text, start) {
+  const head = String(text ?? '').slice(0, start);
+  let index = head.length;
+  while (index > 0 && /\s/u.test(head[index - 1])) index -= 1;
+  while (index > 0 && isAliasLeadSeparator(head[index - 1])) index -= 1;
+  if (index <= 0) return '';
+  const wordEnd = index;
+  while (index > 0 && !/\s/u.test(head[index - 1]) && !isAliasLeadSeparator(head[index - 1])) index -= 1;
+  return head.slice(index, wordEnd);
+}
+
+function hangulOnDesignatorIsQualifier(hangul) {
+  if (hangul === '전압') return true;
+  return KOREAN_ROLES.some((role) => hangul.includes(role));
+}
+
+function designatorLeadStem(word) {
+  const match = /^([A-Za-z]{1,3}\d+)([가-힣]+)$/u.exec(word);
+  if (!match) return word;
+  if (hangulOnDesignatorIsQualifier(match[2])) return word;
+  return match[1];
+}
+
+function precedingQualifierBlocks(text, start) {
+  const raw = designatorLeadStem(aliasLeadWord(text, start));
+  if (!raw) return false;
+  if (aliasPredecessor(raw)) return false;
+  for (const particle of koreanAliasTailParticles()) {
+    if (raw.endsWith(particle) && raw.length > particle.length) {
+      return !aliasPredecessor(designatorLeadStem(raw.slice(0, -particle.length)));
+    }
+  }
+  return true;
+}
+
+function koreanAliasBounded(text, start, end) {
+  const before = text[start - 1] ?? '';
+  if (isHangulChar(before) || isAsciiWordChar(before)) return false;
+  if (!koreanAliasTailOk(text, end)) return false;
+  return !precedingQualifierBlocks(text, start);
+}
+
+function koreanAliasHits(text, item) {
+  const re = item.koreanRe;
+  if (!re) return false;
+  re.lastIndex = 0;
+  for (const match of text.matchAll(re)) {
+    const at = match.index ?? 0;
+    if (koreanAliasBounded(text, at, at + match[0].length)) return true;
+  }
+  return false;
+}
+
+function matcherHits(item, joined) {
+  if (item.ascii) return item.re.test(joined);
+  return koreanAliasHits(joined, item);
+}
 
 function stripYong(word) {
   const key = lower(word);
   return key.length > 1 && key.endsWith('용') ? key.slice(0, -1) : key;
 }
 
-export function textHasLedResistorSynonym(text) {
+function synonymMatchers(ledRef) {
+  const extra = ledRefSynonymMatchers(ledRef);
+  return extra.length === 0 ? LED_RESISTOR_SYNONYM_MATCHERS : LED_RESISTOR_SYNONYM_MATCHERS.concat(extra);
+}
+
+export function textHasLedResistorSynonym(text, ledRef = null) {
   const joined = synonymFold(text);
-  const compact = synonymCompact(text);
+  return synonymMatchers(ledRef).some((item) => matcherHits(item, joined));
+}
+
+// 저항, 저항기, or R anywhere in the same noun phrase: after the modifier and
+// before the 은/는/을/를 that ends the keep ("직렬로 연결된 저항은", "직렬 R은").
+// Another noun there ("직렬 연결은", "전류 제한 설정은") does not count.
+// "하는" also ends in 는, so the particle is the last word-final one.
+function keepPhraseBeforeParticle(text) {
+  let end = text.length;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const ch = text[index];
+    if (ch !== '은' && ch !== '는' && ch !== '을' && ch !== '를') continue;
+    const next = text[index + 1] ?? '';
+    if (next && isHangulChar(next)) continue;
+    end = index;
+    break;
+  }
+  return text.slice(0, end);
+}
+
+function phraseHasResistorNoun(phrase) {
+  if (phrase.includes('저항기') || phrase.includes('저항')) return true;
+  return /(?:^|[^A-Za-z0-9])[Rr](?![A-Za-z0-9])/u.test(phrase);
+}
+
+function resistorNounFollowsAlias(text, end) {
+  return phraseHasResistorNoun(keepPhraseBeforeParticle(text.slice(end)));
+}
+
+function koreanModifierFollowedByResistor(text, item) {
+  const re = item.koreanRe;
+  if (!re) return false;
+  re.lastIndex = 0;
+  for (const match of text.matchAll(re)) {
+    const at = match.index ?? 0;
+    const end = at + match[0].length;
+    if (!koreanAliasBounded(text, at, end)) continue;
+    if (resistorNounFollowsAlias(text, end)) return true;
+  }
+  return false;
+}
+
+// Korean noun rows name the LED resistor. A modifier row ("직렬", "전류 제한")
+// does when 저항, 저항기, or R sits in that noun phrase, before the topic or
+// object particle. English modifiers stay off this path.
+export function textHasKoreanLedResistorAlias(text) {
+  const joined = synonymFold(text);
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
+    if (item.ascii) return false;
+    if (item.noun) return matcherHits(item, joined);
+    return koreanModifierFollowedByResistor(joined, item);
+  });
+}
+
+// "current limiter" and "the series one" name the series resistor with no
+// resistor noun. "current limit" and "series" stay modifiers. A Korean 용 row
+// is a modifier too, so it does not count here even when the bare-name words
+// would otherwise match ("전류 제한용").
+export function textHasBareLedResistorName(text) {
+  const joined = synonymFold(text);
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
-    item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed))
+    synonymIsBareName(item.folded)
+    && (item.ascii || item.noun)
+    && matcherHits(item, joined)
   ));
+}
+
+function ledRefReplacement(template) {
+  return template.includes('저항') ? 'LED 저항' : 'the LED resistor';
+}
+
+// The {led} rows of LED_RESISTOR_SYNONYMS, written as the canonical LED phrase
+// so target and keep classification read one set.
+export function expandLedRefResistorAliases(text, ledRef) {
+  const ref = ledRefToken(ledRef);
+  const raw = String(text ?? '');
+  if (!ref) return raw;
+  const templates = LED_REF_SYNONYM_TEMPLATES.slice().sort((left, right) => right.length - left.length);
+  let next = raw;
+  for (const template of templates) {
+    const source = template.replaceAll('{led}', ref);
+    let body = escapeSynonymBody(source).replace(/'/g, "['’]");
+    if (template.includes('저항')) body = body.replace('\\s+', '\\s*');
+    next = next.replace(new RegExp(`(?<![A-Za-z0-9])${body}(?![A-Za-z0-9])`, 'giu'), ledRefReplacement(template));
+  }
+  return next;
+}
+
+// "the series one" puts the article and "one" on the synonym word list.
+// They are glue, not fragments. Counting them rejects a plain edit that also
+// names a current or a voltage ("set the LED resistor to 680Ω for 20mA").
+function excludedSynonymFragment(word) {
+  const key = lower(word);
+  if (key === 'one') return true;
+  return FUNCTION_WORDS.has(key) && (key === 'a' || key === 'an' || key === 'the');
 }
 
 // A token of the shared set, including "limit" inside "current-limit" and "제한용".
 export function isLedResistorSynonymPiece(word) {
+  if (excludedSynonymFragment(word)) return false;
   const key = lower(word);
   const stripped = stripYong(key);
   const folded = synonymFold(stripped);
@@ -809,15 +1366,23 @@ function modifierFitsSynonym(word, item) {
 // Modifiers name the LED series resistor when they are one phrase from
 // LED_RESISTOR_SYNONYMS. "current sense" stays a shunt. Extra words that are
 // not part of that phrase and not LED allow-words refuse the phrase.
+function synonymHeadWords(item) {
+  return item.words.filter((word) => !RESISTOR_NOUNS.has(word) && !FUNCTION_WORDS.has(word));
+}
+
 export function matchesLedResistorModifiers(content) {
   const words = Array.isArray(content) ? content.map((word) => lower(word)).filter(Boolean) : [];
   if (words.length === 0) return false;
   if (words.some((word) => isShuntSenseWord(word))) return false;
   const joined = synonymFold(words.join(' '));
-  const compact = synonymCompact(words.join(''));
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
-    const hit = item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed));
-    if (!hit) return false;
+    const hit = matcherHits(item, joined);
+    if (hit && words.every((word) => modifierFitsSynonym(word, item))) return true;
+    // "indicator resistor" is the phrase. The noun is separate, so the head
+    // "indicator" is the modifier in front of 저항/resistor.
+    const heads = synonymHeadWords(item);
+    if (heads.length === 0 || heads.length !== words.length) return false;
+    if (!heads.every((word, index) => word === synonymFold(words[index]))) return false;
     return words.every((word) => modifierFitsSynonym(word, item));
   });
 }
@@ -1525,7 +2090,8 @@ function clauseHasLooseSynonymFragment(clause) {
   const words = clauseWords(clause);
   const inside = modifierPieceIndexes(clause);
   return words.some((word, index) => (
-    isLedResistorSynonymPiece(word)
+    !excludedSynonymFragment(word)
+    && isLedResistorSynonymPiece(word)
     && !RESISTOR_NOUNS.has(lower(word))
     && !inside.has(index)
   ));
@@ -1538,6 +2104,20 @@ function isNonOhmMeasurement(word) {
   return rx("^\\d+/\\d+[wW]$").test(text);
 }
 
+// A bare name ("current limiter", "the series one") is the part, so its words
+// are covered with no resistor noun. A modifier ("current limit", "current-limit")
+// is covered only directly before the resistor noun.
+function wordSitsInMatchedSynonym(word, clause) {
+  const key = synonymFold(word);
+  if (!key) return false;
+  const joined = synonymFold(clause);
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
+    synonymIsBareName(item.folded)
+    && (item.words.includes(key) || item.folded === key)
+    && matcherHits(item, joined)
+  ));
+}
+
 function recognizedWord(word, clause, index = -1) {
   if (!word) return true;
   if (isNegationOrAlternativeWord(word)) return true;
@@ -1548,6 +2128,7 @@ function recognizedWord(word, clause, index = -1) {
   if (isNonOhmMeasurement(word) && clauseHasLooseSynonymFragment(clause)) return false;
   if (rx("^\\d").test(word) || rx("[Ω옴%]").test(word) || rx("^(?:ohm|ohms|meg)$", "i").test(word)) return true;
   if (isLedAllowWord(word) || isFunctionWord(word) || isEditVerbWord(word)) return true;
+  if (wordSitsInMatchedSynonym(word, clause)) return true;
   if (index >= 0 && isLedResistorSynonymPiece(word) && modifierPieceIndexes(clause).has(index)) return true;
   if (isModalOrParticleWord(word) || isDemonstrativeWord(word)) return true;
   if (NOISE_WORDS.has(lower(word)) || NOISE_WORDS.has(word)) return true;
