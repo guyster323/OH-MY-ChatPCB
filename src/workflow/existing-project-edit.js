@@ -41,6 +41,7 @@ import {
   choiceJoinerIsIdiom,
   choiceJoinerBindsValue,
   choiceWordJoinerSources,
+  goMalgoClauseSpans,
   decimalBeforeKeepFragments,
   keepClauseSpans,
   ledKeepVerbSkipTexts,
@@ -764,15 +765,13 @@ function choiceValueMarks(text) {
   return marks;
 }
 
-// and, -고, and 말고 close a clause for the keep-list check only. 하거나's 고
-// does not. The list nouns sit against the joiner; the edit value may not.
+// and, -고, and 말고 close a clause for the keep-list check only. The Korean
+// breaks are goMalgoClauseSpans. 하거나's 고 does not. The list nouns sit
+// against the joiner; the edit value may not.
 function choiceClauseMarks(text) {
   const marks = choiceValueMarks(text);
   for (const match of text.matchAll(/\band\b/giu)) marks.push([match.index, match.index + match[0].length]);
-  for (const match of text.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
-    marks.push([match.index, match.index + match[0].length]);
-  }
-  for (const match of text.matchAll(/말고/gu)) marks.push([match.index, match.index + match[0].length]);
+  for (const span of goMalgoClauseSpans(text)) marks.push(span);
   marks.sort((left, right) => left[0] - right[0] || right[1] - left[1]);
   return marks;
 }

@@ -778,8 +778,29 @@ function verbBeforePairIsChoice(text, verb, verbAt) {
   return prev != null && isEditOrDoConnective(prev.text);
 }
 
-// Punctuation, and, -고, and 말고. 하거나's 고 is not a break. The value search
-// in the edit path uses the same breaks so the pair and the ohms share a clause.
+// One -고 / 말고 clause boundary. 하거나's 고 is not a break, and 고 나서 is
+// one connective. existing-project-edit.js imports this so the keep-list
+// check cannot grow a second copy.
+export const GO_MALGO_CLAUSE_BOUNDARIES = Object.freeze([
+  Object.freeze({ id: 'go', re: String.raw`(?<=[가-힣])고(?!\s*나서)(?!거나)` }),
+  Object.freeze({ id: 'malgo', re: String.raw`말고` })
+]);
+
+export function goMalgoClauseSpans(text) {
+  const raw = String(text ?? '');
+  const spans = [];
+  for (const row of GO_MALGO_CLAUSE_BOUNDARIES) {
+    for (const match of raw.matchAll(rx(row.re, 'gu'))) {
+      const at = match.index ?? 0;
+      spans.push([at, at + match[0].length]);
+    }
+  }
+  return spans;
+}
+
+// Punctuation, and, and the shared -고 / 말고 breaks. 하거나's 고 is not a
+// break. The edit path uses the same breaks so the pair and the ohms share
+// a clause.
 function idiomClauseBreaks(text) {
   const raw = String(text ?? '');
   const breaks = [];
@@ -794,10 +815,7 @@ function idiomClauseBreaks(text) {
     if (punctuation || dot) add(at, 1);
   }
   for (const match of raw.matchAll(/\band\b/giu)) add(match.index ?? 0, match[0].length);
-  for (const match of raw.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
-    add(match.index ?? 0, match[0].length);
-  }
-  for (const match of raw.matchAll(/말고/gu)) add(match.index ?? 0, match[0].length);
+  for (const [from, to] of goMalgoClauseSpans(raw)) add(from, to - from);
   return breaks;
 }
 

@@ -11,7 +11,10 @@ import {
 import {
   assessRequestCoverage,
   CHOICE_JOINERS,
+  choiceJoinerIsIdiom,
   choiceWordJoinerSources,
+  GO_MALGO_CLAUSE_BOUNDARIES,
+  goMalgoClauseSpans,
   KEEP_CUES,
   keepLeaveVerbTexts,
   ledKeepVerbSkipTexts
@@ -184,4 +187,90 @@ test('choice side stops are read from KEEP_CUES and CHOICE_JOINERS', () => {
   const kept = classifyExistingProjectRequest('set the LED resistor to 680Ω or keep R4', spec);
   assert.equal(kept.code, 'RESISTOR_AMBIGUOUS', kept.mode);
   assert.equal(kept.edit, undefined);
+});
+
+function exportedBoundaryHits(text) {
+  const hits = [];
+  for (const row of GO_MALGO_CLAUSE_BOUNDARIES) {
+    for (const match of text.matchAll(new RegExp(row.re, 'gu'))) {
+      hits.push({ id: row.id, start: match.index, end: match.index + match[0].length });
+    }
+  }
+  return hits;
+}
+
+// -고 and 말고 are one exported boundary. 하거나 is not a -고 break, and
+// 고 나서 is one connective. A keep list closed by that boundary is not the
+// choice; the edit path and the idiom check both follow the export.
+test('고 and 말고 clause boundaries are the one exported pair', () => {
+  const spec = seriesSpec('1k');
+  const between = (text, left, right) => {
+    const from = text.indexOf(left);
+    const to = text.indexOf(right);
+    assert.equal(from >= 0 && to > from, true, text);
+    return exportedBoundaryHits(text).filter((hit) => hit.start > from && hit.end <= to);
+  };
+  const rows = [
+    {
+      text: 'R4 또는 보드는 그대로 두고 LED 저항 680Ω으로',
+      ids: ['go'],
+      mode: 'merge'
+    },
+    {
+      text: 'R4 또는 보드는 유지 말고 LED 저항 680Ω으로',
+      ids: ['go', 'malgo'],
+      mode: 'merge'
+    },
+    {
+      // 말고 still closes the list. The 고 inside it is 고 나서, so only 말고 matches.
+      text: 'R4 또는 보드는 유지 말고 나서 LED 저항 680Ω으로',
+      ids: ['malgo'],
+      mode: 'refuse',
+      code: 'RESISTOR_REF_UNSUPPORTED'
+    },
+    {
+      text: 'R4 또는 보드는 그대로 하고 나서 LED 저항 680Ω으로',
+      ids: [],
+      mode: 'refuse',
+      code: 'RESISTOR_AMBIGUOUS'
+    },
+    {
+      text: 'R4 또는 보드는 그대로 하거나 LED 저항 680Ω으로',
+      ids: [],
+      mode: 'refuse',
+      code: 'RESISTOR_AMBIGUOUS'
+    }
+  ];
+  for (const row of rows) {
+    const found = between(row.text, '또는', '680');
+    assert.deepEqual(found.map((hit) => hit.id), row.ids, row.text);
+    assert.deepEqual(
+      goMalgoClauseSpans(row.text),
+      exportedBoundaryHits(row.text).map((hit) => [hit.start, hit.end]),
+      row.text
+    );
+    const decision = classifyExistingProjectRequest(row.text, spec);
+    assert.equal(decision.mode, row.mode, `${row.text} => ${decision.code ?? decision.mode}`);
+    if (row.mode === 'merge') {
+      assert.equal(decision.edit?.ref, 'R3', row.text);
+      assert.equal(decision.edit?.ohms, 680, row.text);
+      assert.equal(decision.edit?.label, '680Ω', row.text);
+    } else {
+      assert.equal(decision.code, row.code, row.text);
+      assert.equal(decision.edit, undefined, row.text);
+    }
+  }
+
+  const idiomRows = [
+    { text: 'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둠', word: '하든', idiom: true },
+    { text: 'LED 저항을 680Ω으로 하고 나서 하든 말든 R1은 그대로 둠', word: '하든', idiom: false },
+    { text: 'LED 저항을 680Ω으로 하거나 말거나 R1은 그대로 둠', word: '하거나', idiom: false }
+  ];
+  for (const row of idiomRows) {
+    const at = row.text.indexOf(row.word);
+    const ohm = row.text.indexOf('680');
+    const closed = exportedBoundaryHits(row.text).some((hit) => hit.start >= ohm && hit.end <= at);
+    assert.equal(closed, row.idiom, row.text);
+    assert.equal(choiceJoinerIsIdiom(row.text, at, at + row.word.length), row.idiom, row.text);
+  }
 });
