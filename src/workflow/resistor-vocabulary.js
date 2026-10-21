@@ -986,6 +986,24 @@ function escapeSynonymBody(folded) {
   return folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
 }
 
+// Optional space between Hangul syllables, so "발광다이오드" also matches
+// "발광 다이오드". A space still cannot split a particle off a longer word:
+// the tail check rejects "전류 제한 기" inside "전류 제한 기능".
+function flexKoreanAlias(folded) {
+  const chars = [...folded];
+  let out = '';
+  for (let index = 0; index < chars.length; index += 1) {
+    const ch = chars[index];
+    if (/\s/u.test(ch)) {
+      out += '\\s*';
+      continue;
+    }
+    if (index > 0 && isHangulChar(chars[index - 1]) && isHangulChar(ch)) out += '\\s*';
+    out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return out;
+}
+
 // "{led}" waits for the status LED ref. The other rows are ready to match.
 const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.filter((synonym) => !synonym.includes('{led}')).map((synonym) => {
   const folded = synonymFold(synonym);
@@ -997,9 +1015,10 @@ const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.filter((synonym) => 
     packed,
     ascii,
     words: folded.split(' ').filter(Boolean),
-    // "리미터" is a suffix of "밀리미터" and "프리미터". A Hangul character
-    // before the word is a different word. Particles after it still match.
-    headBound: folded === '리미터',
+    // Spaces inside a Korean alias are optional ("전류 제한기" / "전류제한기",
+    // "발광다이오드" / "발광 다이오드"). They are not a free pass through the
+    // next word ("제한 기능").
+    koreanRe: ascii ? null : new RegExp(flexKoreanAlias(folded), 'gu'),
     re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null
   };
 });
@@ -1048,22 +1067,79 @@ function synonymIsBareName(folded) {
   return hasOutside || hasFunctionWithLed;
 }
 
-function hangulHeaded(text, word) {
-  if (!word) return false;
-  let from = 0;
-  while (from <= text.length) {
-    const at = text.indexOf(word, from);
-    if (at < 0) return false;
-    if (!isHangulChar(text[at - 1] ?? '')) return true;
-    from = at + word.length;
+// PARTICLE_SUFFIXES plus the subject particles 이/가. Longest first, so
+// "으로" wins over "로" and "이랑" wins over "이".
+let aliasTailParticles = null;
+function koreanAliasTailParticles() {
+  if (!aliasTailParticles) {
+    aliasTailParticles = [...new Set([...PARTICLE_SUFFIXES, '이', '가'])].sort((left, right) => right.length - left.length);
+  }
+  return aliasTailParticles;
+}
+
+// A Korean alias is one word. Hangul glued on either side is a different word
+// ("과전류제한기", "전류제한기능", "밀리미터"). A particle may follow
+// ("전류 제한기는", "리미터를"). A preceding non-LED word ("전압", "USB")
+// qualifies a different part. Joiners, designators, and LED words do not.
+function koreanAliasTailOk(text, end) {
+  const next = text[end] ?? '';
+  if (!next || !isHangulChar(next)) return true;
+  const rest = text.slice(end);
+  for (const particle of koreanAliasTailParticles()) {
+    if (!rest.startsWith(particle)) continue;
+    const after = rest[particle.length] ?? '';
+    if (!after || !isHangulChar(after)) return true;
   }
   return false;
 }
 
-function matcherHits(item, joined, compact) {
+function aliasPredecessor(word) {
+  const raw = String(word ?? '').replace(/^[("'`,.:;!?[\]{}]+|[)"'`,.:;!?[\]{}]+$/gu, '');
+  if (!raw) return true;
+  const key = lower(raw);
+  if (isLedAllowWord(raw) || isLedAllowWord(key)) return true;
+  if (isFunctionWord(raw) || isModalOrParticleWord(raw) || isDemonstrativeWord(raw)) return true;
+  if (isNegationOrAlternativeWord(raw) || isEditVerbWord(raw) || isKoreanRequestStem(raw)) return true;
+  if (/^[A-Za-z]{1,3}\d+$/u.test(raw)) return true;
+  return false;
+}
+
+function precedingQualifierBlocks(text, start) {
+  const head = text.slice(0, start).trimEnd();
+  if (!head) return false;
+  const match = /(\S+)$/u.exec(head);
+  if (!match) return false;
+  const raw = match[1];
+  if (aliasPredecessor(raw)) return false;
+  for (const particle of koreanAliasTailParticles()) {
+    if (raw.endsWith(particle) && raw.length > particle.length) {
+      return !aliasPredecessor(raw.slice(0, -particle.length));
+    }
+  }
+  return true;
+}
+
+function koreanAliasBounded(text, start, end) {
+  const before = text[start - 1] ?? '';
+  if (isHangulChar(before) || isAsciiWordChar(before)) return false;
+  if (!koreanAliasTailOk(text, end)) return false;
+  return !precedingQualifierBlocks(text, start);
+}
+
+function koreanAliasHits(text, item) {
+  const re = item.koreanRe;
+  if (!re) return false;
+  re.lastIndex = 0;
+  for (const match of text.matchAll(re)) {
+    const at = match.index ?? 0;
+    if (koreanAliasBounded(text, at, at + match[0].length)) return true;
+  }
+  return false;
+}
+
+function matcherHits(item, joined) {
   if (item.ascii) return item.re.test(joined);
-  if (item.headBound) return hangulHeaded(joined, item.folded) || hangulHeaded(compact, item.packed);
-  return joined.includes(item.folded) || compact.includes(item.packed);
+  return koreanAliasHits(joined, item);
 }
 
 function stripYong(word) {
@@ -1078,17 +1154,15 @@ function synonymMatchers(ledRef) {
 
 export function textHasLedResistorSynonym(text, ledRef = null) {
   const joined = synonymFold(text);
-  const compact = synonymCompact(text);
-  return synonymMatchers(ledRef).some((item) => matcherHits(item, joined, compact));
+  return synonymMatchers(ledRef).some((item) => matcherHits(item, joined));
 }
 
 // "current limiter" and "the series one" name the series resistor with no
 // resistor noun. "current limit" and "series" stay modifiers.
 export function textHasBareLedResistorName(text) {
   const joined = synonymFold(text);
-  const compact = synonymCompact(text);
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
-    synonymIsBareName(item.folded) && matcherHits(item, joined, compact)
+    synonymIsBareName(item.folded) && matcherHits(item, joined)
   ));
 }
 
@@ -1156,9 +1230,8 @@ export function matchesLedResistorModifiers(content) {
   if (words.length === 0) return false;
   if (words.some((word) => isShuntSenseWord(word))) return false;
   const joined = synonymFold(words.join(' '));
-  const compact = synonymCompact(words.join(''));
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
-    const hit = matcherHits(item, joined, compact);
+    const hit = matcherHits(item, joined);
     if (hit && words.every((word) => modifierFitsSynonym(word, item))) return true;
     // "indicator resistor" is the phrase. The noun is separate, so the head
     // "indicator" is the modifier in front of 저항/resistor.
@@ -1893,11 +1966,10 @@ function wordSitsInMatchedSynonym(word, clause) {
   const key = synonymFold(word);
   if (!key) return false;
   const joined = synonymFold(clause);
-  const compact = synonymCompact(clause);
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
     synonymIsBareName(item.folded)
     && (item.words.includes(key) || item.folded === key)
-    && matcherHits(item, joined, compact)
+    && matcherHits(item, joined)
   ));
 }
 

@@ -3849,6 +3849,41 @@ test('Korean current-limiter names are RESISTOR_AMBIGUOUS on keep and apply R3 o
   ]) assertLedKeepApplies(spec, prompt);
 });
 
+// A Korean LED alias is the part only at a word boundary. Hangul glued on
+// ("과전류 제한기"), a following non-particle ("전류 제한 기능"), or a
+// preceding qualifier ("전압 리미터", "USB 전류 제한기") is a different part.
+// The LED 저항 edit still applies. A real "전류 제한기" keep stays ambiguous.
+test('a qualified or extended Korean LED alias keep still applies the LED resistor edit', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    '전류 제한 기능은 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '과전류 제한기는 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    'USB 전류 제한기는 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '전압 리미터는 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '과전류 제한 기능은 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '5밀리미터 간격은 그대로 두고 LED 저항을 680Ω으로 바꿔',
+    '프리미터 레이어는 그대로 두고 LED 저항을 680Ω으로 바꿔'
+  ]) assertLedKeepApplies(spec, prompt);
+  for (const prompt of [
+    '과전류 제한기를 680Ω으로 바꿔',
+    '과전류제한기를 680Ω으로 바꿔',
+    '전압 리미터를 680Ω으로 바꿔'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+  const usbLimiter = classifyExistingProjectRequest('USB 리미터를 680Ω으로 바꿔', spec);
+  assert.equal(usbLimiter.mode, 'refuse', usbLimiter.code ?? '');
+  assert.equal(usbLimiter.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(usbLimiter.edit, undefined);
+  const compactFunction = classifyExistingProjectRequest('전류제한기능은 유지하고 LED 저항을 680Ω으로 바꿔', spec);
+  assert.equal(compactFunction.mode, 'refuse', compactFunction.code ?? '');
+  assert.equal(compactFunction.code, 'RESISTOR_TARGET_UNCLEAR', '전류제한기능은 유지하고 LED 저항을 680Ω으로 바꿔');
+  assert.equal(compactFunction.edit, undefined);
+});
+
 // English alias -> Korean row in LED_RESISTOR_SYNONYMS. A new English row
 // fails until this map names it and that Korean alias is in the table.
 // "the" and "one" are glue, so the series-one rows pair with 직렬. There is
