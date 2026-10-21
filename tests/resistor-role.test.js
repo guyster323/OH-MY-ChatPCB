@@ -2544,6 +2544,64 @@ test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', 
   assert.deepEqual(spec, contrastBefore, contrast);
 });
 
+// Q1, Q2, and the three 'LED 저항 680Ω으로 바꾸거나 하면/해서/하고 1k' sentences
+// are already asserted in 'a non-choice -거나 hedge applies R3 and a real choice stays a refusal'.
+// Q5 is the hygiene review wording: a keep makes the choice, and '하든 말든' with no keep does not.
+// 'LED 저항을 거나하게 680Ω으로' is the other 거나하게 form.
+test('Hygiene pr28-r1 pinned hedge decisions', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const unclear = resistorTargetUnclearMessage('680');
+  const applies = [
+    'R4는 그대로 두거나 하고 LED 저항 680Ω으로',
+    '거나하게 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항을 거나하게 680Ω으로'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const ambiguous = 'LED 저항을 680Ω으로 바꾸거나 하든 R4는 그대로';
+  const ambiguousBefore = structuredClone(spec);
+  const ambiguousDecision = classifyExistingProjectRequest(ambiguous, spec);
+  assert.equal(ambiguousDecision.mode, 'refuse', ambiguous);
+  assert.equal(ambiguousDecision.code, 'RESISTOR_AMBIGUOUS', ambiguous);
+  assert.equal(ambiguousDecision.message, message, ambiguous);
+  assert.equal(ambiguousDecision.edit, undefined, ambiguous);
+  assert.equal(blocksBeforeProvider(ambiguous, ambiguousDecision), true, ambiguous);
+  assert.equal(appliesBeforeProvider(ambiguous, ambiguousDecision), false, ambiguous);
+  assert.equal(componentValue(spec, 'R3'), '1k', ambiguous);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', ambiguous);
+  assert.deepEqual(spec, ambiguousBefore, ambiguous);
+
+  const unclearPrompt = 'LED 저항 680Ω으로 바꾸거나 하든 말든';
+  const unclearBefore = structuredClone(spec);
+  const unclearDecision = classifyExistingProjectRequest(unclearPrompt, spec);
+  assert.equal(unclearDecision.mode, 'refuse', unclearPrompt);
+  assert.equal(unclearDecision.code, 'RESISTOR_TARGET_UNCLEAR', unclearPrompt);
+  assert.equal(unclearDecision.message, unclear, unclearPrompt);
+  assert.equal(unclearDecision.edit, undefined, unclearPrompt);
+  assert.equal(blocksBeforeProvider(unclearPrompt, unclearDecision), true, unclearPrompt);
+  assert.equal(appliesBeforeProvider(unclearPrompt, unclearDecision), false, unclearPrompt);
+  assert.equal(componentValue(spec, 'R3'), '1k', unclearPrompt);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', unclearPrompt);
+  assert.deepEqual(spec, unclearBefore, unclearPrompt);
+});
+
 // A negated edit before -거나 is not the "~거나 하다" hedge. The matrix is the
 // negation, the 하다 tail, and the board. R3 must stay put on every cell.
 const NEGATED_EDIT_GEONA = [
