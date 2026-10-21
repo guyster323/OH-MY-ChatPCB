@@ -5120,3 +5120,78 @@ test('D1 aliases the LED resistor only when the spec has no D-designator part', 
   }
   assert.deepEqual(failures, []);
 });
+
+// BT r55 AL-1 / AL-2. A lexical prohibition, a negated edit before a delete
+// verb, and a trailing withdrawal (그만) do not change R3.
+const AL_REFUSALS = [
+  'LED 저항 680Ω으로 바꿔 버리거나 하는 건 금지',
+  'LED 저항 680Ω으로 바꾸지 말아 삭제하거나 해',
+  'LED 저항 680Ω으로 바꾸거나 해 그만',
+  'R3를 680Ω으로 바꾸거나 해 그만'
+];
+
+test('BT r55 AL-1/AL-2: a prohibition or withdrawal in a -거나 sentence does not change R3', () => {
+  const failures = [];
+  for (const prompt of AL_REFUSALS) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+    }
+  }
+  assert.equal(AL_REFUSALS.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// A prohibition or withdrawal word anywhere in an applying hedge sentence,
+// or at its end, refuses. The whole -거나 sentence is an allowlist.
+const AL_PROHIBITION_WORDS = ['금지', '그만', '취소', '보류', '거부', '노노'];
+const AL_TRAILING_WITHDRAWALS = [' 그만', ' 금지', ' 취소', ' 하지 마', ' 됐어', ' 농담이야'];
+
+test('property: a prohibition word or trailing withdrawal in a hedge sentence never changes R3', () => {
+  const failures = [];
+  const spec = seriesSpec('1k');
+  let checked = 0;
+  for (const base of AK1_APPLYING_HEDGES) {
+    const prompts = [];
+    for (const match of base.matchAll(/\S+/gu)) {
+      const at = match.index ?? 0;
+      for (const word of AL_PROHIBITION_WORDS) prompts.push(`${base.slice(0, at)}${word} ${base.slice(at)}`);
+    }
+    for (const word of AL_PROHIBITION_WORDS) prompts.push(`${base} ${word}`);
+    for (const tail of AL_TRAILING_WITHDRAWALS) prompts.push(`${base}${tail}`);
+    for (const prompt of prompts) {
+      checked += 1;
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' && decision.edit?.ohms === 680) failures.push(prompt);
+    }
+  }
+  assert.ok(checked > 100, `checked ${checked}`);
+  assert.deepEqual(failures, []);
+});
+
+// BT r55 AL-3. 안/못 inside a noun (안전, 안정, 안쪽) and 못 + noun, and the
+// idiom 안 그러면, are not a negation. These keep the target-unclear refusal.
+const AL3_NON_NEGATION = [
+  'R3를 안전하게 680Ω으로 바꾸거나 해',
+  'R3를 안정적으로 680Ω으로 바꾸거나 해',
+  '안쪽 R3를 680Ω으로 바꾸거나 해',
+  '못 자국 옆 R3 680Ω으로 바꿔주시거나 하면 좋겠어요',
+  'R3 안전 마진 위해 680Ω으로 바꾸거나 해',
+  'R3를 680Ω으로 바꾸거나 해 안 그러면 LED가 타'
+];
+
+test('BT r55 AL-3: 안/못 nouns and 안 그러면 are not read as a negation', () => {
+  const spec = seriesSpec('1k');
+  const failures = [];
+  for (const prompt of AL3_NON_NEGATION) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.code === 'RESISTOR_AMBIGUOUS') failures.push(`${prompt} => ${decision.code}`);
+  }
+  assert.deepEqual(failures, []);
+});
