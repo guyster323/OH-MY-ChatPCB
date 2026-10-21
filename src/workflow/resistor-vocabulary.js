@@ -675,12 +675,17 @@ const VERB_STEM_BEFORE_DEUN = [
 // 수정하, 설정하, 맞추/맞춰, with 주/주시 glued or spaced). The predicate is
 // that stem, not a longer word that contains it ("바꾸필요없"). Also an LED
 // state stem (밝, 어둡, 약하, 강하, 눈부시, 거슬리), the leave stem of
-// KEEP_CUES ("두고"/"둬" → 두거나, Q3), or a free-standing 거나 (the stem of
-// 거나하다, glued or spaced: 거나한 / 거나 한).
+// KEEP_CUES ("두고"/"둬" → 두거나, Q3), or a free-standing 거나. Nothing in
+// front of that 거나 is 거나하다 ("거나 한", "거나한"). A word in front is a
+// hedge only when that word is an allowed stem ("바꿔 거나", "밝 거나").
+// "노노 거나", "금지 거나", and "취소 거나" are not.
 // An adjective takes the same ending ("약하거나 해서", "밝거나 하면"): the
 // stem is not a second value, and 약 there is not the adverb "about".
-// A negation marker in that clause drops an otherwise allowed hedge
-// ("바꾸진 않거나", "안바꾸거나", "손대지 않거나", "밝지 않거나").
+// A negation marker anywhere in the sentence drops the hedge, including one
+// after -거나 ("바꾸거나 하지 마", "하지는 마", "하면 안 돼", "바꾸진 않거나",
+// "안바꾸거나", "손대지 않거나", "밝지 않거나"). The "건 아니고" closer is
+// the 거나하다 idiom, not that marker. Negation on the auxiliaries 버리/놓/두
+// refuses ("바꿔 버리지 말거나").
 // The polite closer after the 하다 form is one evaluative shape
 // (좋겠어요, 감사하겠어요), not a listed sentence.
 // isGeonaHedgeJoiner reads both.
@@ -2281,7 +2286,8 @@ const NEGATION_SIGNALS = [
   String.raw`\b(?:don't|dont|not|no|never)\b`,
   String.raw`지\s*말고`,
   String.raw`하지\s*마`,
-  String.raw`지\s*마(?![가-힣])`,
+  // 는/도/요/만 sit between 지 and the prohibitive ("하지는 마"). 진 is 하지는.
+  String.raw`(?:지(?:는|도|요|만)?|진)\s*마(?![가-힣])`,
   String.raw`말고`,
   String.raw`않`
 ];
@@ -2523,9 +2529,10 @@ function hasMalNegation(text) {
   return text.replace(/정말|만약|말씀/gu, ' ').includes('말');
 }
 
-// Fail closed. Any of these in the clause on -거나 drops the hedge, whatever
-// the verb, the spacing, or a particle (진/는/도/기는). 안 is its own word or
-// a prefix (안바꾸, 안되). 마(시) is the prohibitive, not 마다/마음.
+// Fail closed. Any of these in the sentence on -거나 drops the hedge, whatever
+// the verb, the spacing, or a particle (진/는/도/기는). The check is the whole
+// sentence, including the words after -거나 ("바꾸거나 하지 마"). 안 is its own
+// word or a prefix (안바꾸, 안되). 마(시) is the prohibitive, not 마다/마음.
 // 없 is not matched as a bare syllable: 없애 and 없으면 are not this guard.
 // "필요 없거나" is outside the hedge allowlist (the predicate is 없).
 function clauseHasNegationMarker(clause) {
@@ -2538,8 +2545,23 @@ function clauseHasNegationMarker(clause) {
   return false;
 }
 
+// "건 아니고" closes 거나하다. That 않/아니 is the idiom, not a refusal.
+function withoutGeonaNotThat(text) {
+  const nominals = [...GEONA_NOMINALS].sort((left, right) => right.length - left.length).join('|');
+  const forms = [...NOT_THAT_FORMS].sort((left, right) => right.length - left.length).join('|');
+  return String(text ?? '').replace(rx(`(?<![가-힣])(?:${nominals})\\s*(?:${forms})(?![가-힣])`, 'gu'), ' ');
+}
+
+function sentenceHasNegationMarker(text) {
+  return clauseHasNegationMarker(withoutGeonaNotThat(text));
+}
+
 // One LED state list. UAT 093/094/190 and the 어둡 row read these stems.
 const LED_STATE_STEMS = new Set(['밝', '어둡', '약하', '강하', '눈부시', '거슬리']);
+
+// 버리 is the don't-delete auxiliary, 두 is the KEEP leave stem, and 놓 is the
+// connective already listed before bare 든. Negation on one refuses.
+const GEONA_AUXILIARY_STEMS = new Set(['버리', '놓', '두']);
 
 const GEONA_HONORIFIC_HELPERS = ['주시', '주', '시'];
 
@@ -2590,11 +2612,13 @@ function geonaPredicateHead(word) {
 
 // True when the predicate glued to this -거나 is an allowed hedge shape.
 // previous is the token before it, for a spaced 주/주시 helper.
-// A free-standing 거나 is 거나하다; the caller already requires a 하- form.
+// A free-standing 거나 with no previous word is 거나하다. A previous word
+// makes it a hedge only when that word is an allowed stem.
 function isAllowedGeonaPredicate(word, previous) {
   const head = geonaPredicateHead(word);
   if (head == null) return false;
-  if (head === '' || isAllowedGeonaStem(head)) return true;
+  if (isAllowedGeonaStem(head)) return true;
+  if (head === '') return bareGeonaFollowsAllowedStem(previous);
   const prev = hedgeLookupForm(previous ?? '');
   for (const helper of GEONA_HONORIFIC_HELPERS) {
     if (head === helper && isAllowedGeonaStem(prev)) return true;
@@ -2605,14 +2629,55 @@ function isAllowedGeonaPredicate(word, previous) {
   return false;
 }
 
-// The -거나 whose own clause holds a negation marker. The verb does not
+function bareGeonaFollowsAllowedStem(previous) {
+  const prev = hedgeLookupForm(previous ?? '');
+  if (!prev) return true;
+  return isAllowedGeonaStem(prev);
+}
+
+// Surface form of 버리/놓/두, including 지 and a glued negation (버리지말).
+function geonaAuxiliaryStem(word) {
+  let text = hedgeLookupForm(word);
+  if (!text) return '';
+  const ara = araEoStem(text);
+  if (ara && ara !== text) text = ara;
+  if (text.endsWith('지') && text.length > 1) text = text.slice(0, -1);
+  if (GEONA_AUXILIARY_STEMS.has(text)) return text;
+  for (const stem of GEONA_AUXILIARY_STEMS) {
+    if (text.startsWith(stem) && text.length > stem.length && clauseHasNegationMarker(text.slice(stem.length))) {
+      return stem;
+    }
+  }
+  return '';
+}
+
+// "바꿔 버리지 말거나" negates the auxiliary. The edit must not land on R3.
+function negatedAuxiliaryGeona(text) {
+  const raw = String(text ?? '');
+  const tokens = hedgeTokens(raw);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const bare = bareHedgeToken(token.raw);
+    if (!endsWithGeona(bare)) continue;
+    const head = geonaPredicateHead(bare) ?? '';
+    if (geonaAuxiliaryStem(head) && clauseHasNegationMarker(head)) return true;
+    const prev = index > 0 ? tokens[index - 1].raw : '';
+    if (!geonaAuxiliaryStem(prev)) continue;
+    const between = raw.slice(tokens[index - 1].start, token.end);
+    if (clauseHasNegationMarker(between)) return true;
+  }
+  return false;
+}
+
+// The -거나 whose sentence holds a negation marker. The verb does not
 // matter, and a negated state ("밝지 않거나", "안 켜지거나") is included.
-// Null when this word is not -거나 or the clause has no marker.
+// The marker may sit after -거나. Null when this word is not -거나 or the
+// sentence has no marker.
 function editVerbNegationRange(text, tokens, index) {
   const token = tokens[index];
   if (!token || !endsWithGeona(bareHedgeToken(token.raw))) return null;
   const from = clauseStartBefore(text, token.start);
-  if (!clauseHasNegationMarker(text.slice(from, token.end))) return null;
+  if (!sentenceHasNegationMarker(text.slice(from))) return null;
   return [token.start, token.end];
 }
 
@@ -2643,6 +2708,8 @@ function textHasNegatedEditGeona(text) {
 export function geonaHedgeSpans(text) {
   const raw = String(text ?? '');
   if (!explicitTarget(raw)) return [];
+  // A marker anywhere, including after -거나, means this is not a hedge.
+  if (sentenceHasNegationMarker(raw)) return [];
   const tokens = hedgeTokens(raw);
   const spans = [];
   for (let index = 0; index < tokens.length; index += 1) {
@@ -2735,6 +2802,7 @@ export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
   const bare = bareHedgeToken(token);
   if (isGeonahadaAdjective(bare)) return true;
   if (!endsWithGeona(bare)) return false;
+  if (sentenceHasNegationMarker(`${String(preceding ?? '')}${token}${String(following ?? '')}`)) return false;
   const next = rx('^\\s*(\\S+)', 'u').exec(String(following ?? ''));
   if (!next || !isHadaHedgeForm(next[1])) return false;
   const prev = /(\S+)\s*$/u.exec(String(preceding ?? ''));
@@ -2748,7 +2816,8 @@ function hasSignalOutsideExempt(text, sources, exempt = exemptSignalRanges(text)
 }
 
 function hasNegation(text, exempt) {
-  return hasSignalOutsideExempt(text, NEGATION_SIGNALS, exempt);
+  if (hasSignalOutsideExempt(text, NEGATION_SIGNALS, exempt)) return true;
+  return negatedAuxiliaryGeona(text);
 }
 
 function clauseAt(pieces, index) {
