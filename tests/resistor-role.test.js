@@ -3066,6 +3066,153 @@ test('BT r53 AJ-1: any particle before a negated -거나 does not change R3', ()
   assert.deepEqual(failures, []);
 });
 
+// BT r54 AK-1. A negation anywhere in the candidate hedge span (clause start
+// through the -거나 하- form) is not a hedge. The auxiliary 버리 sits on -거나,
+// and the marker is on an earlier word. Five boards. R3 stays 1k. Not a merge.
+const AK1_NEGATED_HEDGE = [
+  'LED 저항을 680Ω으로 바꾸지 말아 버리거나 해',
+  'LED 저항을 680Ω으로 바꾸지 말아 버리시거나 하면',
+  'LED 저항을 680Ω으로 바꾸지 말아 둬 버리거나 해',
+  'LED 저항을 680Ω으로 안 바꿔 버리거나 해'
+];
+
+test('BT r54 AK-1: a negation anywhere in the hedge span does not change R3', () => {
+  const failures = [];
+  for (const prompt of AK1_NEGATED_HEDGE) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AK1_NEGATED_HEDGE.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// UAT 093-096/190/191 and Q1/Q3/Q4. Each one applies R3 today. A negation
+// marker at a word boundary inside the hedge span must not.
+const AK1_APPLYING_HEDGES = [
+  'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘',
+  '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
+  'LED 저항 680Ω으로 바꿔주시거나 하면 좋겠어요',
+  '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+  '밝기가 약하거나 해서 LED 저항 680Ω으로 바꿔줘',
+  'LED 저항 680Ω으로 바꿔 주시거나 하면 감사하겠어요',
+  'LED 저항 680Ω으로 바꾸거나 한다면 좋겠어요',
+  'R4는 그대로 두거나 하고 LED 저항 680Ω으로',
+  '거나하게 LED 저항 680Ω으로 바꿔줘',
+  'LED 저항을 거나하게 680Ω으로'
+];
+
+// The same markers clauseHasNegationMarker and the 없 stem already use.
+const AK1_SPAN_MARKERS = ['말', '않', '못', '안', '없', '지 마', '싫', '아니', '안되'];
+
+const AK1_HADA_FORMS = new Set([
+  '해', '해서', '하여', '하고', '하면', '하니', '하다', '하지', '하는', '할', '한', '함',
+  '해야', '해도', '해라', '했다', '했어', '했네', '했으면', '했다면', '하여서', '하니까',
+  '하니깐', '하지만', '하며', '하자', '할게', '합니다', '하죠', '한다면'
+]);
+
+function ak1Bare(word) {
+  let text = String(word ?? '').replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+  if (text.endsWith('요') && text.length > 1) text = text.slice(0, -1);
+  return text;
+}
+
+function ak1IsHada(word) {
+  const text = ak1Bare(word);
+  if (AK1_HADA_FORMS.has(text)) return true;
+  return text.length > 2 && /[은는도]$/u.test(text) && AK1_HADA_FORMS.has(text.slice(0, -1));
+}
+
+function ak1ClauseStart(text, index) {
+  const boundary = /\s(?:and then|and|&|then)\s|바꾸고|그리고|하면서|하고|이고|이랑|면서|지만|말고|(?<=[가-힣])고(?!\s*나서)(?!거나)|[,，.;!?？！。\n•·]/giu;
+  let start = 0;
+  for (const match of text.matchAll(boundary)) {
+    const at = match.index ?? 0;
+    if (at >= index) break;
+    const end = at + match[0].length;
+    if (end > index) continue;
+    const mark = match[0];
+    if ((mark === ',' || mark === '.' || mark === '，') && /\d/u.test(text[at - 1] ?? '') && /\d/u.test(text[at + 1] ?? '')) continue;
+    start = end;
+  }
+  return start;
+}
+
+// Clause start through the -거나 하- form, or through a word-initial 거나하다.
+function ak1HedgeSpan(text) {
+  const tokens = [...text.matchAll(/\S+/gu)].map((match) => ({
+    raw: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length
+  }));
+  for (let index = 0; index < tokens.length; index += 1) {
+    const bare = ak1Bare(tokens[index].raw);
+    if (/^거나(?:하게|한|해서|하면|하고|하니|하다|하지|하는|할|함|해)$/u.test(bare)) {
+      return { from: ak1ClauseStart(text, tokens[index].start), to: tokens[index].end };
+    }
+    if (!bare.endsWith('거나')) continue;
+    const next = tokens[index + 1];
+    if (!next || !ak1IsHada(next.raw)) continue;
+    return { from: ak1ClauseStart(text, tokens[index].start), to: next.end };
+  }
+  return null;
+}
+
+function ak1Insertions(text) {
+  const span = ak1HedgeSpan(text);
+  if (!span) return [];
+  const prompts = [];
+  for (const match of text.matchAll(/\S+/gu)) {
+    const at = match.index ?? 0;
+    if (at < span.from || at >= span.to) continue;
+    for (const marker of AK1_SPAN_MARKERS) {
+      const gap = at > 0 && text[at - 1] !== ' ' ? ' ' : '';
+      prompts.push(`${text.slice(0, at)}${gap}${marker} ${text.slice(at)}`.replace(/ {2,}/gu, ' '));
+    }
+  }
+  return prompts;
+}
+
+test('property: inserting a negation marker anywhere in a hedge sentence never changes R3', () => {
+  const failures = [];
+  const spec = seriesSpec('1k');
+  let checked = 0;
+  for (const base of AK1_APPLYING_HEDGES) {
+    const prompts = ak1Insertions(base);
+    if (prompts.length === 0) failures.push(`no span ${base}`);
+    for (const prompt of prompts) {
+      checked += 1;
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' && decision.edit?.ohms === 680) {
+        failures.push(`merge ${prompt}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`mutated ${prompt}`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(structuredClone(spec), decision.edit);
+        if (componentValue(next, 'R3') === '680Ω') failures.push(`applied ${prompt}`);
+      }
+    }
+  }
+  assert.equal(AK1_APPLYING_HEDGES.length, 10);
+  assert.equal(AK1_SPAN_MARKERS.length, 9);
+  assert.ok(checked > AK1_APPLYING_HEDGES.length * AK1_SPAN_MARKERS.length);
+  assert.deepEqual(failures.slice(0, 12), [], `negation insertions ${failures.length}`);
+});
+
 // The hedge guard reads the whole sentence. A negation marker before -거나,
 // after -거나, or on 버리/놓/두 means no hedge span. The 거나하다 "건 아니고"
 // closer is not a marker, so that hedge stays.
