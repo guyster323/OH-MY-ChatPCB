@@ -2560,11 +2560,14 @@ function withoutNonNegationAnMot(text) {
   return String(text ?? '').replace(NON_NEGATION_AN_MOT, (found) => ' '.repeat(found.length));
 }
 
+// 지/진/지는/지도/지만 + 마, built from the one NEGATION_JI_SUFFIX.
+const JI_MA_PROHIBITIVE = rx(String.raw`${NEGATION_JI_SUFFIX}\s*마`, 'u');
+
 function clauseHasNegationMarker(clause) {
   const text = withoutNonNegationAnMot(clause);
   if (/[않싫]/u.test(text) || text.includes('아니') || text.includes('못')) return true;
   if (hasMalNegation(text)) return true;
-  if (text.includes('마시') || hasStandalone(text, '마') || /(?:^|[^가-힣])마거나/u.test(text) || /지\s*마/u.test(text)) return true;
+  if (text.includes('마시') || hasStandalone(text, '마') || /(?:^|[^가-힣])마거나/u.test(text) || JI_MA_PROHIBITIVE.test(text)) return true;
   // 안되 stays a marker when it is glued on (바꾸면안되거나). 안 alone is a word or a prefix (안바꾸).
   if (text.includes('안되') || hasStandalone(text, '안') || /(?:^|[^가-힣])안[가-힣]/u.test(text)) return true;
   return false;
