@@ -2602,6 +2602,42 @@ test('Hygiene pr28-r1 pinned hedge decisions', () => {
   assert.deepEqual(spec, unclearBefore, unclearPrompt);
 });
 
+// The 고 of "-거나 하-" is the hedge auxiliary, not a clause break. Splitting
+// there would drop the keep and apply 680Ω to R3.
+test('a 거나 하고 keep does not apply the following ohms to R3', () => {
+  const spec = seriesSpec('1k');
+  const prompt = 'R4는 그대로 두거나 하고 680Ω으로 바꿔줘';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'refuse', decision.code ?? '');
+  assert.equal(decision.code, 'RESISTOR_AMBIGUOUS');
+  assert.equal(decision.message, resistorAmbiguousMessage());
+  assert.equal(decision.edit, undefined);
+  assert.equal(blocksBeforeProvider(prompt, decision), true);
+  assert.equal(appliesBeforeProvider(prompt, decision), false);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'R4'), '4.7k');
+  assert.deepEqual(spec, before);
+});
+
+// The hedgeHada negation guard keeps "하고" a clause break when -거나 is negated.
+// Without that break, a bare following value asks which resistor.
+test('negation before 거나 하고 leaves a bare second value as a plain refusal', () => {
+  const spec = seriesSpec('1k');
+  const prompt = '안 바꾸거나 하고 1k';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'refuse');
+  assert.equal(decision.code, undefined);
+  assert.equal(decision.message, undefined);
+  assert.equal(decision.edit, undefined);
+  assert.equal(blocksBeforeProvider(prompt, decision), false);
+  assert.equal(appliesBeforeProvider(prompt, decision), false);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'R4'), '4.7k');
+  assert.deepEqual(spec, before);
+});
+
 // A negated edit before -거나 is not the "~거나 하다" hedge. The matrix is the
 // negation, the 하다 tail, and the board. R3 must stay put on every cell.
 const NEGATED_EDIT_GEONA = [

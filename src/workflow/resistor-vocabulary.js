@@ -2829,7 +2829,6 @@ export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
   if (!next || !isHadaHedgeForm(next[1])) return false;
   const prev = /(\S+)\s*$/u.exec(String(preceding ?? ''));
   if (!isAllowedGeonaPredicate(bare, prev ? prev[1] : '')) return false;
-  if (textHasNegatedEditGeona(`${String(preceding ?? '')}${token}`)) return false;
   return !followingHasChoiceAlternative(String(following ?? ''));
 }
 
