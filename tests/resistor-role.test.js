@@ -4035,6 +4035,33 @@ test('Korean noun alias particle keeps are RESISTOR_AMBIGUOUS and a modifier nam
   assert.equal(seriesCap.edit, undefined);
 });
 
+// The resistor noun may sit later in the same noun phrase, after the modifier
+// and before the 은/는/을/를 that ends the keep. Another noun in that slot
+// still names a different object, so the LED resistor edit applies.
+test('a resistor noun later in the modifier phrase is RESISTOR_AMBIGUOUS and another noun still applies R3', () => {
+  const spec = seriesLedBoard();
+  const rows = [
+    ['직렬로 연결된 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 연결된 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 연결 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['전류 제한하는 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 쪽 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['전류 제한 쪽 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬로 달린 저항은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 R은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'ambiguous'],
+    ['직렬 연결은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'merge'],
+    ['전류 제한 설정은 그대로 두고, LED 저항을 680Ω으로 바꿔', 'merge'],
+    ['직렬 다이오드는 그대로 두고, LED 저항 680Ω', 'merge'],
+    ['전류 제한 퓨즈는 그대로 두고, LED 저항 680Ω', 'merge'],
+    ['전류 제한 값은 그대로 두고, LED 저항 680Ω', 'merge'],
+    ['전류 제한기판은 그대로 두고, LED 저항 680Ω', 'merge']
+  ];
+  for (const [prompt, kind] of rows) {
+    if (kind === 'ambiguous') assertAmbiguousKeep(spec, prompt);
+    else assertLedKeepApplies(spec, prompt);
+  }
+});
+
 // English alias -> Korean row in LED_RESISTOR_SYNONYMS. A new English row
 // fails until this map names it and that Korean alias is in the table.
 // "the" and "one" are glue, so the series-one rows pair with 직렬. There is

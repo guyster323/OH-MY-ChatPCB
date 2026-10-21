@@ -2591,8 +2591,8 @@ function namesSeriesLed(fragment, side = 'edit') {
   if (resistorNounKinds(fragment).includes('led')) return true;
   // "current limiter" and "the series one" are the series resistor with no noun.
   // A Korean noun alias is the same part. A modifier ("직렬", "전류 제한") is
-  // that part only when 저항 or 저항기 follows it. English "current limit" stays
-  // a modifier.
+  // that part when 저항, 저항기, or R sits in the same noun phrase, before the
+  // topic or object particle. English "current limit" stays a modifier.
   if (side === 'keep' && (textHasBareLedResistorName(fragment) || textHasKoreanLedResistorAlias(fragment))) return true;
   if (side === 'keep') return false;
   return /\bleds?\b|엘이디|엘예디/iu.test(fragment);

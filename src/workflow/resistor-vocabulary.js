@@ -1247,13 +1247,30 @@ export function textHasLedResistorSynonym(text, ledRef = null) {
   return synonymMatchers(ledRef).some((item) => matcherHits(item, joined));
 }
 
-// 저항 or 저항기 sitting directly after a modifier alias ("직렬 저항",
-// "전류 제한 저항"). A following noun ("직렬 연결", "전류 제한 설정") does not.
+// 저항, 저항기, or R anywhere in the same noun phrase: after the modifier and
+// before the 은/는/을/를 that ends the keep ("직렬로 연결된 저항은", "직렬 R은").
+// Another noun there ("직렬 연결은", "전류 제한 설정은") does not count.
+// "하는" also ends in 는, so the particle is the last word-final one.
+function keepPhraseBeforeParticle(text) {
+  let end = text.length;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const ch = text[index];
+    if (ch !== '은' && ch !== '는' && ch !== '을' && ch !== '를') continue;
+    const next = text[index + 1] ?? '';
+    if (next && isHangulChar(next)) continue;
+    end = index;
+    break;
+  }
+  return text.slice(0, end);
+}
+
+function phraseHasResistorNoun(phrase) {
+  if (phrase.includes('저항기') || phrase.includes('저항')) return true;
+  return /(?:^|[^A-Za-z0-9])[Rr](?![A-Za-z0-9])/u.test(phrase);
+}
+
 function resistorNounFollowsAlias(text, end) {
-  let index = end;
-  while (index < text.length && /\s/u.test(text[index])) index += 1;
-  const rest = text.slice(index);
-  return rest.startsWith('저항기') || rest.startsWith('저항');
+  return phraseHasResistorNoun(keepPhraseBeforeParticle(text.slice(end)));
 }
 
 function koreanModifierFollowedByResistor(text, item) {
@@ -1270,7 +1287,8 @@ function koreanModifierFollowedByResistor(text, item) {
 }
 
 // Korean noun rows name the LED resistor. A modifier row ("직렬", "전류 제한")
-// does only when 저항 or 저항기 follows it. English modifiers stay off this path.
+// does when 저항, 저항기, or R sits in that noun phrase, before the topic or
+// object particle. English modifiers stay off this path.
 export function textHasKoreanLedResistorAlias(text) {
   const joined = synonymFold(text);
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
