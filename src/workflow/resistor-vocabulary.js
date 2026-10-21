@@ -661,8 +661,11 @@ const VERB_STEM_BEFORE_DEUN = [
 // One choice-joiner list. Clause split, valued-keep checks, alternative
 // signals, and the value-suffix join all read these rows. "and", "나", and "·"
 // coordinate a clause and are not a choice. "하거나" contains 고, but that 고
-// is not a new clause. An ending matches (?:거나|든지|든가|던지|든)(?:요|도|나)?$
-// on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
+// is not a new clause. An ending matches (?:거나|든지|든가|던지|든) plus
+// CHOICE_ENDING_POLITE on one word. scanRe is that plain suffix. deun sets
+// plainSuffix: false because its re is a lookaround, so a hedge scan does
+// not treat every 든 as a second choice. Bare 든 counts only after
+// VERB_STEM_BEFORE_DEUN, or before 말든.
 // "or so" is an approximation, not a choice.
 // "-거나 하-" is a hedge ("or something"), not a choice, when nothing after
 // the 하다 form is a second alternative. An adjective takes the same ending
@@ -681,25 +684,43 @@ const VERB_STEM_BEFORE_DEUN = [
 // (value+(으)로, or a target earlier in the clause and a value on either
 // side of the pair). "바꾸고 하든 말든" stays the idiom: -고 is another
 // clause, so a value only in the previous clause does not count.
+// Polite tail on a choice ending: 바꾸거나요, 바꾸거나도, 바꾸거나나.
+export const CHOICE_ENDING_POLITE = String.raw`(?:요|도|나)?`;
+
+function choiceJoiner(row) {
+  const next = { ...row };
+  if (row.place === 'ending' && row.plainSuffix !== false) {
+    next.scanRe = `${row.re}${CHOICE_ENDING_POLITE}`;
+  }
+  return Object.freeze(next);
+}
+
 export const CHOICE_JOINERS = Object.freeze([
-  Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
-  Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
-  Object.freeze({ id: 'animyeon', lang: 'ko', text: '아니면', re: '아니면', place: 'word' }),
-  Object.freeze({ id: 'hogeun', lang: 'ko', text: '혹은', re: '혹은', place: 'word' }),
-  Object.freeze({ id: 'hageona', lang: 'ko', text: '하거나', re: '하거나', place: 'word' }),
-  Object.freeze({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending', idiomWith: '말거나' }),
-  Object.freeze({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending', idiomWith: '말든지' }),
-  Object.freeze({ id: 'deunga', lang: 'ko', text: '든가', re: '든가', place: 'ending' }),
-  Object.freeze({ id: 'deonji', lang: 'ko', text: '던지', re: '던지', place: 'ending' }),
-  Object.freeze({
+  choiceJoiner({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
+  choiceJoiner({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
+  choiceJoiner({ id: 'animyeon', lang: 'ko', text: '아니면', re: '아니면', place: 'word' }),
+  choiceJoiner({ id: 'hogeun', lang: 'ko', text: '혹은', re: '혹은', place: 'word' }),
+  choiceJoiner({ id: 'hageona', lang: 'ko', text: '하거나', re: '하거나', place: 'word' }),
+  choiceJoiner({ id: 'geona', lang: 'ko', text: '거나', re: '거나', place: 'ending', idiomWith: '말거나' }),
+  choiceJoiner({ id: 'deunji', lang: 'ko', text: '든지', re: '든지', place: 'ending', idiomWith: '말든지' }),
+  choiceJoiner({ id: 'deunga', lang: 'ko', text: '든가', re: '든가', place: 'ending' }),
+  choiceJoiner({ id: 'deonji', lang: 'ko', text: '던지', re: '던지', place: 'ending' }),
+  choiceJoiner({
     id: 'deun',
     lang: 'ko',
     text: '든',
     re: `(?<=[${VERB_STEM_BEFORE_DEUN}])든|든(?=\\s*말든)`,
     place: 'ending',
+    plainSuffix: false,
     idiomWith: '말든'
   })
 ]);
+
+export function choiceJoinerRow(id) {
+  const row = CHOICE_JOINERS.find((item) => item.id === id);
+  if (!row) throw new Error(`Unknown choice joiner id: ${id}`);
+  return row;
+}
 
 function idiomPairRows() {
   return CHOICE_JOINERS
@@ -790,13 +811,17 @@ function verbBeforePairIsChoice(text, verb, verbAt) {
   return prev != null && isEditOrDoConnective(prev.text);
 }
 
+// The 고 of "-거나 하-" ("거나 하고", "거나하고") is the hedge auxiliary,
+// not a clause break. The edit separators derive from this one lookbehind.
+export const GEONA_HADA_GO_LOOKBEHIND = String.raw`(?<!거나\s*하)`;
+
 // One -고 / 말고 clause boundary. 하거나's 고 is not a break, and 고 나서 is
 // one connective. existing-project-edit.js imports this so the keep-list
 // check cannot grow a second copy.
 export const GO_MALGO_CLAUSE_BOUNDARIES = Object.freeze([
   // 거나 하고's 고 is the hedge auxiliary, not a new clause. 하거나's 고 is
   // still excluded by (?!거나), and 고 나서 stays one connective.
-  Object.freeze({ id: 'go', re: String.raw`(?<=[가-힣])(?<!거나\s*하)고(?!\s*나서)(?!거나)` }),
+  Object.freeze({ id: 'go', re: `(?<=[가-힣])${GEONA_HADA_GO_LOOKBEHIND}${String.raw`고(?!\s*나서)(?!거나)`}` }),
   Object.freeze({ id: 'malgo', re: String.raw`말고` })
 ]);
 
@@ -2274,14 +2299,31 @@ function exemptSignalRanges(text) {
   return exempt;
 }
 
-// 하다 as the "or something" auxiliary after -거나. The set is the paradigm
-// (해서/하니/하면/하고/…), not the four request sentences.
-const HADA_HEDGE_FORMS = new Set([
-  '해', '해서', '해야', '해도', '해라', '했다', '했어', '했네', '했으면', '했다면',
-  '하여', '하여서', '하고', '하면', '하니', '하니까', '하니깐',
-  '하다', '하지', '하지만', '하는', '하며', '하자', '할게', '할', '한', '함',
-  '합니다', '하죠', '한다면'
-]);
+// 하다 after -거나. One paradigm. word is the following-word hedge
+// ("밝거나 해서"). adjective is word-initial 거나 plus the form ("거나하게").
+// 하게 is only the adjective. The set is the paradigm, not the request sentences.
+// Each row is [form, word, adjective].
+const HADA_FORMS = Object.freeze([
+  ['해', true, true], ['해서', true, true], ['하여', true, true], ['하고', true, true],
+  ['하면', true, true], ['하니', true, true], ['하다', true, true], ['하지', true, true],
+  ['하는', true, true], ['할', true, true], ['한', true, true], ['함', true, true],
+  ['하게', false, true],
+  ['해야', true, false], ['해도', true, false], ['해라', true, false], ['했다', true, false],
+  ['했어', true, false], ['했네', true, false], ['했으면', true, false], ['했다면', true, false],
+  ['하여서', true, false], ['하니까', true, false], ['하니깐', true, false], ['하지만', true, false],
+  ['하며', true, false], ['하자', true, false], ['할게', true, false], ['합니다', true, false],
+  ['하죠', true, false], ['한다면', true, false]
+].map(([form, word, adjective]) => Object.freeze({ form, word, adjective })));
+
+const HADA_HEDGE_FORMS = new Set(HADA_FORMS.filter((item) => item.word).map((item) => item.form));
+
+const GEONA_ADJECTIVE_TAIL = HADA_FORMS
+  .filter((item) => item.adjective)
+  .map((item) => item.form)
+  .sort((left, right) => right.length - left.length)
+  .join('|');
+const GEONA_ADJECTIVE = rx(`^${choiceJoinerRow('geona').re}(?:${GEONA_ADJECTIVE_TAIL})$`, 'u');
+const GEONA_ENDING = rx(`${choiceJoinerRow('geona').scanRe}$`, 'u');
 
 const DEGREE_ADVERBS = new Set([
   '너무', '아주', '매우', '정말', '진짜', '되게', '무척', '꽤', '약간',
@@ -2305,22 +2347,13 @@ function hedgeLookupForm(word) {
   return text;
 }
 
-function choiceJoinerById(id) {
-  return CHOICE_JOINERS.find((item) => item.id === id);
-}
-
 function endsWithGeona(word) {
-  const row = choiceJoinerById('geona');
-  if (!row) return false;
-  // The same polite tail the ending joiner allows: 요/도/나.
-  return rx(`${row.re}(?:요|도|나)?$`, 'u').test(hedgeLookupForm(word));
+  return GEONA_ENDING.test(hedgeLookupForm(word));
 }
 
 function isGeonahadaAdjective(word) {
-  const row = choiceJoinerById('geona');
-  if (!row) return false;
   // Word-initial 거나 is the stem of 거나하다, not a choice ending.
-  return rx(`^${row.re}(?:한|하게|하다|하고|해서|하니|하면|하여|해|함|할|하지|하는)$`, 'u').test(hedgeLookupForm(word));
+  return GEONA_ADJECTIVE.test(hedgeLookupForm(word));
 }
 
 function isHadaHedgeForm(word) {
@@ -2436,7 +2469,7 @@ function extendHedgeForward(tokens, index, end) {
 
 // The syllable glued to -거나. 않거나 → 않, 않았거나 → 않았, 바꾸거나 → 바꾸.
 function stemBeforeGeona(word) {
-  return hedgeLookupForm(word).replace(/거나(?:요|도|나)?$/u, '');
+  return hedgeLookupForm(word).replace(GEONA_ENDING, '');
 }
 
 // isEditVerbWord is the English set. Bare 하/두 are edits here: the request
@@ -2646,10 +2679,10 @@ function followingHasChoiceAlternative(following) {
     if (item.place === 'word' && rest.includes(item.text)) return true;
   }
   const endings = CHOICE_JOINERS
-    .filter((item) => item.place === 'ending' && item.id !== 'deun')
+    .filter((item) => item.place === 'ending' && item.plainSuffix !== false)
     .map((item) => item.re);
   if (endings.length === 0) return false;
-  return rx(`(?:${endings.join('|')})(?:요|도|나)?(?![가-힣])`, 'u').test(rest);
+  return rx(`(?:${endings.join('|')})${CHOICE_ENDING_POLITE}(?![가-힣])`, 'u').test(rest);
 }
 
 // True when this token is the hedge, not a choice joiner. A keep cue or
