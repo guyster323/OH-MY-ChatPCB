@@ -1893,7 +1893,11 @@ export function isDontDeleteClause(clause) {
   const raw = String(clause ?? '');
   // "버리지 말고" / "제거 말고" split on 말고, so the left piece keeps the verb.
   if (rx("삭제\\s*하지\\s*마|삭제하지\\s*마|지우지\\s*마|버리지|없애지|빼지").test(raw)) return true;
-  if (rx("제거|삭제|없애|버리").test(raw) && rx("말|마|않|금지|안").test(raw)) return true;
+  // The delete verb itself is negated: the marker sits on it or on the next word.
+  // "바꾸지 말아 삭제하거나" and "버리거나 하는 건 금지" negate the edit, not a deletion.
+  if (rx("(?:제거|삭제|없애|버리)\\S*\\s*(?:하지\\s*)?(?:말|마|않|금지|안\\s*(?:돼|되))").test(raw)) return true;
+  // "삭제하거나 변경하지 마": the prohibitive on the next verb covers the delete too.
+  if (rx("(?:제거|삭제|없애|버리)\\S*거나\\s+\\S*지\\s*(?:마|말|않)").test(raw)) return true;
   // "제거 말고" splits on 말고, leaving "I2C 제거". I2C contains a digit, so a value check cannot use \d.
   if (rx("(?:제거|삭제)\\s*$").test(raw.trim())) return true;
   if (rx("\\b(?:don't|do not|dont|shouldn't|should not)\\s+(?:remove|delete)\\b", "i").test(raw)) return true;
@@ -2547,8 +2551,17 @@ function hasMalNegation(text) {
 // word or a prefix (안바꾸, 안되). 마(시) is the prohibitive, not 마다/마음.
 // 없 is not matched as a bare syllable: 없애 and 없으면 are not this guard.
 // "필요 없거나" is outside the hedge allowlist (the predicate is 없).
+// 안/못 that are not a negation: 안전, 안정, 안쪽, 안녕, 안내 (nouns), 못 + a
+// noun (못 자국, 못 박힌), and the conditional idiom 안 그러면. Masked before the
+// 안/못 markers are read, so they keep the target-unclear path.
+const NON_NEGATION_AN_MOT = /(?<![가-힣])(?:안(?:전|정|쪽|녕|내)[가-힣]*|못\s+(?:자국|박힌|박혀|구멍)[가-힣]*|안\s+그러면)/gu;
+
+function withoutNonNegationAnMot(text) {
+  return String(text ?? '').replace(NON_NEGATION_AN_MOT, (found) => ' '.repeat(found.length));
+}
+
 function clauseHasNegationMarker(clause) {
-  const text = String(clause ?? '');
+  const text = withoutNonNegationAnMot(clause);
   if (/[않싫]/u.test(text) || text.includes('아니') || text.includes('못')) return true;
   if (hasMalNegation(text)) return true;
   if (text.includes('마시') || hasStandalone(text, '마') || /(?:^|[^가-힣])마거나/u.test(text) || /지\s*마/u.test(text)) return true;
@@ -2851,7 +2864,8 @@ function hasNegation(text, exempt) {
 // Scoped to that clause so 말든 and exempt don't-delete clauses are untouched.
 const GEONA_CLAUSE_NEGATION = /(?:^|\s)(?:안|못)(?:\s|(?=[가-힣]))|말아|않|지\s*마/u;
 
-function negatedNonHedgeGeonaClause(text, exempt) {
+function negatedNonHedgeGeonaClause(sentence, exempt) {
+  const text = withoutNonNegationAnMot(sentence);
   // A bare 없/말/안/못/싫/아니 word, or 안 되, is a negation, not a hedge word, in any -거나 sentence.
   if (/거나/u.test(text) && /(?:^|\s)(?:(?:없|말|안|못|싫|아니)(?=\s|$)|안\s*되)/u.test(text)) return true;
   const hedges = geonaHedgeSpans(text);
@@ -2955,6 +2969,38 @@ function unknownRoleValue(clause) {
 }
 
 // Whole-sentence allow list. covered is true only when nothing is left over.
+// A -거나 sentence applies only when every whole token outside the hedge spans
+// and the exempt keep/don't-delete clauses is a recognized word. The raw token
+// is checked, so a particle strip cannot turn 그만 into 그. Anything else
+// (금지, 그만, 취소, a trailing withdrawal, an unknown word) refuses.
+// Prohibition, cancel, and withdrawal words (BT r50 AG-1, r55 AL-1/AL-2).
+// In a -거나 sentence one of these anywhere, even inside a hedge span or a
+// keep clause, refuses. A word that starts with one counts (취소하거나, 그만두).
+export const PROHIBITION_WORD_STEMS = Object.freeze(['금지', '그만', '취소', '보류', '거부', '노노', 'ㄴㄴ', '관두', '됐어', '농담']);
+const PROHIBITION_WORD = rx(`(?<![가-힣ㄱ-ㅎ])(?:${PROHIBITION_WORD_STEMS.join('|')})`, 'u');
+
+function geonaSentenceHasUnknownToken(text, exempt) {
+  if (!/거나/u.test(text)) return false;
+  if (PROHIBITION_WORD.test(text)) return true;
+  const ranges = [...exempt, ...geonaHedgeSpans(text)];
+  // "X거나 말거나" is the 든-말든 idiom pair. The choice-idiom logic owns it.
+  for (const pair of text.matchAll(/\S*거나\s*말거나/gu)) ranges.push([pair.index, pair.index + pair[0].length]);
+  for (const piece of allowClausePieces(text)) {
+    // Keep, don't-delete, length, and foreign-role clauses have no leftover words.
+    const keepLike = leftoverWords(piece.text).length === 0;
+    for (const match of piece.text.matchAll(/\S+/gu)) {
+      const at = piece.start + match.index;
+      if (indexInRanges(at, ranges)) continue;
+      const raw = match[0].replace(/^[("'`[\]]+|[)"'`[\],.;:!?。！？]+$/gu, '');
+      if (keepLike) continue;
+      const words = clauseWords(raw);
+      if (words.some((word) => !recognizedWord(word, piece.text) && !isKnownRoleWord(word) && !isUnboundMeasureNoun(word))) return true;
+    }
+  }
+  return false;
+}
+
+
 export function assessRequestCoverage(text) {
   const normalized = normalizeMatchText(text).trim();
   const adviceQuestion = isAdviceQuestion(normalized);
@@ -2989,6 +3035,7 @@ export function assessRequestCoverage(text) {
     if (leftoverWords(clause).length > 0) unknownLeftover = true;
     if (isUnboundOnlyClause(clause) && allBound.length > 0 && boundOhmTokens(clause).length === 0) unknownLeftover = true;
   }
+  if (geonaSentenceHasUnknownToken(normalized, exempt)) unknownLeftover = true;
   const rawBound = boundOhmTokens(normalized).filter((token) => !isReplacedSourceValue(normalized, token.index));
   const duplicateOhm = sameOhmTokens(rawBound);
   // "2.2k -> 680Ω" is a transition with no resistor noun. "1k & 1000Ω" is one value.
