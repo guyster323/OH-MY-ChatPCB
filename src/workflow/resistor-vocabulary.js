@@ -685,7 +685,7 @@ const VERB_STEM_BEFORE_DEUN = [
 // after -거나 ("바꾸거나 하지 마", "하지는 마", "하면 안 돼", "바꾸진 않거나",
 // "안바꾸거나", "손대지 않거나", "밝지 않거나"). The "건 아니고" closer is
 // the 거나하다 idiom, not that marker. Negation on the auxiliaries 버리/놓/두
-// refuses ("바꿔 버리지 말거나").
+// refuses ("바꿔 버리지 말거나", "바꿔 버리진 말거나").
 // The polite closer after the 하다 form is one evaluative shape
 // (좋겠어요, 감사하겠어요), not a listed sentence.
 // isGeonaHedgeJoiner reads both.
@@ -2281,13 +2281,25 @@ function isExemptSignalClause(clause) {
   return isDontTouchResistorClause(clause);
 }
 
+// 지, 지는, 지도, 지만, and the contraction 진. Every guard that peels this
+// ending off a stem reads this source. 요 is polite, not this ending.
+export const NEGATION_JI_SUFFIX = String.raw`(?:지(?:는|도|만)?|진)`;
+
+const NEGATION_JI_SUFFIX_END = rx(`${NEGATION_JI_SUFFIX}$`, 'u');
+
+function stripNegationJiSuffix(text) {
+  const next = text.replace(NEGATION_JI_SUFFIX_END, '');
+  return next.length > 0 && next.length < text.length ? next : text;
+}
+
 const NEGATION_SIGNALS = [
   String.raw`\b(?:do|does|did)\s+not\b`,
   String.raw`\b(?:don't|dont|not|no|never)\b`,
   String.raw`지\s*말고`,
   String.raw`하지\s*마`,
-  // 는/도/요/만 sit between 지 and the prohibitive ("하지는 마"). 진 is 하지는.
-  String.raw`(?:지(?:는|도|요|만)?|진)\s*마(?![가-힣])`,
+  // 는/도/만 sit between 지 and the prohibitive ("하지는 마"). 진 is 하지는.
+  // 요 is the polite ending in the raw sentence ("하지요 마").
+  String.raw`(?:${NEGATION_JI_SUFFIX}|지요)\s*마(?![가-힣])`,
   String.raw`말고`,
   String.raw`않`
 ];
@@ -2580,7 +2592,7 @@ function isAsIsLeaveStem(stem) {
 // one 하 (변경하). A longer word that only contains the stem is not it.
 function isPositiveEditStem(stem) {
   let text = String(stem ?? '');
-  if (!text || text.includes('부탁') || clauseHasNegationMarker(text) || /(?:지|진)$/u.test(text)) return false;
+  if (!text || text.includes('부탁') || clauseHasNegationMarker(text) || NEGATION_JI_SUFFIX_END.test(text)) return false;
   const ara = araEoStem(text);
   if (ara && ara !== text) {
     if (clauseHasNegationMarker(ara)) return false;
@@ -2635,18 +2647,23 @@ function bareGeonaFollowsAllowedStem(previous) {
   return isAllowedGeonaStem(prev);
 }
 
-// Surface form of 버리/놓/두, including 지 and a glued negation (버리지말).
+// Surface form of 버리/놓/두. NEGATION_JI_SUFFIX peels 지/진/지는/지도/지만.
+// A glued negation stays on the stem (버리지말). An edit verb may sit in
+// front once that ending is gone (바꿔버리진).
 function geonaAuxiliaryStem(word) {
   let text = hedgeLookupForm(word);
   if (!text) return '';
   const ara = araEoStem(text);
   if (ara && ara !== text) text = ara;
-  if (text.endsWith('지') && text.length > 1) text = text.slice(0, -1);
+  const peeled = stripNegationJiSuffix(text);
+  const stripped = peeled !== text;
+  text = peeled;
   if (GEONA_AUXILIARY_STEMS.has(text)) return text;
   for (const stem of GEONA_AUXILIARY_STEMS) {
     if (text.startsWith(stem) && text.length > stem.length && clauseHasNegationMarker(text.slice(stem.length))) {
       return stem;
     }
+    if (stripped && text.endsWith(stem) && text.length > stem.length) return stem;
   }
   return '';
 }
