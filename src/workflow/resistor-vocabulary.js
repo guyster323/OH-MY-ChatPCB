@@ -2845,7 +2845,26 @@ function hasSignalOutsideExempt(text, sources, exempt = exemptSignalRanges(text)
 
 function hasNegation(text, exempt) {
   if (hasSignalOutsideExempt(text, NEGATION_SIGNALS, exempt)) return true;
-  return negatedAuxiliaryGeona(text);
+  if (negatedAuxiliaryGeona(text)) return true;
+  return negatedNonHedgeGeonaClause(text, exempt);
+}
+
+// 안 (spaced or glued to the verb), 못, and 말아 inside the clause of a -거나
+// that is not a hedge ("안 바꿔 버리거나 해", "바꾸지 말아 버리거나 해").
+// Scoped to that clause so 말든 and exempt don't-delete clauses are untouched.
+const GEONA_CLAUSE_NEGATION = /(?:^|\s)(?:안|못)(?:\s|(?=[가-힣]))|말아|않|지\s*마/u;
+
+function negatedNonHedgeGeonaClause(text, exempt) {
+  // A bare 없/말/안/못/싫/아니 word, or 안 되, is a negation, not a hedge word, in any -거나 sentence.
+  if (/거나/u.test(text) && /(?:^|\s)(?:(?:없|말|안|못|싫|아니)(?=\s|$)|안\s*되)/u.test(text)) return true;
+  const hedges = geonaHedgeSpans(text);
+  for (const match of text.matchAll(/\S*거나(?![가-힣])/gu)) {
+    const at = match.index;
+    if (indexInRanges(at, exempt) || indexInRanges(at, hedges)) continue;
+    const clause = text.slice(clauseStartBefore(text, at), at + match[0].length);
+    if (GEONA_CLAUSE_NEGATION.test(clause)) return true;
+  }
+  return false;
 }
 
 function clauseAt(pieces, index) {
