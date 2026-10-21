@@ -682,9 +682,9 @@ function bareGlueWord(token) {
   return token.replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
 }
 
-function choiceJoinerWord(token, following = '') {
+function choiceJoinerWord(token, following = '', preceding = '') {
   const bare = bareGlueWord(token);
-  if (isGeonaHedgeJoiner(bare, following)) return false;
+  if (isGeonaHedgeJoiner(bare, following, preceding)) return false;
   if (CHOICE_JOINER_WORD.test(bare) || CHOICE_JOINER_ENDING.test(bare)) return true;
   // "X든 말든" is the pair even when X's last syllable is not a listed stem.
   // The deun row's second alternative sees the text after this token.
@@ -703,7 +703,7 @@ function decimalChoiceKeep(text) {
   return decimalBeforeKeepFragments(text).some((fragment) => {
     const word = fragment.match(/\S+/u);
     if (word == null) return false;
-    return choiceJoinerWord(word[0], fragment.slice(word.index + word[0].length));
+    return choiceJoinerWord(word[0], fragment.slice(word.index + word[0].length), fragment.slice(0, word.index));
   });
 }
 
@@ -719,7 +719,7 @@ function choiceKeepJoiner(text, ranges) {
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
-    if (!choiceJoinerWord(word[0], text.slice(end))) continue;
+    if (!choiceJoinerWord(word[0], text.slice(end), text.slice(0, start))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
     const joined = ranges.some(([spanStart, spanEnd]) => (
       (start < spanEnd && end > spanStart)
@@ -902,7 +902,7 @@ function choiceJoinsAnyKeep(text, spec) {
   for (const word of text.matchAll(/\S+/gu)) {
     const start = word.index;
     const end = start + word[0].length;
-    if (!choiceJoinerWord(word[0], text.slice(end))) continue;
+    if (!choiceJoinerWord(word[0], text.slice(end), text.slice(0, start))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
     // idiomWith pairs are "regardless" unless the verb is an edit choice or
     // the pair sits on the resistor value. A valued keep still goes through

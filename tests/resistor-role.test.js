@@ -23,7 +23,7 @@ import {
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
-import { assessRequestCoverage, CHOICE_JOINERS, KEEP_CUES, LED_RESISTOR_SYNONYMS, ledResistorSynonymIsNoun, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
+import { assessRequestCoverage, CHOICE_JOINERS, editVerbNegationSpans, geonaHedgeSpans, KEEP_CUES, LED_RESISTOR_SYNONYMS, ledResistorSynonymIsNoun, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -2518,6 +2518,82 @@ test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', 
   assert.equal(componentValue(spec, 'R3'), '1k', contrast);
   assert.equal(componentValue(spec, 'R4'), '4.7k', contrast);
   assert.deepEqual(spec, contrastBefore, contrast);
+});
+
+// A negated edit before -거나 is not the "~거나 하다" hedge. The matrix is the
+// negation, the 하다 tail, and the board. R3 must stay put on every cell.
+const NEGATED_EDIT_GEONA = [
+  ['-지 않', 'LED 저항을 680Ω으로 바꾸지 않거나'],
+  ['-지 말', 'LED 저항을 680Ω으로 바꾸지 말거나'],
+  ['안 V', 'LED 저항 680Ω으로 안 바꾸거나'],
+  ['-기 싫', 'LED 저항을 680Ω으로 바꾸기 싫거나'],
+  ['-는 건 아니', 'LED 저항 680Ω으로 바꾸는 건 아니거나']
+];
+const NEGATED_EDIT_TAILS = ['해', '하면 돼', '해서'];
+
+function negatedEditGeonaPrompts() {
+  const rows = [];
+  for (const [form, phrase] of NEGATED_EDIT_GEONA) {
+    for (const tail of NEGATED_EDIT_TAILS) rows.push([form, tail, `${phrase} ${tail}`]);
+  }
+  return rows;
+}
+
+function negatedEditBoards() {
+  return [
+    ['base', seriesSpec('1k')],
+    ['d1led', probeBoard('d1led')]
+  ];
+}
+
+test('a negated edit verb before -거나 하- is a refusal and does not change R3', () => {
+  const failures = [];
+  const prompts = negatedEditGeonaPrompts();
+  for (const [form, tail, prompt] of prompts) {
+    for (const [board, spec] of negatedEditBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.edit != null || appliesBeforeProvider(prompt, decision)) {
+        failures.push(`${board} ${form} ${tail} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (!blocksBeforeProvider(prompt, decision)) failures.push(`${board} ${form} ${tail} reached provider`);
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${form} ${tail} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${form} ${tail} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(prompts.length, NEGATED_EDIT_GEONA.length * NEGATED_EDIT_TAILS.length);
+  assert.deepEqual(failures, []);
+});
+
+function rangesOverlapSpan(left, right) {
+  return left[0] < right[1] && right[0] < left[1];
+}
+
+test('a -거나 hedge span does not cover a negated edit verb', () => {
+  const failures = [];
+  for (const [, , prompt] of negatedEditGeonaPrompts()) {
+    const negations = editVerbNegationSpans(prompt);
+    if (negations.length === 0) failures.push(`${prompt} has no edit-verb negation`);
+    for (const hedge of geonaHedgeSpans(prompt)) {
+      for (const negation of negations) {
+        if (rangesOverlapSpan(hedge, negation)) failures.push(`${prompt} hedge covers edit negation`);
+      }
+    }
+  }
+  const states = [
+    'LED가 밝지 않거나 하면 LED 저항을 680Ω으로 바꿔줘',
+    'LED가 안 켜지거나 하면 LED 저항 680Ω으로'
+  ];
+  for (const prompt of states) {
+    if (editVerbNegationSpans(prompt).length !== 0) failures.push(`${prompt} state marked as edit`);
+    if (geonaHedgeSpans(prompt).length === 0) failures.push(`${prompt} state hedge dropped`);
+  }
+  assert.deepEqual(failures, []);
 });
 
 test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a control joiner applies R3', () => {

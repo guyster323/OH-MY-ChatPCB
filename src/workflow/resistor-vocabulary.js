@@ -667,6 +667,8 @@ const VERB_STEM_BEFORE_DEUN = [
 // "-거나 하-" is a hedge ("or something"), not a choice, when nothing after
 // the 하다 form is a second alternative. Word-initial 거나 + 한/하게/하다 is
 // the adjective 거나하다, not this ending. isGeonaHedgeJoiner reads both.
+// A negated edit verb is not that hedge ("바꾸지 않거나", "안 바꾸거나").
+// A negated state still is ("밝지 않거나", "안 켜지거나").
 // idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
 // a choice when the verb is an edit verb, when 오다 follows an edit/do
 // connective, or when the pair sits on a resistor value in this clause
@@ -2234,6 +2236,8 @@ function indexInRanges(index, ranges) {
 // a don't-touch of an R ref or resistor role, and any don't-delete clause
 // are removed first, including the separator that closed them. A -거나 hedge
 // is the same kind of aside, so 않 inside that span is not an edit negation.
+// That 않 belongs to a state ("밝지 않거나"). A negated edit verb is not a
+// hedge, so its 않, 말, 안, 싫, or 아니 stays a rejection.
 function exemptSignalRanges(text) {
   const pieces = allowClausePieces(text);
   const exempt = [];
@@ -2378,11 +2382,94 @@ function extendHedgeForward(tokens, index, end) {
   return to;
 }
 
+// The syllable glued to -거나. 않거나 → 않, 않았거나 → 않았, 바꾸거나 → 바꾸.
+function stemBeforeGeona(word) {
+  return hedgeLookupForm(word).replace(/거나(?:요|도|나)?$/u, '');
+}
+
+// isEditVerbWord is the English set. Bare 하/두 are edits here: the request
+// stem leaves 하다 and 두다 off that list. 맞추 is the adjust verb the choice
+// pair already counts as an edit.
+function isHedgeEditStem(stem) {
+  const text = String(stem ?? '');
+  if (!text) return false;
+  if (text === '하' || text === '두' || text === '맞추' || text === '맞춰') return true;
+  return isEditVerbWord(text) || isKoreanRequestStem(text);
+}
+
+function verbStemBeforeJi(word) {
+  const match = /^(.+?)지(?:는|도|만)?$/u.exec(hedgeLookupForm(word));
+  return match?.[1] ?? '';
+}
+
+function verbStemBeforeGi(word) {
+  const match = /^(.+?)기$/u.exec(hedgeLookupForm(word));
+  return match?.[1] ?? '';
+}
+
+function verbStemBeforeNeun(word) {
+  const match = /^(.+?)는$/u.exec(hedgeLookupForm(word));
+  return match?.[1] ?? '';
+}
+
+function markerInside(token, prefix) {
+  const at = String(token.raw).indexOf(prefix);
+  if (at < 0) return [token.start, token.end];
+  return [token.start + at, token.start + at + prefix.length];
+}
+
+// The negation glued to an edit verb at this -거나. Null for a state
+// (밝지 않거나, 안 켜지거나) and for a -거나 that is not negated.
+function editVerbNegationRange(tokens, index) {
+  const token = tokens[index];
+  if (!token || !endsWithGeona(bareHedgeToken(token.raw))) return null;
+  const stem = stemBeforeGeona(token.raw);
+  const prev = index > 0 ? tokens[index - 1] : null;
+  const prev2 = index > 1 ? tokens[index - 2] : null;
+  const prevForm = prev ? hedgeLookupForm(prev.raw) : '';
+  if (prevForm === '안' && isHedgeEditStem(stem)) return [prev.start, prev.end];
+  if (stem === '않' || stem === '않았' || stem === '말') {
+    if (!isHedgeEditStem(verbStemBeforeJi(prevForm))) return null;
+    return markerInside(token, stem);
+  }
+  if (stem === '싫') {
+    if (!isHedgeEditStem(verbStemBeforeGi(prevForm))) return null;
+    return markerInside(token, '싫');
+  }
+  if (stem !== '아니') return null;
+  let verb = '';
+  if (isGeonaNominal(prevForm)) verb = verbStemBeforeNeun(prev2 ? prev2.raw : '');
+  else {
+    const glued = /^(.+?)는(건|것은|게|거는|건지)$/u.exec(prevForm);
+    if (glued) verb = glued[1];
+  }
+  if (!isHedgeEditStem(verb)) return null;
+  return markerInside(token, '아니');
+}
+
+// Ranges of an edit-verb negation on -거나. A hedge span must not cover these.
+export function editVerbNegationSpans(text) {
+  const tokens = hedgeTokens(text);
+  const spans = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const range = editVerbNegationRange(tokens, index);
+    if (range) spans.push(range);
+  }
+  return spans;
+}
+
+function textHasNegatedEditGeona(text) {
+  const tokens = hedgeTokens(text);
+  if (tokens.length === 0) return false;
+  return editVerbNegationRange(tokens, tokens.length - 1) != null;
+}
+
 // Spans of a non-choice -거나. Empty unless the sentence names a resistor,
 // so "너무 밝거나 해서 680Ω으로" stays unknown. A keep or a second -거나 after
 // the 하다 form is a real choice and is not in these spans' joiner check;
-// the words are still filler so they are not a second role.
-function geonaHedgeSpans(text) {
+// the words are still filler so they are not a second role. A negated edit
+// verb is not a span, so its negation is not filler and not exempt.
+export function geonaHedgeSpans(text) {
   const raw = String(text ?? '');
   if (!explicitTarget(raw)) return [];
   const tokens = hedgeTokens(raw);
@@ -2396,6 +2483,7 @@ function geonaHedgeSpans(text) {
     if (!endsWithGeona(bare)) continue;
     const next = tokens[index + 1];
     if (!next || !isHadaHedgeForm(next.raw)) continue;
+    if (editVerbNegationRange(tokens, index)) continue;
     const from = extendHedgeBack(tokens, index);
     spans.push([from, extendHedgeForward(tokens, index + 2, next.end)]);
   }
@@ -2403,7 +2491,10 @@ function geonaHedgeSpans(text) {
 }
 
 function geonaHedgeHadaAt(text, index) {
-  return endsWithGeona(bareHedgeToken((/(\S+)\s*$/u.exec(String(text ?? '').slice(0, index)) ?? [])[1] ?? ''));
+  const raw = String(text ?? '');
+  const match = /(\S+)\s*$/u.exec(raw.slice(0, index));
+  if (!match || !endsWithGeona(bareHedgeToken(match[1]))) return false;
+  return !textHasNegatedEditGeona(raw.slice(0, index));
 }
 
 function particleGlueStem(word) {
@@ -2460,8 +2551,10 @@ function followingHasChoiceAlternative(following) {
 
 // True when this token is the hedge, not a choice joiner. A keep cue or
 // another choice ending after the 하다 form is the second alternative, so
-// the ending stays a choice ("바꾸거나 하면 R4는 그대로").
-export function isGeonaHedgeJoiner(token, following = '') {
+// the ending stays a choice ("바꾸거나 하면 R4는 그대로"). preceding is the
+// text before the token, so a negated edit ("바꾸지 않거나") stays a choice
+// while a negated state ("밝지 않거나") stays a hedge.
+export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
   const context = `${bareHedgeToken(token)} ${String(following ?? '')}`;
   if (!explicitTarget(context)) return false;
   const bare = bareHedgeToken(token);
@@ -2469,6 +2562,7 @@ export function isGeonaHedgeJoiner(token, following = '') {
   if (!endsWithGeona(bare)) return false;
   const next = rx('^\\s*(\\S+)', 'u').exec(String(following ?? ''));
   if (!next || !isHadaHedgeForm(next[1])) return false;
+  if (textHasNegatedEditGeona(`${String(preceding ?? '')}${token}`)) return false;
   return !followingHasChoiceAlternative(String(following ?? ''));
 }
 
