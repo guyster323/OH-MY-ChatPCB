@@ -2420,10 +2420,79 @@ test('a choice joiner before any keep, valued or not, or before leaving it as is
   }
 });
 
-test('UAT over-block rows stay at today\'s code', () => {
+test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', () => {
   const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
   const unclear = resistorTargetUnclearMessage('680');
   const unsupported = resistorRefUnsupportedMessage('R3');
+  const applies = [
+    'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘',
+    '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
+    'LED 저항 680Ω으로 바꿔주시거나 하면 좋겠어요',
+    '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+    '거나 한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항이 너무 밝거나 하고 680Ω으로 바꿔줘',
+    'LED가 어둡거나 하면 LED 저항을 680Ω으로 바꿔줘'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const ambiguous = [
+    'LED 저항을 680Ω으로 바꾸거나 두거나 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸거나 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나요 R4는 4.7k로 유지',
+    'LED 저항을 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하거나 말거나 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸거나 하면 R4는 그대로 둬'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const unclearPrompts = [
+    '너무 밝거나 해서 680Ω으로 바꿔줘',
+    'R3나 R4 중 하나를 680Ω으로'
+  ];
+  for (const prompt of unclearPrompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.message, unclear, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
   const bare = '바꿔주시거나 하면 좋겠어요';
   const bareBefore = structuredClone(spec);
   const bareDecision = classifyExistingProjectRequest(bare, spec);
@@ -2437,36 +2506,18 @@ test('UAT over-block rows stay at today\'s code', () => {
   assert.equal(componentValue(spec, 'R4'), '4.7k', bare);
   assert.deepEqual(spec, bareBefore, bare);
 
-  const unclearPrompt = '너무 밝거나 해서 680Ω으로 바꿔줘';
-  const unclearBefore = structuredClone(spec);
-  const unclearDecision = classifyExistingProjectRequest(unclearPrompt, spec);
-  assert.equal(unclearDecision.mode, 'refuse', unclearPrompt);
-  assert.equal(unclearDecision.code, 'RESISTOR_TARGET_UNCLEAR', unclearPrompt);
-  assert.equal(unclearDecision.message, unclear, unclearPrompt);
-  assert.equal(unclearDecision.edit, undefined, unclearPrompt);
-  assert.equal(blocksBeforeProvider(unclearPrompt, unclearDecision), true, unclearPrompt);
-  assert.equal(appliesBeforeProvider(unclearPrompt, unclearDecision), false, unclearPrompt);
-  assert.equal(componentValue(spec, 'R3'), '1k', unclearPrompt);
-  assert.equal(componentValue(spec, 'R4'), '4.7k', unclearPrompt);
-  assert.deepEqual(spec, unclearBefore, unclearPrompt);
-
-  const unsupportedPrompts = [
-    '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
-    '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘'
-  ];
-  for (const prompt of unsupportedPrompts) {
-    const before = structuredClone(spec);
-    const decision = classifyExistingProjectRequest(prompt, spec);
-    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
-    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
-    assert.equal(decision.message, unsupported, prompt);
-    assert.equal(decision.edit, undefined, prompt);
-    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
-    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
-    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
-    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
-    assert.deepEqual(spec, before, prompt);
-  }
+  const contrast = 'LED가 너무 밝거나 어두우면 LED 저항을 680Ω으로 바꿔줘';
+  const contrastBefore = structuredClone(spec);
+  const contrastDecision = classifyExistingProjectRequest(contrast, spec);
+  assert.equal(contrastDecision.mode, 'refuse', contrast);
+  assert.equal(contrastDecision.code, 'RESISTOR_REF_UNSUPPORTED', contrast);
+  assert.equal(contrastDecision.message, unsupported, contrast);
+  assert.equal(contrastDecision.edit, undefined, contrast);
+  assert.equal(blocksBeforeProvider(contrast, contrastDecision), true, contrast);
+  assert.equal(appliesBeforeProvider(contrast, contrastDecision), false, contrast);
+  assert.equal(componentValue(spec, 'R3'), '1k', contrast);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', contrast);
+  assert.deepEqual(spec, contrastBefore, contrast);
 });
 
 test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a control joiner applies R3', () => {

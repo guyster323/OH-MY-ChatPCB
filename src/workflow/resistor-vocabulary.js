@@ -630,6 +630,7 @@ function asideSpans(text) {
 }
 
 export function isAsideFiller(word, text) {
+  if (isGeonaHedgeFiller(word, text)) return true;
   const key = String(word ?? '');
   if (!key) return false;
   const raw = String(text ?? '');
@@ -663,6 +664,9 @@ const VERB_STEM_BEFORE_DEUN = [
 // is not a new clause. An ending matches (?:거나|든지|든가|던지|든)(?:요|도|나)?$
 // on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
 // "or so" is an approximation, not a choice.
+// "-거나 하-" is a hedge ("or something"), not a choice, when nothing after
+// the 하다 form is a second alternative. Word-initial 거나 + 한/하게/하다 is
+// the adjective 거나하다, not this ending. isGeonaHedgeJoiner reads both.
 // idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
 // a choice when the verb is an edit verb, when 오다 follows an edit/do
 // connective, or when the pair sits on a resistor value in this clause
@@ -782,7 +786,9 @@ function verbBeforePairIsChoice(text, verb, verbAt) {
 // one connective. existing-project-edit.js imports this so the keep-list
 // check cannot grow a second copy.
 export const GO_MALGO_CLAUSE_BOUNDARIES = Object.freeze([
-  Object.freeze({ id: 'go', re: String.raw`(?<=[가-힣])고(?!\s*나서)(?!거나)` }),
+  // 거나 하고's 고 is the hedge auxiliary, not a new clause. 하거나's 고 is
+  // still excluded by (?!거나), and 고 나서 stays one connective.
+  Object.freeze({ id: 'go', re: String.raw`(?<=[가-힣])(?<!거나\s*하)고(?!\s*나서)(?!거나)` }),
   Object.freeze({ id: 'malgo', re: String.raw`말고` })
 ]);
 
@@ -1680,7 +1686,9 @@ function allowClausePieces(text) {
       const at = text.indexOf(sep, from);
       if (at < 0) break;
       const insideList = KEEP_LIST_CLAUSE_SEPS.has(sep) && separatorInsideKeepList(keepObjects, at, at + sep.length);
-      if (!insideList) pushBreak(breaks, at, at + sep.length);
+      // "밝거나 하고" is the -거나 하- hedge. That 하고 does not start a clause.
+      const hedgeHada = sep === '하고' && geonaHedgeHadaAt(text, at);
+      if (!insideList && !hedgeHada) pushBreak(breaks, at, at + sep.length);
       from = at + sep.length;
     }
   }
@@ -2224,14 +2232,244 @@ function indexInRanges(index, ranges) {
 
 // Negation and alternatives reject the whole request. A resistor keep,
 // a don't-touch of an R ref or resistor role, and any don't-delete clause
-// are removed first, including the separator that closed them.
+// are removed first, including the separator that closed them. A -거나 hedge
+// is the same kind of aside, so 않 inside that span is not an edit negation.
 function exemptSignalRanges(text) {
   const pieces = allowClausePieces(text);
   const exempt = [];
   for (const piece of pieces) {
     if (isExemptSignalClause(piece.text)) exempt.push([piece.start, piece.sepEnd]);
   }
+  for (const span of geonaHedgeSpans(text)) exempt.push(span);
   return exempt;
+}
+
+// 하다 as the "or something" auxiliary after -거나. The set is the paradigm
+// (해서/하니/하면/하고/…), not the four request sentences.
+const HADA_HEDGE_FORMS = new Set([
+  '해', '해서', '해야', '해도', '해라', '했다', '했어', '했네', '했으면', '했다면',
+  '하여', '하여서', '하고', '하면', '하니', '하니까', '하니깐',
+  '하다', '하지', '하지만', '하는', '하며', '하자', '할게', '할', '한', '함',
+  '합니다', '하죠', '한다면'
+]);
+
+const DEGREE_ADVERBS = new Set([
+  '너무', '아주', '매우', '정말', '진짜', '되게', '무척', '꽤', '약간',
+  '상당히', '굉장히', '몹시', '심히', '유난히', '너무나도', '제법'
+]);
+
+const GEONA_NOMINALS = new Set(['건', '것은', '게', '거는', '건지']);
+
+const NOT_THAT_FORMS = new Set([
+  '아니고', '아니라', '아닌', '아님', '아니야', '아니다', '아닌데', '아니에요',
+  '않음', '않다', '않은', '않아', '않아요', '않네', '않지'
+]);
+
+function bareHedgeToken(token) {
+  return String(token ?? '').replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+}
+
+function hedgeLookupForm(word) {
+  let text = bareHedgeToken(word);
+  if (text.endsWith('요') && text.length > 1) text = text.slice(0, -1);
+  return text;
+}
+
+function choiceJoinerById(id) {
+  return CHOICE_JOINERS.find((item) => item.id === id);
+}
+
+function endsWithGeona(word) {
+  const row = choiceJoinerById('geona');
+  if (!row) return false;
+  // The same polite tail the ending joiner allows: 요/도/나.
+  return rx(`${row.re}(?:요|도|나)?$`, 'u').test(hedgeLookupForm(word));
+}
+
+function isGeonahadaAdjective(word) {
+  const row = choiceJoinerById('geona');
+  if (!row) return false;
+  // Word-initial 거나 is the stem of 거나하다, not a choice ending.
+  return rx(`^${row.re}(?:한|하게|하다|하고|해서|하니|하면|하여|해|함|할|하지|하는)$`, 'u').test(hedgeLookupForm(word));
+}
+
+function isHadaHedgeForm(word) {
+  const text = hedgeLookupForm(word);
+  if (HADA_HEDGE_FORMS.has(text)) return true;
+  if (text.length > 2 && /[은는도]$/u.test(text) && HADA_HEDGE_FORMS.has(text.slice(0, -1))) return true;
+  return false;
+}
+
+function isDegreeAdverb(word) {
+  return DEGREE_ADVERBS.has(hedgeLookupForm(word));
+}
+
+function isGeonaNominal(word) {
+  return GEONA_NOMINALS.has(hedgeLookupForm(word));
+}
+
+function isNotThatWord(word) {
+  const text = hedgeLookupForm(word);
+  if (NOT_THAT_FORMS.has(text)) return true;
+  if (text.endsWith('요') && NOT_THAT_FORMS.has(text.slice(0, -1))) return true;
+  return false;
+}
+
+function isGoodEvaluative(word) {
+  return rx('^좋(?:겠|을|아|다|습|네|지|음)', 'u').test(hedgeLookupForm(word));
+}
+
+function isHedgeSubject(word) {
+  const form = asideTokenStem(bareHedgeToken(word));
+  if (!form || rx('\\d', 'u').test(form)) return false;
+  if (isDegreeAdverb(form) || isNegationOrAlternativeWord(form) || isFunctionWord(form)) return false;
+  if (isEditVerbWord(form) || isKoreanRequestStem(form)) return false;
+  if (/[가-힣]/u.test(form)) {
+    if (isLedAllowWord(form) || RESISTOR_NOUNS.has(form)) return false;
+    return true;
+  }
+  return rx('^[A-Za-z]+[이가]$', 'u').test(form);
+}
+
+function hedgeTokens(text) {
+  return [...String(text ?? '').matchAll(rx('\\S+', 'gu'))].map((match) => ({
+    raw: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length
+  }));
+}
+
+function extendHedgeBack(tokens, index) {
+  let from = tokens[index].start;
+  let back = index - 1;
+  let sawDegree = false;
+  let sawSubject = false;
+  while (back >= 0 && (!sawDegree || !sawSubject)) {
+    if (!sawDegree && isDegreeAdverb(tokens[back].raw)) {
+      from = tokens[back].start;
+      sawDegree = true;
+      back -= 1;
+      continue;
+    }
+    if (!sawSubject && isHedgeSubject(tokens[back].raw)) {
+      from = tokens[back].start;
+      sawSubject = true;
+      back -= 1;
+      continue;
+    }
+    break;
+  }
+  return from;
+}
+
+function extendHedgeForward(tokens, index, end) {
+  let to = end;
+  let cursor = index;
+  if (cursor < tokens.length && isGoodEvaluative(tokens[cursor].raw)) {
+    to = tokens[cursor].end;
+    cursor += 1;
+  }
+  const nominal = tokens[cursor];
+  const afterNominal = tokens[cursor + 1];
+  if (nominal && afterNominal && isGeonaNominal(nominal.raw) && isNotThatWord(afterNominal.raw)) {
+    return afterNominal.end;
+  }
+  if (nominal && isNotThatWord(nominal.raw)) return nominal.end;
+  return to;
+}
+
+// Spans of a non-choice -거나. Empty unless the sentence names a resistor,
+// so "너무 밝거나 해서 680Ω으로" stays unknown. A keep or a second -거나 after
+// the 하다 form is a real choice and is not in these spans' joiner check;
+// the words are still filler so they are not a second role.
+function geonaHedgeSpans(text) {
+  const raw = String(text ?? '');
+  if (!explicitTarget(raw)) return [];
+  const tokens = hedgeTokens(raw);
+  const spans = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const bare = bareHedgeToken(tokens[index].raw);
+    if (isGeonahadaAdjective(bare)) {
+      spans.push([tokens[index].start, extendHedgeForward(tokens, index + 1, tokens[index].end)]);
+      continue;
+    }
+    if (!endsWithGeona(bare)) continue;
+    const next = tokens[index + 1];
+    if (!next || !isHadaHedgeForm(next.raw)) continue;
+    const from = extendHedgeBack(tokens, index);
+    spans.push([from, extendHedgeForward(tokens, index + 2, next.end)]);
+  }
+  return spans;
+}
+
+function geonaHedgeHadaAt(text, index) {
+  return endsWithGeona(bareHedgeToken((/(\S+)\s*$/u.exec(String(text ?? '').slice(0, index)) ?? [])[1] ?? ''));
+}
+
+function particleGlueStem(word) {
+  if (/[이가]$/u.test(word) && word.length >= 2) return word.slice(0, -1);
+  return word;
+}
+
+function sameHedgeWord(key, token) {
+  const left = asideTokenStem(key);
+  const right = asideTokenStem(token);
+  if (left === right) return true;
+  const stem = particleGlueStem(left);
+  if (!stem || stem !== particleGlueStem(right)) return false;
+  if (isLedAllowWord(stem) || RESISTOR_NOUNS.has(stem) || rx('^R\\d+$', 'i').test(stem)) return false;
+  return true;
+}
+
+function isGeonaHedgeFiller(word, text) {
+  const key = String(word ?? '');
+  if (!key) return false;
+  const raw = String(text ?? '');
+  const spans = geonaHedgeSpans(raw);
+  if (spans.length === 0) return false;
+  let saw = false;
+  for (const token of hedgeTokens(raw)) {
+    if (!sameHedgeWord(key, bareHedgeToken(token.raw))) continue;
+    saw = true;
+    const inside = spans.some(([from, to]) => token.start < to && token.end > from);
+    if (!inside) return false;
+  }
+  return saw;
+}
+
+function followingHasChoiceAlternative(following) {
+  const rest = String(following ?? '').replace(/^\s*\S+\s*/u, '');
+  for (const cue of KEEP_CUES) {
+    if (cue.signal !== true || !cue.text) continue;
+    if (/[가-힣]/u.test(cue.text)) {
+      if (rest.includes(cue.text)) return true;
+      continue;
+    }
+    const body = cue.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (rx(`(?:^|[^A-Za-z])${body}(?:[^A-Za-z]|$)`, 'i').test(rest)) return true;
+  }
+  for (const item of CHOICE_JOINERS) {
+    if (item.place === 'word' && rest.includes(item.text)) return true;
+  }
+  const endings = CHOICE_JOINERS
+    .filter((item) => item.place === 'ending' && item.id !== 'deun')
+    .map((item) => item.re);
+  if (endings.length === 0) return false;
+  return rx(`(?:${endings.join('|')})(?:요|도|나)?(?![가-힣])`, 'u').test(rest);
+}
+
+// True when this token is the hedge, not a choice joiner. A keep cue or
+// another choice ending after the 하다 form is the second alternative, so
+// the ending stays a choice ("바꾸거나 하면 R4는 그대로").
+export function isGeonaHedgeJoiner(token, following = '') {
+  const context = `${bareHedgeToken(token)} ${String(following ?? '')}`;
+  if (!explicitTarget(context)) return false;
+  const bare = bareHedgeToken(token);
+  if (isGeonahadaAdjective(bare)) return true;
+  if (!endsWithGeona(bare)) return false;
+  const next = rx('^\\s*(\\S+)', 'u').exec(String(following ?? ''));
+  if (!next || !isHadaHedgeForm(next[1])) return false;
+  return !followingHasChoiceAlternative(String(following ?? ''));
 }
 
 function hasSignalOutsideExempt(text, sources, exempt = exemptSignalRanges(text)) {

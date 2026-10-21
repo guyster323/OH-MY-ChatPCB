@@ -40,6 +40,7 @@ import {
   CHOICE_JOINERS,
   choiceJoinerIsIdiom,
   choiceJoinerBindsValue,
+  isGeonaHedgeJoiner,
   choiceWordJoinerSources,
   goMalgoClauseSpans,
   decimalBeforeKeepFragments,
@@ -683,6 +684,7 @@ function bareGlueWord(token) {
 
 function choiceJoinerWord(token, following = '') {
   const bare = bareGlueWord(token);
+  if (isGeonaHedgeJoiner(bare, following)) return false;
   if (CHOICE_JOINER_WORD.test(bare) || CHOICE_JOINER_ENDING.test(bare)) return true;
   // "X든 말든" is the pair even when X's last syllable is not a listed stem.
   // The deun row's second alternative sees the text after this token.
@@ -2625,13 +2627,13 @@ const RESISTOR_CLAUSE_SEPARATORS = Object.freeze([
   Object.freeze({ re: String.raw`(?<!\d),(?!\d)` }),
   Object.freeze({ re: '그리고' }),
   Object.freeze({ re: '면서' }),
-  Object.freeze({ re: String.raw`하고(?![가-힣])` }),
+  Object.freeze({ re: String.raw`(?<!거나\s*)하고(?![가-힣])` }),
   Object.freeze({ re: String.raw`이고(?![가-힣])` }),
   Object.freeze({ re: String.raw`이랑(?![가-힣])` }),
   Object.freeze({ re: '지만' }),
   Object.freeze({ re: '말고' }),
   Object.freeze({ re: String.raw`(?<=[가-힣])며(?![가-힣])` }),
-  Object.freeze({ re: String.raw`(?<=[가-힣])고(?!\s*나서)(?![가-힣])` })
+  Object.freeze({ re: String.raw`(?<=[가-힣])(?<!거나\s*하)고(?!\s*나서)(?![가-힣])` })
 ]);
 
 // USB-C is a connector name. A bare USB role is not the LED resistor.
