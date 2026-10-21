@@ -2865,6 +2865,29 @@ test('든-말든 after a resistor value is a choice and a keep on either side is
   assert.deepEqual(failures, []);
 });
 
+// 바꾸고's -고 puts 680Ω in the previous clause, so the value-position rule
+// does not see it. 바꾸 and 변경 are edit verbs, so the pair is still a choice
+// and the R1 keep is RESISTOR_AMBIGUOUS. A non-edit verb after the same break
+// stays the idiom and applies R3.
+test('바꾸든 or 변경하든 after 바꾸고 plus an R1 keep is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const prompts = [
+    'LED 저항을 680Ω으로 바꾸고 바꾸든 말든 R1은 그대로 둘',
+    'LED 저항을 680Ω으로 바꾸고 변경하든 말든 R1은 그대로 둘'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of prompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  assert.deepEqual(failures, []);
+});
+
 test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', () => {
   const spec = seriesSpec('1k');
   const failures = [];
