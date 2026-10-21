@@ -664,8 +664,10 @@ const VERB_STEM_BEFORE_DEUN = [
 // on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
 // "or so" is an approximation, not a choice.
 // idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
-// a choice only when the verb is an edit verb, or 오다 follows an edit/do
-// connective. "하" alone is not an edit verb, so "하든 말든" stays the idiom.
+// a choice when the verb is an edit verb, when 오다 follows an edit/do
+// connective, or when the pair sits on a resistor value in this clause
+// (value+(으)로, or a target and a value earlier in the clause). "바꾸고
+// 하든 말든" stays the idiom: -고 is another clause.
 export const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
   Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
@@ -775,13 +777,59 @@ function verbBeforePairIsChoice(text, verb, verbAt) {
   return prev != null && isEditOrDoConnective(prev.text);
 }
 
-// The pair is the idiom "regardless" unless the verb is a real edit choice.
-// Both halves return true so a partner such as 말든 is not a second choice.
-export function choiceJoinerIsIdiom(text, start, end) {
+// Punctuation, and, -고, and 말고. 하거나's 고 is not a break. The value search
+// in the edit path uses the same breaks so the pair and the ohms share a clause.
+function idiomClauseStart(text, index) {
+  const raw = String(text ?? '');
+  let start = 0;
+  const consider = (to) => {
+    if (to <= index && to > start) start = to;
+  };
+  for (let at = 0; at < raw.length; at += 1) {
+    const ch = raw[at];
+    const punctuation = ch === ',' || ch === '，' || ch === ';' || ch === '\n'
+      || ch === '。' || ch === '？' || ch === '！' || ch === '?' || ch === '!';
+    const dot = ch === '.' && !(/\d/u.test(raw[at - 1] ?? '') && /\d/u.test(raw[at + 1] ?? ''));
+    if (punctuation || dot) consider(at + 1);
+  }
+  for (const match of raw.matchAll(/\band\b/giu)) consider(match.index + match[0].length);
+  for (const match of raw.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
+    consider(match.index + match[0].length);
+  }
+  for (const match of raw.matchAll(/말고/gu)) consider(match.index + match[0].length);
+  return start;
+}
+
+const IDIOM_OHM_BODY = String.raw`\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?\b|[rRkK](?![A-Za-z]))|\d+(?:\.\d+)?\s*[kKmM]\d*(?![A-Za-z])|\d+\s*[rR]\d+(?![A-Za-z])`;
+
+function idiomGapIsConnective(gap) {
+  const words = String(gap ?? '').split(/\s+/u).filter(Boolean);
+  return words.every((word) => isEditOrDoConnective(bareChoiceToken(word)));
+}
+
+// The ohms have to sit in front of the pair. value+(으)로 may keep an edit/do
+// connective between itself and the verb ("680Ω으로 해 가든"). A target and a
+// value earlier in the same clause count too ("LED 저항 680Ω 하든"). A value
+// after the pair, or only in the previous -고 clause, does not.
+function idiomPairSitsOnValue(text, verbAt) {
+  const before = String(text ?? '').slice(idiomClauseStart(text, verbAt), verbAt);
+  const particle = new RegExp(String.raw`(?:${IDIOM_OHM_BODY})(?:\s*(?:Ω|옴))?\s*(?:으로|로)`, 'giu');
+  let last = null;
+  for (const match of before.matchAll(particle)) last = match;
+  if (last && idiomGapIsConnective(before.slice(last.index + last[0].length))) return true;
+  if (!new RegExp(IDIOM_OHM_BODY, 'iu').test(before)) return false;
+  if (textHasLedResistorSynonym(before)) return true;
+  if (/\bR\d+\b/iu.test(before)) return true;
+  return /(?:저항|抵抗|\bresistors?\b)/iu.test(before);
+}
+
+// null when this span is not one half of an X든 + 말든 pair. The caller treats
+// that the same as a real choice, which is what a bare 든 ending already is.
+function pairedIdiomVerb(text, start, end) {
   const raw = String(text ?? '');
   const slice = raw.slice(start, end);
   const bare = bareChoiceToken(slice);
-  if (!bare) return false;
+  if (!bare) return null;
   const lead = slice.indexOf(bare);
   const bareStart = start + (lead < 0 ? 0 : lead);
   const core = stripChoicePolite(bare);
@@ -789,13 +837,13 @@ export function choiceJoinerIsIdiom(text, start, end) {
   for (const row of rows) {
     if (core !== row.idiomWith) continue;
     const prev = previousChoiceWord(raw, start);
-    if (!prev) return false;
+    if (!prev) return null;
     const prevBare = bareChoiceToken(prev.text);
     const prevCore = stripChoicePolite(prevBare);
-    if (!prevCore.endsWith(row.text) || prevCore.length === row.text.length) return false;
+    if (!prevCore.endsWith(row.text) || prevCore.length === row.text.length) return null;
     const verb = prevCore.slice(0, -row.text.length);
     const verbAt = prev.start + Math.max(0, prev.text.indexOf(prevBare)) + Math.max(0, prevBare.indexOf(verb));
-    return !verbBeforePairIsChoice(raw, verb, verbAt);
+    return { verb, verbAt };
   }
   for (const row of rows) {
     let host = core;
@@ -810,9 +858,35 @@ export function choiceJoinerIsIdiom(text, start, end) {
     if (!sawPartner || !host.endsWith(row.text) || host.length === row.text.length) continue;
     const verb = host.slice(0, -row.text.length);
     const verbAt = bareStart + Math.max(0, bare.indexOf(verb));
-    return !verbBeforePairIsChoice(raw, verb, verbAt);
+    return { verb, verbAt };
   }
-  return false;
+  return null;
+}
+
+// 'edit' is the 8bd7c6b choice. 'value' is the same pair sitting on the ohms,
+// for any verb. 'idiom' applies. 'no' is not a pair.
+function idiomPairClass(text, start, end) {
+  const pair = pairedIdiomVerb(text, start, end);
+  if (!pair) return 'no';
+  if (verbBeforePairIsChoice(text, pair.verb, pair.verbAt)) return 'edit';
+  if (idiomPairSitsOnValue(text, pair.verbAt)) return 'value';
+  return 'idiom';
+}
+
+// The pair is the idiom "regardless" unless it is a real edit choice or it
+// sits on the resistor value. Both halves return true so a partner such as
+// 말든 is not a second choice.
+export function choiceJoinerIsIdiom(text, start, end) {
+  return idiomPairClass(text, start, end) === 'idiom';
+}
+
+// The pair sits on the ohms, so a keep in an earlier clause still joins it.
+// An edit verb does too ("680Ω으로 바꾸든 말든", "바꿔 오든 말든"). A pair
+// after -고 is not on the ohms and keeps the old geometry.
+export function choiceJoinerBindsValue(text, start, end) {
+  const pair = pairedIdiomVerb(text, start, end);
+  if (!pair || idiomPairClass(text, start, end) === 'idiom') return false;
+  return idiomPairSitsOnValue(text, pair.verbAt);
 }
 
 export function choiceWordJoinerSources({ exceptApprox = false } = {}) {

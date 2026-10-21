@@ -39,6 +39,7 @@ import {
   KEEP_CUES,
   CHOICE_JOINERS,
   choiceJoinerIsIdiom,
+  choiceJoinerBindsValue,
   choiceWordJoinerSources,
   decimalBeforeKeepFragments,
   keepClauseSpans,
@@ -901,14 +902,18 @@ function choiceJoinsAnyKeep(text, spec) {
     const end = start + word[0].length;
     if (!choiceJoinerWord(word[0], text.slice(end))) continue;
     if (/^or$/iu.test(bareGlueWord(word[0])) && orSoApproximation(text, end)) continue;
-    // idiomWith pairs are "regardless" unless the verb is an edit choice.
-    // A valued keep still goes through choiceKeepJoiner.
+    // idiomWith pairs are "regardless" unless the verb is an edit choice or
+    // the pair sits on the resistor value. A valued keep still goes through
+    // choiceKeepJoiner. A value-bound pair also meets a keep in an earlier
+    // clause ("그대로 두고 … 680Ω으로 하든 말든").
     if (choiceJoinerIsIdiom(text, start, end)) continue;
-    if (!rangesOverlap(ranges, start, end)
-      && !ranges.some(([spanStart, spanEnd]) => (
+    const bindsValue = choiceJoinerBindsValue(text, start, end);
+    const touchesKeep = rangesOverlap(ranges, start, end)
+      || ranges.some(([spanStart, spanEnd]) => (
         (spanEnd <= start && /^\s*$/u.test(text.slice(spanEnd, start)))
         || (end <= spanStart && /^\s*$/u.test(text.slice(end, spanStart)))
-      ))) continue;
+      ));
+    if (!touchesKeep && !bindsValue) continue;
     const [left, right] = choiceClauseBounds(start, end, marks, text.length);
     const [valueLeft] = choiceClauseBounds(start, end, valueMarks, text.length);
     const leftText = text.slice(left, start);
@@ -917,7 +922,7 @@ function choiceJoinsAnyKeep(text, spec) {
     const rightKeep = rangesOverlap(ranges, end, right);
     const leftValue = clauseCarriesResistorValue(text.slice(valueLeft, start));
     const rightValue = clauseCarriesResistorValue(rightText);
-    if (!(leftValue && rightKeep) && !(rightValue && leftKeep)) continue;
+    if (!(leftValue && rightKeep) && !(rightValue && leftKeep) && !bindsValue) continue;
     const leftPhrase = choiceSidePhrase(leftText, 'left');
     const rightPhrase = choiceSidePhrase(rightText, 'right');
     if (choiceSideIsListTarget(leftPhrase, series) && choiceSideIsListTarget(rightPhrase, series)) continue;

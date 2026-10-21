@@ -2697,7 +2697,9 @@ test('property: a verb between the ohms and an unvalued choice keep is RESISTOR_
 });
 
 // X든/X든지/X거나 + 말든/말든지/말거나 is the idiom unless the verb is an edit
-// verb, or 오다 follows an edit/do connective. Bare 하든 without 말든 stays a choice.
+// verb, or 오다 follows an edit/do connective. A pair sitting on the resistor
+// value is a choice for any verb; the next test pins that. Bare 하든 without
+// 말든 stays a choice.
 test('든-말든 is an idiom unless the verb is an edit verb or 오다 follows an edit connective', () => {
   const spec = seriesSpec('1k');
   const applies = [
@@ -2761,6 +2763,99 @@ test('든-말든 is an idiom unless the verb is an edit verb or 오다 follows a
   for (const [id, partner] of [['deun', '말든'], ['deunji', '말든지'], ['geona', '말거나']]) {
     const row = CHOICE_JOINERS.find((item) => item.id === id);
     if (row?.idiomWith !== partner) failures.push(`${id} idiomWith ${row?.idiomWith ?? 'missing'}`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+// 든/든지/거나 + 말든/말든지/말거나 right after value+(으)로, or earlier in the
+// same clause as a target and a value, is a choice for any verb. A keep on
+// either side is RESISTOR_AMBIGUOUS. After a clause break the pair stays the
+// idiom and still applies R3. With no keep the sentence stays TARGET_UNCLEAR.
+test('든-말든 after a resistor value is a choice and a keep on either side is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [
+    'LED 저항을 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든지 말든지 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하거나 말거나 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 해든 말든 R4는 그대로 둬',
+    'LED 저항 680Ω 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R4는 건드리지 마',
+    'LED 저항을 680Ω으로 하든 말든 풀업은 그대로',
+    'LED 저항을 680Ω으로 하든말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든요 말든요 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 변경하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 해 가든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 오든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 가든 말든 R4는 그대로 둬',
+    'R3를 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R4는 4.7k 그대로',
+    'LED 저항을 680Ω으로 하든 말든 R4는 4.7k로 유지',
+    'R4는 그대로 두고 LED 저항을 680Ω으로 하든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 하든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 바꾸든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 변경하든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 해 오든 말든',
+    'R1은 그대로 두고 LED 저항을 680Ω으로 바꿔 오든 말든',
+    'LED 저항을 680Ω으로 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 하든지 말든지 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 해든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 하거나 말거나 R1은 그대로 둠',
+    'LED 저항 680Ω 하든 말든 R1은 그대로 둠',
+    'LED 저항 680Ω으로 하든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R1은 건드리지 마',
+    'LED 저항을 680Ω으로 하든말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 하든요 말든요 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 변경하든 말든 R1은 그대로 둬',
+    'R3를 680Ω으로 하든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 하든 말든 R1은 4.7k 그대로',
+    'LED 저항을 680Ω으로 하든 말든 R1은 4.7k로 유지',
+    'LED 저항을 680Ω으로 해 가든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 오든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 가든 말든 R1은 그대로 둠'
+  ];
+  const applies = [
+    'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 오든말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 가든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오거나 말거나 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 누가 오든 말든 R1은 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R4는 그대로 둬'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(next, 'R1') !== '5.1k') failures.push(`${prompt} R1 ${componentValue(next, 'R1')}`);
+    }
+  }
+  const unclear = 'LED 저항을 680Ω으로 하든 말든 해줘';
+  const unclearDecision = classifyExistingProjectRequest(unclear, spec);
+  if (unclearDecision.code !== 'RESISTOR_TARGET_UNCLEAR' || unclearDecision.edit != null) {
+    failures.push(`${unclear} => ${unclearDecision.mode} ${unclearDecision.code ?? ''} ${unclearDecision.edit?.ref ?? ''}`);
+  }
+  const afterValue = 'R4는 그대로 두고 오든 말든 LED 저항 680Ω';
+  const afterValueDecision = classifyExistingProjectRequest(afterValue, spec);
+  if (afterValueDecision.code !== 'RESISTOR_REF_UNSUPPORTED' || afterValueDecision.edit != null) {
+    failures.push(`${afterValue} => ${afterValueDecision.mode} ${afterValueDecision.code ?? ''} ${afterValueDecision.edit?.ref ?? ''}`);
   }
   assert.deepEqual(failures, []);
 });
