@@ -671,13 +671,13 @@ const VERB_STEM_BEFORE_DEUN = [
 // the 하다 form is a second alternative. An adjective takes the same ending
 // ("약하거나 해서", "밝거나 하면"): the stem is not a second value, and 약
 // there is not the adverb "about". Honorific -시- may be glued
-// ("바꿔주시거나") or spaced ("바꿔 주시거나", "해 주시거나"). A negated
-// edit is still not a hedge, with or without that -시- ("바꾸지 않거나",
-// "안 바꾸거나", "바꿔 주시지 않거나", "안 바꿔 주시거나"). A negated state
-// still is ("밝지 않거나", "안 켜지거나"). The polite closer after the 하다
-// form is one evaluative shape (좋겠어요, 감사하겠어요), not a listed
-// sentence. Word-initial 거나 + 한/하게/하다 is the adjective 거나하다, not
-// this ending. isGeonaHedgeJoiner reads both.
+// ("바꿔주시거나") or spaced ("바꿔 주시거나", "해 주시거나"). Any negation
+// marker in the clause on that -거나 drops the hedge, verb and spacing
+// aside ("바꾸진 않거나", "안바꾸거나", "손대지 않거나", "밝지 않거나").
+// The polite closer after the 하다 form is one evaluative shape
+// (좋겠어요, 감사하겠어요), not a listed sentence. Word-initial 거나 +
+// 한/하게/하다 is the adjective 거나하다, not this ending.
+// isGeonaHedgeJoiner reads both.
 // idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
 // a choice when the verb is an edit verb, when 오다 follows an edit/do
 // connective, or when the pair sits on a resistor value in this clause
@@ -2286,14 +2286,21 @@ function indexInRanges(index, ranges) {
 // Negation and alternatives reject the whole request. A resistor keep,
 // a don't-touch of an R ref or resistor role, and any don't-delete clause
 // are removed first, including the separator that closed them. A -거나 hedge
-// is the same kind of aside, so 않 inside that span is not an edit negation.
-// That 않 belongs to a state ("밝지 않거나"). A negated edit verb is not a
-// hedge, so its 않, 말, 안, 싫, or 아니 stays a rejection.
+// is the same kind of aside. A negation marker in the clause on that -거나
+// (않, 말, 마/마시, 못, 안, 없, 싫, 아니) is not a hedge, so the marker stays
+// a rejection.
 function exemptSignalRanges(text) {
   const pieces = allowClausePieces(text);
   const exempt = [];
+  // A keep clause must not hide a negated -거나. "손대지 않거나" is that case:
+  // 손대지 is a keep stem, and without this the 않 would be exempt and the
+  // ohms would still land on R3.
+  const negatedGeona = editVerbNegationSpans(text);
   for (const piece of pieces) {
-    if (isExemptSignalClause(piece.text)) exempt.push([piece.start, piece.sepEnd]);
+    if (!isExemptSignalClause(piece.text)) continue;
+    const hidesNegatedGeona = negatedGeona.some(([from, to]) => from < piece.sepEnd && to > piece.start);
+    if (hidesNegatedGeona) continue;
+    exempt.push([piece.start, piece.sepEnd]);
   }
   for (const span of geonaHedgeSpans(text)) exempt.push(span);
   return exempt;
@@ -2467,137 +2474,74 @@ function extendHedgeForward(tokens, index, end) {
   return to;
 }
 
-// The syllable glued to -거나. 않거나 → 않, 않았거나 → 않았, 바꾸거나 → 바꾸.
-function stemBeforeGeona(word) {
-  return hedgeLookupForm(word).replace(GEONA_ENDING, '');
+// Where the clause sitting on this index begins. The separators are the same
+// ones allowClausePieces splits on, plus -고. This does not call back into
+// the hedge scan. A decimal or thousands separator between digits stays put.
+function clauseStartBefore(text, index) {
+  const raw = String(text ?? '');
+  const boundary = rx(
+    String.raw`\s(?:and then|and|&|then)\s|바꾸고|그리고|하면서|하고|이고|이랑|면서|지만|말고|(?<=[가-힣])고(?!\s*나서)(?!거나)|[,，.;!?？！。\n•·]`,
+    'giu'
+  );
+  let start = 0;
+  for (const match of raw.matchAll(boundary)) {
+    const at = match.index ?? 0;
+    if (at >= index) break;
+    const end = at + match[0].length;
+    if (end > index) continue;
+    const mark = match[0];
+    if ((mark === ',' || mark === '.' || mark === '，') && /\d/u.test(raw[at - 1] ?? '') && /\d/u.test(raw[at + 1] ?? '')) continue;
+    start = end;
+  }
+  return start;
 }
 
-// isEditVerbWord is the English set. Bare 하/두 are edits here: the request
-// stem leaves 하다 and 두다 off that list. 맞추 is the adjust verb the choice
-// pair already counts as an edit. Honorific -시- on that stem (바꾸시,
-// 바꿔주시, 하시) is the same verb.
-function stemWithoutHonorificSi(stem) {
-  const text = String(stem ?? '');
-  if (text.length > 1 && text.endsWith('시')) return text.slice(0, -1);
-  return '';
+// 정말/만약/말씀 use the syllable 말 and are not the prohibitive.
+function hasMalNegation(text) {
+  return text.replace(/정말|만약|말씀/gu, ' ').includes('말');
 }
 
-function isHedgeEditStem(stem) {
-  const text = String(stem ?? '');
-  if (!text) return false;
-  if (text === '하' || text === '두' || text === '맞추' || text === '맞춰') return true;
-  if (isEditVerbWord(text) || isKoreanRequestStem(text)) return true;
-  const bare = stemWithoutHonorificSi(text);
-  return bare ? isHedgeEditStem(bare) : false;
+// Fail closed. Any of these in the clause on -거나 drops the hedge, whatever
+// the verb, the spacing, or a particle (진/는/도/기는). 안 is its own word or
+// a prefix (안바꾸, 안되). 마(시) is the prohibitive, not 마다/마음.
+function clauseHasNegationMarker(clause) {
+  const text = String(clause ?? '');
+  if (/[않없싫]/u.test(text) || text.includes('아니') || text.includes('못')) return true;
+  if (hasMalNegation(text)) return true;
+  if (text.includes('마시') || hasStandalone(text, '마') || /(?:^|[^가-힣])마거나/u.test(text) || /지\s*마/u.test(text)) return true;
+  // 안되 stays a marker when it is glued on (바꾸면안되거나). 안 alone is a word or a prefix (안바꾸).
+  if (text.includes('안되') || hasStandalone(text, '안') || /(?:^|[^가-힣])안[가-힣]/u.test(text)) return true;
+  return false;
 }
 
-// 주/드리 plus optional -시- is the benefactive ("해 주시", "바꿔 드리시")
-// when a space separates it from the edit verb. Glued 바꾸시 is the edit stem.
-function isBenefactiveHonorific(stem) {
-  const text = String(stem ?? '');
-  if (text === '주' || text === '시' || text === '드리' || text === '주시' || text === '드리시') return true;
-  const bare = stemWithoutHonorificSi(text);
-  return bare === '주' || bare === '드리';
-}
-
-function isSpacedEditHost(word) {
-  const form = hedgeLookupForm(word);
-  if (!form) return false;
-  if (isHedgeEditStem(form)) return true;
-  const stem = araEoStem(form);
-  if (!stem) return false;
-  if (stem === '하') return true;
-  if (stem.endsWith('하')) return isHedgeEditStem(stem.slice(0, -1));
-  return isHedgeEditStem(stem);
-}
-
-function honorificAuxOnEdit(stem, tokens, auxTokenIndex) {
-  if (!isBenefactiveHonorific(stem) || auxTokenIndex <= 0) return false;
-  return isSpacedEditHost(tokens[auxTokenIndex - 1].raw);
-}
-
-function verbHostIsEdit(stem, tokens, verbTokenIndex) {
-  if (isHedgeEditStem(stem)) return true;
-  return honorificAuxOnEdit(stem, tokens, verbTokenIndex);
-}
-
-function verbStemBeforeJi(word) {
-  const match = /^(.+?)지(?:는|도|만)?$/u.exec(hedgeLookupForm(word));
-  return match?.[1] ?? '';
-}
-
-function verbStemBeforeGi(word) {
-  const match = /^(.+?)기$/u.exec(hedgeLookupForm(word));
-  return match?.[1] ?? '';
-}
-
-function verbStemBeforeNeun(word) {
-  const match = /^(.+?)는$/u.exec(hedgeLookupForm(word));
-  return match?.[1] ?? '';
-}
-
-function markerInside(token, prefix) {
-  const at = String(token.raw).indexOf(prefix);
-  if (at < 0) return [token.start, token.end];
-  return [token.start + at, token.start + at + prefix.length];
-}
-
-// The negation glued to an edit verb at this -거나. Null for a state
-// (밝지 않거나, 안 켜지거나) and for a -거나 that is not negated.
-// Spaced honorific -시- is the same edit ("바꿔 주시지 않거나", "안 바꿔
-// 주시거나", "바꿔 주시기 싫거나", "바꿔 주시는 건 아니거나").
-function editVerbNegationRange(tokens, index) {
+// The -거나 whose own clause holds a negation marker. The verb does not
+// matter, and a negated state ("밝지 않거나", "안 켜지거나") is included.
+// Null when this word is not -거나 or the clause has no marker.
+function editVerbNegationRange(text, tokens, index) {
   const token = tokens[index];
   if (!token || !endsWithGeona(bareHedgeToken(token.raw))) return null;
-  const stem = stemBeforeGeona(token.raw);
-  const prev = index > 0 ? tokens[index - 1] : null;
-  const prev2 = index > 1 ? tokens[index - 2] : null;
-  const prevForm = prev ? hedgeLookupForm(prev.raw) : '';
-  if (prevForm === '안' && isHedgeEditStem(stem)) return [prev.start, prev.end];
-  if (honorificAuxOnEdit(stem, tokens, index)) {
-    const beforeHost = index > 1 ? tokens[index - 2] : null;
-    if (beforeHost && hedgeLookupForm(beforeHost.raw) === '안') return [beforeHost.start, beforeHost.end];
-  }
-  if (stem === '않' || stem === '않았' || stem === '말') {
-    if (!verbHostIsEdit(verbStemBeforeJi(prevForm), tokens, index - 1)) return null;
-    return markerInside(token, stem);
-  }
-  if (stem === '싫') {
-    if (!verbHostIsEdit(verbStemBeforeGi(prevForm), tokens, index - 1)) return null;
-    return markerInside(token, '싫');
-  }
-  if (stem !== '아니') return null;
-  let verb = '';
-  let verbTokenIndex = -1;
-  if (isGeonaNominal(prevForm)) {
-    verb = verbStemBeforeNeun(prev2 ? prev2.raw : '');
-    verbTokenIndex = index - 2;
-  } else {
-    const glued = /^(.+?)는(건|것은|게|거는|건지)$/u.exec(prevForm);
-    if (glued) {
-      verb = glued[1];
-      verbTokenIndex = index - 1;
-    }
-  }
-  if (!verbHostIsEdit(verb, tokens, verbTokenIndex)) return null;
-  return markerInside(token, '아니');
+  const from = clauseStartBefore(text, token.start);
+  if (!clauseHasNegationMarker(text.slice(from, token.end))) return null;
+  return [token.start, token.end];
 }
 
-// Ranges of an edit-verb negation on -거나. A hedge span must not cover these.
+// Ranges of a negated -거나. A hedge span must not cover these.
 export function editVerbNegationSpans(text) {
-  const tokens = hedgeTokens(text);
+  const raw = String(text ?? '');
+  const tokens = hedgeTokens(raw);
   const spans = [];
   for (let index = 0; index < tokens.length; index += 1) {
-    const range = editVerbNegationRange(tokens, index);
+    const range = editVerbNegationRange(raw, tokens, index);
     if (range) spans.push(range);
   }
   return spans;
 }
 
 function textHasNegatedEditGeona(text) {
-  const tokens = hedgeTokens(text);
+  const raw = String(text ?? '');
+  const tokens = hedgeTokens(raw);
   if (tokens.length === 0) return false;
-  return editVerbNegationRange(tokens, tokens.length - 1) != null;
+  return editVerbNegationRange(raw, tokens, tokens.length - 1) != null;
 }
 
 // Spans of a non-choice -거나. Empty unless the sentence names a resistor,
@@ -2619,7 +2563,7 @@ export function geonaHedgeSpans(text) {
     if (!endsWithGeona(bare)) continue;
     const next = tokens[index + 1];
     if (!next || !isHadaHedgeForm(next.raw)) continue;
-    if (editVerbNegationRange(tokens, index)) continue;
+    if (editVerbNegationRange(raw, tokens, index)) continue;
     const from = extendHedgeBack(tokens, index);
     spans.push([from, extendHedgeForward(tokens, index + 2, next.end)]);
   }
@@ -2688,8 +2632,8 @@ function followingHasChoiceAlternative(following) {
 // True when this token is the hedge, not a choice joiner. A keep cue or
 // another choice ending after the 하다 form is the second alternative, so
 // the ending stays a choice ("바꾸거나 하면 R4는 그대로"). preceding is the
-// text before the token, so a negated edit ("바꾸지 않거나") stays a choice
-// while a negated state ("밝지 않거나") stays a hedge.
+// text before the token. A negation marker in that clause ("바꾸지 않거나",
+// "밝지 않거나") stays a choice.
 export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
   const context = `${bareHedgeToken(token)} ${String(following ?? '')}`;
   if (!explicitTarget(context)) return false;
