@@ -3849,6 +3849,84 @@ test('Korean current-limiter names are RESISTOR_AMBIGUOUS on keep and apply R3 o
   ]) assertLedKeepApplies(spec, prompt);
 });
 
+// English alias -> Korean row in LED_RESISTOR_SYNONYMS. A new English row
+// fails until this map names it and that Korean alias is in the table.
+// "the" and "one" are glue, so the series-one rows pair with 직렬. There is
+// no separate Korean bare-name row for that idiom.
+const LED_RESISTOR_ENGLISH_TO_KOREAN = Object.freeze({
+  'current-limiting': '전류제한',
+  'current limiting': '전류 제한',
+  'current-limit': '전류 제한',
+  'current limiter': '전류 제한기',
+  'current limiters': '전류 제한기',
+  'indicator resistor': '표시등 저항',
+  'series': '직렬',
+  'series one': '직렬',
+  'the series one': '직렬',
+  'LED series': 'LED 직렬',
+  'status LED resistor': '상태 LED 저항',
+  'led': '엘이디',
+  'leds': '엘이디',
+  'status': '상태',
+  "{led}'s resistor": '{led} 저항',
+  'the {led} resistor': '{led} 저항',
+  '{led} resistor': '{led} 저항'
+});
+
+function isEnglishLedResistorAlias(alias) {
+  return /[A-Za-z]/.test(alias) && !/[가-힣]/.test(alias);
+}
+
+test('every English LED-resistor alias has a Korean counterpart row', () => {
+  const table = new Set(LED_RESISTOR_SYNONYMS);
+  const english = LED_RESISTOR_SYNONYMS.filter((alias) => isEnglishLedResistorAlias(alias));
+  const missingMap = [];
+  const missingKorean = [];
+  for (const alias of english) {
+    if (!Object.hasOwn(LED_RESISTOR_ENGLISH_TO_KOREAN, alias)) {
+      missingMap.push(alias);
+      continue;
+    }
+    const korean = LED_RESISTOR_ENGLISH_TO_KOREAN[alias];
+    if (isEnglishLedResistorAlias(korean) || !table.has(korean)) missingKorean.push(`${alias} -> ${korean}`);
+  }
+  const stale = Object.keys(LED_RESISTOR_ENGLISH_TO_KOREAN).filter((alias) => (
+    !table.has(alias) || !isEnglishLedResistorAlias(alias)
+  ));
+  assert.equal(LED_RESISTOR_ENGLISH_TO_KOREAN['current limiter'], '전류 제한기');
+  assert.equal(LED_RESISTOR_ENGLISH_TO_KOREAN['current limiters'], '전류 제한기');
+  assert.equal(LED_RESISTOR_ENGLISH_TO_KOREAN['indicator resistor'], '표시등 저항');
+  assert.deepEqual(missingMap, []);
+  assert.deepEqual(missingKorean, []);
+  assert.deepEqual(stale, []);
+  assert.equal(english.length, Object.keys(LED_RESISTOR_ENGLISH_TO_KOREAN).length);
+});
+
+// 'LED 직렬' and '상태 LED 저항' are the Korean rows for 'LED series' and
+// 'status LED resistor'. A keep of either contradicts an LED-resistor edit.
+test('Korean LED-series and status-LED-resistor rows are RESISTOR_AMBIGUOUS on keep and apply R3 on edit', () => {
+  const spec = seriesLedBoard();
+  for (const synonym of ['LED 직렬', '상태 LED 저항']) {
+    assert.equal(LED_RESISTOR_SYNONYMS.includes(synonym), true, synonym);
+  }
+  for (const prompt of [
+    'LED 직렬 저항은 그대로 두고 LED 저항 680Ω',
+    'LED 직렬 저항은 그대로 두고, LED 저항 680Ω',
+    'R4 또는 LED 직렬 저항은 그대로 두고 LED 저항 680Ω',
+    '상태 LED 저항은 그대로 두고 LED 저항 680Ω',
+    '상태 LED 저항은 그대로 두고, LED 저항 680Ω',
+    'R4 또는 상태 LED 저항은 그대로 두고 LED 저항 680Ω',
+    '상태 LED 저항은 그대로 두고, LED 저항을 680Ω으로'
+  ]) assertAmbiguousKeep(spec, prompt);
+  for (const prompt of [
+    'LED 직렬 저항 680Ω',
+    'LED 직렬 저항을 680Ω으로',
+    'LED 직렬 680Ω으로',
+    '상태 LED 저항 680Ω으로',
+    '상태 LED 저항을 680Ω으로'
+  ]) assertLedKeepApplies(spec, prompt);
+});
+
 // "the" and "one" are articles and a pronoun in the synonym table. A current
 // or voltage on the LED resistor phrase is still the edit, with or without "the".
 test('property: a measured LED resistor phrase merges R3 with or without the article', () => {
