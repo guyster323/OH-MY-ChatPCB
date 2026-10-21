@@ -2737,8 +2737,6 @@ function textHasNegatedEditGeona(text) {
 export function geonaHedgeSpans(text) {
   const raw = String(text ?? '');
   if (!explicitTarget(raw)) return [];
-  // A marker anywhere, including after -거나, means this is not a hedge.
-  if (sentenceHasNegationMarker(raw)) return [];
   const tokens = hedgeTokens(raw);
   const spans = [];
   for (let index = 0; index < tokens.length; index += 1) {
@@ -2831,7 +2829,6 @@ export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
   const bare = bareHedgeToken(token);
   if (isGeonahadaAdjective(bare)) return true;
   if (!endsWithGeona(bare)) return false;
-  if (sentenceHasNegationMarker(`${String(preceding ?? '')}${token}${String(following ?? '')}`)) return false;
   const next = rx('^\\s*(\\S+)', 'u').exec(String(following ?? ''));
   if (!next || !isHadaHedgeForm(next[1])) return false;
   const prev = /(\S+)\s*$/u.exec(String(preceding ?? ''));
