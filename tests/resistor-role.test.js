@@ -1562,7 +1562,12 @@ test('every LED-resistor synonym in a keep clause is RESISTOR_AMBIGUOUS', () => 
     '직렬',
     '전류제한',
     '전류 제한',
-    '전류 제한용'
+    '전류 제한용',
+    'current limiters',
+    '전류 제한기',
+    '전류제한기',
+    '표시등 저항',
+    '리미터'
   ];
   for (const synonym of required) {
     assert.equal(
@@ -3770,16 +3775,78 @@ test('property: an LED-resistor alias keep is RESISTOR_AMBIGUOUS and a direct ed
 });
 
 // UAT 121 joins the alias keep with a comma and no "and set". 120/122 use "and set".
-// "전류 제한기" is the modifier "전류 제한", not the bare "current limiter" name,
-// so the Korean list still edits R3. A ref list with no alias does too.
+// "전류 제한기" names the same part as "current limiter", so that keep contradicts the edit.
+// A ref list with no alias still edits R3.
 test('a comma-joined LED-resistor alias keep is RESISTOR_AMBIGUOUS', () => {
   const spec = seriesLedBoard();
   for (const prompt of [
     'keep R4 or the current limiter, LED resistor 680Ω',
-    'keep the current limiter, LED resistor 680Ω'
+    'keep the current limiter, LED resistor 680Ω',
+    'R4 또는 전류 제한기는 그대로 두고, LED 저항 680Ω'
   ]) assertAmbiguousKeep(spec, prompt);
-  assertLedKeepApplies(spec, 'R4 또는 전류 제한기는 그대로 두고, LED 저항 680Ω');
   assertLedKeepApplies(spec, 'keep R4 or R5, LED resistor 680Ω');
+});
+
+// "전류 제한" / "전류 제한 저항" stay modifiers. "전류 제한기" is the part.
+// Bare "리미터" must not match inside "밀리미터" or "프리미터".
+test('Korean current-limiter names are RESISTOR_AMBIGUOUS on keep and apply R3 on edit', () => {
+  const spec = seriesLedBoard();
+  for (const synonym of ['current limiters', '전류 제한기', '전류제한기', '표시등 저항', '리미터']) {
+    assert.equal(LED_RESISTOR_SYNONYMS.includes(synonym), true, synonym);
+  }
+  for (const prompt of [
+    'R4 또는 전류 제한기는 그대로 두고, LED 저항 680Ω',
+    'R4 또는 전류 제한기는 그대로 두고 LED 저항 680Ω',
+    '전류 제한기는 그대로 두고, LED 저항 680Ω',
+    '전류 제한기는 그대로 두고 LED 저항 680Ω',
+    '전류 제한기는 그대로 두고 LED 저항을 680Ω으로',
+    'R4 또는 전류제한기는 그대로 두고, LED 저항 680Ω',
+    '전류제한기는 그대로 두고 LED 저항 680Ω',
+    '전류 제한기는 건드리지 말고 R3 680Ω',
+    'R4 또는 전류 제한기는 건드리지 말고 R3 680Ω으로',
+    'keep the current limiters and set R3 to 680Ω',
+    'keep the current limiters, set the LED resistor to 680Ω'
+  ]) assertAmbiguousKeep(spec, prompt);
+  for (const prompt of [
+    '전류 제한기를 680Ω으로',
+    '전류제한기 680Ω으로 바꿔줘',
+    '표시등 저항 680Ω으로',
+    '리미터 680Ω으로',
+    'set the current limiters to 680Ω'
+  ]) assertLedKeepApplies(spec, prompt);
+  assertAmbiguousKeep(spec, '전류 제한 저항은 그대로 두고 LED 저항 680Ω');
+  for (const prompt of [
+    '전류 제한 저항 680Ω',
+    'LED 전류 제한용 저항 680Ω',
+    '전류 제한 680Ω으로',
+    '전류 제한을 680Ω으로',
+    '전류제한 680Ω으로',
+    '전류 제한용 680Ω으로',
+    '리미터 저항 680Ω으로'
+  ]) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+  }
+  for (const prompt of ['전류제한용 680Ω으로', 'set the current limit to 680Ω', '프리미터 680Ω으로', '전압 리미터 680Ω으로']) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.edit, undefined, prompt);
+  }
+  const milliResistor = classifyExistingProjectRequest('밀리미터 저항 680Ω으로', spec);
+  assert.equal(milliResistor.mode, 'refuse', milliResistor.code ?? '');
+  assert.equal(milliResistor.code, 'RESISTOR_REF_UNSUPPORTED');
+  assert.equal(milliResistor.edit, undefined);
+  for (const prompt of [
+    '밀리미터는 그대로 두고 LED 저항 680Ω',
+    '프리미터는 그대로 두고 LED 저항 680Ω'
+  ]) assertLedKeepApplies(spec, prompt);
 });
 
 // "the" and "one" are articles and a pronoun in the synonym table. A current

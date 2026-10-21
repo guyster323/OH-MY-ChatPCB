@@ -2492,7 +2492,9 @@ function ledResistorEditSpans(text) {
     const namesResistor = /resistor|저항|抵抗/.test(folded);
     const tail = namesResistor ? '' : '(?:\\s+resistors?|\\s*저항|\\s*抵抗)';
     const ascii = /^[a-z0-9 -]+$/.test(folded.replace(/-/g, ' '));
-    alternatives.push(ascii ? `(?<![a-z0-9])(?:the\\s+)?${body}${tail}` : `${body}${tail}`);
+    // "리미터" is inside "밀리미터". The character before it has to be a boundary.
+    const hangulHead = folded === '리미터' ? '(?<![가-힣])' : '';
+    alternatives.push(ascii ? `(?<![a-z0-9])(?:the\\s+)?${body}${tail}` : `${hangulHead}${body}${tail}`);
   }
   if (alternatives.length === 0) return spans;
   const pattern = compileRegExp(alternatives.join('|'), 'giu');

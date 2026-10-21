@@ -943,6 +943,7 @@ export const LED_RESISTOR_SYNONYMS = Object.freeze([
   'current limiting',
   'current-limit',
   'current limiter',
+  'current limiters',
   'indicator resistor',
   'series',
   'series one',
@@ -954,6 +955,10 @@ export const LED_RESISTOR_SYNONYMS = Object.freeze([
   '전류 제한',
   '전류 제한용',
   '전류제한용',
+  '전류 제한기',
+  '전류제한기',
+  '표시등 저항',
+  '리미터',
   'led',
   'leds',
   'status',
@@ -990,6 +995,9 @@ const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.filter((synonym) => 
     packed,
     ascii,
     words: folded.split(' ').filter(Boolean),
+    // "리미터" is a suffix of "밀리미터" and "프리미터". A Hangul character
+    // before the word is a different word. Particles after it still match.
+    headBound: folded === '리미터',
     re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null
   };
 });
@@ -1021,18 +1029,39 @@ function ledRefSynonymMatchers(ledRef) {
 
 // A modifier phrase ("current limiting", "current limit", "series") still needs
 // the resistor noun. A bare name is the part by itself: "current limiter",
-// "the series one". "limit" stays the modifier inside "current-limit".
+// "current limiters", "the series one", "전류 제한기". "limit" stays the
+// modifier inside "current-limit". A one-word part name ("전류제한기", "리미터")
+// is bare too. LED words and "전류제한용" stay modifiers.
 function synonymIsBareName(folded) {
   const words = folded.split(' ').filter(Boolean);
-  if (words.length < 2) return false;
   if (words.some((word) => RESISTOR_NOUNS.has(word))) return false;
+  if (words.length < 2) {
+    const only = words[0] ?? '';
+    if (!only || LED_WORDS.has(only) || FUNCTION_WORDS.has(only) || only === 'limit') return false;
+    if (only.endsWith('용')) return false;
+    return true;
+  }
   const hasOutside = words.some((word) => !LED_WORDS.has(word) && !FUNCTION_WORDS.has(word) && word !== 'limit');
   const hasFunctionWithLed = words.some((word) => FUNCTION_WORDS.has(word)) && words.some((word) => LED_WORDS.has(word));
   return hasOutside || hasFunctionWithLed;
 }
 
+function hangulHeaded(text, word) {
+  if (!word) return false;
+  let from = 0;
+  while (from <= text.length) {
+    const at = text.indexOf(word, from);
+    if (at < 0) return false;
+    if (!isHangulChar(text[at - 1] ?? '')) return true;
+    from = at + word.length;
+  }
+  return false;
+}
+
 function matcherHits(item, joined, compact) {
-  return item.ascii ? item.re.test(joined) : (joined.includes(item.folded) || compact.includes(item.packed));
+  if (item.ascii) return item.re.test(joined);
+  if (item.headBound) return hangulHeaded(joined, item.folded) || hangulHeaded(compact, item.packed);
+  return joined.includes(item.folded) || compact.includes(item.packed);
 }
 
 function stripYong(word) {
