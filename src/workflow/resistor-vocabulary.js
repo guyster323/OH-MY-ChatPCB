@@ -1038,7 +1038,9 @@ const LED_RESISTOR_SYNONYM_MATCHERS = LED_RESISTOR_SYNONYMS.filter((synonym) => 
     // "발광다이오드" / "발광 다이오드"). They are not a free pass through the
     // next word ("제한 기능").
     koreanRe: ascii ? null : new RegExp(flexKoreanAlias(folded), 'gu'),
-    re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null
+    re: ascii ? new RegExp(`(?:^|[^a-z0-9])${body}(?:[^a-z0-9]|$)`) : null,
+    // Noun rows name the part. Modifier rows need 저항/저항기 after them.
+    noun: synonymRowIsNoun(folded)
   };
 });
 
@@ -1086,6 +1088,21 @@ function synonymIsBareName(folded) {
   return hasOutside || hasFunctionWithLed;
 }
 
+// Derived from the synonym row, not a second list of Korean spellings.
+// A resistor noun already in the row ("표시등 저항", "상태 LED 저항") is the
+// part. So is a bare name ("전류 제한기", "리미터"). A 용 row stays a modifier
+// ("전류 제한용"), matching the one-word rule above.
+function synonymRowIsNoun(folded) {
+  const words = folded.split(' ').filter(Boolean);
+  if (words.some((word) => RESISTOR_NOUNS.has(word) || word === '저항기')) return true;
+  if (words.some((word) => word.endsWith('용'))) return false;
+  return synonymIsBareName(folded);
+}
+
+export function ledResistorSynonymIsNoun(synonym) {
+  return synonymRowIsNoun(synonymFold(synonym));
+}
+
 // PARTICLE_SUFFIXES plus the subject particles 이/가. Longest first, so
 // "으로" wins over "로" and "이랑" wins over "이".
 let aliasTailParticles = null;
@@ -1099,12 +1116,13 @@ function koreanAliasTailParticles() {
 // A Korean alias is one word. Hangul glued on the left is a different word
 // ("과전류제한기", "밀리미터"). The tail lengthens the word only when the next
 // Hangul is a noun continuation ("전류 제한기능", "전류 제한 기능": the noun
-// 기능, or the leftover syllable 능 once 기 was read from 기능). Particles and
-// postpositions are not that continuation, so they are not an allowlist: 하고,
-// 나, 에는, 처럼, and the rest pass because they do not start a new noun.
-// A closed particle list is what made 에는 and 까지 fail. It cannot name every
-// stacked ending, and it rejects real postpositions that were never added.
-const ALIAS_NOUN_CONTINUATIONS = ['기능', '능'];
+// 기능, or the leftover syllable 능 once 기 was read from 기능; "전류 제한기판"
+// is 기판 the same way, leftover 판). Particles and postpositions are not that
+// continuation, so they are not an allowlist: 하고, 나, 에는, 처럼, and the
+// rest pass because they do not start a new noun. A closed particle list is
+// what made 에는 and 까지 fail. It cannot name every stacked ending, and it
+// rejects real postpositions that were never added.
+const ALIAS_NOUN_CONTINUATIONS = ['기능', '기판', '능', '판'];
 
 // Time and discourse adverbs sit in front of the part. They are not qualifiers
 // the way 전압 and USB are. "현재" is also a particle word.
@@ -1211,20 +1229,49 @@ export function textHasLedResistorSynonym(text, ledRef = null) {
   return synonymMatchers(ledRef).some((item) => matcherHits(item, joined));
 }
 
-// Korean rows of LED_RESISTOR_SYNONYMS, including modifiers ("직렬", "전류 제한").
-// A keep of one names the same part as the LED resistor edit. English modifiers
-// ("current limit") stay off this path.
+// 저항 or 저항기 sitting directly after a modifier alias ("직렬 저항",
+// "전류 제한 저항"). A following noun ("직렬 연결", "전류 제한 설정") does not.
+function resistorNounFollowsAlias(text, end) {
+  let index = end;
+  while (index < text.length && /\s/u.test(text[index])) index += 1;
+  const rest = text.slice(index);
+  return rest.startsWith('저항기') || rest.startsWith('저항');
+}
+
+function koreanModifierFollowedByResistor(text, item) {
+  const re = item.koreanRe;
+  if (!re) return false;
+  re.lastIndex = 0;
+  for (const match of text.matchAll(re)) {
+    const at = match.index ?? 0;
+    const end = at + match[0].length;
+    if (!koreanAliasBounded(text, at, end)) continue;
+    if (resistorNounFollowsAlias(text, end)) return true;
+  }
+  return false;
+}
+
+// Korean noun rows name the LED resistor. A modifier row ("직렬", "전류 제한")
+// does only when 저항 or 저항기 follows it. English modifiers stay off this path.
 export function textHasKoreanLedResistorAlias(text) {
   const joined = synonymFold(text);
-  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => !item.ascii && matcherHits(item, joined));
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => {
+    if (item.ascii) return false;
+    if (item.noun) return matcherHits(item, joined);
+    return koreanModifierFollowedByResistor(joined, item);
+  });
 }
 
 // "current limiter" and "the series one" name the series resistor with no
-// resistor noun. "current limit" and "series" stay modifiers.
+// resistor noun. "current limit" and "series" stay modifiers. A Korean 용 row
+// is a modifier too, so it does not count here even when the bare-name words
+// would otherwise match ("전류 제한용").
 export function textHasBareLedResistorName(text) {
   const joined = synonymFold(text);
   return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => (
-    synonymIsBareName(item.folded) && matcherHits(item, joined)
+    synonymIsBareName(item.folded)
+    && (item.ascii || item.noun)
+    && matcherHits(item, joined)
   ));
 }
 

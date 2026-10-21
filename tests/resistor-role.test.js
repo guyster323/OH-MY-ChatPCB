@@ -23,7 +23,7 @@ import {
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
-import { assessRequestCoverage, CHOICE_JOINERS, KEEP_CUES, LED_RESISTOR_SYNONYMS, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
+import { assessRequestCoverage, CHOICE_JOINERS, KEEP_CUES, LED_RESISTOR_SYNONYMS, ledResistorSynonymIsNoun, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -3974,8 +3974,9 @@ test('Korean alias particles, separators, and adverbs stay RESISTOR_AMBIGUOUS', 
   ]) assertAmbiguousKeep(spec, prompt);
 });
 
-// Each Korean alias plus a particle is still that alias. The particle is glued
-// on, and the keep cue stays "그대로 두고".
+// Each Korean noun alias plus a particle is still that alias. The particle is
+// glued on, and the keep cue stays "그대로 두고". A modifier row is not that
+// part unless 저항 follows it.
 const KOREAN_ALIAS_PARTICLES = Object.freeze([
   '는', '은', '을', '를', '도', '만', '하고', '나', '이나', '까지', '부터', '에는', '에도', '처럼'
 ]);
@@ -3984,21 +3985,54 @@ function koreanLedResistorAliases() {
   return LED_RESISTOR_SYNONYMS.filter((alias) => /[가-힣]/u.test(alias) && !alias.includes('{led}'));
 }
 
-test('every Korean LED alias with a particle keep is RESISTOR_AMBIGUOUS', () => {
+test('Korean noun alias particle keeps are RESISTOR_AMBIGUOUS and a modifier names that part only with 저항', () => {
   const spec = seriesLedBoard();
   const failures = [];
   const aliases = koreanLedResistorAliases();
-  for (const alias of aliases) {
+  const nouns = aliases.filter((alias) => ledResistorSynonymIsNoun(alias));
+  for (const alias of nouns) {
     for (const particle of KOREAN_ALIAS_PARTICLES) {
       const prompt = `${alias}${particle} 그대로 두고, LED 저항 680Ω`;
       const decision = classifyExistingProjectRequest(prompt, spec);
       if (decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
-        failures.push(`${prompt} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+        failures.push(`noun ${prompt} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
       }
     }
   }
-  assert.equal(aliases.length > 0, true);
+  assert.equal(aliases.length > nouns.length, true);
+  assert.equal(nouns.length > 0, true);
+  assert.equal(ledResistorSynonymIsNoun('직렬'), false);
+  assert.equal(ledResistorSynonymIsNoun('LED 직렬'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류 제한'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류제한'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류 제한용'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류제한용'), false);
+  assert.equal(ledResistorSynonymIsNoun('엘이디'), false);
+  assert.equal(ledResistorSynonymIsNoun('엘예디'), false);
+  assert.equal(ledResistorSynonymIsNoun('상태'), false);
+  assert.equal(ledResistorSynonymIsNoun('발광다이오드'), false);
+  assert.equal(ledResistorSynonymIsNoun('전류 제한기'), true);
+  assert.equal(ledResistorSynonymIsNoun('전류제한기'), true);
+  assert.equal(ledResistorSynonymIsNoun('리미터'), true);
+  assert.equal(ledResistorSynonymIsNoun('표시등 저항'), true);
+  assert.equal(ledResistorSynonymIsNoun('상태 LED 저항'), true);
   assert.equal(failures.length, 0, failures.slice(0, 24).join('\n'));
+  // A modifier plus some other noun keeps that object. The LED resistor edit applies.
+  for (const prompt of [
+    '직렬 연결은 그대로 두고, LED 저항 680Ω',
+    '직렬 다이오드는 그대로 두고, LED 저항 680Ω',
+    '전류 제한 설정은 그대로 두고, LED 저항 680Ω',
+    '전류 제한 퓨즈는 그대로 두고, LED 저항 680Ω',
+    '전류 제한 값은 그대로 두고, LED 저항 680Ω',
+    '전류 제한기판은 그대로 두고, LED 저항 680Ω'
+  ]) assertLedKeepApplies(spec, prompt);
+  assertLedKeepApplies(spec, '전류 제한기 기능은 그대로 두고 LED 저항을 680Ω으로 바꿔');
+  assertAmbiguousKeep(spec, '직렬 저항은 그대로 두고, LED 저항 680Ω');
+  assertAmbiguousKeep(spec, '전류 제한 저항은 그대로 두고, LED 저항 680Ω');
+  const seriesCap = classifyExistingProjectRequest('직렬 커패시터는 그대로 두고, LED 저항 680Ω', spec);
+  assert.equal(seriesCap.mode, 'refuse', seriesCap.code ?? '');
+  assert.equal(seriesCap.code, 'RESISTOR_TARGET_UNCLEAR');
+  assert.equal(seriesCap.edit, undefined);
 });
 
 // English alias -> Korean row in LED_RESISTOR_SYNONYMS. A new English row
