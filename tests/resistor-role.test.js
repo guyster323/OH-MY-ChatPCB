@@ -2888,6 +2888,24 @@ const SPACED_GEONA_BLOCKED_WORDS = [
   '노노', '금지', '취소', 'ㄴㄴ', '거부', '보류', '멈추', '먹', '울', '걷'
 ];
 
+// AJ-1. 버리/놓/두, then any particle, then a negated -거나 stem. 질 is the
+// ㄹ contraction of 지를. 곤 is -고는, so it does not follow 지. The particle
+// is not what decides the hedge.
+const AJ1_AUXILIARIES = ['버리', '놓', '두'];
+const AJ1_PARTICLE_AXIS = [
+  ['를', (aux) => `${aux}지를`],
+  ['ㄹ', (aux) => `${aux}질`],
+  ['까지', (aux) => `${aux}지까지`],
+  ['조차', (aux) => `${aux}지조차`],
+  ['들', (aux) => `${aux}지들`],
+  ['곤', (aux) => `${aux}곤`],
+  ['도', (aux) => `${aux}지도`],
+  ['는', (aux) => `${aux}지는`],
+  ['만', (aux) => `${aux}지만`],
+  ['요', (aux) => `${aux}지요`]
+];
+const AJ1_NEGATED_GEONA_STEMS = ['말거나', '않거나', '못하거나', '없거나', '마시거나', '않으시거나'];
+
 function outsideHedgePrompts() {
   const prompts = [];
   for (const pred of OUTSIDE_HEDGE_PREDICATES) {
@@ -2907,6 +2925,13 @@ function outsideHedgePrompts() {
   for (const word of SPACED_GEONA_BLOCKED_WORDS) {
     prompts.push(`LED 저항 680Ω으로 ${word} 거나 해`);
     prompts.push(`LED 저항을 680Ω으로 바꾸는 거 ${word} 거나 하면`);
+  }
+  for (const aux of AJ1_AUXILIARIES) {
+    for (const [, form] of AJ1_PARTICLE_AXIS) {
+      for (const stem of AJ1_NEGATED_GEONA_STEMS) {
+        prompts.push(`LED 저항을 680Ω으로 바꿔 ${form(aux)} ${stem} 해`);
+      }
+    }
   }
   return prompts;
 }
@@ -2934,8 +2959,10 @@ test('property: outside the allowed hedge shapes, refuse', () => {
     + 2
     + AF1_NEGATION_VERBS.length * AF1_NEGATION_MARKERS.length * 2
     + POST_GEONA_NEGATION_STEMS.length * POST_GEONA_NEGATION_TAILS.length
-    + SPACED_GEONA_BLOCKED_WORDS.length * 2;
+    + SPACED_GEONA_BLOCKED_WORDS.length * 2
+    + AJ1_AUXILIARIES.length * AJ1_PARTICLE_AXIS.length * AJ1_NEGATED_GEONA_STEMS.length;
   assert.equal(prompts.length, outsideCount);
+  assert.deepEqual(AJ1_PARTICLE_AXIS.map(([particle]) => particle), ['를', 'ㄹ', '까지', '조차', '들', '곤', '도', '는', '만', '요']);
   assert.deepEqual(failures, []);
 });
 
@@ -3003,6 +3030,39 @@ test('BT r52 AI-1: particle on a negated auxiliary does not change R3', () => {
     }
   }
   assert.equal(AI1_NEGATED_AUXILIARY.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// BT r53 AJ-1. Any particle before a negated -거나. The stem on -거나 is the
+// negation, so the particle is not a hedge. Five boards. R3 stays 1k. Not a merge.
+const AJ1_NEGATED_PARTICLE = [
+  'LED 저항을 680Ω으로 바꿔 버리지를 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리질 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지까지 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지조차 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지들 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리곤 말거나 해'
+];
+
+test('BT r53 AJ-1: any particle before a negated -거나 does not change R3', () => {
+  const failures = [];
+  for (const prompt of AJ1_NEGATED_PARTICLE) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AJ1_NEGATED_PARTICLE.length, 6);
   assert.deepEqual(failures, []);
 });
 
