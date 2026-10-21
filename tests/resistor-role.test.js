@@ -2792,26 +2792,84 @@ const AF1_NEGATION_MARKERS = [
   ['안되', (verb, spaced) => (spaced ? `${verb}면 안 되거나` : `${verb}면안되거나`)]
 ];
 
-test('property: a negation marker on any verb before -거나 is outside every hedge span', () => {
+// r50 AG-1. The 11 refusal shapes, as the 13 q.rows sentences. R3 stays 1k.
+const LEXICAL_REFUSAL_GEONA = [
+  'LED 저항을 680Ω으로 바꾸는 건 금지거나 해',
+  'LED 저항을 680Ω으로 바꾸기 금지하거나 해',
+  'LED 저항을 680Ω으로 바꾸길 거부하거나 해',
+  'LED 저항을 680Ω으로 바꾸는 거 취소하거나 해',
+  'LED 저항을 680Ω으로 바꾸는 거 보류하거나 해',
+  'LED 저항을 680Ω으로 바꾸는 거 멈추거나 해',
+  'LED 저항을 680Ω으로 바꾸는 건 관두거나 해',
+  'LED 저항을 680Ω으로 바꾸라는 건 관두거나 해',
+  'LED 저항을 680Ω으로 바꾸는 건 그만두거나 해',
+  'LED 저항을 680Ω으로 바꾸는 건 그만하거나 해',
+  'LED 저항 680Ω 노노 하거나 해',
+  'LED 저항 680Ω으로 노노거나 해',
+  'LED 저항 680Ω으로 바꾸기 ㄴㄴ거나 해'
+];
+
+test('a lexical refusal before -거나 does not change R3', () => {
   const failures = [];
-  let count = 0;
-  for (const verb of AF1_NEGATION_VERBS) {
-    for (const [marker, build] of AF1_NEGATION_MARKERS) {
-      for (const spaced of [true, false]) {
-        const phrase = build(verb, spaced);
-        const prompt = `LED 저항을 680Ω으로 ${phrase} 해`;
-        count += 1;
-        const at = prompt.indexOf(phrase);
-        const end = at + phrase.length;
-        for (const span of geonaHedgeSpans(prompt)) {
-          if (at < span[1] && span[0] < end) {
-            failures.push(`${marker} ${verb} ${spaced ? 'spaced' : 'attached'} ${prompt}`);
-          }
-        }
+  for (const prompt of LEXICAL_REFUSAL_GEONA) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
       }
     }
   }
-  assert.equal(count, AF1_NEGATION_VERBS.length * AF1_NEGATION_MARKERS.length * 2);
+  assert.equal(LEXICAL_REFUSAL_GEONA.length, 13);
+  assert.deepEqual(failures, []);
+});
+
+// Outside the allowlist, or a negation of an allowed stem, -거나 is not a hedge.
+const OUTSIDE_HEDGE_PREDICATES = [
+  '금지', '금지하', '거부', '거부하', '취소', '취소하', '보류', '보류하',
+  '멈추', '관두', '그만두', '그만', '그만하', '노노', 'ㄴㄴ',
+  '없애', '없애주', '없애주시', '먹', '울', '걷', '빌드하'
+];
+
+function outsideHedgePrompts() {
+  const prompts = [];
+  for (const pred of OUTSIDE_HEDGE_PREDICATES) {
+    prompts.push(`LED 저항을 680Ω으로 바꾸는 거 ${pred}거나 해`);
+    prompts.push(`LED 저항을 680Ω으로 ${pred}거나 해`);
+  }
+  prompts.push('LED 저항을 680Ω으로 바꾸는 거 노노 하거나 해');
+  prompts.push('LED 저항 680Ω으로 바꿔서 깜빡임 없애주시거나 하면 좋겠어요');
+  for (const verb of AF1_NEGATION_VERBS) {
+    for (const [, build] of AF1_NEGATION_MARKERS) {
+      for (const spaced of [true, false]) prompts.push(`LED 저항을 680Ω으로 ${build(verb, spaced)} 해`);
+    }
+  }
+  return prompts;
+}
+
+test('property: outside the allowed hedge shapes, refuse', () => {
+  const failures = [];
+  const prompts = outsideHedgePrompts();
+  const spec = seriesSpec('1k');
+  for (const prompt of prompts) {
+    if (geonaHedgeSpans(prompt).length !== 0) failures.push(`hedge ${prompt}`);
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode === 'merge' || (decision.edit?.ref === 'R3' && decision.edit?.ohms === 680)) {
+      failures.push(`merge ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`mutated ${prompt}`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(structuredClone(spec), decision.edit);
+      if (componentValue(next, 'R3') !== '1k') failures.push(`applied ${prompt}`);
+    }
+  }
+  assert.equal(prompts.length, OUTSIDE_HEDGE_PREDICATES.length * 2 + 2 + AF1_NEGATION_VERBS.length * AF1_NEGATION_MARKERS.length * 2);
   assert.deepEqual(failures, []);
 });
 
