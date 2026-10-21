@@ -2428,7 +2428,10 @@ test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', 
   const applies = [
     'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘',
     '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
+    '밝기가 약하거나 해서 LED 저항 680Ω으로 바꿔줘',
     'LED 저항 680Ω으로 바꿔주시거나 하면 좋겠어요',
+    'LED 저항 680Ω으로 바꿔 주시거나 하면 감사하겠어요',
+    'LED 저항 680Ω으로 바꾸거나 한다면 좋겠어요',
     '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘',
     '거나 한 건 아니고 LED 저항 680Ω으로 바꿔줘',
     'LED 저항이 너무 밝거나 하고 680Ω으로 바꿔줘',
@@ -2477,7 +2480,8 @@ test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', 
 
   const unclearPrompts = [
     '너무 밝거나 해서 680Ω으로 바꿔줘',
-    'R3나 R4 중 하나를 680Ω으로'
+    'R3나 R4 중 하나를 680Ω으로',
+    'R3 또는 R4 중 하나를 680Ω으로'
   ];
   for (const prompt of unclearPrompts) {
     const before = structuredClone(spec);
@@ -2485,6 +2489,26 @@ test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', 
     assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
     assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
     assert.equal(decision.message, unclear, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const valueMessage = resistorValueAmbiguousMessage(null, ['680Ω', '1k']);
+  const secondValue = [
+    'LED 저항 680Ω으로 바꾸거나 하면 1k',
+    'LED 저항 680Ω으로 바꾸거나 해서 1k',
+    'LED 저항 680Ω으로 바꾸거나 하고 1k'
+  ];
+  for (const prompt of secondValue) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', prompt);
+    assert.equal(decision.message, valueMessage, prompt);
     assert.equal(decision.edit, undefined, prompt);
     assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
     assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
@@ -2527,7 +2551,12 @@ const NEGATED_EDIT_GEONA = [
   ['-지 말', 'LED 저항을 680Ω으로 바꾸지 말거나'],
   ['안 V', 'LED 저항 680Ω으로 안 바꾸거나'],
   ['-기 싫', 'LED 저항을 680Ω으로 바꾸기 싫거나'],
-  ['-는 건 아니', 'LED 저항 680Ω으로 바꾸는 건 아니거나']
+  ['-는 건 아니', 'LED 저항 680Ω으로 바꾸는 건 아니거나'],
+  ['-시- space -지 않', 'LED 저항을 680Ω으로 바꿔 주시지 않거나'],
+  ['-시- space -지 말', 'LED 저항을 680Ω으로 바꿔 주시지 말거나'],
+  ['-시- space 안 V', 'LED 저항 680Ω으로 안 바꿔 주시거나'],
+  ['-시- space -기 싫', 'LED 저항을 680Ω으로 바꿔 주시기 싫거나'],
+  ['-시- space -는 건 아니', 'LED 저항 680Ω으로 바꿔 주시는 건 아니거나']
 ];
 const NEGATED_EDIT_TAILS = ['해', '하면 돼', '해서'];
 

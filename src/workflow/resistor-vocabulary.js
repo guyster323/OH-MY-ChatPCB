@@ -665,10 +665,16 @@ const VERB_STEM_BEFORE_DEUN = [
 // on one word. Bare 든 counts only after VERB_STEM_BEFORE_DEUN, or before 말든.
 // "or so" is an approximation, not a choice.
 // "-거나 하-" is a hedge ("or something"), not a choice, when nothing after
-// the 하다 form is a second alternative. Word-initial 거나 + 한/하게/하다 is
-// the adjective 거나하다, not this ending. isGeonaHedgeJoiner reads both.
-// A negated edit verb is not that hedge ("바꾸지 않거나", "안 바꾸거나").
-// A negated state still is ("밝지 않거나", "안 켜지거나").
+// the 하다 form is a second alternative. An adjective takes the same ending
+// ("약하거나 해서", "밝거나 하면"): the stem is not a second value, and 약
+// there is not the adverb "about". Honorific -시- may be glued
+// ("바꿔주시거나") or spaced ("바꿔 주시거나", "해 주시거나"). A negated
+// edit is still not a hedge, with or without that -시- ("바꾸지 않거나",
+// "안 바꾸거나", "바꿔 주시지 않거나", "안 바꿔 주시거나"). A negated state
+// still is ("밝지 않거나", "안 켜지거나"). The polite closer after the 하다
+// form is one evaluative shape (좋겠어요, 감사하겠어요), not a listed
+// sentence. Word-initial 거나 + 한/하게/하다 is the adjective 거나하다, not
+// this ending. isGeonaHedgeJoiner reads both.
 // idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
 // a choice when the verb is an edit verb, when 오다 follows an edit/do
 // connective, or when the pair sits on a resistor value in this clause
@@ -1609,10 +1615,30 @@ export function isPermittedEdit(text) {
 // number. A leading "~680Ω" stays an approximation.
 const VALUE_RANGE_SOURCE = String.raw`\d+(?:\.\d+)?\s*[kKmMrR]?(?:\s*(?:Ω|옴|ohms?))?\s*[~∼〜]\s*\d+(?:\.\d+)?\s*(?:[kKmMrR](?:\s*(?:Ω|옴|ohms?))?|Ω|옴|ohms?)`;
 
+// 약/대략/대충 inside an adjective -거나 hedge are the predicate ("약하거나
+// 해서"), not the free adverb in "약 680Ω". The hedge span is blanked only
+// for that adverb. A tilde, 정도, or "about" elsewhere still approximates.
+function blankGeonaHedges(text) {
+  const raw = String(text ?? '');
+  const spans = geonaHedgeSpans(raw).slice().sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  if (spans.length === 0) return raw;
+  let out = '';
+  let cursor = 0;
+  for (const [from, to] of spans) {
+    const start = Math.max(from, cursor);
+    if (to <= start) continue;
+    out += raw.slice(cursor, start);
+    out += ' '.repeat(to - start);
+    cursor = to;
+  }
+  return out + raw.slice(cursor);
+}
+
 export function textHasApproximation(text) {
   const raw = String(text ?? '');
   const withoutRanges = raw.replace(rx(VALUE_RANGE_SOURCE, 'giu'), ' ');
-  if (rx("[~∼〜]").test(withoutRanges) || rx("(?:^|[\\s\\d])(?:약|대략|대충)", "u").test(raw)) return true;
+  const withoutHedge = blankGeonaHedges(raw);
+  if (rx("[~∼〜]").test(withoutRanges) || rx("(?:^|[\\s\\d])(?:약|대략|대충)", "u").test(withoutHedge)) return true;
   if (rx("(?:정도|쯤|가량|내외)", "u").test(raw)) return true;
   return rx("\\b(?:about|around|approximately|approx|roughly)\\b|-ish\\b", "i").test(raw);
 }
@@ -2323,6 +2349,32 @@ function isGoodEvaluative(word) {
   return rx('^좋(?:겠|을|아|다|습|네|지|음)', 'u').test(hedgeLookupForm(word));
 }
 
+// Polite closers after -거나 하-. 좋겠어요 and 감사하겠어요 share one shape:
+// an evaluative stem, optional 하, optional honorific 시, then a polite or
+// conjectural ending. The full sentence is not listed. An edit verb
+// (바꾸겠어요) is not this closer.
+const POLITE_CLOSER_ENDINGS = [
+  '겠습니다', '겠어요', '겠네요', '겠어', '겠다', '겠네',
+  '습니다', 'ㅂ니다', '네요', '지요', '해요', '하여',
+  '습', '네', '지', '다', '음', '을', '아', '어', '해', '요', '죠'
+];
+
+function evaluativeCloserStem(word) {
+  let text = hedgeLookupForm(word);
+  const ending = POLITE_CLOSER_ENDINGS.find((item) => text.endsWith(item) && text.length > item.length);
+  if (ending) text = text.slice(0, -ending.length);
+  if (text.endsWith('시') && text.length > 1) text = text.slice(0, -1);
+  if (text.endsWith('하') && text.length > 1) text = text.slice(0, -1);
+  if (text === '고마워' || text === '고마와' || text === '고마웠') return '고마';
+  return text;
+}
+
+function isPoliteCloser(word) {
+  if (isGoodEvaluative(word)) return true;
+  const stem = evaluativeCloserStem(word);
+  return stem === '감사' || stem === '고맙' || stem === '고마';
+}
+
 function isHedgeSubject(word) {
   const form = asideTokenStem(bareHedgeToken(word));
   if (!form || rx('\\d', 'u').test(form)) return false;
@@ -2369,7 +2421,7 @@ function extendHedgeBack(tokens, index) {
 function extendHedgeForward(tokens, index, end) {
   let to = end;
   let cursor = index;
-  if (cursor < tokens.length && isGoodEvaluative(tokens[cursor].raw)) {
+  if (cursor < tokens.length && isPoliteCloser(tokens[cursor].raw)) {
     to = tokens[cursor].end;
     cursor += 1;
   }
@@ -2389,12 +2441,51 @@ function stemBeforeGeona(word) {
 
 // isEditVerbWord is the English set. Bare 하/두 are edits here: the request
 // stem leaves 하다 and 두다 off that list. 맞추 is the adjust verb the choice
-// pair already counts as an edit.
+// pair already counts as an edit. Honorific -시- on that stem (바꾸시,
+// 바꿔주시, 하시) is the same verb.
+function stemWithoutHonorificSi(stem) {
+  const text = String(stem ?? '');
+  if (text.length > 1 && text.endsWith('시')) return text.slice(0, -1);
+  return '';
+}
+
 function isHedgeEditStem(stem) {
   const text = String(stem ?? '');
   if (!text) return false;
   if (text === '하' || text === '두' || text === '맞추' || text === '맞춰') return true;
-  return isEditVerbWord(text) || isKoreanRequestStem(text);
+  if (isEditVerbWord(text) || isKoreanRequestStem(text)) return true;
+  const bare = stemWithoutHonorificSi(text);
+  return bare ? isHedgeEditStem(bare) : false;
+}
+
+// 주/드리 plus optional -시- is the benefactive ("해 주시", "바꿔 드리시")
+// when a space separates it from the edit verb. Glued 바꾸시 is the edit stem.
+function isBenefactiveHonorific(stem) {
+  const text = String(stem ?? '');
+  if (text === '주' || text === '시' || text === '드리' || text === '주시' || text === '드리시') return true;
+  const bare = stemWithoutHonorificSi(text);
+  return bare === '주' || bare === '드리';
+}
+
+function isSpacedEditHost(word) {
+  const form = hedgeLookupForm(word);
+  if (!form) return false;
+  if (isHedgeEditStem(form)) return true;
+  const stem = araEoStem(form);
+  if (!stem) return false;
+  if (stem === '하') return true;
+  if (stem.endsWith('하')) return isHedgeEditStem(stem.slice(0, -1));
+  return isHedgeEditStem(stem);
+}
+
+function honorificAuxOnEdit(stem, tokens, auxTokenIndex) {
+  if (!isBenefactiveHonorific(stem) || auxTokenIndex <= 0) return false;
+  return isSpacedEditHost(tokens[auxTokenIndex - 1].raw);
+}
+
+function verbHostIsEdit(stem, tokens, verbTokenIndex) {
+  if (isHedgeEditStem(stem)) return true;
+  return honorificAuxOnEdit(stem, tokens, verbTokenIndex);
 }
 
 function verbStemBeforeJi(word) {
@@ -2420,6 +2511,8 @@ function markerInside(token, prefix) {
 
 // The negation glued to an edit verb at this -거나. Null for a state
 // (밝지 않거나, 안 켜지거나) and for a -거나 that is not negated.
+// Spaced honorific -시- is the same edit ("바꿔 주시지 않거나", "안 바꿔
+// 주시거나", "바꿔 주시기 싫거나", "바꿔 주시는 건 아니거나").
 function editVerbNegationRange(tokens, index) {
   const token = tokens[index];
   if (!token || !endsWithGeona(bareHedgeToken(token.raw))) return null;
@@ -2428,22 +2521,32 @@ function editVerbNegationRange(tokens, index) {
   const prev2 = index > 1 ? tokens[index - 2] : null;
   const prevForm = prev ? hedgeLookupForm(prev.raw) : '';
   if (prevForm === '안' && isHedgeEditStem(stem)) return [prev.start, prev.end];
+  if (honorificAuxOnEdit(stem, tokens, index)) {
+    const beforeHost = index > 1 ? tokens[index - 2] : null;
+    if (beforeHost && hedgeLookupForm(beforeHost.raw) === '안') return [beforeHost.start, beforeHost.end];
+  }
   if (stem === '않' || stem === '않았' || stem === '말') {
-    if (!isHedgeEditStem(verbStemBeforeJi(prevForm))) return null;
+    if (!verbHostIsEdit(verbStemBeforeJi(prevForm), tokens, index - 1)) return null;
     return markerInside(token, stem);
   }
   if (stem === '싫') {
-    if (!isHedgeEditStem(verbStemBeforeGi(prevForm))) return null;
+    if (!verbHostIsEdit(verbStemBeforeGi(prevForm), tokens, index - 1)) return null;
     return markerInside(token, '싫');
   }
   if (stem !== '아니') return null;
   let verb = '';
-  if (isGeonaNominal(prevForm)) verb = verbStemBeforeNeun(prev2 ? prev2.raw : '');
-  else {
+  let verbTokenIndex = -1;
+  if (isGeonaNominal(prevForm)) {
+    verb = verbStemBeforeNeun(prev2 ? prev2.raw : '');
+    verbTokenIndex = index - 2;
+  } else {
     const glued = /^(.+?)는(건|것은|게|거는|건지)$/u.exec(prevForm);
-    if (glued) verb = glued[1];
+    if (glued) {
+      verb = glued[1];
+      verbTokenIndex = index - 1;
+    }
   }
-  if (!isHedgeEditStem(verb)) return null;
+  if (!verbHostIsEdit(verb, tokens, verbTokenIndex)) return null;
   return markerInside(token, '아니');
 }
 
@@ -2630,7 +2733,25 @@ function hasMultiValueChoice(text) {
   return true;
 }
 
+// "R3 또는 R4 중 하나" names which resistor, same as "R3나 R4 중 하나".
+// The joiner sits between the refs and there is one ohm value. "680Ω 또는
+// 1k" and "680Ω 또는 1k 중 하나" stay a choice of values.
+function choiceJoinerCoordinatesResistorTargets(text) {
+  const raw = String(text ?? '');
+  if (!/중\s*하나/u.test(raw)) return false;
+  const refs = [...raw.matchAll(/\bR\d+\b/giu)];
+  if (refs.length < 2) return false;
+  if (hasMultiValueChoice(raw)) return false;
+  const signals = signalIndexes(raw, ALTERNATIVE_SIGNALS);
+  if (signals.length === 0) return false;
+  const zoneStart = refs[0].index ?? 0;
+  const last = refs[refs.length - 1];
+  const zoneEnd = (last.index ?? 0) + last[0].length;
+  return signals.every((index) => index >= zoneStart && index < zoneEnd);
+}
+
 function hasValueAlternative(text, exempt) {
+  if (choiceJoinerCoordinatesResistorTargets(text)) return false;
   return hasSignalOutsideExempt(text, ALTERNATIVE_SIGNALS, exempt) || hasMultiValueChoice(text);
 }
 
