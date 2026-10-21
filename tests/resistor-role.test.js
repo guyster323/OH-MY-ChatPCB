@@ -2975,6 +2975,37 @@ test('a negation after -거나 or a spaced 거나 after a non-edit word does not
   assert.deepEqual(failures, []);
 });
 
+// BT r52 AI-1. 진/지는/지도 on a negated auxiliary, including the glued form.
+// Five boards. R3 stays 1k. Not a merge.
+const AI1_NEGATED_AUXILIARY = [
+  'LED 저항을 680Ω으로 바꿔 버리진 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지는 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지도 말거나 해',
+  'LED 저항을 680Ω으로 바꿔버리진 말거나 해'
+];
+
+test('BT r52 AI-1: particle on a negated auxiliary does not change R3', () => {
+  const failures = [];
+  for (const prompt of AI1_NEGATED_AUXILIARY) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AI1_NEGATED_AUXILIARY.length, 4);
+  assert.deepEqual(failures, []);
+});
+
 // The hedge guard reads the whole sentence. A negation marker before -거나,
 // after -거나, or on 버리/놓/두 means no hedge span. The 거나하다 "건 아니고"
 // closer is not a marker, so that hedge stays.
