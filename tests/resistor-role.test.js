@@ -3873,7 +3873,7 @@ test('Korean current-limiter names are RESISTOR_AMBIGUOUS on keep and apply R3 o
 });
 
 // A Korean LED alias is the part only at a word boundary. Hangul glued on
-// ("과전류 제한기"), a following non-particle ("전류 제한 기능"), or a
+// ("과전류 제한기"), a noun continuation ("전류 제한 기능"), or a
 // preceding qualifier ("전압 리미터", "USB 전류 제한기") is a different part.
 // The LED 저항 edit still applies. A real "전류 제한기" keep stays ambiguous.
 test('a qualified or extended Korean LED alias keep still applies the LED resistor edit', () => {
@@ -3905,6 +3905,50 @@ test('a qualified or extended Korean LED alias keep still applies the LED resist
   assert.equal(compactFunction.mode, 'refuse', compactFunction.code ?? '');
   assert.equal(compactFunction.code, 'RESISTOR_TARGET_UNCLEAR', '전류제한기능은 유지하고 LED 저항을 680Ω으로 바꿔');
   assert.equal(compactFunction.edit, undefined);
+});
+
+// Particles and postpositions do not lengthen the alias into another noun.
+// A designator, adverb, or separator in front does not qualify a different part.
+test('Korean alias particles, separators, and adverbs stay RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  for (const prompt of [
+    '전류 제한기하고 R4는 그대로 두고, LED 저항 680Ω',
+    '전류 제한기나 R4는 그대로 두고, LED 저항 680Ω',
+    '전류 제한기까지 그대로 두고, LED 저항 680Ω',
+    '전류 제한기에는 손대지 말고, LED 저항 680Ω',
+    'R4(전류 제한기)는 그대로 두고, LED 저항 680Ω',
+    'R4·전류 제한기는 그대로 두고, LED 저항 680Ω',
+    '지금 전류 제한기는 그대로 두고, LED 저항 680Ω',
+    'R4나 리미터는 그대로 두고, LED 저항 680Ω',
+    'R4/전류 제한기는 그대로 두고, LED 저항 680Ω'
+  ]) assertAmbiguousKeep(spec, prompt);
+});
+
+// Each Korean alias plus a particle is still that alias. The particle is glued
+// on, and the keep cue stays "그대로 두고".
+const KOREAN_ALIAS_PARTICLES = Object.freeze([
+  '는', '은', '을', '를', '도', '만', '하고', '나', '이나', '까지', '부터', '에는', '에도', '처럼'
+]);
+
+function koreanLedResistorAliases() {
+  return LED_RESISTOR_SYNONYMS.filter((alias) => /[가-힣]/u.test(alias) && !alias.includes('{led}'));
+}
+
+test('every Korean LED alias with a particle keep is RESISTOR_AMBIGUOUS', () => {
+  const spec = seriesLedBoard();
+  const failures = [];
+  const aliases = koreanLedResistorAliases();
+  for (const alias of aliases) {
+    for (const particle of KOREAN_ALIAS_PARTICLES) {
+      const prompt = `${alias}${particle} 그대로 두고, LED 저항 680Ω`;
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+        failures.push(`${prompt} => ${decision.code ?? decision.mode} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+      }
+    }
+  }
+  assert.equal(aliases.length > 0, true);
+  assert.equal(failures.length, 0, failures.slice(0, 24).join('\n'));
 });
 
 // English alias -> Korean row in LED_RESISTOR_SYNONYMS. A new English row

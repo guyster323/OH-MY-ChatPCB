@@ -1077,26 +1077,37 @@ function koreanAliasTailParticles() {
   return aliasTailParticles;
 }
 
-// A Korean alias is one word. Hangul glued on either side is a different word
-// ("과전류제한기", "전류제한기능", "밀리미터"). A particle may follow
-// ("전류 제한기는", "리미터를"). A preceding non-LED word ("전압", "USB")
-// qualifies a different part. Joiners, designators, and LED words do not.
+// A Korean alias is one word. Hangul glued on the left is a different word
+// ("과전류제한기", "밀리미터"). The tail lengthens the word only when the next
+// Hangul is a noun continuation ("전류 제한기능", "전류 제한 기능": the noun
+// 기능, or the leftover syllable 능 once 기 was read from 기능). Particles and
+// postpositions are not that continuation, so they are not an allowlist: 하고,
+// 나, 에는, 처럼, and the rest pass because they do not start a new noun.
+// A closed particle list is what made 에는 and 까지 fail. It cannot name every
+// stacked ending, and it rejects real postpositions that were never added.
+const ALIAS_NOUN_CONTINUATIONS = ['기능', '능'];
+
+// Time and discourse adverbs sit in front of the part. They are not qualifiers
+// the way 전압 and USB are. "현재" is also a particle word.
+const ALIAS_LEAD_ADVERBS = new Set(['지금', '현재', '원래']);
+
+function isAliasLeadSeparator(ch) {
+  return /[()（）[\]{}<>「」『』·•・/\\|&~～:：;；=+，,]/u.test(ch ?? '');
+}
+
 function koreanAliasTailOk(text, end) {
-  const next = text[end] ?? '';
-  if (!next || !isHangulChar(next)) return true;
-  const rest = text.slice(end);
-  for (const particle of koreanAliasTailParticles()) {
-    if (!rest.startsWith(particle)) continue;
-    const after = rest[particle.length] ?? '';
-    if (!after || !isHangulChar(after)) return true;
-  }
-  return false;
+  let index = end;
+  while (index < text.length && /\s/u.test(text[index])) index += 1;
+  const rest = text.slice(index);
+  if (!rest || !isHangulChar(rest[0])) return true;
+  return !ALIAS_NOUN_CONTINUATIONS.some((noun) => rest.startsWith(noun));
 }
 
 function aliasPredecessor(word) {
   const raw = String(word ?? '').replace(/^[("'`,.:;!?[\]{}]+|[)"'`,.:;!?[\]{}]+$/gu, '');
   if (!raw) return true;
   const key = lower(raw);
+  if (ALIAS_LEAD_ADVERBS.has(raw) || ALIAS_LEAD_ADVERBS.has(key)) return true;
   if (isLedAllowWord(raw) || isLedAllowWord(key)) return true;
   if (isFunctionWord(raw) || isModalOrParticleWord(raw) || isDemonstrativeWord(raw)) return true;
   if (isNegationOrAlternativeWord(raw) || isEditVerbWord(raw) || isKoreanRequestStem(raw)) return true;
@@ -1104,16 +1115,40 @@ function aliasPredecessor(word) {
   return false;
 }
 
+// The word that touches the alias. ( · / and the same family are separators,
+// so "R4(전류 제한기)" and "R4/전류 제한기" still see R4. A ref plus Hangul is
+// that ref with an ending ("R4나") unless the Hangul is itself a qualifier
+// ("전압") or a role ("풀업").
+function aliasLeadWord(text, start) {
+  const head = String(text ?? '').slice(0, start);
+  let index = head.length;
+  while (index > 0 && /\s/u.test(head[index - 1])) index -= 1;
+  while (index > 0 && isAliasLeadSeparator(head[index - 1])) index -= 1;
+  if (index <= 0) return '';
+  const wordEnd = index;
+  while (index > 0 && !/\s/u.test(head[index - 1]) && !isAliasLeadSeparator(head[index - 1])) index -= 1;
+  return head.slice(index, wordEnd);
+}
+
+function hangulOnDesignatorIsQualifier(hangul) {
+  if (hangul === '전압') return true;
+  return KOREAN_ROLES.some((role) => hangul.includes(role));
+}
+
+function designatorLeadStem(word) {
+  const match = /^([A-Za-z]{1,3}\d+)([가-힣]+)$/u.exec(word);
+  if (!match) return word;
+  if (hangulOnDesignatorIsQualifier(match[2])) return word;
+  return match[1];
+}
+
 function precedingQualifierBlocks(text, start) {
-  const head = text.slice(0, start).trimEnd();
-  if (!head) return false;
-  const match = /(\S+)$/u.exec(head);
-  if (!match) return false;
-  const raw = match[1];
+  const raw = designatorLeadStem(aliasLeadWord(text, start));
+  if (!raw) return false;
   if (aliasPredecessor(raw)) return false;
   for (const particle of koreanAliasTailParticles()) {
     if (raw.endsWith(particle) && raw.length > particle.length) {
-      return !aliasPredecessor(raw.slice(0, -particle.length));
+      return !aliasPredecessor(designatorLeadStem(raw.slice(0, -particle.length)));
     }
   }
   return true;
@@ -1155,6 +1190,14 @@ function synonymMatchers(ledRef) {
 export function textHasLedResistorSynonym(text, ledRef = null) {
   const joined = synonymFold(text);
   return synonymMatchers(ledRef).some((item) => matcherHits(item, joined));
+}
+
+// Korean rows of LED_RESISTOR_SYNONYMS, including modifiers ("직렬", "전류 제한").
+// A keep of one names the same part as the LED resistor edit. English modifiers
+// ("current limit") stay off this path.
+export function textHasKoreanLedResistorAlias(text) {
+  const joined = synonymFold(text);
+  return LED_RESISTOR_SYNONYM_MATCHERS.some((item) => !item.ascii && matcherHits(item, joined));
 }
 
 // "current limiter" and "the series one" name the series resistor with no

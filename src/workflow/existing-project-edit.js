@@ -54,6 +54,7 @@ import {
   expandLedRefResistorAliases,
   textHasBareLedResistorName,
   textHasKnownRole,
+  textHasKoreanLedResistorAlias,
   textHasLedResistorSynonym,
   textHasLengthObject,
   textHasUsbRole
@@ -2590,7 +2591,9 @@ function addKeptIdentity(keys, fragment, series, side) {
 function namesSeriesLed(fragment, side = 'edit') {
   if (resistorNounKinds(fragment).includes('led')) return true;
   // "current limiter" and "the series one" are the series resistor with no noun.
-  if (side === 'keep' && textHasBareLedResistorName(fragment)) return true;
+  // A Korean alias is the same part once the tail accepts the ending, including
+  // modifiers ("직렬는", "전류 제한은"). English "current limit" stays a modifier.
+  if (side === 'keep' && (textHasBareLedResistorName(fragment) || textHasKoreanLedResistorAlias(fragment))) return true;
   if (side === 'keep') return false;
   return /\bleds?\b|엘이디|엘예디/iu.test(fragment);
 }
