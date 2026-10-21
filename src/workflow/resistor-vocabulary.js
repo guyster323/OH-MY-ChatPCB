@@ -666,8 +666,9 @@ const VERB_STEM_BEFORE_DEUN = [
 // idiomWith is the "regardless" partner. X든/X든지/X거나 plus that partner is
 // a choice when the verb is an edit verb, when 오다 follows an edit/do
 // connective, or when the pair sits on a resistor value in this clause
-// (value+(으)로, or a target and a value earlier in the clause). "바꾸고
-// 하든 말든" stays the idiom: -고 is another clause.
+// (value+(으)로, or a target earlier in the clause and a value on either
+// side of the pair). "바꾸고 하든 말든" stays the idiom: -고 is another
+// clause, so a value only in the previous clause does not count.
 export const CHOICE_JOINERS = Object.freeze([
   Object.freeze({ id: 'or', lang: 'en', text: 'or', re: String.raw`\bor\b`, place: 'word', notBefore: String.raw`\s+so\b` }),
   Object.freeze({ id: 'ttoneun', lang: 'ko', text: '또는', re: '또는', place: 'word' }),
@@ -779,25 +780,42 @@ function verbBeforePairIsChoice(text, verb, verbAt) {
 
 // Punctuation, and, -고, and 말고. 하거나's 고 is not a break. The value search
 // in the edit path uses the same breaks so the pair and the ohms share a clause.
-function idiomClauseStart(text, index) {
+function idiomClauseBreaks(text) {
   const raw = String(text ?? '');
-  let start = 0;
-  const consider = (to) => {
-    if (to <= index && to > start) start = to;
+  const breaks = [];
+  const add = (at, length) => {
+    breaks.push([at, at + length]);
   };
   for (let at = 0; at < raw.length; at += 1) {
     const ch = raw[at];
     const punctuation = ch === ',' || ch === '，' || ch === ';' || ch === '\n'
       || ch === '。' || ch === '？' || ch === '！' || ch === '?' || ch === '!';
     const dot = ch === '.' && !(/\d/u.test(raw[at - 1] ?? '') && /\d/u.test(raw[at + 1] ?? ''));
-    if (punctuation || dot) consider(at + 1);
+    if (punctuation || dot) add(at, 1);
   }
-  for (const match of raw.matchAll(/\band\b/giu)) consider(match.index + match[0].length);
+  for (const match of raw.matchAll(/\band\b/giu)) add(match.index ?? 0, match[0].length);
   for (const match of raw.matchAll(/(?<=[가-힣])고(?!\s*나서)(?!거나)/gu)) {
-    consider(match.index + match[0].length);
+    add(match.index ?? 0, match[0].length);
   }
-  for (const match of raw.matchAll(/말고/gu)) consider(match.index + match[0].length);
-  return start;
+  for (const match of raw.matchAll(/말고/gu)) add(match.index ?? 0, match[0].length);
+  return breaks;
+}
+
+function idiomClauseBounds(text, index) {
+  const raw = String(text ?? '');
+  let start = 0;
+  let end = raw.length;
+  for (const [from, to] of idiomClauseBreaks(raw)) {
+    if (to <= index && to > start) start = to;
+    if (from >= index && from < end) end = from;
+  }
+  return [start, end];
+}
+
+function idiomClauseHasTarget(fragment) {
+  if (textHasLedResistorSynonym(fragment)) return true;
+  if (/\bR\d+\b/iu.test(fragment)) return true;
+  return /(?:저항|抵抗|\bresistors?\b)/iu.test(fragment);
 }
 
 const IDIOM_OHM_BODY = String.raw`\d+(?:\.\d+)?\s*(?:Ω|옴|ohms?\b|[rRkK](?![A-Za-z]))|\d+(?:\.\d+)?\s*[kKmM]\d*(?![A-Za-z])|\d+\s*[rR]\d+(?![A-Za-z])`;
@@ -807,20 +825,21 @@ function idiomGapIsConnective(gap) {
   return words.every((word) => isEditOrDoConnective(bareChoiceToken(word)));
 }
 
-// The ohms have to sit in front of the pair. value+(으)로 may keep an edit/do
-// connective between itself and the verb ("680Ω으로 해 가든"). A target and a
-// value earlier in the same clause count too ("LED 저항 680Ω 하든"). A value
-// after the pair, or only in the previous -고 clause, does not.
+// value+(으)로 may keep an edit/do connective between itself and the verb
+// ("680Ω으로 해 가든"). A target earlier in the same clause counts with a
+// value on either side of the pair ("LED 저항 680Ω 하든", "LED 저항은 하든
+// 말든 680Ω으로"). A value only in the previous -고 clause does not.
 function idiomPairSitsOnValue(text, verbAt) {
-  const before = String(text ?? '').slice(idiomClauseStart(text, verbAt), verbAt);
+  const raw = String(text ?? '');
+  const [clauseFrom, clauseTo] = idiomClauseBounds(raw, verbAt);
+  const before = raw.slice(clauseFrom, verbAt);
   const particle = new RegExp(String.raw`(?:${IDIOM_OHM_BODY})(?:\s*(?:Ω|옴))?\s*(?:으로|로)`, 'giu');
   let last = null;
   for (const match of before.matchAll(particle)) last = match;
   if (last && idiomGapIsConnective(before.slice(last.index + last[0].length))) return true;
-  if (!new RegExp(IDIOM_OHM_BODY, 'iu').test(before)) return false;
-  if (textHasLedResistorSynonym(before)) return true;
-  if (/\bR\d+\b/iu.test(before)) return true;
-  return /(?:저항|抵抗|\bresistors?\b)/iu.test(before);
+  if (!idiomClauseHasTarget(before)) return false;
+  if (new RegExp(IDIOM_OHM_BODY, 'iu').test(before)) return true;
+  return new RegExp(IDIOM_OHM_BODY, 'iu').test(raw.slice(verbAt, clauseTo));
 }
 
 // null when this span is not one half of an X든 + 말든 pair. The caller treats

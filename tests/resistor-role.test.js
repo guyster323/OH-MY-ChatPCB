@@ -2888,6 +2888,56 @@ test('바꾸든 or 변경하든 after 바꾸고 plus an R1 keep is RESISTOR_AMBI
   assert.deepEqual(failures, []);
 });
 
+// The target sits before 든/든지/거나 + 말든/말든지/말거나 and the value sits
+// after that pair, in the same clause. That is the same choice as a value
+// earlier in the clause, so a keep is RESISTOR_AMBIGUOUS. A standalone idiom
+// after -고 still applies R3: its value is in the previous clause. No keep
+// leaves the sentence on its current decision.
+test('a value after 든-말든 in the same target clause is RESISTOR_AMBIGUOUS with a keep', () => {
+  const spec = seriesSpec('1k');
+  const ambiguous = [
+    'LED 저항은 바꾸든 말든 680Ω으로 하고 R1은 그대로 둘',
+    'LED 저항은 하든 말든 680Ω으로 하고 R1은 그대로 둘'
+  ];
+  const applies = [
+    'LED 저항을 680Ω으로 바꾸고 하든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 오든 말든 R1은 그대로 둠',
+    'LED 저항을 680Ω으로 바꾸고 가든 말든 R1은 그대로 둠'
+  ];
+  const failures = [];
+  const r3 = componentValue(spec, 'R3');
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+  }
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680 || decision.edit?.label !== '680Ω') {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''} ${decision.edit?.ohms ?? ''} ${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(before)) failures.push(`${prompt} mutated`);
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(spec, decision.edit);
+      if (componentValue(next, 'R3') !== '680Ω') failures.push(`${prompt} applied ${componentValue(next, 'R3')}`);
+      if (componentValue(next, 'R4') !== '4.7k') failures.push(`${prompt} R4 ${componentValue(next, 'R4')}`);
+      if (componentValue(next, 'R1') !== '5.1k') failures.push(`${prompt} R1 ${componentValue(next, 'R1')}`);
+    }
+  }
+  const noKeep = 'LED 저항은 바꾸든 말든 680Ω으로 해줘';
+  const noKeepBefore = structuredClone(spec);
+  const noKeepDecision = classifyExistingProjectRequest(noKeep, spec);
+  if (noKeepDecision.code !== 'RESISTOR_TARGET_UNCLEAR' || noKeepDecision.edit != null) {
+    failures.push(`${noKeep} => ${noKeepDecision.mode} ${noKeepDecision.code ?? ''} ${noKeepDecision.edit?.ref ?? ''}`);
+  }
+  if (componentValue(spec, 'R3') !== r3 || JSON.stringify(spec) !== JSON.stringify(noKeepBefore)) failures.push(`${noKeep} mutated`);
+  assert.deepEqual(failures, []);
+});
+
 test('contrast: lexical 든 is not a choice ending and verb-stem 든 still is', () => {
   const spec = seriesSpec('1k');
   const failures = [];
