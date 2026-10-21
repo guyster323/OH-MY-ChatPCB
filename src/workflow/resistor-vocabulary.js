@@ -2669,13 +2669,35 @@ function negatedAuxiliaryGeona(text) {
   return false;
 }
 
-// The -거나 whose sentence holds a negation marker. The verb does not
-// matter, and a negated state ("밝지 않거나", "안 켜지거나") is included.
-// The marker may sit after -거나. Null when this word is not -거나 or the
-// sentence has no marker.
+// "삭제하거나 변경하지 마" shares one prohibitive with the removal verb.
+// That -거나 is the don't-delete coordinator, not an edit negation. A span
+// on it drops the don't-delete exemption, and the 거나 is then a choice.
+const REMOVAL_COORDINATOR_STEMS = new Set(['삭제', '제거', '지우', '지워', '없애', '빼']);
+
+function removalCoordinatorStem(word) {
+  let stem = hedgeLookupForm(word);
+  if (stem.endsWith('하') && stem.length > 1) stem = stem.slice(0, -1);
+  return REMOVAL_COORDINATOR_STEMS.has(stem);
+}
+
+function isRemovalCoordinatorGeona(word, previous) {
+  const head = geonaPredicateHead(bareHedgeToken(word));
+  if (head == null) return false;
+  if (head && removalCoordinatorStem(head)) return true;
+  // "삭제 하거나": 하 is 하다, and the removal verb is the previous word.
+  if (head !== '' && head !== '하') return false;
+  return removalCoordinatorStem(previous ?? '');
+}
+
+// The -거나 whose sentence holds a negation marker. A negated state
+// ("밝지 않거나", "안 켜지거나") is included. The marker may sit after -거나.
+// A removal coordinator ("삭제하거나 변경하지 마") is not this span.
+// Null when this word is not -거나 or the sentence has no marker.
 function editVerbNegationRange(text, tokens, index) {
   const token = tokens[index];
   if (!token || !endsWithGeona(bareHedgeToken(token.raw))) return null;
+  const previous = index > 0 ? tokens[index - 1].raw : '';
+  if (isRemovalCoordinatorGeona(token.raw, previous)) return null;
   const from = clauseStartBefore(text, token.start);
   if (!sentenceHasNegationMarker(text.slice(from))) return null;
   return [token.start, token.end];
