@@ -2834,6 +2834,24 @@ const OUTSIDE_HEDGE_PREDICATES = [
   '없애', '없애주', '없애주시', '먹', '울', '걷', '빌드하'
 ];
 
+// Negation that sits after an otherwise allowed -거나. The marker is not on the stem.
+const POST_GEONA_NEGATION_STEMS = ['바꾸', '변경', '수정', '설정', '맞추', '밝', '어둡'];
+const POST_GEONA_NEGATION_TAILS = [
+  '하지 마',
+  '하지는 마',
+  '하지 말아',
+  '하면 안 돼',
+  '하면 안돼',
+  '하진 않아',
+  '하지마',
+  '하지 마세요'
+];
+
+// A spaced 거나 whose previous word is not an edit stem or an LED-state stem.
+const SPACED_GEONA_BLOCKED_WORDS = [
+  '노노', '금지', '취소', 'ㄴㄴ', '거부', '보류', '멈추', '먹', '울', '걷'
+];
+
 function outsideHedgePrompts() {
   const prompts = [];
   for (const pred of OUTSIDE_HEDGE_PREDICATES) {
@@ -2846,6 +2864,13 @@ function outsideHedgePrompts() {
     for (const [, build] of AF1_NEGATION_MARKERS) {
       for (const spaced of [true, false]) prompts.push(`LED 저항을 680Ω으로 ${build(verb, spaced)} 해`);
     }
+  }
+  for (const stem of POST_GEONA_NEGATION_STEMS) {
+    for (const tail of POST_GEONA_NEGATION_TAILS) prompts.push(`LED 저항 680Ω으로 ${stem}거나 ${tail}`);
+  }
+  for (const word of SPACED_GEONA_BLOCKED_WORDS) {
+    prompts.push(`LED 저항 680Ω으로 ${word} 거나 해`);
+    prompts.push(`LED 저항을 680Ω으로 바꾸는 거 ${word} 거나 하면`);
   }
   return prompts;
 }
@@ -2869,7 +2894,87 @@ test('property: outside the allowed hedge shapes, refuse', () => {
       if (componentValue(next, 'R3') !== '1k') failures.push(`applied ${prompt}`);
     }
   }
-  assert.equal(prompts.length, OUTSIDE_HEDGE_PREDICATES.length * 2 + 2 + AF1_NEGATION_VERBS.length * AF1_NEGATION_MARKERS.length * 2);
+  const outsideCount = OUTSIDE_HEDGE_PREDICATES.length * 2
+    + 2
+    + AF1_NEGATION_VERBS.length * AF1_NEGATION_MARKERS.length * 2
+    + POST_GEONA_NEGATION_STEMS.length * POST_GEONA_NEGATION_TAILS.length
+    + SPACED_GEONA_BLOCKED_WORDS.length * 2;
+  assert.equal(prompts.length, outsideCount);
+  assert.deepEqual(failures, []);
+});
+
+// AH-1. Negation after an allowed -거나, a negated auxiliary 버리/놓/두, and a
+// spaced 거나 after 노노/금지/취소. Five boards. R3 stays 1k. Not a merge.
+const AH1_GEONA_REFUSALS = [
+  'LED 저항 680Ω으로 바꾸거나 하지 마',
+  'LED 저항 680Ω으로 바꾸거나 하지 마.',
+  'LED 저항 680Ω으로 변경하거나 하지 마',
+  'LED 저항 680Ω으로 수정하거나 하지 마',
+  'LED 저항 680Ω으로 바꾸거나 하지는 마',
+  'LED 저항을 680Ω으로 바꿔 버리지 말거나 해',
+  'LED 저항 680Ω으로 노노 거나 해',
+  'LED 저항 680Ω으로 금지 거나 해',
+  'LED 저항 680Ω으로 취소 거나 해'
+];
+
+test('a negation after -거나 or a spaced 거나 after a non-edit word does not change R3', () => {
+  const failures = [];
+  for (const prompt of AH1_GEONA_REFUSALS) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AH1_GEONA_REFUSALS.length, 9);
+  assert.deepEqual(failures, []);
+});
+
+// The hedge guard reads the whole sentence. A negation marker before -거나,
+// after -거나, or on 버리/놓/두 means no hedge span. The 거나하다 "건 아니고"
+// closer is not a marker, so that hedge stays.
+function wholeSentenceNegationPrompts() {
+  const prompts = [];
+  const stems = ['바꾸', '변경', '수정', '밝', '어둡'];
+  const tails = ['하지 마', '하지는 마', '하지 말아', '하면 안 돼', '하진 않아', '하지마', '하지 마세요'];
+  for (const stem of stems) {
+    for (const tail of tails) prompts.push(`LED 저항 680Ω으로 ${stem}거나 ${tail}`);
+    prompts.push(`LED 저항을 680Ω으로 ${stem}지 않거나 해`);
+    prompts.push(`LED 저항 680Ω으로 ${stem}거나 하면 좋지만 하지 마`);
+  }
+  prompts.push('LED 저항을 680Ω으로 바꿔 버리지 말거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 놓지 말거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 두지 말거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 버리지 않거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 놓지 않거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 두지 않거나 해');
+  return prompts;
+}
+
+test('a negation marker anywhere in the sentence, including after -거나, leaves no hedge span', () => {
+  const failures = [];
+  const prompts = wholeSentenceNegationPrompts();
+  for (const prompt of prompts) {
+    if (geonaHedgeSpans(prompt).length !== 0) failures.push(`hedge ${prompt}`);
+  }
+  const stillHedge = [
+    'LED 저항 680Ω으로 바꾸거나 하면 좋겠어요',
+    '거나 한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘'
+  ];
+  for (const prompt of stillHedge) {
+    if (geonaHedgeSpans(prompt).length === 0) failures.push(`missing hedge ${prompt}`);
+  }
+  assert.ok(prompts.length > AH1_GEONA_REFUSALS.length);
   assert.deepEqual(failures, []);
 });
 
