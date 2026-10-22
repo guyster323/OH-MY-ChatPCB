@@ -128,6 +128,43 @@ function windowsUserCandidates(env) {
   ];
 }
 
+// The flatpak wrapper can fail before KiCad starts, e.g. "error: Extension
+// org.freedesktop.Platform.GL.default has invalid merge-dirs". KiCad never ran,
+// so nothing it would have written exists and no file was touched.
+const LAUNCHER_STDERR = /^(?:error|bwrap): /;
+// flatpak prints "F: ..." warnings (e.g. "F: Can't get document portal") ahead
+// of the launcher error, so those lines are dropped before the check.
+const FLATPAK_WARNING_LINE = /^F: .*(?:\r?\n|$)/gm;
+
+export function isKicadLauncherFailure(result) {
+  if (!result || typeof result !== 'object' || result.source !== 'flatpak') return false;
+  if (result.exitCode === 0) return false;
+  if (typeof result.stdout === 'string' && result.stdout.trim() !== '') return false;
+  const stderr = typeof result.stderr === 'string' ? result.stderr.replace(FLATPAK_WARNING_LINE, '').trim() : '';
+  return LAUNCHER_STDERR.test(stderr);
+}
+
+// Mitigation, not a root-cause fix: why flatpak sometimes fails to launch is
+// unknown. In triage (triage/erc-flake/report.md) the launcher failed 3 times
+// in 160 runs and every failure recovered on the first retry, so one retry is
+// enough; a second failure is returned as KICAD_CLI_LAUNCH_FAILED and fails
+// closed. Retrying is safe because a launcher failure means KiCad never ran.
+export async function retryOnceOnLauncherFailure(run) {
+  const first = await run();
+  if (!isKicadLauncherFailure(first)) return first;
+  const second = await run();
+  if (!isKicadLauncherFailure(second)) return { ...second, launchRetried: true };
+  return {
+    ...second,
+    launchRetried: true,
+    launchFailed: true,
+    reason: {
+      code: 'KICAD_CLI_LAUNCH_FAILED',
+      message: 'The KiCad CLI launcher failed before KiCad started, twice.'
+    }
+  };
+}
+
 export async function runKicadCli(args, options = {}) {
   const resolved = resolveKicadCli(options);
   if (!resolved.path) {
@@ -145,13 +182,18 @@ export async function runKicadCli(args, options = {}) {
     platform,
     cwd: options.cwd
   });
-  try {
-    const result = await runCommand(resolved.path, args, {
+  const run = async () => ({
+    ...(await runCommand(resolved.path, args, {
       cwd: options.cwd,
       timeoutMs: options.timeoutMs ?? 120000,
       env
-    });
-    return { ...result, command: resolved.path, source: resolved.source };
+    })),
+    command: resolved.path,
+    source: resolved.source
+  });
+  try {
+    // Opt-in: only validateProject's sch upgrade and sch erc calls retry.
+    return options.retryLauncherFailure === true ? await retryOnceOnLauncherFailure(run) : await run();
   } finally {
     if (privateConfigHome) {
       await fs.promises.rm(privateConfigHome, { recursive: true, force: true });

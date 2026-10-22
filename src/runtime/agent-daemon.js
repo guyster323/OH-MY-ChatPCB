@@ -441,7 +441,9 @@ async function dispatchSchematicPatch(args, ctx, resolvedClassifier = classifyEx
   const decision = ercApprovalDecision(recorded, args.ercOverride);
   if (!decision.allow) {
     if (decision.reason === 'missing') console.warn('patch.apply.blocked-missing');
-    return failure('ERC_BLOCKED', decision.message);
+    return failure('ERC_BLOCKED', decision.message, decision.reasonCode
+      ? { ercReason: { code: decision.reasonCode, ...(decision.stderr ? { stderr: decision.stderr } : {}) } }
+      : {});
   }
 
   emitProgress(ctx, { stage: 'apply', sprite: 'apply', text: 'Applying the draft to the schematic.' });

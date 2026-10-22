@@ -1,7 +1,10 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
-import { runKicadCli } from '../kicad/kicad-cli.js';
+import { isKicadLauncherFailure, runKicadCli } from '../kicad/kicad-cli.js';
+import { stderrExcerpt } from '../kicad/stderr-excerpt.js';
 import { assertInspectionTree } from './inspection-copy.js';
 import { isInside } from './project-workspace.js';
 
@@ -27,34 +30,71 @@ export async function validateProject({
   const output = path.join(resolvedProjectDir, 'chatpcb-erc.json');
 
   try {
-    const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], {
+    const cliOptions = {
       explicitPath: kicadCliPath,
       cwd: resolvedProjectDir,
-      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
-    });
+      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir,
+      // Only these two calls retry a flatpak launcher failure; see kicad-cli.js.
+      retryLauncherFailure: true
+    };
+    const schematicBefore = await fileDigest(schematic);
+    const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], cliOptions);
+    const upgradeOk = formatUpgrade.exitCode === 0;
+    const upgradeLaunchFailed = isKicadLauncherFailure(formatUpgrade);
+    // A launcher failure is tolerated only when the schematic bytes are provably
+    // unchanged, so the ERC below checks exactly the bytes the patch will carry.
+    const schematicUntouched = upgradeLaunchFailed
+      && schematicBefore !== null
+      && schematicBefore === await fileDigest(schematic);
+    const upgradeSummary = {
+      ok: upgradeOk,
+      launchFailed: upgradeLaunchFailed,
+      exitCode: formatUpgrade.exitCode,
+      stdout: formatUpgrade.stdout,
+      stderr: formatUpgrade.stderr
+    };
 
-    const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], {
-      explicitPath: kicadCliPath,
-      cwd: resolvedProjectDir,
-      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
-    });
+    // A report left by an earlier run must never stand in for this run. If it
+    // cannot be cleared, fail closed: this is not an overridable skip.
+    try {
+      await rm(output, { force: true });
+    } catch (error) {
+      return {
+        ok: false,
+        skipped: false,
+        tool: formatUpgrade.command,
+        source: formatUpgrade.source,
+        formatUpgrade: upgradeSummary,
+        report: output,
+        reason: failureReason('ERC_REPORT_STALE', `Could not clear the previous ERC report (${error.code ?? 'unknown error'}).`)
+      };
+    }
+    const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], cliOptions);
+    const base = {
+      skipped: false,
+      tool: result.command,
+      source: result.source,
+      formatUpgrade: upgradeSummary,
+      report: output
+    };
+    const runOutput = { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+
+    if (isKicadLauncherFailure(result)) {
+      return {
+        ok: false,
+        ...base,
+        erc: { errorCount: 0, warningCount: 0, byType: {} },
+        reason: failureReason('KICAD_CLI_LAUNCH_FAILED', 'The KiCad CLI launcher failed before ERC ran.', result.stderr),
+        ...runOutput
+      };
+    }
 
     const erc = await readErcSummary(output);
-    const upgradeOk = formatUpgrade.exitCode === 0;
 
     if (erc.invalid) {
       return {
         ok: false,
-        skipped: false,
-        tool: result.command,
-        source: result.source,
-        formatUpgrade: {
-          ok: upgradeOk,
-          exitCode: formatUpgrade.exitCode,
-          stdout: formatUpgrade.stdout,
-          stderr: formatUpgrade.stderr
-        },
-        report: output,
+        ...base,
         erc: {
           errorCount: 0,
           warningCount: 0,
@@ -64,37 +104,43 @@ export async function validateProject({
           code: 'ERC_REPORT_INVALID',
           message: erc.message
         },
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr
+        ...runOutput
       };
     }
 
+    const ercOk = result.exitCode === 0 && erc.errorCount === 0;
+    const upgradeTolerated = upgradeLaunchFailed && schematicUntouched;
+    const reason = upgradeOk
+      ? null
+      : failureReason(
+        'ERC_FORMAT_UPGRADE_FAILED',
+        upgradeTolerated
+          ? 'The format upgrade launcher failed before KiCad started; the schematic is unchanged, so ERC checked the same bytes.'
+          : 'kicad-cli sch upgrade failed, so the ERC result is not trusted.',
+        formatUpgrade.stderr
+      );
+
     return {
-      ok: upgradeOk && result.exitCode === 0 && erc.errorCount === 0,
-      skipped: false,
-      tool: result.command,
-      source: result.source,
-      formatUpgrade: {
-        ok: upgradeOk,
-        exitCode: formatUpgrade.exitCode,
-        stdout: formatUpgrade.stdout,
-        stderr: formatUpgrade.stderr
-      },
-      report: output,
+      ok: ercOk && (upgradeOk || upgradeTolerated),
+      ...base,
       erc,
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr
+      ...(reason ? { reason } : {}),
+      ...runOutput
     };
   } catch (error) {
     if (error.code === 'KICAD_CLI_TIMEOUT') {
       return { ok: false, skipped: false, reason: { code: error.code, message: error.message } };
     }
-    const message = error.code === 'ENOENT' 
-      ? 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.'
-      : error.message;
-    return skipped('KICAD_CLI_UNAVAILABLE', message);
+    // Only a missing kicad-cli binary is an overridable skip. Any other error
+    // means validation was attempted and did not finish, so it fails closed.
+    if (isMissingKicadCli(error, resolvedProjectDir)) {
+      return skipped('KICAD_CLI_UNAVAILABLE', 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.');
+    }
+    return {
+      ok: false,
+      skipped: false,
+      reason: { code: 'VALIDATION_ERROR', message: error.message }
+    };
   }
 }
 
@@ -153,6 +199,32 @@ async function readErcSummary(reportPath) {
       message: `ERC report could not be read: ${error.message}`
     };
   }
+}
+
+function failureReason(code, message, stderr) {
+  const excerpt = stderrExcerpt(stderr);
+  return { code, message, ...(excerpt ? { stderr: excerpt } : {}) };
+}
+
+// Any read error yields null, and a null digest never tolerates an upgrade
+// launcher failure, so swallowing the error here is fail-closed.
+async function fileDigest(filePath) {
+  try {
+    return createHash('sha256').update(await readFile(filePath)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+// Only a kicad-cli binary that is provably absent is an overridable skip.
+function isMissingKicadCli(error, cwd) {
+  if (error?.code !== 'ENOENT') return false;
+  // runKicadCli throws ENOENT without a syscall when nothing resolves.
+  if (error.syscall === undefined) return true;
+  if (!String(error.syscall).startsWith('spawn')) return false;
+  // spawn also reports ENOENT when cwd is gone; that is not a missing CLI (AP-1).
+  if (!cwd || !existsSync(cwd)) return false;
+  return typeof error.path === 'string' && !existsSync(error.path);
 }
 
 function skipped(code, message) {
