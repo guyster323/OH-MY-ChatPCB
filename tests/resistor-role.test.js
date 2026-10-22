@@ -23,7 +23,7 @@ import {
   resistorValueOutOfRangeMessage,
   resistorValueUnchangedMessage
 } from '../src/workflow/existing-project-edit.js';
-import { assessRequestCoverage, CHOICE_JOINERS, KEEP_CUES, LED_RESISTOR_SYNONYMS, ledResistorSynonymIsNoun, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
+import { assessRequestCoverage, CHOICE_JOINERS, editVerbNegationSpans, geonaHedgeSpans, KEEP_CUES, LED_RESISTOR_SYNONYMS, ledResistorSynonymIsNoun, vocabularyAllowLists } from '../src/workflow/resistor-vocabulary.js';
 
 function seriesSpec(value = '330Ω') {
   return {
@@ -2420,10 +2420,103 @@ test('a choice joiner before any keep, valued or not, or before leaving it as is
   }
 });
 
-test('UAT over-block rows stay at today\'s code', () => {
+test('a non-choice -거나 hedge applies R3 and a real choice stays a refusal', () => {
   const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
   const unclear = resistorTargetUnclearMessage('680');
   const unsupported = resistorRefUnsupportedMessage('R3');
+  const applies = [
+    'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘',
+    '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
+    '밝기가 약하거나 해서 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항 680Ω으로 바꿔주시거나 하면 좋겠어요',
+    'LED 저항 680Ω으로 바꿔 주시거나 하면 감사하겠어요',
+    'LED 저항 680Ω으로 바꾸거나 한다면 좋겠어요',
+    '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+    '거나 한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항이 너무 밝거나 하고 680Ω으로 바꿔줘',
+    'LED가 어둡거나 하면 LED 저항을 680Ω으로 바꿔줘'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const ambiguous = [
+    'LED 저항을 680Ω으로 바꾸거나 두거나 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸거나 R4는 그대로 둬',
+    'LED 저항 680Ω으로 바꾸든 R4는 4.7k로 유지',
+    'LED 저항 680Ω으로 바꾸거나요 R4는 4.7k로 유지',
+    'LED 저항을 680Ω으로 하든 말든 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 하거나 말거나 R4는 그대로 둬',
+    'LED 저항을 680Ω으로 바꾸거나 하면 R4는 그대로 둬'
+  ];
+  for (const prompt of ambiguous) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_AMBIGUOUS', prompt);
+    assert.equal(decision.message, message, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const unclearPrompts = [
+    '너무 밝거나 해서 680Ω으로 바꿔줘',
+    'R3나 R4 중 하나를 680Ω으로',
+    'R3 또는 R4 중 하나를 680Ω으로'
+  ];
+  for (const prompt of unclearPrompts) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_TARGET_UNCLEAR', prompt);
+    assert.equal(decision.message, unclear, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const valueMessage = resistorValueAmbiguousMessage(null, ['680Ω', '1k']);
+  const secondValue = [
+    'LED 저항 680Ω으로 바꾸거나 하면 1k',
+    'LED 저항 680Ω으로 바꾸거나 해서 1k',
+    'LED 저항 680Ω으로 바꾸거나 하고 1k'
+  ];
+  for (const prompt of secondValue) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
+    assert.equal(decision.code, 'RESISTOR_VALUE_AMBIGUOUS', prompt);
+    assert.equal(decision.message, valueMessage, prompt);
+    assert.equal(decision.edit, undefined, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
   const bare = '바꿔주시거나 하면 좋겠어요';
   const bareBefore = structuredClone(spec);
   const bareDecision = classifyExistingProjectRequest(bare, spec);
@@ -2437,7 +2530,65 @@ test('UAT over-block rows stay at today\'s code', () => {
   assert.equal(componentValue(spec, 'R4'), '4.7k', bare);
   assert.deepEqual(spec, bareBefore, bare);
 
-  const unclearPrompt = '너무 밝거나 해서 680Ω으로 바꿔줘';
+  const contrast = 'LED가 너무 밝거나 어두우면 LED 저항을 680Ω으로 바꿔줘';
+  const contrastBefore = structuredClone(spec);
+  const contrastDecision = classifyExistingProjectRequest(contrast, spec);
+  assert.equal(contrastDecision.mode, 'refuse', contrast);
+  assert.equal(contrastDecision.code, 'RESISTOR_REF_UNSUPPORTED', contrast);
+  assert.equal(contrastDecision.message, unsupported, contrast);
+  assert.equal(contrastDecision.edit, undefined, contrast);
+  assert.equal(blocksBeforeProvider(contrast, contrastDecision), true, contrast);
+  assert.equal(appliesBeforeProvider(contrast, contrastDecision), false, contrast);
+  assert.equal(componentValue(spec, 'R3'), '1k', contrast);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', contrast);
+  assert.deepEqual(spec, contrastBefore, contrast);
+});
+
+// Q1, Q2, and the three 'LED 저항 680Ω으로 바꾸거나 하면/해서/하고 1k' sentences
+// are already asserted in 'a non-choice -거나 hedge applies R3 and a real choice stays a refusal'.
+// Q5 is the hygiene review wording: a keep makes the choice, and '하든 말든' with no keep does not.
+// 'LED 저항을 거나하게 680Ω으로' is the other 거나하게 form.
+test('Hygiene pr28-r1 pinned hedge decisions', () => {
+  const spec = seriesSpec('1k');
+  const message = resistorAmbiguousMessage();
+  const unclear = resistorTargetUnclearMessage('680');
+  const applies = [
+    'R4는 그대로 두거나 하고 LED 저항 680Ω으로',
+    '거나하게 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항을 거나하게 680Ω으로'
+  ];
+  for (const prompt of applies) {
+    const before = structuredClone(spec);
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    assert.equal(decision.mode, 'merge', `${prompt} ${decision.code ?? ''} ${decision.message ?? ''}`);
+    assert.equal(decision.code, undefined, prompt);
+    assert.equal(decision.edit?.ohms, 680, prompt);
+    assert.equal(decision.edit?.label, '680Ω', prompt);
+    assert.equal(decision.edit?.ref, 'R3', prompt);
+    assert.equal(appliesBeforeProvider(prompt, decision), true, prompt);
+    assert.equal(blocksBeforeProvider(prompt, decision), false, prompt);
+    const next = applyExistingProjectEdit(spec, decision.edit);
+    assert.equal(componentValue(next, 'R3'), '680Ω', prompt);
+    assert.equal(componentValue(next, 'R4'), '4.7k', prompt);
+    assert.equal(componentValue(next, 'R1'), '5.1k', prompt);
+    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
+    assert.deepEqual(spec, before, prompt);
+  }
+
+  const ambiguous = 'LED 저항을 680Ω으로 바꾸거나 하든 R4는 그대로';
+  const ambiguousBefore = structuredClone(spec);
+  const ambiguousDecision = classifyExistingProjectRequest(ambiguous, spec);
+  assert.equal(ambiguousDecision.mode, 'refuse', ambiguous);
+  assert.equal(ambiguousDecision.code, 'RESISTOR_AMBIGUOUS', ambiguous);
+  assert.equal(ambiguousDecision.message, message, ambiguous);
+  assert.equal(ambiguousDecision.edit, undefined, ambiguous);
+  assert.equal(blocksBeforeProvider(ambiguous, ambiguousDecision), true, ambiguous);
+  assert.equal(appliesBeforeProvider(ambiguous, ambiguousDecision), false, ambiguous);
+  assert.equal(componentValue(spec, 'R3'), '1k', ambiguous);
+  assert.equal(componentValue(spec, 'R4'), '4.7k', ambiguous);
+  assert.deepEqual(spec, ambiguousBefore, ambiguous);
+
+  const unclearPrompt = 'LED 저항 680Ω으로 바꾸거나 하든 말든';
   const unclearBefore = structuredClone(spec);
   const unclearDecision = classifyExistingProjectRequest(unclearPrompt, spec);
   assert.equal(unclearDecision.mode, 'refuse', unclearPrompt);
@@ -2449,24 +2600,656 @@ test('UAT over-block rows stay at today\'s code', () => {
   assert.equal(componentValue(spec, 'R3'), '1k', unclearPrompt);
   assert.equal(componentValue(spec, 'R4'), '4.7k', unclearPrompt);
   assert.deepEqual(spec, unclearBefore, unclearPrompt);
+});
 
-  const unsupportedPrompts = [
-    '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
-    '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘'
+// The 고 of "-거나 하-" is the hedge auxiliary, not a clause break. Splitting
+// there would drop the keep and apply 680Ω to R3.
+test('a 거나 하고 keep does not apply the following ohms to R3', () => {
+  const spec = seriesSpec('1k');
+  const prompt = 'R4는 그대로 두거나 하고 680Ω으로 바꿔줘';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'refuse', decision.code ?? '');
+  assert.equal(decision.code, 'RESISTOR_AMBIGUOUS');
+  assert.equal(decision.message, resistorAmbiguousMessage());
+  assert.equal(decision.edit, undefined);
+  assert.equal(blocksBeforeProvider(prompt, decision), true);
+  assert.equal(appliesBeforeProvider(prompt, decision), false);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'R4'), '4.7k');
+  assert.deepEqual(spec, before);
+});
+
+// The hedgeHada negation guard keeps "하고" a clause break when -거나 is negated.
+// Without that break, a bare following value asks which resistor.
+test('negation before 거나 하고 leaves a bare second value as a plain refusal', () => {
+  const spec = seriesSpec('1k');
+  const prompt = '안 바꾸거나 하고 1k';
+  const before = structuredClone(spec);
+  const decision = classifyExistingProjectRequest(prompt, spec);
+  assert.equal(decision.mode, 'refuse');
+  assert.equal(decision.code, undefined);
+  assert.equal(decision.message, undefined);
+  assert.equal(decision.edit, undefined);
+  assert.equal(blocksBeforeProvider(prompt, decision), false);
+  assert.equal(appliesBeforeProvider(prompt, decision), false);
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.equal(componentValue(spec, 'R4'), '4.7k');
+  assert.deepEqual(spec, before);
+});
+
+// A negated edit before -거나 is not the "~거나 하다" hedge. The matrix is the
+// negation, the 하다 tail, and the board. R3 must stay put on every cell.
+const NEGATED_EDIT_GEONA = [
+  ['-지 않', 'LED 저항을 680Ω으로 바꾸지 않거나'],
+  ['-지 말', 'LED 저항을 680Ω으로 바꾸지 말거나'],
+  ['안 V', 'LED 저항 680Ω으로 안 바꾸거나'],
+  ['-기 싫', 'LED 저항을 680Ω으로 바꾸기 싫거나'],
+  ['-는 건 아니', 'LED 저항 680Ω으로 바꾸는 건 아니거나'],
+  ['-시- space -지 않', 'LED 저항을 680Ω으로 바꿔 주시지 않거나'],
+  ['-시- space -지 말', 'LED 저항을 680Ω으로 바꿔 주시지 말거나'],
+  ['-시- space 안 V', 'LED 저항 680Ω으로 안 바꿔 주시거나'],
+  ['-시- space -기 싫', 'LED 저항을 680Ω으로 바꿔 주시기 싫거나'],
+  ['-시- space -는 건 아니', 'LED 저항 680Ω으로 바꿔 주시는 건 아니거나']
+];
+const NEGATED_EDIT_TAILS = ['해', '하면 돼', '해서'];
+
+function negatedEditGeonaPrompts() {
+  const rows = [];
+  for (const [form, phrase] of NEGATED_EDIT_GEONA) {
+    for (const tail of NEGATED_EDIT_TAILS) rows.push([form, tail, `${phrase} ${tail}`]);
+  }
+  return rows;
+}
+
+function negatedEditBoards() {
+  return [
+    ['base', seriesSpec('1k')],
+    ['d1led', probeBoard('d1led')]
   ];
-  for (const prompt of unsupportedPrompts) {
+}
+
+test('a negated edit verb before -거나 하- is a refusal and does not change R3', () => {
+  const failures = [];
+  const prompts = negatedEditGeonaPrompts();
+  for (const [form, tail, prompt] of prompts) {
+    for (const [board, spec] of negatedEditBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.edit != null || appliesBeforeProvider(prompt, decision)) {
+        failures.push(`${board} ${form} ${tail} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (!blocksBeforeProvider(prompt, decision)) failures.push(`${board} ${form} ${tail} reached provider`);
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${form} ${tail} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${form} ${tail} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(prompts.length, NEGATED_EDIT_GEONA.length * NEGATED_EDIT_TAILS.length);
+  assert.deepEqual(failures, []);
+});
+
+function rangesOverlapSpan(left, right) {
+  return left[0] < right[1] && right[0] < left[1];
+}
+
+test('a -거나 hedge span does not cover a negated edit verb', () => {
+  const failures = [];
+  for (const [, , prompt] of negatedEditGeonaPrompts()) {
+    const negations = editVerbNegationSpans(prompt);
+    if (negations.length === 0) failures.push(`${prompt} has no edit-verb negation`);
+    for (const hedge of geonaHedgeSpans(prompt)) {
+      for (const negation of negations) {
+        if (rangesOverlapSpan(hedge, negation)) failures.push(`${prompt} hedge covers edit negation`);
+      }
+    }
+  }
+  // A negated state is not a hedge either. Refusal is the accepted outcome.
+  const states = [
+    'LED가 밝지 않거나 하면 LED 저항을 680Ω으로 바꿔줘',
+    'LED가 안 켜지거나 하면 LED 저항 680Ω으로'
+  ];
+  const stateSpec = seriesSpec('1k');
+  for (const prompt of states) {
+    if (geonaHedgeSpans(prompt).length !== 0) failures.push(`${prompt} negated state still a hedge`);
+    const before = structuredClone(stateSpec);
+    const decision = classifyExistingProjectRequest(prompt, stateSpec);
+    if (decision.mode === 'merge' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(stateSpec, 'R3') !== '1k' || JSON.stringify(stateSpec) !== JSON.stringify(before)) {
+      failures.push(`${prompt} mutated`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+// AF-1. Any negation marker before -거나 refuses the hedge. The matrix is the
+// negated clause, the frame, and the board. R3 stays 1k on every cell.
+const AF1_NEGATED_CLAUSES = [
+  '바꾸진 않거나',
+  '바꾸지않거나',
+  '안바꾸거나',
+  '못 바꾸거나',
+  '바꿀 필요 없거나',
+  '바꾸면 안 되거나',
+  '바꾸지 마시거나',
+  '바꾸지 않아도 되거나',
+  '바꾸지 말았거나',
+  '바꾸기는 싫거나',
+  '교체하지 않거나',
+  '고치지 않거나',
+  '올리지 않거나',
+  '낮추지 않거나',
+  '놓지 않거나',
+  '바꾸지 않지 않거나',
+  '손대지 않거나'
+];
+
+// UAT pr28-r2. Full sentences, each over the same five boards. Refusal, no patch, R3 stays 1k.
+const AF1_UAT_PR28_R2 = [
+  ['196', 'LED 저항을 680Ω으로 못 바꾸거나 해'],
+  ['197', 'LED 저항을 680Ω으로 못 바꾸거나 하면 돼요'],
+  ['199', 'LED 저항을 680Ω으로 바꿔 주지 않으시거나 하면 좋겠어요'],
+  ['201', 'LED 저항을 680Ω으로 바꾸지 마시거나 해 주세요']
+];
+
+function af1NegatedPrompt(clause, frame) {
+  if (frame === 'tail') return `LED 저항을 680Ω으로 ${clause} 해`;
+  return `LED 저항은 ${clause} 하면 680Ω으로`;
+}
+
+function af1NegatedBoards() {
+  return [
+    ['base', seriesSpec('1k')],
+    ['d1led', probeBoard('d1led')],
+    ['d2status', probeBoard('d2status')],
+    ['multiled', probeBoard('multiled')],
+    ['d1schottky', probeBoard('d1schottky')]
+  ];
+}
+
+test('a negation marker before -거나 does not change R3', () => {
+  const failures = [];
+  const frames = ['tail', 'front'];
+  for (const clause of AF1_NEGATED_CLAUSES) {
+    for (const frame of frames) {
+      const prompt = af1NegatedPrompt(clause, frame);
+      for (const [board, spec] of af1NegatedBoards()) {
+        const before = structuredClone(spec);
+        const decision = classifyExistingProjectRequest(prompt, spec);
+        const mergedR3 = decision.mode === 'merge' && decision.edit?.ref === 'R3';
+        if (mergedR3 || decision.edit?.ohms === 680) {
+          failures.push(`${board} ${frame} ${clause} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+        }
+        if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+          failures.push(`${board} ${frame} ${clause} mutated`);
+        }
+        if (decision.edit) {
+          const next = applyExistingProjectEdit(spec, decision.edit);
+          if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${frame} ${clause} applied ${componentValue(next, 'R3')}`);
+        }
+      }
+    }
+  }
+  for (const [id, prompt] of AF1_UAT_PR28_R2) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode !== 'refuse' || decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${id} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${id} mutated`);
+      }
+    }
+  }
+  assert.equal(AF1_NEGATED_CLAUSES.length, 17);
+  assert.equal(AF1_UAT_PR28_R2.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// Negation marker × verb × spacing. geonaHedgeSpans must not cover the clause.
+const AF1_NEGATION_VERBS = ['바꾸', '교체하', '고치', '올리', '낮추', '두', '놓', '손대', '맞추', '편집하'];
+const AF1_NEGATION_MARKERS = [
+  ['않', (verb, spaced) => (spaced ? `${verb}지 않거나` : `${verb}지않거나`)],
+  ['않으시', (verb, spaced) => (spaced ? `${verb}지 않으시거나` : `${verb}지않으시거나`)],
+  ['말', (verb, spaced) => (spaced ? `${verb}지 말거나` : `${verb}지말거나`)],
+  ['마시', (verb, spaced) => (spaced ? `${verb}지 마시거나` : `${verb}지마시거나`)],
+  ['못', (verb, spaced) => (spaced ? `못 ${verb}거나` : `못${verb}거나`)],
+  ['안', (verb, spaced) => (spaced ? `안 ${verb}거나` : `안${verb}거나`)],
+  ['없', (verb, spaced) => (spaced ? `${verb} 필요 없거나` : `${verb}필요없거나`)],
+  ['싫', (verb, spaced) => (spaced ? `${verb}기 싫거나` : `${verb}기싫거나`)],
+  ['아니', (verb, spaced) => (spaced ? `${verb}는 건 아니거나` : `${verb}는건아니거나`)],
+  ['안되', (verb, spaced) => (spaced ? `${verb}면 안 되거나` : `${verb}면안되거나`)]
+];
+
+// r50 AG-1. The 11 refusal shapes, as the 13 q.rows sentences. R3 stays 1k.
+const LEXICAL_REFUSAL_GEONA = [
+  'LED 저항을 680Ω으로 바꾸는 건 금지거나 해',
+  'LED 저항을 680Ω으로 바꾸기 금지하거나 해',
+  'LED 저항을 680Ω으로 바꾸길 거부하거나 해',
+  'LED 저항을 680Ω으로 바꾸는 거 취소하거나 해',
+  'LED 저항을 680Ω으로 바꾸는 거 보류하거나 해',
+  'LED 저항을 680Ω으로 바꾸는 거 멈추거나 해',
+  'LED 저항을 680Ω으로 바꾸는 건 관두거나 해',
+  'LED 저항을 680Ω으로 바꾸라는 건 관두거나 해',
+  'LED 저항을 680Ω으로 바꾸는 건 그만두거나 해',
+  'LED 저항을 680Ω으로 바꾸는 건 그만하거나 해',
+  'LED 저항 680Ω 노노 하거나 해',
+  'LED 저항 680Ω으로 노노거나 해',
+  'LED 저항 680Ω으로 바꾸기 ㄴㄴ거나 해'
+];
+
+test('a lexical refusal before -거나 does not change R3', () => {
+  const failures = [];
+  for (const prompt of LEXICAL_REFUSAL_GEONA) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+    }
+  }
+  assert.equal(LEXICAL_REFUSAL_GEONA.length, 13);
+  assert.deepEqual(failures, []);
+});
+
+// Outside the allowlist, or a negation of an allowed stem, -거나 is not a hedge.
+const OUTSIDE_HEDGE_PREDICATES = [
+  '금지', '금지하', '거부', '거부하', '취소', '취소하', '보류', '보류하',
+  '멈추', '관두', '그만두', '그만', '그만하', '노노', 'ㄴㄴ',
+  '없애', '없애주', '없애주시', '먹', '울', '걷', '빌드하'
+];
+
+// Negation that sits after an otherwise allowed -거나. The marker is not on the stem.
+const POST_GEONA_NEGATION_STEMS = ['바꾸', '변경', '수정', '설정', '맞추', '밝', '어둡'];
+const POST_GEONA_NEGATION_TAILS = [
+  '하지 마',
+  '하지는 마',
+  '하지 말아',
+  '하면 안 돼',
+  '하면 안돼',
+  '하진 않아',
+  '하지마',
+  '하지 마세요'
+];
+
+// A spaced 거나 whose previous word is not an edit stem or an LED-state stem.
+const SPACED_GEONA_BLOCKED_WORDS = [
+  '노노', '금지', '취소', 'ㄴㄴ', '거부', '보류', '멈추', '먹', '울', '걷'
+];
+
+// AJ-1. 버리/놓/두, then any particle, then a negated -거나 stem. 질 is the
+// ㄹ contraction of 지를. 곤 is -고는, so it does not follow 지. The particle
+// is not what decides the hedge.
+const AJ1_AUXILIARIES = ['버리', '놓', '두'];
+const AJ1_PARTICLE_AXIS = [
+  ['를', (aux) => `${aux}지를`],
+  ['ㄹ', (aux) => `${aux}질`],
+  ['까지', (aux) => `${aux}지까지`],
+  ['조차', (aux) => `${aux}지조차`],
+  ['들', (aux) => `${aux}지들`],
+  ['곤', (aux) => `${aux}곤`],
+  ['도', (aux) => `${aux}지도`],
+  ['는', (aux) => `${aux}지는`],
+  ['만', (aux) => `${aux}지만`],
+  ['요', (aux) => `${aux}지요`]
+];
+const AJ1_NEGATED_GEONA_STEMS = ['말거나', '않거나', '못하거나', '없거나', '마시거나', '않으시거나'];
+
+function outsideHedgePrompts() {
+  const prompts = [];
+  for (const pred of OUTSIDE_HEDGE_PREDICATES) {
+    prompts.push(`LED 저항을 680Ω으로 바꾸는 거 ${pred}거나 해`);
+    prompts.push(`LED 저항을 680Ω으로 ${pred}거나 해`);
+  }
+  prompts.push('LED 저항을 680Ω으로 바꾸는 거 노노 하거나 해');
+  prompts.push('LED 저항 680Ω으로 바꿔서 깜빡임 없애주시거나 하면 좋겠어요');
+  for (const verb of AF1_NEGATION_VERBS) {
+    for (const [, build] of AF1_NEGATION_MARKERS) {
+      for (const spaced of [true, false]) prompts.push(`LED 저항을 680Ω으로 ${build(verb, spaced)} 해`);
+    }
+  }
+  for (const stem of POST_GEONA_NEGATION_STEMS) {
+    for (const tail of POST_GEONA_NEGATION_TAILS) prompts.push(`LED 저항 680Ω으로 ${stem}거나 ${tail}`);
+  }
+  for (const word of SPACED_GEONA_BLOCKED_WORDS) {
+    prompts.push(`LED 저항 680Ω으로 ${word} 거나 해`);
+    prompts.push(`LED 저항을 680Ω으로 바꾸는 거 ${word} 거나 하면`);
+  }
+  for (const aux of AJ1_AUXILIARIES) {
+    for (const [, form] of AJ1_PARTICLE_AXIS) {
+      for (const stem of AJ1_NEGATED_GEONA_STEMS) {
+        prompts.push(`LED 저항을 680Ω으로 바꿔 ${form(aux)} ${stem} 해`);
+      }
+    }
+  }
+  return prompts;
+}
+
+test('property: outside the allowed hedge shapes, refuse', () => {
+  const failures = [];
+  const prompts = outsideHedgePrompts();
+  const spec = seriesSpec('1k');
+  for (const prompt of prompts) {
+    if (geonaHedgeSpans(prompt).length !== 0) failures.push(`hedge ${prompt}`);
     const before = structuredClone(spec);
     const decision = classifyExistingProjectRequest(prompt, spec);
-    assert.equal(decision.mode, 'refuse', `${prompt} ${decision.code ?? ''}`);
-    assert.equal(decision.code, 'RESISTOR_REF_UNSUPPORTED', prompt);
-    assert.equal(decision.message, unsupported, prompt);
-    assert.equal(decision.edit, undefined, prompt);
-    assert.equal(blocksBeforeProvider(prompt, decision), true, prompt);
-    assert.equal(appliesBeforeProvider(prompt, decision), false, prompt);
-    assert.equal(componentValue(spec, 'R3'), '1k', prompt);
-    assert.equal(componentValue(spec, 'R4'), '4.7k', prompt);
-    assert.deepEqual(spec, before, prompt);
+    if (decision.mode === 'merge' || (decision.edit?.ref === 'R3' && decision.edit?.ohms === 680)) {
+      failures.push(`merge ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+    }
+    if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+      failures.push(`mutated ${prompt}`);
+    }
+    if (decision.edit) {
+      const next = applyExistingProjectEdit(structuredClone(spec), decision.edit);
+      if (componentValue(next, 'R3') !== '1k') failures.push(`applied ${prompt}`);
+    }
   }
+  const outsideCount = OUTSIDE_HEDGE_PREDICATES.length * 2
+    + 2
+    + AF1_NEGATION_VERBS.length * AF1_NEGATION_MARKERS.length * 2
+    + POST_GEONA_NEGATION_STEMS.length * POST_GEONA_NEGATION_TAILS.length
+    + SPACED_GEONA_BLOCKED_WORDS.length * 2
+    + AJ1_AUXILIARIES.length * AJ1_PARTICLE_AXIS.length * AJ1_NEGATED_GEONA_STEMS.length;
+  assert.equal(prompts.length, outsideCount);
+  assert.deepEqual(AJ1_PARTICLE_AXIS.map(([particle]) => particle), ['를', 'ㄹ', '까지', '조차', '들', '곤', '도', '는', '만', '요']);
+  assert.deepEqual(failures, []);
+});
+
+// AH-1. Negation after an allowed -거나, a negated auxiliary 버리/놓/두, and a
+// spaced 거나 after 노노/금지/취소. Five boards. R3 stays 1k. Not a merge.
+const AH1_GEONA_REFUSALS = [
+  'LED 저항 680Ω으로 바꾸거나 하지 마',
+  'LED 저항 680Ω으로 바꾸거나 하지 마.',
+  'LED 저항 680Ω으로 변경하거나 하지 마',
+  'LED 저항 680Ω으로 수정하거나 하지 마',
+  'LED 저항 680Ω으로 바꾸거나 하지는 마',
+  'LED 저항을 680Ω으로 바꿔 버리지 말거나 해',
+  'LED 저항 680Ω으로 노노 거나 해',
+  'LED 저항 680Ω으로 금지 거나 해',
+  'LED 저항 680Ω으로 취소 거나 해'
+];
+
+test('a negation after -거나 or a spaced 거나 after a non-edit word does not change R3', () => {
+  const failures = [];
+  for (const prompt of AH1_GEONA_REFUSALS) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AH1_GEONA_REFUSALS.length, 9);
+  assert.deepEqual(failures, []);
+});
+
+// BT r52 AI-1. 진/지는/지도 on a negated auxiliary, including the glued form.
+// Five boards. R3 stays 1k. Not a merge.
+const AI1_NEGATED_AUXILIARY = [
+  'LED 저항을 680Ω으로 바꿔 버리진 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지는 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지도 말거나 해',
+  'LED 저항을 680Ω으로 바꿔버리진 말거나 해'
+];
+
+test('BT r52 AI-1: particle on a negated auxiliary does not change R3', () => {
+  const failures = [];
+  for (const prompt of AI1_NEGATED_AUXILIARY) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AI1_NEGATED_AUXILIARY.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// BT r53 AJ-1. Any particle before a negated -거나. The stem on -거나 is the
+// negation, so the particle is not a hedge. Five boards. R3 stays 1k. Not a merge.
+const AJ1_NEGATED_PARTICLE = [
+  'LED 저항을 680Ω으로 바꿔 버리지를 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리질 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지까지 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지조차 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리지들 말거나 해',
+  'LED 저항을 680Ω으로 바꿔 버리곤 말거나 해'
+];
+
+test('BT r53 AJ-1: any particle before a negated -거나 does not change R3', () => {
+  const failures = [];
+  for (const prompt of AJ1_NEGATED_PARTICLE) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AJ1_NEGATED_PARTICLE.length, 6);
+  assert.deepEqual(failures, []);
+});
+
+// BT r54 AK-1. A negation anywhere in the candidate hedge span (clause start
+// through the -거나 하- form) is not a hedge. The auxiliary 버리 sits on -거나,
+// and the marker is on an earlier word. Five boards. R3 stays 1k. Not a merge.
+const AK1_NEGATED_HEDGE = [
+  'LED 저항을 680Ω으로 바꾸지 말아 버리거나 해',
+  'LED 저항을 680Ω으로 바꾸지 말아 버리시거나 하면',
+  'LED 저항을 680Ω으로 바꾸지 말아 둬 버리거나 해',
+  'LED 저항을 680Ω으로 안 바꿔 버리거나 해'
+];
+
+test('BT r54 AK-1: a negation anywhere in the hedge span does not change R3', () => {
+  const failures = [];
+  for (const prompt of AK1_NEGATED_HEDGE) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(spec, decision.edit);
+        if (componentValue(next, 'R3') !== '1k') failures.push(`${board} ${prompt} applied ${componentValue(next, 'R3')}`);
+      }
+    }
+  }
+  assert.equal(AK1_NEGATED_HEDGE.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// UAT 093-096/190/191 and Q1/Q3/Q4. Each one applies R3 today. A negation
+// marker at a word boundary inside the hedge span must not.
+const AK1_APPLYING_HEDGES = [
+  'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘',
+  '밝기가 거슬리거나 하니 LED 저항 680Ω으로',
+  'LED 저항 680Ω으로 바꿔주시거나 하면 좋겠어요',
+  '거나한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+  '밝기가 약하거나 해서 LED 저항 680Ω으로 바꿔줘',
+  'LED 저항 680Ω으로 바꿔 주시거나 하면 감사하겠어요',
+  'LED 저항 680Ω으로 바꾸거나 한다면 좋겠어요',
+  'R4는 그대로 두거나 하고 LED 저항 680Ω으로',
+  '거나하게 LED 저항 680Ω으로 바꿔줘',
+  'LED 저항을 거나하게 680Ω으로'
+];
+
+// The same markers clauseHasNegationMarker and the 없 stem already use.
+const AK1_SPAN_MARKERS = ['말', '않', '못', '안', '없', '지 마', '싫', '아니', '안되'];
+
+const AK1_HADA_FORMS = new Set([
+  '해', '해서', '하여', '하고', '하면', '하니', '하다', '하지', '하는', '할', '한', '함',
+  '해야', '해도', '해라', '했다', '했어', '했네', '했으면', '했다면', '하여서', '하니까',
+  '하니깐', '하지만', '하며', '하자', '할게', '합니다', '하죠', '한다면'
+]);
+
+function ak1Bare(word) {
+  let text = String(word ?? '').replace(/^[("'`]+|[)"'`.;!?。！？,]+$/gu, '');
+  if (text.endsWith('요') && text.length > 1) text = text.slice(0, -1);
+  return text;
+}
+
+function ak1IsHada(word) {
+  const text = ak1Bare(word);
+  if (AK1_HADA_FORMS.has(text)) return true;
+  return text.length > 2 && /[은는도]$/u.test(text) && AK1_HADA_FORMS.has(text.slice(0, -1));
+}
+
+function ak1ClauseStart(text, index) {
+  const boundary = /\s(?:and then|and|&|then)\s|바꾸고|그리고|하면서|하고|이고|이랑|면서|지만|말고|(?<=[가-힣])고(?!\s*나서)(?!거나)|[,，.;!?？！。\n•·]/giu;
+  let start = 0;
+  for (const match of text.matchAll(boundary)) {
+    const at = match.index ?? 0;
+    if (at >= index) break;
+    const end = at + match[0].length;
+    if (end > index) continue;
+    const mark = match[0];
+    if ((mark === ',' || mark === '.' || mark === '，') && /\d/u.test(text[at - 1] ?? '') && /\d/u.test(text[at + 1] ?? '')) continue;
+    start = end;
+  }
+  return start;
+}
+
+// Clause start through the -거나 하- form, or through a word-initial 거나하다.
+function ak1HedgeSpan(text) {
+  const tokens = [...text.matchAll(/\S+/gu)].map((match) => ({
+    raw: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length
+  }));
+  for (let index = 0; index < tokens.length; index += 1) {
+    const bare = ak1Bare(tokens[index].raw);
+    if (/^거나(?:하게|한|해서|하면|하고|하니|하다|하지|하는|할|함|해)$/u.test(bare)) {
+      return { from: ak1ClauseStart(text, tokens[index].start), to: tokens[index].end };
+    }
+    if (!bare.endsWith('거나')) continue;
+    const next = tokens[index + 1];
+    if (!next || !ak1IsHada(next.raw)) continue;
+    return { from: ak1ClauseStart(text, tokens[index].start), to: next.end };
+  }
+  return null;
+}
+
+function ak1Insertions(text) {
+  const span = ak1HedgeSpan(text);
+  if (!span) return [];
+  const prompts = [];
+  for (const match of text.matchAll(/\S+/gu)) {
+    const at = match.index ?? 0;
+    if (at < span.from || at >= span.to) continue;
+    for (const marker of AK1_SPAN_MARKERS) {
+      const gap = at > 0 && text[at - 1] !== ' ' ? ' ' : '';
+      prompts.push(`${text.slice(0, at)}${gap}${marker} ${text.slice(at)}`.replace(/ {2,}/gu, ' '));
+    }
+  }
+  return prompts;
+}
+
+test('property: inserting a negation marker anywhere in a hedge sentence never changes R3', () => {
+  const failures = [];
+  const spec = seriesSpec('1k');
+  let checked = 0;
+  for (const base of AK1_APPLYING_HEDGES) {
+    const prompts = ak1Insertions(base);
+    if (prompts.length === 0) failures.push(`no span ${base}`);
+    for (const prompt of prompts) {
+      checked += 1;
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' && decision.edit?.ohms === 680) {
+        failures.push(`merge ${prompt}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`mutated ${prompt}`);
+      }
+      if (decision.edit) {
+        const next = applyExistingProjectEdit(structuredClone(spec), decision.edit);
+        if (componentValue(next, 'R3') === '680Ω') failures.push(`applied ${prompt}`);
+      }
+    }
+  }
+  assert.equal(AK1_APPLYING_HEDGES.length, 10);
+  assert.equal(AK1_SPAN_MARKERS.length, 9);
+  assert.ok(checked > AK1_APPLYING_HEDGES.length * AK1_SPAN_MARKERS.length);
+  assert.deepEqual(failures.slice(0, 12), [], `negation insertions ${failures.length}`);
+});
+
+// The hedge guard reads the whole sentence. A negation marker before -거나,
+// after -거나, or on 버리/놓/두 means no hedge span. The 거나하다 "건 아니고"
+// closer is not a marker, so that hedge stays.
+function wholeSentenceNegationPrompts() {
+  const prompts = [];
+  const stems = ['바꾸', '변경', '수정', '밝', '어둡'];
+  const tails = ['하지 마', '하지는 마', '하지 말아', '하면 안 돼', '하진 않아', '하지마', '하지 마세요'];
+  for (const stem of stems) {
+    for (const tail of tails) prompts.push(`LED 저항 680Ω으로 ${stem}거나 ${tail}`);
+    prompts.push(`LED 저항을 680Ω으로 ${stem}지 않거나 해`);
+    prompts.push(`LED 저항 680Ω으로 ${stem}거나 하면 좋지만 하지 마`);
+  }
+  prompts.push('LED 저항을 680Ω으로 바꿔 버리지 말거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 놓지 말거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 두지 말거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 버리지 않거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 놓지 않거나 해');
+  prompts.push('LED 저항을 680Ω으로 바꿔 두지 않거나 해');
+  return prompts;
+}
+
+test('a negation marker anywhere in the sentence, including after -거나, leaves no hedge span', () => {
+  const failures = [];
+  const prompts = wholeSentenceNegationPrompts();
+  for (const prompt of prompts) {
+    if (geonaHedgeSpans(prompt).length !== 0) failures.push(`hedge ${prompt}`);
+  }
+  const stillHedge = [
+    'LED 저항 680Ω으로 바꾸거나 하면 좋겠어요',
+    '거나 한 건 아니고 LED 저항 680Ω으로 바꿔줘',
+    'LED 저항이 너무 밝거나 해서 680Ω으로 바꿔줘'
+  ];
+  for (const prompt of stillHedge) {
+    if (geonaHedgeSpans(prompt).length === 0) failures.push(`missing hedge ${prompt}`);
+  }
+  assert.ok(prompts.length > AH1_GEONA_REFUSALS.length);
+  assert.deepEqual(failures, []);
 });
 
 test('property: a choice joiner on a valued keep is RESISTOR_AMBIGUOUS and a control joiner applies R3', () => {
@@ -4335,5 +5118,113 @@ test('D1 aliases the LED resistor only when the spec has no D-designator part', 
       failures.push(`${kind} ${prompt} added R3`);
     }
   }
+  assert.deepEqual(failures, []);
+});
+
+// BT r55 AL-1 / AL-2. A lexical prohibition, a negated edit before a delete
+// verb, and a trailing withdrawal (그만) do not change R3.
+const AL_REFUSALS = [
+  'LED 저항 680Ω으로 바꿔 버리거나 하는 건 금지',
+  'LED 저항 680Ω으로 바꾸지 말아 삭제하거나 해',
+  'LED 저항 680Ω으로 바꾸거나 해 그만',
+  'R3를 680Ω으로 바꾸거나 해 그만'
+];
+
+test('BT r55 AL-1/AL-2: a prohibition or withdrawal in a -거나 sentence does not change R3', () => {
+  const failures = [];
+  for (const prompt of AL_REFUSALS) {
+    for (const [board, spec] of af1NegatedBoards()) {
+      const before = structuredClone(spec);
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' || decision.edit != null) {
+        failures.push(`${board} ${prompt} => ${decision.mode} ${decision.code ?? ''} ${decision.edit?.ref ?? ''}=${decision.edit?.label ?? ''}`);
+      }
+      if (componentValue(spec, 'R3') !== '1k' || JSON.stringify(spec) !== JSON.stringify(before)) {
+        failures.push(`${board} ${prompt} mutated`);
+      }
+    }
+  }
+  assert.equal(AL_REFUSALS.length, 4);
+  assert.deepEqual(failures, []);
+});
+
+// A prohibition or withdrawal word anywhere in an applying hedge sentence,
+// or at its end, refuses. The whole -거나 sentence is an allowlist.
+const AL_PROHIBITION_WORDS = ['금지', '그만', '취소', '보류', '거부', '노노'];
+const AL_TRAILING_WITHDRAWALS = [' 그만', ' 금지', ' 취소', ' 하지 마', ' 됐어', ' 농담이야'];
+
+test('property: a prohibition word or trailing withdrawal in a hedge sentence never changes R3', () => {
+  const failures = [];
+  const spec = seriesSpec('1k');
+  let checked = 0;
+  for (const base of AK1_APPLYING_HEDGES) {
+    const prompts = [];
+    for (const match of base.matchAll(/\S+/gu)) {
+      const at = match.index ?? 0;
+      for (const word of AL_PROHIBITION_WORDS) prompts.push(`${base.slice(0, at)}${word} ${base.slice(at)}`);
+    }
+    for (const word of AL_PROHIBITION_WORDS) prompts.push(`${base} ${word}`);
+    for (const tail of AL_TRAILING_WITHDRAWALS) prompts.push(`${base}${tail}`);
+    for (const prompt of prompts) {
+      checked += 1;
+      const decision = classifyExistingProjectRequest(prompt, spec);
+      if (decision.mode === 'merge' && decision.edit?.ohms === 680) failures.push(prompt);
+    }
+  }
+  assert.ok(checked > 100, `checked ${checked}`);
+  assert.deepEqual(failures, []);
+});
+
+// BT r55 AL-3. 안/못 inside a noun (안전, 안정, 안쪽) and 못 + noun, and the
+// idiom 안 그러면, are not a negation. These keep the target-unclear refusal.
+const AL3_NON_NEGATION = [
+  'R3를 안전하게 680Ω으로 바꾸거나 해',
+  'R3를 안정적으로 680Ω으로 바꾸거나 해',
+  '안쪽 R3를 680Ω으로 바꾸거나 해',
+  '못 자국 옆 R3 680Ω으로 바꿔주시거나 하면 좋겠어요',
+  'R3 안전 마진 위해 680Ω으로 바꾸거나 해',
+  'R3를 680Ω으로 바꾸거나 해 안 그러면 LED가 타'
+];
+
+test('BT r55 AL-3: 안/못 nouns and 안 그러면 are not read as a negation', () => {
+  const spec = seriesSpec('1k');
+  const failures = [];
+  for (const prompt of AL3_NON_NEGATION) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.code === 'RESISTOR_AMBIGUOUS') failures.push(`${prompt} => ${decision.code}`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+// Hygiene pr28-r2 contrast rows. Each row fails when its guard is removed:
+// H5 (은/는/도 after the 하다 form), AL10 (거나도/거나나 tail), NJ1 (진 마),
+// NJ4 (지요 마), GH3 (았/었 before -거나 on 없).
+const HYGIENE_R2_APPLIES = [
+  'LED 저항을 680Ω으로 바꾸거나 하면은',
+  'LED 저항을 680Ω으로 바꾸거나도 해',
+  'LED 저항 680Ω으로 바꾸거나나 해'
+];
+const HYGIENE_R2_REFUSES = [
+  'LED 저항을 680Ω으로 바꾸진 마',
+  'LED 저항을 680Ω으로 바꾸지요 마',
+  'LED 저항을 680Ω으로 바꿔 없었거나 해'
+];
+
+test('Hygiene pr28-r2: hedge tails apply R3; 진 마, 지요 마 and 없었거나 refuse', () => {
+  const spec = seriesSpec('1k');
+  const failures = [];
+  for (const prompt of HYGIENE_R2_APPLIES) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''}`);
+    }
+  }
+  for (const prompt of HYGIENE_R2_REFUSES) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''}`);
+    }
+  }
+  assert.equal(componentValue(spec, 'R3'), '1k');
   assert.deepEqual(failures, []);
 });

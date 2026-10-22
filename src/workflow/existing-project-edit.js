@@ -38,8 +38,12 @@ import {
   isKoreanRequestStem,
   KEEP_CUES,
   CHOICE_JOINERS,
+  choiceJoinerRow,
+  CHOICE_ENDING_POLITE,
+  GEONA_HADA_GO_LOOKBEHIND,
   choiceJoinerIsIdiom,
   choiceJoinerBindsValue,
+  isGeonaHedgeJoiner,
   choiceWordJoinerSources,
   goMalgoClauseSpans,
   decimalBeforeKeepFragments,
@@ -61,22 +65,18 @@ import {
   textHasUsbRole
 } from './resistor-vocabulary.js';
 
+export { choiceJoinerRow };
+
 const FULL_DESIGN_MCU = /\b(stm32|esp32|rp2040|atmega|nrf52|adbms)\b/i;
 const FULL_DESIGN_BOARD = /\b(board|usb|regulator|connector|header|sensor)\b|보드|커넥터|헤더|레귤레이터|센서/i;
 const KEEP_REST = /keep everything|everything else unchanged|나머지는\s*그대로|그대로\s*두|기존.*(?:유지|그대로)|unchanged/i;
-
-export function choiceJoinerRow(id) {
-  const row = CHOICE_JOINERS.find((item) => item.id === id);
-  if (!row) throw new Error(`Unknown choice joiner id: ${id}`);
-  return row;
-}
 
 const CHOICE_JOINER_WORD = compileRegExp(
   `^(?:${CHOICE_JOINERS.filter((item) => item.place === 'word').map((item) => item.re).join('|')})$`,
   'iu'
 );
 const CHOICE_JOINER_ENDING = compileRegExp(
-  `(?:${CHOICE_JOINERS.filter((item) => item.place === 'ending').map((item) => item.re).join('|')})(?:요|도|나)?$`,
+  `(?:${CHOICE_JOINERS.filter((item) => item.place === 'ending').map((item) => item.re).join('|')})${CHOICE_ENDING_POLITE}$`,
   'iu'
 );
 const DEUN_CHOICE = compileRegExp(choiceJoinerRow('deun').re, 'gu');
@@ -683,6 +683,7 @@ function bareGlueWord(token) {
 
 function choiceJoinerWord(token, following = '') {
   const bare = bareGlueWord(token);
+  if (isGeonaHedgeJoiner(bare, following)) return false;
   if (CHOICE_JOINER_WORD.test(bare) || CHOICE_JOINER_ENDING.test(bare)) return true;
   // "X든 말든" is the pair even when X's last syllable is not a listed stem.
   // The deun row's second alternative sees the text after this token.
@@ -2616,6 +2617,9 @@ function blankCopy(text, ranges) {
 // Resistor breaks are not the deletion breaks. A comma inside 4,7 or 1,000
 // stays. "and then" is one break, so the later "to" is still the destination.
 // 으로, 로, and "to" mark a value. They do not start a clause.
+// 하고 spells the 하 inside GEONA_HADA_GO_LOOKBEHIND, so the lookbehind sits
+// in front of the word and the matched text stays "하고".
+const GEONA_HADA_HAGO_LOOKBEHIND = GEONA_HADA_GO_LOOKBEHIND.replace(/하(?=\)$)/u, '');
 const RESISTOR_CLAUSE_SEPARATORS = Object.freeze([
   Object.freeze({ re: String.raw`\band\s+then\b` }),
   Object.freeze({ re: String.raw`\band\b` }),
@@ -2625,13 +2629,13 @@ const RESISTOR_CLAUSE_SEPARATORS = Object.freeze([
   Object.freeze({ re: String.raw`(?<!\d),(?!\d)` }),
   Object.freeze({ re: '그리고' }),
   Object.freeze({ re: '면서' }),
-  Object.freeze({ re: String.raw`하고(?![가-힣])` }),
+  Object.freeze({ re: `${GEONA_HADA_HAGO_LOOKBEHIND}${String.raw`하고(?![가-힣])`}` }),
   Object.freeze({ re: String.raw`이고(?![가-힣])` }),
   Object.freeze({ re: String.raw`이랑(?![가-힣])` }),
   Object.freeze({ re: '지만' }),
   Object.freeze({ re: '말고' }),
   Object.freeze({ re: String.raw`(?<=[가-힣])며(?![가-힣])` }),
-  Object.freeze({ re: String.raw`(?<=[가-힣])고(?!\s*나서)(?![가-힣])` })
+  Object.freeze({ re: `(?<=[가-힣])${GEONA_HADA_GO_LOOKBEHIND}${String.raw`고(?!\s*나서)(?![가-힣])`}` })
 ]);
 
 // USB-C is a connector name. A bare USB role is not the LED resistor.
