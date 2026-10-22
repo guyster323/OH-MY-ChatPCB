@@ -1,7 +1,8 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
-import { runKicadCli } from '../kicad/kicad-cli.js';
+import { isKicadLauncherFailure, runKicadCli } from '../kicad/kicad-cli.js';
 import { assertInspectionTree } from './inspection-copy.js';
 import { isInside } from './project-workspace.js';
 
@@ -27,34 +28,57 @@ export async function validateProject({
   const output = path.join(resolvedProjectDir, 'chatpcb-erc.json');
 
   try {
-    const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], {
+    const cliOptions = {
       explicitPath: kicadCliPath,
       cwd: resolvedProjectDir,
       excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
-    });
+    };
+    const schematicBefore = await fileDigest(schematic);
+    const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], cliOptions);
+    const upgradeOk = formatUpgrade.exitCode === 0;
+    const upgradeLaunchFailed = !upgradeOk
+      && (formatUpgrade.launchFailed === true || isKicadLauncherFailure(formatUpgrade));
+    // A launcher failure is tolerated only when the schematic bytes are provably
+    // unchanged, so the ERC below checks exactly the bytes the patch will carry.
+    const schematicUntouched = upgradeLaunchFailed
+      && schematicBefore !== null
+      && schematicBefore === await fileDigest(schematic);
+    const upgradeSummary = {
+      ok: upgradeOk,
+      launchFailed: upgradeLaunchFailed,
+      exitCode: formatUpgrade.exitCode,
+      stdout: formatUpgrade.stdout,
+      stderr: formatUpgrade.stderr
+    };
 
-    const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], {
-      explicitPath: kicadCliPath,
-      cwd: resolvedProjectDir,
-      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
-    });
+    // A report left by an earlier run must never stand in for this run.
+    await rm(output, { force: true });
+    const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], cliOptions);
+    const base = {
+      skipped: false,
+      tool: result.command,
+      source: result.source,
+      formatUpgrade: upgradeSummary,
+      report: output
+    };
+    const runOutput = { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+
+    if (result.exitCode !== 0 && (result.launchFailed === true || isKicadLauncherFailure(result))) {
+      return {
+        ok: false,
+        ...base,
+        erc: { errorCount: 0, warningCount: 0, byType: {} },
+        reason: failureReason('KICAD_CLI_LAUNCH_FAILED', 'The KiCad CLI launcher failed before ERC ran.', result.stderr),
+        ...runOutput
+      };
+    }
 
     const erc = await readErcSummary(output);
-    const upgradeOk = formatUpgrade.exitCode === 0;
 
     if (erc.invalid) {
       return {
         ok: false,
-        skipped: false,
-        tool: result.command,
-        source: result.source,
-        formatUpgrade: {
-          ok: upgradeOk,
-          exitCode: formatUpgrade.exitCode,
-          stdout: formatUpgrade.stdout,
-          stderr: formatUpgrade.stderr
-        },
-        report: output,
+        ...base,
         erc: {
           errorCount: 0,
           warningCount: 0,
@@ -64,28 +88,28 @@ export async function validateProject({
           code: 'ERC_REPORT_INVALID',
           message: erc.message
         },
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr
+        ...runOutput
       };
     }
 
+    const ercOk = result.exitCode === 0 && erc.errorCount === 0;
+    const upgradeTolerated = upgradeLaunchFailed && schematicUntouched;
+    const reason = upgradeOk
+      ? null
+      : failureReason(
+        'ERC_FORMAT_UPGRADE_FAILED',
+        upgradeTolerated
+          ? 'The format upgrade launcher failed before KiCad started; the schematic is unchanged, so ERC checked the same bytes.'
+          : 'kicad-cli sch upgrade failed, so the ERC result is not trusted.',
+        formatUpgrade.stderr
+      );
+
     return {
-      ok: upgradeOk && result.exitCode === 0 && erc.errorCount === 0,
-      skipped: false,
-      tool: result.command,
-      source: result.source,
-      formatUpgrade: {
-        ok: upgradeOk,
-        exitCode: formatUpgrade.exitCode,
-        stdout: formatUpgrade.stdout,
-        stderr: formatUpgrade.stderr
-      },
-      report: output,
+      ok: ercOk && (upgradeOk || upgradeTolerated),
+      ...base,
       erc,
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr
+      ...(reason ? { reason } : {}),
+      ...runOutput
     };
   } catch (error) {
     if (error.code === 'KICAD_CLI_TIMEOUT') {
@@ -152,6 +176,33 @@ async function readErcSummary(reportPath) {
       invalid: true,
       message: `ERC report could not be read: ${error.message}`
     };
+  }
+}
+
+const STDERR_EXCERPT_CHARS = 200;
+
+// A short, single-line stderr excerpt for the ERC_BLOCKED response. Absolute
+// paths are replaced so the excerpt does not leak local directories.
+export function stderrExcerpt(stderr) {
+  if (typeof stderr !== 'string') return '';
+  const line = stderr
+    .replace(/[A-Za-z]:\\[^\s"']+/g, '<path>')
+    .replace(/(?<![\w.])\/[^\s"']+/g, '<path>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return line.length > STDERR_EXCERPT_CHARS ? `${line.slice(0, STDERR_EXCERPT_CHARS - 3)}...` : line;
+}
+
+function failureReason(code, message, stderr) {
+  const excerpt = stderrExcerpt(stderr);
+  return { code, message, ...(excerpt ? { stderr: excerpt } : {}) };
+}
+
+async function fileDigest(filePath) {
+  try {
+    return createHash('sha256').update(await readFile(filePath)).digest('hex');
+  } catch {
+    return null;
   }
 }
 
