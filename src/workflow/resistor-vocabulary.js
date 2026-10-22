@@ -2117,21 +2117,11 @@ function isKeepNonResistorClause(clause) {
   return nonRes && !resistorObject;
 }
 
-// "손대지 말고" is the keep phrase. The filler "손대지" plus a negation on
-// -거나 ("손대지 말거나") is not: swallowing the clause would land the ohms on R3.
-function dontTouchFillerNegatedGeona(clause) {
-  const raw = String(clause ?? '');
-  const fillers = KEEP_CUES.filter((cue) => cue.slot === 'filler' && /(?:손대|건드리지)/u.test(cue.text));
-  if (!fillers.some((cue) => raw.includes(cue.text))) return false;
-  return editVerbNegationSpans(raw).length > 0;
-}
-
 function isResistorKeepClause(clause) {
   if (isAmbiguousI2cPreservation(clause)) return false;
   // "don't touch R4" keeps that ref. "don't touch the pull-ups" keeps that role,
   // the same way "keep the pull-ups" does. "don't touch the LED resistor" has
   // no role word, so it stays a negation of the edit.
-  if (dontTouchFillerNegatedGeona(clause)) return false;
   if (isDontTouchResistorClause(clause)) return true;
   if (!hasKeepCue(clause) || isNegatedKeep(clause)) return false;
   if (isKeepNonResistorClause(clause)) return false;
@@ -2293,8 +2283,6 @@ function isExemptSignalClause(clause) {
 // is the negation, so a particle on the word in front is not listed here.
 // 요 is polite, not this ending.
 export const NEGATION_JI_SUFFIX = String.raw`(?:지(?:는|도|만)?|진)`;
-
-const NEGATION_JI_SUFFIX_END = rx(`${NEGATION_JI_SUFFIX}$`, 'u');
 
 const NEGATION_SIGNALS = [
   String.raw`\b(?:do|does|did)\s+not\b`,
@@ -2618,12 +2606,9 @@ function isAsIsLeaveStem(stem) {
 // one 하 (변경하). A longer word that only contains the stem is not it.
 function isPositiveEditStem(stem) {
   let text = String(stem ?? '');
-  if (!text || text.includes('부탁') || clauseHasNegationMarker(text) || NEGATION_JI_SUFFIX_END.test(text)) return false;
+  if (!text || text.includes('부탁')) return false;
   const ara = araEoStem(text);
-  if (ara && ara !== text) {
-    if (clauseHasNegationMarker(ara)) return false;
-    text = ara;
-  }
+  if (ara && ara !== text) text = ara;
   if (text.endsWith('하') && text.length > 1) text = text.slice(0, -1);
   if (!text) return false;
   if (EXACT_EDIT_STEMS.includes(text)) return true;
@@ -2777,8 +2762,6 @@ function geonaHedgeHadaAt(text, index) {
   const raw = String(text ?? '');
   const match = /(\S+)\s*$/u.exec(raw.slice(0, index));
   if (!match || !endsWithGeona(bareHedgeToken(match[1]))) return false;
-  const prev = /(\S+)\s*$/u.exec(raw.slice(0, match.index));
-  if (!isAllowedGeonaPredicate(match[1], prev ? prev[1] : '')) return false;
   return !textHasNegatedEditGeona(raw.slice(0, index));
 }
 
@@ -2836,10 +2819,10 @@ function followingHasChoiceAlternative(following) {
 
 // True when this token is the hedge, not a choice joiner. A keep cue or
 // another choice ending after the 하다 form is the second alternative, so
-// the ending stays a choice ("바꾸거나 하면 R4는 그대로"). preceding is the
-// text before the token. A negation marker in that clause ("바꾸지 않거나",
-// "밝지 않거나") stays a choice.
-export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
+// the ending stays a choice ("바꾸거나 하면 R4는 그대로"). The predicate
+// allowlist and negation checks sit in the coverage pass, which every
+// request goes through before this token is read.
+export function isGeonaHedgeJoiner(token, following = '') {
   const context = `${bareHedgeToken(token)} ${String(following ?? '')}`;
   if (!explicitTarget(context)) return false;
   const bare = bareHedgeToken(token);
@@ -2847,8 +2830,6 @@ export function isGeonaHedgeJoiner(token, following = '', preceding = '') {
   if (!endsWithGeona(bare)) return false;
   const next = rx('^\\s*(\\S+)', 'u').exec(String(following ?? ''));
   if (!next || !isHadaHedgeForm(next[1])) return false;
-  const prev = /(\S+)\s*$/u.exec(String(preceding ?? ''));
-  if (!isAllowedGeonaPredicate(bare, prev ? prev[1] : '')) return false;
   return !followingHasChoiceAlternative(String(following ?? ''));
 }
 
@@ -2986,8 +2967,6 @@ function geonaSentenceHasUnknownToken(text, exempt) {
   if (!/거나/u.test(text)) return false;
   if (PROHIBITION_WORD.test(text)) return true;
   const ranges = [...exempt, ...geonaHedgeSpans(text)];
-  // "X거나 말거나" is the 든-말든 idiom pair. The choice-idiom logic owns it.
-  for (const pair of text.matchAll(/\S*거나\s*말거나/gu)) ranges.push([pair.index, pair.index + pair[0].length]);
   for (const piece of allowClausePieces(text)) {
     // Keep, don't-delete, length, and foreign-role clauses have no leftover words.
     const keepLike = leftoverWords(piece.text).length === 0;
