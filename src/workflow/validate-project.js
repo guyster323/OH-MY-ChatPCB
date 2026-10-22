@@ -51,8 +51,21 @@ export async function validateProject({
       stderr: formatUpgrade.stderr
     };
 
-    // A report left by an earlier run must never stand in for this run.
-    await rm(output, { force: true });
+    // A report left by an earlier run must never stand in for this run. If it
+    // cannot be cleared, fail closed: this is not an overridable skip.
+    try {
+      await rm(output, { force: true });
+    } catch (error) {
+      return {
+        ok: false,
+        skipped: false,
+        tool: formatUpgrade.command,
+        source: formatUpgrade.source,
+        formatUpgrade: upgradeSummary,
+        report: output,
+        reason: failureReason('ERC_REPORT_STALE', `Could not clear the previous ERC report (${error.code ?? 'unknown error'}).`, '')
+      };
+    }
     const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], cliOptions);
     const base = {
       skipped: false,
@@ -115,10 +128,16 @@ export async function validateProject({
     if (error.code === 'KICAD_CLI_TIMEOUT') {
       return { ok: false, skipped: false, reason: { code: error.code, message: error.message } };
     }
-    const message = error.code === 'ENOENT' 
-      ? 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.'
-      : error.message;
-    return skipped('KICAD_CLI_UNAVAILABLE', message);
+    // Only a missing kicad-cli binary is an overridable skip. Any other error
+    // means validation was attempted and did not finish, so it fails closed.
+    if (isMissingKicadCli(error)) {
+      return skipped('KICAD_CLI_UNAVAILABLE', 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.');
+    }
+    return {
+      ok: false,
+      skipped: false,
+      reason: { code: 'VALIDATION_ERROR', message: error.message }
+    };
   }
 }
 
@@ -204,6 +223,13 @@ async function fileDigest(filePath) {
   } catch {
     return null;
   }
+}
+
+function isMissingKicadCli(error) {
+  if (error?.code !== 'ENOENT') return false;
+  // runKicadCli throws ENOENT without a syscall when nothing resolves; a spawn
+  // of a resolved path that is gone reports syscall "spawn <path>".
+  return error.syscall === undefined || String(error.syscall).startsWith('spawn');
 }
 
 function skipped(code, message) {

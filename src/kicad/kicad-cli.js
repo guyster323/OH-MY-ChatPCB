@@ -132,12 +132,15 @@ function windowsUserCandidates(env) {
 // org.freedesktop.Platform.GL.default has invalid merge-dirs". KiCad never ran,
 // so nothing it would have written exists and no file was touched.
 const LAUNCHER_STDERR = /^(?:error|bwrap): /;
+// flatpak prints "F: ..." warnings (e.g. "F: Can't get document portal") ahead
+// of the launcher error, so those lines are dropped before the check.
+const FLATPAK_WARNING_LINE = /^F: .*(?:\r?\n|$)/gm;
 
 export function isKicadLauncherFailure(result) {
   if (!result || typeof result !== 'object' || result.source !== 'flatpak') return false;
   if (result.exitCode === 0) return false;
   if (typeof result.stdout === 'string' && result.stdout.trim() !== '') return false;
-  const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+  const stderr = typeof result.stderr === 'string' ? result.stderr.replace(FLATPAK_WARNING_LINE, '').trim() : '';
   return LAUNCHER_STDERR.test(stderr);
 }
 
