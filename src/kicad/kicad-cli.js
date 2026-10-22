@@ -144,6 +144,11 @@ export function isKicadLauncherFailure(result) {
   return LAUNCHER_STDERR.test(stderr);
 }
 
+// Mitigation, not a root-cause fix: why flatpak sometimes fails to launch is
+// unknown. In triage (triage/erc-flake/report.md) the launcher failed 3 times
+// in 160 runs and every failure recovered on the first retry, so one retry is
+// enough; a second failure is returned as KICAD_CLI_LAUNCH_FAILED and fails
+// closed. Retrying is safe because a launcher failure means KiCad never ran.
 export async function retryOnceOnLauncherFailure(run) {
   const first = await run();
   if (!isKicadLauncherFailure(first)) return first;
@@ -177,16 +182,18 @@ export async function runKicadCli(args, options = {}) {
     platform,
     cwd: options.cwd
   });
+  const run = async () => ({
+    ...(await runCommand(resolved.path, args, {
+      cwd: options.cwd,
+      timeoutMs: options.timeoutMs ?? 120000,
+      env
+    })),
+    command: resolved.path,
+    source: resolved.source
+  });
   try {
-    return await retryOnceOnLauncherFailure(async () => ({
-      ...(await runCommand(resolved.path, args, {
-        cwd: options.cwd,
-        timeoutMs: options.timeoutMs ?? 120000,
-        env
-      })),
-      command: resolved.path,
-      source: resolved.source
-    }));
+    // Opt-in: only validateProject's sch upgrade and sch erc calls retry.
+    return options.retryLauncherFailure === true ? await retryOnceOnLauncherFailure(run) : await run();
   } finally {
     if (privateConfigHome) {
       await fs.promises.rm(privateConfigHome, { recursive: true, force: true });

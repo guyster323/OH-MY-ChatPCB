@@ -1,4 +1,5 @@
 import { classifyRecordedErc } from '../../apps/panel/erc-verdict.js';
+import { stderrExcerpt } from '../kicad/stderr-excerpt.js';
 
 // Fail-closed ERC decision for schematic.patch approval.
 // `passed === true` only when a recorded run actually succeeded.
@@ -16,7 +17,6 @@ export function normalizeRecordedErc(source) {
 }
 
 const REASON_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
-const REASON_STDERR_CHARS = 200;
 
 // The recorded failure reason (code and a short stderr excerpt), when the
 // validator left one. Display only: it never changes the verdict above.
@@ -25,7 +25,7 @@ function recordedReason(source) {
   if (!reason || typeof reason !== 'object' || typeof reason.code !== 'string' || !REASON_CODE.test(reason.code)) {
     return null;
   }
-  const stderr = typeof reason.stderr === 'string' ? reason.stderr.slice(0, REASON_STDERR_CHARS) : '';
+  const stderr = stderrExcerpt(reason.stderr);
   return { code: reason.code, ...(stderr ? { stderr } : {}) };
 }
 

@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import { isKicadLauncherFailure, runKicadCli } from '../kicad/kicad-cli.js';
+import { stderrExcerpt } from '../kicad/stderr-excerpt.js';
 import { assertInspectionTree } from './inspection-copy.js';
 import { isInside } from './project-workspace.js';
 
@@ -31,13 +33,14 @@ export async function validateProject({
     const cliOptions = {
       explicitPath: kicadCliPath,
       cwd: resolvedProjectDir,
-      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir
+      excludeProjectDir: excludeProjectDir ?? resolvedProjectDir,
+      // Only these two calls retry a flatpak launcher failure; see kicad-cli.js.
+      retryLauncherFailure: true
     };
     const schematicBefore = await fileDigest(schematic);
     const formatUpgrade = await runKicadCliImpl(['sch', 'upgrade', '--force', schematic], cliOptions);
     const upgradeOk = formatUpgrade.exitCode === 0;
-    const upgradeLaunchFailed = !upgradeOk
-      && (formatUpgrade.launchFailed === true || isKicadLauncherFailure(formatUpgrade));
+    const upgradeLaunchFailed = isKicadLauncherFailure(formatUpgrade);
     // A launcher failure is tolerated only when the schematic bytes are provably
     // unchanged, so the ERC below checks exactly the bytes the patch will carry.
     const schematicUntouched = upgradeLaunchFailed
@@ -63,7 +66,7 @@ export async function validateProject({
         source: formatUpgrade.source,
         formatUpgrade: upgradeSummary,
         report: output,
-        reason: failureReason('ERC_REPORT_STALE', `Could not clear the previous ERC report (${error.code ?? 'unknown error'}).`, '')
+        reason: failureReason('ERC_REPORT_STALE', `Could not clear the previous ERC report (${error.code ?? 'unknown error'}).`)
       };
     }
     const result = await runKicadCliImpl(['sch', 'erc', '--format', 'json', '--output', output, schematic], cliOptions);
@@ -76,7 +79,7 @@ export async function validateProject({
     };
     const runOutput = { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 
-    if (result.exitCode !== 0 && (result.launchFailed === true || isKicadLauncherFailure(result))) {
+    if (isKicadLauncherFailure(result)) {
       return {
         ok: false,
         ...base,
@@ -130,7 +133,7 @@ export async function validateProject({
     }
     // Only a missing kicad-cli binary is an overridable skip. Any other error
     // means validation was attempted and did not finish, so it fails closed.
-    if (isMissingKicadCli(error)) {
+    if (isMissingKicadCli(error, resolvedProjectDir)) {
       return skipped('KICAD_CLI_UNAVAILABLE', 'kicad-cli not found. Install KiCad or set KICAD_CLI_PATH environment variable.');
     }
     return {
@@ -198,25 +201,13 @@ async function readErcSummary(reportPath) {
   }
 }
 
-const STDERR_EXCERPT_CHARS = 200;
-
-// A short, single-line stderr excerpt for the ERC_BLOCKED response. Absolute
-// paths are replaced so the excerpt does not leak local directories.
-export function stderrExcerpt(stderr) {
-  if (typeof stderr !== 'string') return '';
-  const line = stderr
-    .replace(/[A-Za-z]:\\[^\s"']+/g, '<path>')
-    .replace(/(?<![\w.])\/[^\s"']+/g, '<path>')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return line.length > STDERR_EXCERPT_CHARS ? `${line.slice(0, STDERR_EXCERPT_CHARS - 3)}...` : line;
-}
-
 function failureReason(code, message, stderr) {
   const excerpt = stderrExcerpt(stderr);
   return { code, message, ...(excerpt ? { stderr: excerpt } : {}) };
 }
 
+// Any read error yields null, and a null digest never tolerates an upgrade
+// launcher failure, so swallowing the error here is fail-closed.
 async function fileDigest(filePath) {
   try {
     return createHash('sha256').update(await readFile(filePath)).digest('hex');
@@ -225,11 +216,15 @@ async function fileDigest(filePath) {
   }
 }
 
-function isMissingKicadCli(error) {
+// Only a kicad-cli binary that is provably absent is an overridable skip.
+function isMissingKicadCli(error, cwd) {
   if (error?.code !== 'ENOENT') return false;
-  // runKicadCli throws ENOENT without a syscall when nothing resolves; a spawn
-  // of a resolved path that is gone reports syscall "spawn <path>".
-  return error.syscall === undefined || String(error.syscall).startsWith('spawn');
+  // runKicadCli throws ENOENT without a syscall when nothing resolves.
+  if (error.syscall === undefined) return true;
+  if (!String(error.syscall).startsWith('spawn')) return false;
+  // spawn also reports ENOENT when cwd is gone; that is not a missing CLI (AP-1).
+  if (!cwd || !existsSync(cwd)) return false;
+  return typeof error.path === 'string' && !existsSync(error.path);
 }
 
 function skipped(code, message) {
