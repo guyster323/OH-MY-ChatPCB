@@ -5195,3 +5195,36 @@ test('BT r55 AL-3: 안/못 nouns and 안 그러면 are not read as a negation', 
   }
   assert.deepEqual(failures, []);
 });
+
+// Hygiene pr28-r2 contrast rows. Each row fails when its guard is removed:
+// H5 (은/는/도 after the 하다 form), AL10 (거나도/거나나 tail), NJ1 (진 마),
+// NJ4 (지요 마), GH3 (았/었 before -거나 on 없).
+const HYGIENE_R2_APPLIES = [
+  'LED 저항을 680Ω으로 바꾸거나 하면은',
+  'LED 저항을 680Ω으로 바꾸거나도 해',
+  'LED 저항 680Ω으로 바꾸거나나 해'
+];
+const HYGIENE_R2_REFUSES = [
+  'LED 저항을 680Ω으로 바꾸진 마',
+  'LED 저항을 680Ω으로 바꾸지요 마',
+  'LED 저항을 680Ω으로 바꿔 없었거나 해'
+];
+
+test('Hygiene pr28-r2: hedge tails apply R3; 진 마, 지요 마 and 없었거나 refuse', () => {
+  const spec = seriesSpec('1k');
+  const failures = [];
+  for (const prompt of HYGIENE_R2_APPLIES) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'merge' || decision.edit?.ref !== 'R3' || decision.edit?.ohms !== 680) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''}`);
+    }
+  }
+  for (const prompt of HYGIENE_R2_REFUSES) {
+    const decision = classifyExistingProjectRequest(prompt, spec);
+    if (decision.mode !== 'refuse' || decision.code !== 'RESISTOR_AMBIGUOUS' || decision.edit != null) {
+      failures.push(`${prompt} => ${decision.mode} ${decision.code ?? ''}`);
+    }
+  }
+  assert.equal(componentValue(spec, 'R3'), '1k');
+  assert.deepEqual(failures, []);
+});
