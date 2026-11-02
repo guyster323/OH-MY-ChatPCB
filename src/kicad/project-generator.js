@@ -24,6 +24,16 @@ const BOARD_CROSS_FOOTPRINT_TRACE_MAX_MM = 30;
 const BOARD_CROSS_FOOTPRINT_TRACE_PAD_KEEP_OUT_MM = 1.0;
 const SCHEMATIC_GRID_COLUMNS = 5;
 const SCHEMATIC_GRID_ROW_SPACING_MM = 45.72;
+// KiCad's built-in stroke font has no Hangul glyphs, so notes and labels name a CJK face.
+const SCHEMATIC_FONT_FACE = 'Noto Sans CJK KR';
+// Notes get their own column right of the 5-column parts grid (last symbol at 190.5 mm plus pin labels).
+const SCHEMATIC_NOTES_X_MM = 228.6;
+const SCHEMATIC_NOTES_Y_MM = 25.4;
+const SCHEMATIC_NOTES_LINE_SPACING_MM = 5.08;
+// A4 is 297 mm wide with a 10 mm frame; at 1.27 mm text a Latin glyph is about 0.8 mm and a Hangul glyph twice that,
+// so 60 width units keep each note line within roughly 50 mm, left of the frame from the notes column at 228.6 mm.
+const SCHEMATIC_NOTES_MAX_LINE_UNITS = 60;
+const SCHEMATIC_NOTES_WRAPPED_LINE_SPACING_MM = 2.54;
 const PROFILE_BOARD_PLACEMENTS = {
   J4: { x: 18, y: 65, rotation: 0 }, C3: { x: 35, y: 55, rotation: 0 },
   U1: { x: 52, y: 55, rotation: 0 }, J6: { x: 135, y: 95, rotation: 0 }, L1: { x: 64, y: 68, rotation: 0 },
@@ -845,6 +855,55 @@ function findingMessage(item) {
   return '';
 }
 
+function schematicTextUnits(text) {
+  let units = 0;
+  for (const char of text) units += char.codePointAt(0) > 0x2e7f ? 2 : 1;
+  return units;
+}
+
+export function wrapSchematicNote(note, maxUnits = SCHEMATIC_NOTES_MAX_LINE_UNITS) {
+  const lines = [];
+  let current = '';
+  for (const word of note.split(/\s+/).filter(Boolean)) {
+    let piece = word;
+    while (schematicTextUnits(piece) > maxUnits) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      let head = '';
+      for (const char of piece) {
+        if (schematicTextUnits(head + char) > maxUnits) break;
+        head += char;
+      }
+      lines.push(head);
+      piece = piece.slice(head.length);
+    }
+    const candidate = current ? `${current} ${piece}` : piece;
+    if (current && schematicTextUnits(candidate) > maxUnits) {
+      lines.push(current);
+      current = piece;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function renderSchematicNotes(notes) {
+  const rendered = [];
+  let y = SCHEMATIC_NOTES_Y_MM;
+  for (const note of notes) {
+    const lines = wrapSchematicNote(note);
+    lines.forEach((line, index) => {
+      rendered.push(renderText(line, SCHEMATIC_NOTES_X_MM, y + index * SCHEMATIC_NOTES_WRAPPED_LINE_SPACING_MM));
+    });
+    y += (lines.length - 1) * SCHEMATIC_NOTES_WRAPPED_LINE_SPACING_MM + SCHEMATIC_NOTES_LINE_SPACING_MM;
+  }
+  return rendered.join('\n');
+}
+
 function uniqueSchematicText(lines) {
   const seen = new Set();
   const unique = [];
@@ -899,6 +958,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
         ...(spec.product?.designNotes ?? []),
         'Review all symbols, footprints, net labels, and design rules before production.'
       ].filter(Boolean);
+  const uniqueNotes = uniqueSchematicText(notes);
 
   return `(kicad_sch
   (version 20260306)
@@ -910,7 +970,7 @@ export function renderKiCadSchematic({ baseName, spec, schematic = buildMcuSchem
     (title "${escapeSchText(baseName)}")
   )
 ${renderLibSymbols(schematic.components.map((item) => item.libId))}
-${notes.map((note, index) => renderText(note, 25.4, 25.4 + index * 7.62)).join('\n')}
+${renderSchematicNotes(uniqueNotes)}
 ${renderPlacedComponents(schematic, baseName, spec.kind === 'discrete-led')}
   (sheet_instances
     (path "/"
@@ -2294,7 +2354,7 @@ function renderWire(start, end) {
 function renderText(text, x, y) {
   return `  (text "${escapeSchText(text)}"
     (at ${sch(x)} ${sch(y)} 0)
-    (effects (font (size ${sch(1.27)} ${sch(1.27)})) (justify left))
+    (effects (font (face "${SCHEMATIC_FONT_FACE}") (size ${sch(1.27)} ${sch(1.27)})) (justify left))
     (uuid "${randomUUID()}")
   )`;
 }
@@ -2302,7 +2362,7 @@ function renderText(text, x, y) {
 function renderLabel(name, x, y, rotation = 0) {
   return `  (label "${escapeSchText(name)}"
     (at ${sch(x)} ${sch(y)} ${rotation})
-    (effects (font (size ${sch(1.27)} ${sch(1.27)})) (justify left))
+    (effects (font (face "${SCHEMATIC_FONT_FACE}") (size ${sch(1.27)} ${sch(1.27)})) (justify left))
     (uuid "${randomUUID()}")
   )`;
 }
