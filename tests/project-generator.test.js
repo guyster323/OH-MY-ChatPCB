@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { kicadInstallLibraryCandidatePaths, renderKiCadSchematic, setFlatpakLibraryRootsForTests, wrapSchematicNote } from '../src/kicad/project-generator.js';
-import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { BOARD_DRAFT_STATUS, generateMcuPeripheralProject, writeGeneratedProject } from '../src/workflow/generate-mcu-project.js';
 import { schematicTextItems } from './helpers/schematic-text.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
@@ -511,6 +511,40 @@ test('unresolved footprints skip routing with warnings in profile mode', async (
     assert.ok(result.review.findings.blockers.some((finding) => finding.code === 'unresolved-footprints'));
     assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'unresolved-footprints'));
     assert.equal(result.spec.boardProfile.manufacturing.boardDraft.status, 'incomplete');
+  } finally {
+    restoreKicadLibraryEnv(previous);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('unresolved footprints clear after libraries resolve', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-unresolved-clears-'));
+  const emptyLib = path.join(root, 'empty-lib');
+  await mkdir(emptyLib, { recursive: true });
+  let previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: emptyLib });
+
+  try {
+    const first = await generateMcuPeripheralProject({
+      projectDir: path.join(root, 'project'),
+      prompt: 'Release profile ESP32-S3 USB-C 5V sensor board with 3.3V 500mA regulator.'
+    });
+    assert.equal(first.review.status, 'blocked');
+    assert.equal(first.spec.boardProfile.manufacturing.boardDraft.status, BOARD_DRAFT_STATUS.incomplete);
+    // Gerbers stay pending while the board draft is incomplete.
+    assert.equal(first.spec.boardProfile.manufacturing.exports.gerber.status, 'pending');
+    const saved = JSON.parse(await readFile(first.files.spec, 'utf8'));
+    assert.ok(saved.boardProfile.boardDraftWarnings.length > 0);
+
+    restoreKicadLibraryEnv(previous);
+    previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
+    const second = await writeGeneratedProject({ projectDir: path.join(root, 'project'), spec: saved });
+
+    assert.notEqual(second.review.status, 'blocked');
+    assert.equal(second.spec.boardProfile.boardDraftWarnings, undefined);
+    assert.equal(second.spec.boardProfile.manufacturing.boardDraft.status, BOARD_DRAFT_STATUS.generated);
+    assert.ok(!second.review.findings.blockers.some((finding) => finding.code === 'unresolved-footprints'));
+    const resaved = JSON.parse(await readFile(second.files.spec, 'utf8'));
+    assert.equal(resaved.boardProfile.boardDraftWarnings, undefined);
   } finally {
     restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
