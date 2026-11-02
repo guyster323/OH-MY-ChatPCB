@@ -677,7 +677,7 @@ test('mains and supplies above 24V are refused instead of generating an LED circ
     ].map((finding) => finding.message);
     assert.equal(new Set(messages).size, messages.length, `${prompt} ${JSON.stringify(messages)}`);
     const blocker = refused.review.findings.blockers.find((finding) => finding.code === 'discrete-led-high-voltage');
-    assert.equal(refused.schematic.split(blocker.message).length - 1, 1, prompt);
+    assert.equal(sheetNoteText(refused.schematic).split(blocker.message).length - 1, 1, prompt);
     assert.match(blocker.ko, /고전압/, prompt);
     assert.match(blocker.en, /24V/, prompt);
     assert.equal(blocker.message, blocker.en, prompt);
@@ -780,7 +780,7 @@ test('low LED headroom warns once and a supply at Vf is refused without a placeh
   ].map((finding) => finding.message);
   assert.equal(new Set(blueMessages).size, blueMessages.length, JSON.stringify(blueMessages));
   const blueBlocker = blue.review.findings.blockers.find((finding) => finding.code === 'discrete-led-below-vf').message;
-  assert.equal(blue.schematic.split(blueBlocker).length - 1, 1);
+  assert.equal(sheetNoteText(blue.schematic).split(blueBlocker).length - 1, 1);
 });
 
 test('AC, ambiguous supplies, and below-Vf LED prompts generate no placeholder circuit', async () => {
@@ -1127,4 +1127,11 @@ function topLevelPowerSymbol(source, name) {
   assert.ok(start >= 0, `missing power symbol ${name}`);
   const next = source.indexOf('\n  (symbol "', start + marker.length);
   return source.slice(start, next === -1 ? source.length : next);
+}
+
+// Long schematic notes wrap onto several (text ...) lines; rejoin them to read each note as one sentence.
+function sheetNoteText(schematic) {
+  return [...schematic.matchAll(/\(text "((?:[^"\\]|\\.)*)"/g)]
+    .map((match) => match[1].replace(/\\(["\\])/g, '$1'))
+    .join(' ');
 }

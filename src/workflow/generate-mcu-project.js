@@ -141,6 +141,9 @@ export async function writeGeneratedProject({
     }), 'utf8');
     if (boardWarnings.length > 0 && projectMetadata.boardProfile) {
       projectMetadata.boardProfile.boardDraftWarnings = boardWarnings;
+      if (projectMetadata.boardProfile.manufacturing?.boardDraft) {
+        projectMetadata.boardProfile.manufacturing.boardDraft.status = 'incomplete';
+      }
     }
   }
   await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(schematic.components.map((component) => component.libId)), 'utf8');

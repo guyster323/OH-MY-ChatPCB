@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { kicadInstallLibraryCandidatePaths, setFlatpakLibraryRootsForTests } from '../src/kicad/project-generator.js';
+import { kicadInstallLibraryCandidatePaths, renderKiCadSchematic, setFlatpakLibraryRootsForTests, wrapSchematicNote } from '../src/kicad/project-generator.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
@@ -96,7 +96,12 @@ test('writes real schematic symbols, net labels, and metadata explanations for M
     assert.match(schematic, /\(label "SCL"\s+\(at 96\.52 86\.36 0\)/);
     assert.match(schematic, /\(wire\s+\(pts\s+\(xy 63\.50 129\.54\)\s+\(xy 58\.42 129\.54\)\)/);
     assert.match(schematic, /\(label "SCL"\s+\(at 58\.42 129\.54 0\)/);
-    assert.match(schematic, /\(effects \(font \(size 1\.27 1\.27\)\)/);
+    assert.match(schematic, /\(effects \(font \(face "Noto Sans CJK KR"\) \(size 1\.27 1\.27\)\)/);
+    const textAndLabelEffects = [...schematic.matchAll(/\((?:text|label) "(?:[^"\\]|\\.)*"\s+\(at [^)]*\)\s+(\(effects [^\n]*)/g)].map((match) => match[1]);
+    assert.ok(textAndLabelEffects.length > 0);
+    for (const effects of textAndLabelEffects) {
+      assert.match(effects, /\(face "Noto Sans CJK KR"\)/, 'every schematic text and label names a Hangul-capable font face');
+    }
     assert.doesNotMatch(schematic, /\(at 3810\.00 8890\.00 0\)/);
 
     const metadata = JSON.parse(await readFile(result.files.spec, 'utf8'));
@@ -192,7 +197,8 @@ test('review blocker names the requested MCU family instead of a hard-coded part
 
 test('supported release profiles generate a PCB draft and manufacturing metadata', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-profile-pcb-'));
-  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols });
+  // Without footprint libraries the board is pad-less and fails closed, so this test supplies them.
+  const previous = setKicadLibraryEnv({ symbols: FIXTURE_LIBS.symbols, footprints: FIXTURE_LIBS.footprints });
 
   try {
     const result = await generateMcuPeripheralProject({
@@ -498,6 +504,12 @@ test('unresolved footprints skip routing with warnings in profile mode', async (
     
     // Should still have footprint placeholders (without pads)
     assert.match(board, /\(footprint /);
+
+    // A board with pad-less placeholder footprints must fail closed, not pass as a warning.
+    assert.equal(result.review.status, 'blocked');
+    assert.ok(result.review.findings.blockers.some((finding) => finding.code === 'unresolved-footprints'));
+    assert.ok(!result.review.findings.warnings.some((finding) => finding.code === 'unresolved-footprints'));
+    assert.equal(result.spec.boardProfile.manufacturing.boardDraft.status, 'incomplete');
   } finally {
     restoreKicadLibraryEnv(previous);
     await rm(root, { force: true, recursive: true });
@@ -749,3 +761,94 @@ function boardSegmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
     isOnSegment(secondStart, secondEnd, firstEnd)
   );
 }
+
+function schematicTextEntries(schematic) {
+  return [...schematic.matchAll(/\(text "((?:[^"\\]|\\.)*)"\s+\(at ([\d.]+) ([\d.]+) /g)]
+    .map((match) => ({ text: match[1], x: Number(match[2]), y: Number(match[3]) }));
+}
+
+function schematicSymbolPositions(schematic) {
+  return [...schematic.matchAll(/\(symbol\s+\(lib_id "[^"]+"\)\s+\(at ([\d.]+) ([\d.]+) /g)]
+    .map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+}
+
+async function mcuSpecFor(prompt) {
+  const root = await mkdtemp(path.join(tmpdir(), 'chatpcb-m1-spec-'));
+  try {
+    const result = await generateMcuPeripheralProject({ projectDir: root, prompt });
+    return { spec: result.spec, schematic: await readFile(result.files.schematic, 'utf8') };
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+}
+
+test('MCU schematic notes do not repeat a sentence already present in product design notes', async () => {
+  const { spec } = await mcuSpecFor(
+    'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, boot button, and status LED.'
+  );
+  const augmented = {
+    ...spec,
+    power: { ...spec.power, topology: '스위칭(벅) — 효율 우선', integration: 'Main board' },
+    product: { ...(spec.product ?? {}), designNotes: ['Power topology: 스위칭(벅) — 효율 우선', 'Product integration: Main board'] }
+  };
+  const texts = schematicTextEntries(renderKiCadSchematic({ baseName: 'dup', spec: augmented, schematic: spec.schematic }))
+    .map((entry) => entry.text);
+  assert.equal(texts.filter((text) => text === 'Power topology: 스위칭(벅) — 효율 우선').length, 1);
+  assert.equal(texts.filter((text) => text === 'Product integration: Main board').length, 1);
+  assert.equal(new Set(texts).size, texts.length, 'no schematic note sentence appears twice');
+});
+
+test('schematic notes live in their own column clear of every placed symbol', async () => {
+  const { spec, schematic } = await mcuSpecFor(
+    'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, boot button, and status LED.'
+  );
+  const manyNotes = Array.from({ length: 18 }, (_, index) => `Design note ${index + 1}`);
+  const crowded = renderKiCadSchematic({
+    baseName: 'crowded',
+    spec: { ...spec, product: { ...(spec.product ?? {}), designNotes: manyNotes } },
+    schematic: spec.schematic
+  });
+
+  for (const sheet of [schematic, crowded]) {
+    const notes = schematicTextEntries(sheet);
+    const symbols = schematicSymbolPositions(sheet);
+    assert.ok(notes.length > 0);
+    assert.ok(symbols.length > 0);
+    // Symbol body plus right-hand pin labels reach about 25.4 mm past the symbol origin.
+    const partsRight = Math.max(...symbols.map((symbol) => symbol.x)) + 25.4;
+    for (const note of notes) {
+      assert.ok(note.x >= partsRight, `note "${note.text}" at x=${note.x} overlaps parts that reach x=${partsRight}`);
+      assert.ok(note.y <= 210, `note "${note.text}" at y=${note.y} falls off the A4 sheet`);
+    }
+  }
+});
+
+test('long schematic notes wrap so no line runs past the A4 right frame', async () => {
+  const { spec } = await mcuSpecFor(
+    'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button, boot button, and status LED.'
+  );
+  const longTitle = 'STM32 board with USB-C power, 3.3V regulator, I2C sensor connector, UART debug header, reset button and status LED';
+  const longKorean = '전원 토폴로지: 스위칭(벅) 효율 우선, 입력 전압 범위 넓게, 출력 리플 최소화, 열 설계 여유 확보 필요';
+  const sheet = renderKiCadSchematic({
+    baseName: 'wrap',
+    spec: { ...spec, title: longTitle, product: { ...(spec.product ?? {}), designNotes: [longKorean, 'x'.repeat(150)] } },
+    schematic: spec.schematic
+  });
+  const units = (text) => [...text].reduce((sum, char) => sum + (char.codePointAt(0) > 0x2e7f ? 2 : 1), 0);
+  const notes = schematicTextEntries(sheet);
+  // Notes start at 228.6 mm; 60 units at <= 0.8 mm each stays left of the 287 mm frame.
+  for (const note of notes) {
+    assert.ok(units(note.text) <= 60, `note line "${note.text}" is ${units(note.text)} units wide`);
+    assert.ok(note.y <= 200, `note line "${note.text}" at y=${note.y} falls off the A4 sheet`);
+  }
+  const ys = notes.map((note) => note.y);
+  assert.equal(new Set(ys).size, ys.length, 'wrapped note lines never overlap');
+  assert.ok(notes.some((note) => note.text.startsWith('ChatPCB generated MCU peripheral draft:')));
+  assert.ok(notes.length > 4, 'long notes were wrapped onto extra lines');
+
+  assert.deepEqual(wrapSchematicNote('short note'), ['short note']);
+  const wrapped = wrapSchematicNote(longTitle, 30);
+  assert.equal(wrapped.join(' '), longTitle, 'wrapping keeps every word in order');
+  assert.ok(wrapped.every((line) => units(line) <= 30));
+  assert.ok(wrapSchematicNote('가'.repeat(40), 30).every((line) => units(line) <= 30));
+});
