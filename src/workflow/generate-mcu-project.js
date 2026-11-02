@@ -20,6 +20,9 @@ import { reviewCircuitReadiness } from './review-project.js';
 import { assertInspectionTree, assertUnlinkedAncestors } from './inspection-copy.js';
 import { assertSafeProjectDir } from './project-workspace.js';
 
+// Allowed values of boardProfile.manufacturing.boardDraft.status: 'incomplete' means placeholder footprints without pads.
+export const BOARD_DRAFT_STATUS = Object.freeze({ generated: 'generated', incomplete: 'incomplete' });
+
 export async function generateMcuPeripheralProject({
   projectDir,
   prompt,
@@ -131,6 +134,10 @@ export async function writeGeneratedProject({
 
   await writeFile(files.project, renderKiCadProject(baseName), 'utf8');
   await writeFile(files.schematic, renderKiCadSchematic({ baseName, spec, schematic }), 'utf8');
+  // Board warnings are derived per generation: drop stale ones from a saved spec before rendering.
+  if (projectMetadata.boardProfile) {
+    delete projectMetadata.boardProfile.boardDraftWarnings;
+  }
   if (files.board) {
     const boardWarnings = [];
     await writeFile(files.board, renderKiCadBoard({
@@ -141,6 +148,9 @@ export async function writeGeneratedProject({
     }), 'utf8');
     if (boardWarnings.length > 0 && projectMetadata.boardProfile) {
       projectMetadata.boardProfile.boardDraftWarnings = boardWarnings;
+      if (projectMetadata.boardProfile.manufacturing?.boardDraft) {
+        projectMetadata.boardProfile.manufacturing.boardDraft.status = BOARD_DRAFT_STATUS.incomplete;
+      }
     }
   }
   await writeFile(files.symbolLibrary, renderProjectSymbolLibrary(schematic.components.map((component) => component.libId)), 'utf8');
@@ -191,7 +201,7 @@ function discretePartRole(component) {
 function manufacturingMetadataFor(boardFileName) {
   return {
     boardDraft: {
-      status: 'generated',
+      status: BOARD_DRAFT_STATUS.generated,
       file: boardFileName,
       note: 'PCB draft with board outline, embedded footprints, conservative same-net traces, SW_3V3 detours, safe CC1/CC2 escapes, and an F.Cu GND zone that KiCad must refill (`pcb drc --refill-zones`) before DRC copper is counted; VBUS/USB-data pad-field fanout, full routing signoff, Gerbers, and drill files remain pending.'
     },

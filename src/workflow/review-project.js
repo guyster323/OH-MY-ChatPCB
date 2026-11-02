@@ -87,8 +87,9 @@ export function reviewCircuitReadiness({ spec, validation } = {}) {
   }
 
   if ((spec.boardProfile?.boardDraftWarnings ?? []).length > 0) {
+    // Pad-less placeholder footprints mean the board has nothing to route: fail closed.
     addFinding(
-      findings.warnings,
+      findings.blockers,
       'unresolved-footprints',
       spec.boardProfile.boardDraftWarnings.join(' ')
     );

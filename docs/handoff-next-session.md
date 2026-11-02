@@ -501,7 +501,7 @@ node ./bin/chatpcb-cli.js validate --project ./workspaces/stm32-usbc-sensor-prof
 - Implemented behavior:
   - Supported ESP32-S3 and STM32 profiles now write `chatpcb_mcu_peripheral.kicad_pcb` and return `files.board`.
   - The generated board file contains a KiCad 10 PCB container, an `Edge.Cuts` board outline, and placement-only footprint references for all schematic components that declare footprints.
-  - Supported-profile metadata now records `boardProfile.manufacturing.boardDraft.status = generated`.
+  - Supported-profile metadata now records `boardProfile.manufacturing.boardDraft.status = generated`. Allowed values are `BOARD_DRAFT_STATUS` in `src/workflow/generate-mcu-project.js`: `generated`, or `incomplete` when footprints are pad-less placeholders (review then blocks on `unresolved-footprints`). `boardDraftWarnings` is recomputed on every generation and removed when there are none.
   - The same metadata keeps `drc`, `exports.gerber`, and `exports.drill` as `pending`, with explicit reasons.
 - TDD evidence:
   - `tests/project-generator.test.js` first failed because supported profiles did not return `files.board`.

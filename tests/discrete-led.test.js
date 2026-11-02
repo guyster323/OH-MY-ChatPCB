@@ -12,6 +12,7 @@ import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registr
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { validateProject } from '../src/workflow/validate-project.js';
+import { sheetNoteText } from './helpers/schematic-text.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, restoreProcessEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 async function generateLed(prompt) {
@@ -677,7 +678,7 @@ test('mains and supplies above 24V are refused instead of generating an LED circ
     ].map((finding) => finding.message);
     assert.equal(new Set(messages).size, messages.length, `${prompt} ${JSON.stringify(messages)}`);
     const blocker = refused.review.findings.blockers.find((finding) => finding.code === 'discrete-led-high-voltage');
-    assert.equal(refused.schematic.split(blocker.message).length - 1, 1, prompt);
+    assert.equal(sheetNoteText(refused.schematic).split(blocker.message).length - 1, 1, prompt);
     assert.match(blocker.ko, /고전압/, prompt);
     assert.match(blocker.en, /24V/, prompt);
     assert.equal(blocker.message, blocker.en, prompt);
@@ -780,7 +781,7 @@ test('low LED headroom warns once and a supply at Vf is refused without a placeh
   ].map((finding) => finding.message);
   assert.equal(new Set(blueMessages).size, blueMessages.length, JSON.stringify(blueMessages));
   const blueBlocker = blue.review.findings.blockers.find((finding) => finding.code === 'discrete-led-below-vf').message;
-  assert.equal(blue.schematic.split(blueBlocker).length - 1, 1);
+  assert.equal(sheetNoteText(blue.schematic).split(blueBlocker).length - 1, 1);
 });
 
 test('AC, ambiguous supplies, and below-Vf LED prompts generate no placeholder circuit', async () => {
