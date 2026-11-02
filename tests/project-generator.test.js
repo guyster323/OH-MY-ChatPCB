@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { kicadInstallLibraryCandidatePaths, renderKiCadSchematic, setFlatpakLibraryRootsForTests, wrapSchematicNote } from '../src/kicad/project-generator.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
+import { schematicTextItems } from './helpers/schematic-text.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 test('generates a reviewable KiCad project and SPICE fixture for an MCU peripheral prompt', async () => {
@@ -97,7 +98,7 @@ test('writes real schematic symbols, net labels, and metadata explanations for M
     assert.match(schematic, /\(wire\s+\(pts\s+\(xy 63\.50 129\.54\)\s+\(xy 58\.42 129\.54\)\)/);
     assert.match(schematic, /\(label "SCL"\s+\(at 58\.42 129\.54 0\)/);
     assert.match(schematic, /\(effects \(font \(face "Noto Sans CJK KR"\) \(size 1\.27 1\.27\)\)/);
-    const textAndLabelEffects = [...schematic.matchAll(/\((?:text|label) "(?:[^"\\]|\\.)*"\s+\(at [^)]*\)\s+(\(effects [^\n]*)/g)].map((match) => match[1]);
+    const textAndLabelEffects = schematicTextItems(schematic, ['text', 'label']).map((item) => item.effects);
     assert.ok(textAndLabelEffects.length > 0);
     for (const effects of textAndLabelEffects) {
       assert.match(effects, /\(face "Noto Sans CJK KR"\)/, 'every schematic text and label names a Hangul-capable font face');
@@ -763,8 +764,7 @@ function boardSegmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
 }
 
 function schematicTextEntries(schematic) {
-  return [...schematic.matchAll(/\(text "((?:[^"\\]|\\.)*)"\s+\(at ([\d.]+) ([\d.]+) /g)]
-    .map((match) => ({ text: match[1], x: Number(match[2]), y: Number(match[3]) }));
+  return schematicTextItems(schematic);
 }
 
 function schematicSymbolPositions(schematic) {
@@ -834,11 +834,14 @@ test('long schematic notes wrap so no line runs past the A4 right frame', async 
     spec: { ...spec, title: longTitle, product: { ...(spec.product ?? {}), designNotes: [longKorean, 'x'.repeat(150)] } },
     schematic: spec.schematic
   });
+  // Independent width oracle on purpose (not the generator's own helper): Latin 1 unit, CJK and wider 2 units.
   const units = (text) => [...text].reduce((sum, char) => sum + (char.codePointAt(0) > 0x2e7f ? 2 : 1), 0);
   const notes = schematicTextEntries(sheet);
-  // Notes start at 228.6 mm; 60 units at <= 0.8 mm each stays left of the 287 mm frame.
+  // A4 frame inner right edge is 287 mm; a unit is at most 0.8 mm at 1.27 mm text.
   for (const note of notes) {
     assert.ok(units(note.text) <= 60, `note line "${note.text}" is ${units(note.text)} units wide`);
+    assert.ok(note.x + 60 * 0.8 <= 287, `notes column at x=${note.x} cannot fit 60 units inside the A4 frame`);
+    assert.ok(note.x + units(note.text) * 0.8 <= 287, `note line "${note.text}" runs past the A4 frame`);
     assert.ok(note.y <= 200, `note line "${note.text}" at y=${note.y} falls off the A4 sheet`);
   }
   const ys = notes.map((note) => note.y);
@@ -851,4 +854,14 @@ test('long schematic notes wrap so no line runs past the A4 right frame', async 
   assert.equal(wrapped.join(' '), longTitle, 'wrapping keeps every word in order');
   assert.ok(wrapped.every((line) => units(line) <= 30));
   assert.ok(wrapSchematicNote('가'.repeat(40), 30).every((line) => units(line) <= 30));
+
+  // Hard splits of a long token keep every character, in order, and fill each line up to the limit.
+  const longLatin = 'x'.repeat(150);
+  const latinLines = wrapSchematicNote(longLatin);
+  assert.equal(latinLines.join(''), longLatin);
+  assert.deepEqual(latinLines.map(units), [60, 60, 30]);
+  const longHangul = '가'.repeat(40);
+  const hangulLines = wrapSchematicNote(longHangul, 30);
+  assert.equal(hangulLines.join(''), longHangul);
+  assert.deepEqual(hangulLines.map(units), [30, 30, 20]);
 });

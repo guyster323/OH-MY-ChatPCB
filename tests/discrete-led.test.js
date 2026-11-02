@@ -12,6 +12,7 @@ import { createProjectMutexRegistry } from '../src/runtime/project-mutex-registr
 import { createTransactionJournal } from '../src/runtime/transaction-journal.js';
 import { generateMcuPeripheralProject } from '../src/workflow/generate-mcu-project.js';
 import { validateProject } from '../src/workflow/validate-project.js';
+import { sheetNoteText } from './helpers/schematic-text.js';
 import { FIXTURE_LIBS, restoreKicadLibraryEnv, restoreProcessEnv, setKicadLibraryEnv } from './helpers/kicad-library-env.js';
 
 async function generateLed(prompt) {
@@ -1127,11 +1128,4 @@ function topLevelPowerSymbol(source, name) {
   assert.ok(start >= 0, `missing power symbol ${name}`);
   const next = source.indexOf('\n  (symbol "', start + marker.length);
   return source.slice(start, next === -1 ? source.length : next);
-}
-
-// Long schematic notes wrap onto several (text ...) lines; rejoin them to read each note as one sentence.
-function sheetNoteText(schematic) {
-  return [...schematic.matchAll(/\(text "((?:[^"\\]|\\.)*)"/g)]
-    .map((match) => match[1].replace(/\\(["\\])/g, '$1'))
-    .join(' ');
 }
